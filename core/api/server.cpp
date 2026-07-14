@@ -1,0 +1,212 @@
+#include "server.h"
+#include "routes.h"
+#include "../config.h"
+#include "../log.h"
+#include "../events/events.h"
+
+#include <windows.h>
+#include <bcrypt.h>
+#include <httplib.h>
+#include <thread>
+#include <memory>
+#include <atomic>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <mutex>
+#include <cctype>
+
+namespace api {
+
+namespace {
+    std::unique_ptr<httplib::Server> g_server;
+    std::thread g_thread;
+    int g_port = 0;
+    ULONGLONG g_startTimeMs = 0;
+    std::string g_token;
+    std::string g_tokenPath;
+    std::string g_lastError;
+    std::mutex g_stateMutex;
+
+    void SetLastError(std::string error) {
+        std::lock_guard<std::mutex> lock(g_stateMutex);
+        g_lastError = std::move(error);
+    }
+
+    std::string GenerateToken() {
+        unsigned char bytes[32] = {};
+        if (BCryptGenRandom(nullptr, bytes, sizeof(bytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG) != 0) return {};
+        std::ostringstream out;
+        out << std::hex << std::setfill('0');
+        for (unsigned char b : bytes) out << std::setw(2) << static_cast<unsigned int>(b);
+        return out.str();
+    }
+
+    std::string LoadOrCreateToken(const std::string& configured) {
+        g_tokenPath = config::GetModuleDir() + "\\cortex.token";
+        if (!configured.empty()) return configured;
+        std::ifstream in(g_tokenPath);
+        std::string token;
+        if (in >> token && token.size() >= 32) return token;
+        token = GenerateToken();
+        if (!token.empty()) {
+            HANDLE file = CreateFileA(g_tokenPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+            if (file == INVALID_HANDLE_VALUE) return {};
+            const std::string payload = token + "\r\n";
+            DWORD written = 0;
+            const bool ok = WriteFile(file, payload.data(), static_cast<DWORD>(payload.size()), &written, nullptr) &&
+                            written == payload.size() && FlushFileBuffers(file);
+            CloseHandle(file);
+            if (!ok) return {};
+        }
+        return token;
+    }
+
+    bool IsLocalAuthority(const std::string& authority) {
+        const size_t colon = authority.find(':');
+        const std::string host = authority.substr(0, colon);
+        if (host != "127.0.0.1" && host != "localhost") return false;
+        if (colon == std::string::npos) return true;
+        const std::string port = authority.substr(colon + 1);
+        return !port.empty() && port.find_first_not_of("0123456789") == std::string::npos;
+    }
+
+    bool IsLocalOrigin(const std::string& value) {
+        size_t start = value.rfind("http://", 0) == 0 ? 7 : value.rfind("https://", 0) == 0 ? 8 : std::string::npos;
+        if (start == std::string::npos) return false;
+        size_t end = value.find('/', start);
+        return IsLocalAuthority(value.substr(start, end - start));
+    }
+
+    bool SecureTokenEquals(const std::string& supplied) {
+        size_t diff = supplied.size() ^ g_token.size();
+        const size_t length = (std::max)(supplied.size(), g_token.size());
+        for (size_t i = 0; i < length; ++i) {
+            const unsigned char a = i < supplied.size() ? static_cast<unsigned char>(supplied[i]) : 0;
+            const unsigned char b = i < g_token.size() ? static_cast<unsigned char>(g_token[i]) : 0;
+            diff |= a ^ b;
+        }
+        return diff == 0;
+    }
+
+    bool IsPublicPath(const std::string& path) {
+        return path == "/status" || path == "/health" || path == "/tools" || path == "/openapi.json";
+    }
+}
+
+bool Start(int port, const std::string& configuredToken) {
+    if (g_server) return true;
+    if (port <= 0 || port > 65535) {
+        SetLastError("invalid_port");
+        return false;
+    }
+    g_port = port;
+    g_startTimeMs = GetTickCount64();
+    SetLastError({});
+    g_token = LoadOrCreateToken(configuredToken);
+    if (g_token.size() < 32) {
+        SetLastError("token_generation_failed");
+        return false;
+    }
+
+    g_server = std::make_unique<httplib::Server>();
+
+    g_server->set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-store");
+        res.set_header("X-Content-Type-Options", "nosniff");
+
+        const std::string host = req.get_header_value("Host");
+        if (!host.empty() && !IsLocalAuthority(host)) {
+            res.status = 403;
+            res.set_content("{\"ok\":false,\"error\":\"invalid_host\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        const std::string origin = req.get_header_value("Origin");
+        if (!origin.empty() && !IsLocalOrigin(origin)) {
+            res.status = 403;
+            res.set_content("{\"ok\":false,\"error\":\"untrusted_origin\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        if (!IsPublicPath(req.path) && !SecureTokenEquals(req.get_header_value("X-Cortex-Token"))) {
+            res.status = 401;
+            res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") && !req.body.empty()) {
+            std::string contentType = req.get_header_value("Content-Type");
+            std::transform(contentType.begin(), contentType.end(), contentType.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (contentType.rfind("application/json", 0) != 0) {
+                res.status = 415;
+                res.set_content("{\"ok\":false,\"error\":\"application_json_required\"}", "application/json");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+
+    RegisterStatusRoutes(*g_server);
+    RegisterModulesRoutes(*g_server);
+    RegisterMemoryRoutes(*g_server);
+    RegisterScanRoutes(*g_server);
+    RegisterDisasmRoutes(*g_server);
+    RegisterDebugRoutes(*g_server);
+    RegisterSymbolsRoutes(*g_server);
+    RegisterProjectRoutes(*g_server);
+    RegisterScreenshotRoutes(*g_server);
+    RegisterPromptRoutes(*g_server);
+    RegisterPatchRoutes(*g_server);
+    RegisterInputRoutes(*g_server);
+    RegisterFreezeRoutes(*g_server);
+    RegisterStructRoutes(*g_server);
+    RegisterCallRoutes(*g_server);
+    RegisterWatchRoutes(*g_server);
+    RegisterAnalysisRoutes(*g_server);
+    RegisterDissectRoutes(*g_server);
+    RegisterBatchRoutes(*g_server);
+    RegisterActionRoutes(*g_server);
+    RegisterEventRoutes(*g_server);
+    RegisterPointerMapRoutes(*g_server);
+    RegisterTraceRoutes(*g_server);
+    RegisterGhidraRoutes(*g_server);
+    RegisterTimelineRoutes(*g_server);
+
+    if (!g_server->bind_to_port("127.0.0.1", port)) {
+        SetLastError("bind_failed");
+        g_server.reset();
+        return false;
+    }
+
+    g_thread = std::thread([] {
+        // 127.0.0.1 only -- an AI-controllable memory read/write endpoint
+        // must never be reachable from the network.
+        if (!g_server->listen_after_bind()) SetLastError("listen_failed");
+    });
+    dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    return true;
+}
+
+void Stop() {
+    if (!g_server) return;
+    events::WakeAll();
+    g_server->stop();
+    if (g_thread.joinable()) g_thread.join();
+    g_server.reset();
+}
+
+int GetPort() { return g_port; }
+
+unsigned long long GetUptimeMs() {
+    return GetTickCount64() - g_startTimeMs;
+}
+
+bool IsRunning() { return g_server && g_server->is_running(); }
+std::string GetLastError() {
+    std::lock_guard<std::mutex> lock(g_stateMutex);
+    return g_lastError;
+}
+std::string GetTokenPath() { return g_tokenPath; }
+
+} // namespace api

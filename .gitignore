@@ -1,0 +1,15 @@
+# Build outputs
+/build/
+/build_x64/
+
+# Vendored MinGW toolchain (fetched separately, not source)
+/toolchains/
+
+# Secrets
+cortex_host.token
+
+# Editor / OS cruft
+.vs/
+.vscode/
+*.user
+Thumbs.db
