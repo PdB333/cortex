@@ -406,3 +406,13 @@ When adding an endpoint, keep these three locations synchronized:
 3. the live manifest in `core/api/routes_status.cpp`.
 
 Before submitting a change, build and test both architectures.
+
+## For AI agents
+
+If you are driving Cortex from an LLM or automated agent, see
+[`agent/agents.md`](agent/agents.md) for the connection, authentication, and
+workflow conventions the API assumes.
+
+## License
+
+Released under the [MIT License](LICENSE).
