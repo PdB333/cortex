@@ -2,6 +2,9 @@
 /build/
 /build_x64/
 
+# Release binaries (uploaded to GitHub Releases, not tracked in source)
+/release/
+
 # Vendored MinGW toolchain (fetched separately, not source)
 /toolchains/
 
