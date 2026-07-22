@@ -31,6 +31,12 @@ The HTTP server binds only to `127.0.0.1`. Protected routes require a
 - [External Host](#external-host)
 - [Load Cortex](#load-cortex)
 - [Verify the connection](#verify-the-connection)
+- [Quickstart tutorial](#quickstart-tutorial)
+- [Background capture and input](#background-capture-and-input)
+- [Debugger with expression captures](#debugger-with-expression-captures)
+- [Model Context Protocol (MCP) endpoint](#model-context-protocol-mcp-endpoint)
+- [Network hook](#network-hook)
+- [Session export](#session-export)
 - [Configuration](#configuration)
 - [API overview](#api-overview)
 - [Persistent projects](#persistent-projects)
@@ -77,11 +83,14 @@ AI agent / script / developer tool
 | Memory | Typed read/write, batches, fills, region enumeration, exact 64-bit integer handling |
 | Scanning | External exact/comparative scans, AOB patterns, strings, code caves, intersections, persistent pointer maps |
 | Reverse engineering | x86/x64 disassembly, CFGs, xrefs, vtables, PE headers, inferred structures, Ghidra bridge |
-| Debugging | Breakpoints, C-like conditions, detailed access events, conditional traces, coverage and dynamic call graphs |
+| Debugging | Breakpoints, expression-based memory captures at hit, C-like conditions, trigger-to-trace, StackWalk64 + heuristic fallback, paginated logs |
 | Runtime instrumentation | Tracked patches, relocation-aware trampolines, freezes, calls, page/allocation watches, targeted rewind |
-| Automation | Keyboard and mouse injection, screenshots, prompts, batch execution, live SSE events |
+| Automation | **Background** keyboard/mouse injection (Win32 + DirectInput synthesis), **background** screenshots (any renderer), input sequences, record/replay, window control |
+| Networking | ws2_32 recv/send/WSARecv/WSASend interceptor with ring buffer |
+| Addressing | Universal `module+RVA` resolver on every route (ASLR-proof) |
+| AI integration | Native **Model Context Protocol** (JSON-RPC 2.0) endpoint, auto-derived tool catalog, `/session/export` archive |
 | Persistence | Per-process addresses, pointer paths, notes, freezes, and named structures |
-| Safety | Loopback-only server, token authentication, Host/Origin checks, JSON content validation, mutation journal |
+| Safety | Loopback-only server (v4 + v6), token authentication, Host/Origin checks, JSON content validation, mutation journal |
 
 ## Renderer support
 
@@ -240,6 +249,242 @@ Invoke-RestMethod `
   -Body $body
 ```
 
+## Quickstart tutorial
+
+A complete first-hit walkthrough using the bundled `test_target` binary. It has
+known canary values so you can verify every subsystem end-to-end without a game.
+
+**1. Launch the test target**
+
+```powershell
+.\test_target_x64.exe
+```
+
+It opens a small blue window and prints its PID + the addresses of its canary
+values (`g_cortex_u32 = 0xDEADBEEF`, `g_health = 100`, a frame counter, ...).
+
+**2. Inject Cortex**
+
+```powershell
+.\injector_x64.exe test_target_x64.exe
+```
+
+**3. Read the token and confirm health**
+
+```powershell
+$token = (Get-Content .\cortex.token -Raw).Trim()
+$h = @{ "X-Cortex-Token" = $token }
+Invoke-RestMethod http://127.0.0.1:6969/health
+```
+
+**4. Read a value by `module+RVA`** (survives ASLR/reboots)
+
+```powershell
+$body = @{ address = "test_target_x64.exe+0x4000"; type = "u32" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:6969/memory/read `
+  -Headers $h -ContentType "application/json" -Body $body
+# -> { "value": 3735928559 }  (0xDEADBEEF)
+```
+
+**5. Take a background screenshot** (no need to focus the window)
+
+```powershell
+Invoke-WebRequest "http://127.0.0.1:6969/screenshot?mode=auto" `
+  -Headers $h -OutFile shot.png
+```
+
+**6. Send a background input sequence**
+
+```powershell
+$seq = @{
+  mode = "os"
+  steps = @(
+    @{ type = "key_tap"; vk = 0x57; hold_ms = 50 },   # W
+    @{ type = "delay"; ms = 200 },
+    @{ type = "text"; text = "hello" }
+  )
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:6969/input/sequence `
+  -Headers $h -ContentType "application/json" -Body $seq
+```
+
+**7. Set a breakpoint that captures memory at hit**
+
+```powershell
+$bp = @{
+  address = "test_target_x64.exe+0x1234"
+  kind    = "hw"
+  capture = @(
+    @{ name = "health"; expression = "[rcx+0x18]"; type = "i32" }
+  )
+} | ConvertTo-Json -Depth 5
+
+$r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:6969/debug/breakpoint `
+  -Headers $h -ContentType "application/json" -Body $bp
+# Later: paginated log
+Invoke-RestMethod "http://127.0.0.1:6969/debug/breakpoint/$($r.id)/log?limit=50" -Headers $h
+```
+
+**8. Export a full session archive**
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:6969/session/export -Headers $h
+# Writes cortex_sessions/session_<UTC>/session.json + screenshot.png
+```
+
+**9. Drive Cortex from an MCP client**
+
+```powershell
+$req = @{ jsonrpc="2.0"; id=1; method="tools/list" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://127.0.0.1:6969/mcp `
+  -Headers $h -ContentType "application/json" -Body $req
+```
+
+## Background capture and input
+
+Cortex captures and injects input **without requiring the target window to be
+focused**. This works on any renderer (D3D8/9/10/11/12, OpenGL) and even on
+minimized windows.
+
+**Screenshots** — `GET /screenshot?mode=<mode>`:
+
+| Mode | Behavior |
+|---|---|
+| `render` | Grab the hooked backbuffer (highest fidelity, needs the render loop active) |
+| `window` | `PrintWindow(PW_RENDERFULLCONTENT)` — works in background, any renderer |
+| `last` | Return the last cached frame (zero cost, may be stale) |
+| `auto` | Try `render` → `window` → `last`, headers report the source |
+
+The response includes an `X-Cortex-Capture-Source` header so callers know which
+path served the image.
+
+**Input** — three transports, use the one that suits the target:
+
+| Route | Transport | Use when |
+|---|---|---|
+| `POST /input/key`, `/input/mouse_*` | `PostMessage` | Background, Win32-message-driven games |
+| `POST /input/sequence` with `mode:"dinput"` | DirectInput vtable hook on `GetDeviceState` | Games that read DirectInput directly (older titles) |
+| `POST /input/sequence` with `mode:"game"` | `SendInput` | Foreground, works everywhere |
+
+**Sequences** queue multi-step scripts (`key_tap`, `mouse_click`, `mouse_move`,
+`text`, `delay`). Poll `GET /input/sequence/{id}` for status; cancel with
+`DELETE /input/sequence/{id}`.
+
+**Record & replay** — `POST /input/record/start` installs low-level keyboard +
+mouse hooks on a dedicated pump thread. `POST /input/record/stop` returns the
+captured sequence, ready to feed back into `/input/sequence`.
+
+**Window control** — `GET /window`, `POST /window/{focus,restore,minimize,move}`.
+
+## Debugger with expression captures
+
+Every breakpoint can carry a list of memory captures evaluated at each hit.
+Expressions support registers, integer literals, `+`/`-`, and pointer-sized
+dereferences with `[]`, so complex layouts resolve inline:
+
+```json
+{
+  "address": "engine.dll+0x2A0F10",
+  "kind": "hw",
+  "capture": [
+    { "name": "hp",       "expression": "[[ecx+0x18]+0x4]", "type": "i32"  },
+    { "name": "name",     "expression": "[ecx+0x40]",       "type": "cstring", "size": 32 },
+    { "name": "position", "expression": "ecx+0x100",        "type": "bytes",   "size": 12 }
+  ]
+}
+```
+
+Types: `bytes`, `cstring`, `u8/i8/u16/i16/u32/i32/u64/i64`, `float`, `double`.
+
+Hit logs are paginated and non-destructive — the ring buffer reports
+`dropped_entries` and `total_hits` so agents never miss activity even if the
+consumer is slow:
+
+```powershell
+GET /debug/breakpoint/{id}/log?since_seq=0&limit=200
+# -> { entries, returned, next_seq, dropped_entries, total_hits }
+```
+
+**Trigger → auto trace** — attach a trace template with
+`POST /debug/breakpoint/{id}/trigger` and the debugger will start a trace on
+every hit, optionally auto-stopping when the current function returns
+(`stop_on_return`).
+
+Stack walks fall back through **EBP chain → `StackWalk64` (with FPO) → executable-page
+heuristic scan** so broken/optimized prologues still yield a call stack.
+
+## Model Context Protocol (MCP) endpoint
+
+`POST /mcp` speaks **JSON-RPC 2.0** and exposes every Cortex route as a typed
+MCP tool. Tools are auto-derived from the same `/tools` manifest — there is no
+second registry to keep in sync.
+
+Supported methods:
+
+- `initialize` — returns `protocolVersion: "2024-11-05"`, capabilities, serverInfo.
+- `tools/list` — the full catalog as MCP tool descriptors with `inputSchema`.
+- `tools/call` — invokes a tool by name; the endpoint loops back through the
+  same HTTP server so route handlers stay the single source of behavior.
+- `ping` — liveness.
+- Batch (JSON array) requests are supported.
+
+Arguments format:
+
+```json
+{
+  "jsonrpc": "2.0", "id": 42, "method": "tools/call",
+  "params": {
+    "name": "memory_read",
+    "arguments": {
+      "address": "test_target_x64.exe+0x4000",
+      "type": "u32"
+    }
+  }
+}
+```
+
+Path placeholders (`/debug/breakpoint/{id}/log`) go in `_path`, query params in
+`_query`:
+
+```json
+{
+  "name": "debug_breakpoint__id__log",
+  "arguments": {
+    "_path": { "id": "3" },
+    "_query": { "since_seq": "0", "limit": "50" }
+  }
+}
+```
+
+The MCP endpoint still requires `X-Cortex-Token`; a single token authenticates
+both the REST and MCP surfaces.
+
+## Network hook
+
+Cortex intercepts `recv`, `send`, `WSARecv`, and `WSASend` on `ws2_32` and
+keeps the last 512 events in a ring buffer with a 64-byte hex preview:
+
+```powershell
+POST /network/capture   { "enabled": true }
+GET  /network/events?limit=100
+```
+
+Useful for observing single-player games that talk to auth or telemetry
+services, or for reverse-engineering local IPC.
+
+## Session export
+
+`POST /session/export` writes a self-contained archive under
+`<module-dir>/cortex_sessions/session_<UTC-timestamp>/`:
+
+- `session.json` — modules, breakpoints (with paginated logs, captures, and
+  each address expressed as `module+RVA`), traces metadata, project state.
+- `screenshot.png` — a snapshot taken via `mode=auto`.
+
+Archives are directly re-loadable and diffable between runs, which makes bug
+reports and reproducers actually reproducible.
+
 ## Configuration
 
 Create an optional `cortex.ini` beside the DLL:
@@ -278,9 +523,11 @@ GET http://127.0.0.1:6969/openapi.json
 | Watches | `/watch`, `/watch/events`, `/watch/allocations`, `/watch/page_access` |
 | Patching | `/patch/write`, `/patch/assemble`, `/patch/detour`, `/patch/trampoline`, `/patch/alloc_cave` |
 | Persistent project | `/project`, `/project/address`, `/project/pointer_path`, `/project/resolve/{name}`, `/project/note` |
-| Automation | `/input/*`, `/screenshot`, `/prompt/*`, `/call/function`, `/freeze`, `/struct/*` |
+| Automation | `/input/*` (key, mouse, sequence, text, record), `/screenshot?mode=`, `/window/*`, `/prompt/*`, `/call/function`, `/freeze`, `/struct/*` |
 | Reverse engineering | `/pointermap/*`, `/struct/infer`, `/ghidra/*`, `/snapshot/*`, `/dissect/*` |
-| Orchestration | `/batch/run`, `/events`, `/actions`, `/actions/rollback` |
+| Networking | `/network/capture`, `/network/events` |
+| Orchestration | `/batch/run`, `/events`, `/actions`, `/actions/rollback`, `/session/export` |
+| MCP | `POST /mcp` (JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`, `ping`) |
 
 ### Scan behavior
 

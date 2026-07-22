@@ -41,6 +41,20 @@ The only routes that need no token are `/status`, `/health`, `/tools`, and
 4. `GET /project` — recover named addresses, pointer paths, structures, and
    notes saved in earlier sessions. This is your long-term memory.
 
+## Native MCP transport
+
+Cortex also speaks **Model Context Protocol** over `POST /mcp` (JSON-RPC 2.0).
+The tool catalog is auto-derived from `/tools`, so there is no second registry
+to maintain.
+
+- `initialize` returns `protocolVersion "2024-11-05"`, capabilities, serverInfo.
+- `tools/list` returns MCP tool descriptors with an `inputSchema`.
+- `tools/call` loops back through the same HTTP server; put path placeholders
+  in `arguments._path` and query params in `arguments._query`.
+- Batch (array) requests are supported.
+
+The same `X-Cortex-Token` gates `/mcp` — one token for both surfaces.
+
 ## Core conventions
 
 - All request/response bodies are JSON unless a route returns binary data
@@ -53,6 +67,9 @@ The only routes that need no token are `/status`, `/health`, `/tools`, and
   either as a single string (`"godfather2.exe+0x554820"`) or as an object
   (`{"module":"godfather2.exe","rva":"0x554820"}`). Cortex re-resolves the
   base at every call, so persisted scripts survive ASLR across sessions.
+- **Prefer `module+RVA`** for any address you plan to store, log, or send
+  through `/session/export`. Cortex emits `address_named` fields in this form
+  automatically.
 - Absolute addresses change on every restart. Persist a **pointer path**, an
   **AOB signature**, or the `module+RVA` form (via `/project`) so an address
   can be re-resolved later.
@@ -74,6 +91,57 @@ The only routes that need no token are `/status`, `/health`, `/tools`, and
 5. **Modify** — `POST /memory/write`, `/patch/write`, `/patch/detour`, or
    `POST /call/function`. Every mutation is journaled; undo with
    `POST /actions/rollback`.
+
+## Background capture and input
+
+Cortex works even when the game window is not focused or is minimized.
+
+- **Screenshots** — `GET /screenshot?mode=auto` tries the render hook, then
+  `PrintWindow(PW_RENDERFULLCONTENT)`, then a cached last frame. The response
+  carries an `X-Cortex-Capture-Source` header telling you which path served it.
+- **Input transports** — `os` (Win32 `PostMessage`, works in background),
+  `dinput` (DirectInput synthesis for games that read the device directly),
+  `game` (`SendInput`, foreground only). Pick per target.
+- **Sequences** — `POST /input/sequence` queues multi-step scripts. Poll
+  `GET /input/sequence/{id}`, cancel with `DELETE /input/sequence/{id}`.
+- **Record/replay** — `POST /input/record/start` then `/stop` returns a
+  sequence that can be re-fed into `/input/sequence`.
+- **Window control** — `GET /window`, `POST /window/{focus,restore,minimize,move}`.
+
+## Breakpoint captures and traces
+
+Every breakpoint may carry a `capture` array evaluated at each hit. Expressions
+support registers, integers, `+`/`-`, and pointer-sized dereferences with `[]`:
+
+```json
+{
+  "capture": [
+    { "name": "hp", "expression": "[[ecx+0x18]+0x4]", "type": "i32" },
+    { "name": "name", "expression": "[ecx+0x40]", "type": "cstring", "size": 32 }
+  ]
+}
+```
+
+Hit logs are **paginated** and **non-destructive** — page with
+`?since_seq=&limit=` and watch `dropped_entries` + `total_hits`. Attach an
+auto-trace with `POST /debug/breakpoint/{id}/trigger` (supports
+`stop_on_return` to bound the trace to the current function).
+
+Stack walks combine EBP chain → `StackWalk64` → heuristic exec-page scan, so
+optimized prologues still yield a call stack.
+
+## Network capture
+
+`POST /network/capture { enabled: true }` starts intercepting
+`recv/send/WSARecv/WSASend` on `ws2_32`. Read the ring buffer with
+`GET /network/events?limit=`.
+
+## Session export
+
+`POST /session/export` writes a reproducible archive
+(`cortex_sessions/session_<UTC>/session.json` + screenshot) with modules,
+breakpoints (with paginated logs, captures, and `module+RVA` addresses), trace
+metadata, and project state. Use it as a bug report or a diffable checkpoint.
 
 ## Human-in-the-loop
 
