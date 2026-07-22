@@ -42,22 +42,19 @@ Renderer hooks: D3D8 (x86), D3D9/10/11 (x86+x64), D3D12 (x64), OpenGL. Vulkan no
 ## Quickstart
 
 ```powershell
-# 1. Launch a target (use the bundled test binary if you don't have a game)
-.\cortex_test_target_d3d11_x64.exe
+# 1. Launch your target, then inject
+.\injector_x64.exe game.exe
 
-# 2. Inject
-.\injector_x64.exe cortex_test_target_d3d11_x64.exe
-
-# 3. Read the token, verify
+# 2. Verify with the generated token
 $h = @{ "X-Cortex-Token" = (Get-Content .\cortex.token -Raw).Trim() }
 Invoke-RestMethod http://127.0.0.1:6969/health
 
-# 4. Read a canary value by module+RVA (survives ASLR)
-$b = @{ address = "cortex_test_target_d3d11_x64.exe+0x4000"; type = "u32" } | ConvertTo-Json
+# 3. Read memory by module+RVA (survives ASLR)
+$b = @{ address = "game.exe+0x4000"; type = "u32" } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:6969/memory/read `
-    -Headers $h -ContentType "application/json" -Body $b   # -> 0xDEADBEEF
+    -Headers $h -ContentType "application/json" -Body $b
 
-# 5. Background screenshot + OCR
+# 4. Background screenshot
 Invoke-WebRequest "http://127.0.0.1:6969/screenshot?mode=auto" -Headers $h -OutFile shot.png
 ```
 
@@ -79,8 +76,8 @@ cmake --build build --config Release
 ```
 
 Each build produces `cortex_core.dll` (injected), `injector.exe`,
-`cortex_host.exe` (external scanner), `cortex_mcp_bridge.exe` (stdio bridge),
-plus test targets. Run `ctest --test-dir build` to check.
+`cortex_host.exe` (external scanner), and `cortex_mcp_bridge.exe` (stdio
+bridge). Run `ctest --test-dir build` to check.
 
 Use `-DCORTEX_OFFLINE=ON` to prevent network access after the first configure.
 
@@ -210,18 +207,6 @@ Stack walks combine EBP chain → `StackWalk64` → heuristic exec-page scan.
   `POST /actions/clear`.
 - `POST /session/export` writes a reproducible archive under
   `cortex_sessions/session_<UTC>/` (state + screenshot).
-
-## Test targets
-
-Bundled small binaries with the same canary symbols (`g_cortex_u32 =
-0xDEADBEEF`, `g_cortex_health = 100`, `g_cortex_frame`, ...) across
-renderers:
-
-| Binary | Backend |
-|---|---|
-| `cortex_test_target_x{86,64}.exe` | GDI |
-| `cortex_test_target_d3d9_x{86,64}.exe` | Direct3D 9 |
-| `cortex_test_target_d3d11_x{86,64}.exe` | Direct3D 11 |
 
 ## Security model
 
