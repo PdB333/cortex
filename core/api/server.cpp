@@ -189,6 +189,7 @@ bool Start(int port, const std::string& configuredToken) {
     RegisterNetRoutes(*g_server);
     RegisterSessionRoutes(*g_server);
     RegisterMcpRoutes(*g_server);
+    RegisterLuaRoutes(*g_server);
 
     if (!g_server->bind_to_port("127.0.0.1", port)) {
         SetLastError("bind_failed");

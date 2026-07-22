@@ -136,6 +136,29 @@ set(ZYDIS_BUILD_DOXYGEN OFF CACHE INTERNAL "")
 set(ZYDIS_BUILD_MAN OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(zydis)
 
+# ---- Lua 5.4 (upstream repo has no CMakeLists; compile the library sources
+#      directly. Skips lua.c/luac.c which are the standalone interpreter and
+#      compiler CLI drivers we do not need.) ----
+FetchContent_Declare(
+    lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        v5.4.7
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(lua)
+
+set(LUA_LIB_SOURCES
+    lapi.c lauxlib.c lbaselib.c lcode.c lcorolib.c lctype.c ldblib.c
+    ldebug.c ldo.c ldump.c lfunc.c lgc.c linit.c liolib.c llex.c
+    lmathlib.c lmem.c loadlib.c lobject.c lopcodes.c loslib.c
+    lparser.c lstate.c lstring.c lstrlib.c ltable.c ltablib.c ltm.c
+    lundump.c lutf8lib.c lvm.c lzio.c
+)
+list(TRANSFORM LUA_LIB_SOURCES PREPEND ${lua_SOURCE_DIR}/)
+add_library(lua STATIC ${LUA_LIB_SOURCES})
+target_include_directories(lua PUBLIC ${lua_SOURCE_DIR})
+target_compile_definitions(lua PUBLIC LUA_COMPAT_5_3)
+
 # ---- stb (single-header, only need stb_image_write.h) ----
 FetchContent_Declare(
     stb
@@ -225,6 +248,8 @@ add_library(core SHARED
     core/api/routes_net.cpp
     core/api/routes_session.cpp
     core/api/routes_mcp.cpp
+    core/scripting/lua_engine.cpp
+    core/api/routes_lua.cpp
 )
 
 target_include_directories(core PRIVATE core)
@@ -243,6 +268,7 @@ target_link_libraries(core PRIVATE
     minhook
     nlohmann_json::nlohmann_json
     stb
+    lua
     ${CORE_RENDER_LIBS}
     dinput8
     ws2_32

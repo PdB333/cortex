@@ -53,6 +53,32 @@ json BuildToolsManifest() {
                                       "a folder under <module-dir>/cortex_sessions/session_<UTC>. "
                                       "Returns {path} for post-hoc analysis or regression testing."}});
 
+        j.push_back({{"name", "lua_exec"}, {"method", "POST"}, {"path", "/lua/exec"},
+                      {"description", "Executes a Lua 5.4 snippet in a fresh sandbox. The `cortex.*` "
+                                      "table exposes memory.read/write/read_bytes, module_base, "
+                                      "resolve, describe, log, sleep. `print(...)` is captured into "
+                                      "the returned output. Returns {ok, result, output, error}."},
+                      {"body", {{"code", "required: Lua source"},
+                                {"timeout_ms", "optional: wall-time cap (default 5000)"}}}});
+
+        j.push_back({{"name", "lua_scripts"}, {"method", "GET"}, {"path", "/lua/scripts"},
+                      {"description", "Lists the persisted Lua scripts under cortex_scripts/."}});
+
+        j.push_back({{"name", "lua_scripts_save"}, {"method", "POST"}, {"path", "/lua/scripts"},
+                      {"description", "Saves or overwrites a named Lua script."},
+                      {"body", {{"name", "required: identifier (a-zA-Z0-9_-)"},
+                                {"code", "required: Lua source"}}}});
+
+        j.push_back({{"name", "lua_scripts_get"}, {"method", "GET"}, {"path", "/lua/scripts/{name}"},
+                      {"description", "Returns the source of a saved script."}});
+
+        j.push_back({{"name", "lua_scripts_run"}, {"method", "POST"}, {"path", "/lua/scripts/{name}/run"},
+                      {"description", "Runs a saved script; returns {ok, result, output, error}."},
+                      {"body", {{"timeout_ms", "optional: wall-time cap (default 5000)"}}}});
+
+        j.push_back({{"name", "lua_scripts_delete"}, {"method", "DELETE"}, {"path", "/lua/scripts/{name}"},
+                      {"description", "Deletes a saved script."}});
+
         j.push_back({{"name", "modules"}, {"method", "GET"}, {"path", "/modules"},
                       {"description", "List of modules (DLL/EXE) loaded in the process, with base and size."}});
 
