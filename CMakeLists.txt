@@ -362,6 +362,40 @@ else()
     set_target_properties(cortex_test_target PROPERTIES OUTPUT_NAME "cortex_test_target_x64")
 endif()
 
+# =========================================================================
+# cortex_mcp_bridge -- stdio<->HTTP bridge for MCP clients (Claude Desktop
+# etc.) that only speak the stdio transport variant of the MCP spec.
+# =========================================================================
+add_executable(cortex_mcp_bridge mcp_bridge/main.cpp)
+target_include_directories(cortex_mcp_bridge PRIVATE ${httplib_SOURCE_DIR})
+target_compile_definitions(cortex_mcp_bridge PRIVATE
+    _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(cortex_mcp_bridge PRIVATE ws2_32)
+target_link_options(cortex_mcp_bridge PRIVATE -static -static-libgcc -static-libstdc++)
+
+# =========================================================================
+# Renderer-specific test targets: same canary layout, D3D9 and D3D11
+# backends so the screenshot hook + overlay can be verified per renderer.
+# =========================================================================
+foreach(RENDERER 9 11)
+    set(TGT cortex_test_target_d3d${RENDERER})
+    add_executable(${TGT} WIN32 test_target/main_d3d.cpp)
+    target_compile_definitions(${TGT} PRIVATE
+        TEST_RENDERER=${RENDERER}
+        _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_options(${TGT} PRIVATE -static -static-libgcc -static-libstdc++)
+    if(RENDERER STREQUAL "9")
+        target_link_libraries(${TGT} PRIVATE user32 gdi32 d3d9)
+    else()
+        target_link_libraries(${TGT} PRIVATE user32 gdi32 d3d11 dxgi)
+    endif()
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set_target_properties(${TGT} PROPERTIES OUTPUT_NAME "${TGT}_x86")
+    else()
+        set_target_properties(${TGT} PROPERTIES OUTPUT_NAME "${TGT}_x64")
+    endif()
+endforeach()
+
 if(BUILD_TESTING)
     add_executable(cortex_core_tests
         tests/core_tests.cpp
