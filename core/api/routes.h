@@ -38,5 +38,6 @@ void RegisterNetRoutes(httplib::Server& svr);
 void RegisterSessionRoutes(httplib::Server& svr);
 void RegisterMcpRoutes(httplib::Server& svr);
 void RegisterLuaRoutes(httplib::Server& svr);
+void RegisterOcrRoutes(httplib::Server& svr);
 
 } // namespace api

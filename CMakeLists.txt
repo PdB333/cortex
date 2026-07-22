@@ -250,6 +250,8 @@ add_library(core SHARED
     core/api/routes_mcp.cpp
     core/scripting/lua_engine.cpp
     core/api/routes_lua.cpp
+    core/ocr/ocr.cpp
+    core/api/routes_ocr.cpp
 )
 
 target_include_directories(core PRIVATE core)

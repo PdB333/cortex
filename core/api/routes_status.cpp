@@ -79,6 +79,16 @@ json BuildToolsManifest() {
         j.push_back({{"name", "lua_scripts_delete"}, {"method", "DELETE"}, {"path", "/lua/scripts/{name}"},
                       {"description", "Deletes a saved script."}});
 
+        j.push_back({{"name", "ocr"}, {"method", "POST"}, {"path", "/ocr"},
+                      {"description", "Runs OCR on a PNG (Windows.Media.Ocr backend, Win10+). "
+                                      "Returns recognized text plus per-word bounding boxes. "
+                                      "Feed screenshots straight from /screenshot?mode=auto by "
+                                      "base64-encoding the response."},
+                      {"body", {{"image_base64", "PNG bytes (base64-encoded); OR"},
+                                {"image_path", "absolute path to a PNG on disk"},
+                                {"language", "optional: BCP-47 tag (e.g. 'en-US', 'fr-FR'); "
+                                             "empty uses the user's installed OCR languages"}}}});
+
         j.push_back({{"name", "modules"}, {"method", "GET"}, {"path", "/modules"},
                       {"description", "List of modules (DLL/EXE) loaded in the process, with base and size."}});
 
