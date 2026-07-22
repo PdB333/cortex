@@ -35,8 +35,12 @@ The HTTP server binds only to `127.0.0.1`. Protected routes require a
 - [Background capture and input](#background-capture-and-input)
 - [Debugger with expression captures](#debugger-with-expression-captures)
 - [Model Context Protocol (MCP) endpoint](#model-context-protocol-mcp-endpoint)
+- [Claude Desktop / MCP stdio bridge](#claude-desktop--mcp-stdio-bridge)
+- [Embedded Lua scripting](#embedded-lua-scripting)
+- [OCR](#ocr)
 - [Network hook](#network-hook)
 - [Session export](#session-export)
+- [Renderer test targets](#renderer-test-targets)
 - [Configuration](#configuration)
 - [API overview](#api-overview)
 - [Persistent projects](#persistent-projects)
@@ -88,7 +92,9 @@ AI agent / script / developer tool
 | Automation | **Background** keyboard/mouse injection (Win32 + DirectInput synthesis), **background** screenshots (any renderer), input sequences, record/replay, window control |
 | Networking | ws2_32 recv/send/WSARecv/WSASend interceptor with ring buffer |
 | Addressing | Universal `module+RVA` resolver on every route (ASLR-proof) |
-| AI integration | Native **Model Context Protocol** (JSON-RPC 2.0) endpoint, auto-derived tool catalog, `/session/export` archive |
+| Scripting | Embedded **Lua 5.4** sandbox with `cortex.*` bindings, persisted script catalog |
+| Vision | **OCR** via Windows.Media.Ocr (Win10+, no bundled binaries) |
+| AI integration | Native **Model Context Protocol** (JSON-RPC 2.0) endpoint, **stdio bridge** for Claude Desktop / Cursor / Cline, auto-derived tool catalog, `/session/export` archive |
 | Persistence | Per-process addresses, pointer paths, notes, freezes, and named structures |
 | Safety | Loopback-only server (v4 + v6), token authentication, Host/Origin checks, JSON content validation, mutation journal |
 
@@ -460,6 +466,90 @@ Path placeholders (`/debug/breakpoint/{id}/log`) go in `_path`, query params in
 The MCP endpoint still requires `X-Cortex-Token`; a single token authenticates
 both the REST and MCP surfaces.
 
+## Claude Desktop / MCP stdio bridge
+
+Most out-of-the-box MCP clients (Claude Desktop, Cursor, Cline, Continue.dev)
+only speak the **stdio** transport of the MCP spec. Cortex ships a tiny
+bridge exe (`cortex_mcp_bridge_x{86,64}.exe`) that reads newline-delimited
+JSON-RPC from stdin, forwards to `POST http://127.0.0.1:6969/mcp` with the
+token, writes the response back to stdout.
+
+Register it in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "C:/games/cortex_mcp_bridge_x64.exe",
+      "args": ["--token-file", "C:/games/cortex.token"]
+    }
+  }
+}
+```
+
+Optional args: `--port 6969`, `--host 127.0.0.1`, `--token <hex>` (inline).
+If neither `--token` nor `--token-file` is given, the bridge tries
+`cortex.token` next to its own exe.
+
+## Embedded Lua scripting
+
+`POST /lua/exec` runs a Lua 5.4 snippet in a fresh sandbox (fresh
+`lua_State` per call, no globals leak between requests). A wall-time
+`timeout_ms` (default 5000) aborts runaway scripts.
+
+Bindings under the `cortex.*` table:
+
+```lua
+-- memory
+local v = cortex.memory.read("test_target_x64.exe+0x4000", "u32")
+cortex.memory.write(v_addr, "u32", 42)
+local raw = cortex.memory.read_bytes(addr, 16)
+
+-- modules / addresses
+local base = cortex.module_base("engine.dll")
+local abs  = cortex.resolve("engine.dll+0x1234")
+print(cortex.describe(abs))       -- "engine.dll+0x1234"
+
+-- utilities
+cortex.log("hit!")                 -- to the ImGui overlay
+cortex.sleep(200)
+```
+
+`print(...)` is captured into the response `output`.
+
+Persisted catalog under `<module_dir>/cortex_scripts/`:
+
+| Route | Purpose |
+|---|---|
+| `GET /lua/scripts` | List saved script names |
+| `POST /lua/scripts` `{name, code}` | Save/overwrite |
+| `GET /lua/scripts/{name}` | Get source |
+| `POST /lua/scripts/{name}/run` | Run saved script |
+| `DELETE /lua/scripts/{name}` | Delete |
+
+## OCR
+
+`POST /ocr` runs Windows.Media.Ocr on a PNG and returns recognized text
+plus per-word bounding boxes. Backend is a PowerShell shim that Cortex
+extracts to `%TEMP%\cortex_ocr.ps1` on first use — **no bundled Tesseract,
+no external files to ship**. Requires Windows 10+ with at least one OCR
+language pack installed (Settings → Time & Language → Language).
+
+```json
+POST /ocr
+{
+  "image_base64": "iVBORw0KG...",  // OR "image_path": "C:/tmp/frame.png"
+  "language": "en-US"              // optional BCP-47 tag
+}
+-> {
+  "ok": true, "engine": "winrt",
+  "text": "cortex_test_target frame=42 W=3 health=100",
+  "lines": [ { "text": "...", "words": [ {"text":"cortex_test_target","x":10,"y":10,"w":180,"h":18}, ... ] } ]
+}
+```
+
+Typical loop: `GET /screenshot?mode=auto` → base64-encode → `POST /ocr`.
+
 ## Network hook
 
 Cortex intercepts `recv`, `send`, `WSARecv`, and `WSASend` on `ws2_32` and
@@ -484,6 +574,21 @@ services, or for reverse-engineering local IPC.
 
 Archives are directly re-loadable and diffable between runs, which makes bug
 reports and reproducers actually reproducible.
+
+## Renderer test targets
+
+Cortex ships several small self-contained target binaries for verifying the
+hooks without needing a real game:
+
+| Binary | Backend | Purpose |
+|---|---|---|
+| `cortex_test_target_x{86,64}.exe` | GDI | Canary values + Win32 message loop (base) |
+| `cortex_test_target_d3d9_x{86,64}.exe` | Direct3D 9 | Verifies kiero D3D9 hook, screenshot, overlay |
+| `cortex_test_target_d3d11_x{86,64}.exe` | Direct3D 11 | Same for D3D11 |
+
+All expose the same canary symbols (`g_cortex_u32 = 0xDEADBEEF`,
+`g_cortex_health = 100`, `g_cortex_frame`, ...) so a single test suite
+covers every renderer. Launch, inject, verify.
 
 ## Configuration
 
@@ -526,8 +631,10 @@ GET http://127.0.0.1:6969/openapi.json
 | Automation | `/input/*` (key, mouse, sequence, text, record), `/screenshot?mode=`, `/window/*`, `/prompt/*`, `/call/function`, `/freeze`, `/struct/*` |
 | Reverse engineering | `/pointermap/*`, `/struct/infer`, `/ghidra/*`, `/snapshot/*`, `/dissect/*` |
 | Networking | `/network/capture`, `/network/events` |
+| Scripting | `/lua/exec`, `/lua/scripts` (CRUD + `/run`) |
+| Vision | `/ocr` |
 | Orchestration | `/batch/run`, `/events`, `/actions`, `/actions/rollback`, `/session/export` |
-| MCP | `POST /mcp` (JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`, `ping`) |
+| MCP | `POST /mcp` (JSON-RPC 2.0: `initialize`, `tools/list`, `tools/call`, `ping`) + `cortex_mcp_bridge.exe` stdio bridge |
 
 ### Scan behavior
 
