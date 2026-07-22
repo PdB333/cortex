@@ -23,16 +23,25 @@ The HTTP server binds only to `127.0.0.1`. Protected routes require a
 
 ## Contents
 
+- [Why Cortex?](#why-cortex)
 - [Highlights](#highlights)
 - [Renderer support](#renderer-support)
+- [Requirements](#requirements)
 - [Build](#build)
+- [External Host](#external-host)
 - [Load Cortex](#load-cortex)
+- [Verify the connection](#verify-the-connection)
 - [Configuration](#configuration)
 - [API overview](#api-overview)
 - [Persistent projects](#persistent-projects)
+- [Action journal and batches](#action-journal-and-batches)
 - [Architecture](#architecture)
 - [Security model](#security-model)
 - [Known limitations](#known-limitations)
+- [Dependencies](#dependencies)
+- [Contributing](#contributing)
+- [For AI agents](#for-ai-agents)
+- [License](#license)
 
 ## Why Cortex?
 
@@ -131,7 +140,7 @@ cmake --build build_x64 --config Release
 Each build produces:
 
 - `cortex_core.dll` - the DLL loaded into the target process;
-- `injector.exe` - the command-line injector.
+- `injector.exe` - the command-line injector;
 - `cortex_host.exe` - the external controller and self-pollution-free scanner.
 
 After dependencies have been populated once, configure with
@@ -334,11 +343,16 @@ cortex/
 |   `-- main.cpp                 external controller and scanner
 |-- core/
 |   |-- dllmain.cpp             initialization and shutdown
+|   |-- config.cpp              cortex.ini parser and defaults
+|   |-- log.cpp                 debug console + rotating log file
 |   |-- api/                    HTTP server and route domains
 |   |-- memory/                 safe reads, writes, and scans
+|   |-- process/                module enumeration
 |   |-- debugger/               breakpoints and execution control
 |   |-- disasm/                 Zydis integration
+|   |-- symbols/                DbgHelp / PDB symbol resolution
 |   |-- analysis/               CFG, xrefs, vtables, structures
+|   |-- dissect/                inferred structure layouts
 |   |-- patch/                  patches, assembly, detours, caves
 |   |-- pointermap/             persisted cross-session pointer paths
 |   |-- timeline/               targeted checkpoints and rewind
@@ -346,9 +360,11 @@ cortex/
 |   |-- watch/                  data, page, and allocation watches
 |   |-- project/                persistent per-target state
 |   |-- action/                 mutation journal and rollback
+|   |-- events/                 Server-Sent Events stream
 |   |-- hook/                   renderer and input hooks
 |   |-- overlay/                Dear ImGui UI
-|   |-- capture/                screenshots
+|   |-- capture/                screenshots (render hook + fallbacks)
+|   |-- prompt/                 human-in-the-loop prompt queue
 |   |-- freeze/                 periodic value enforcement
 |   |-- struct/                 named runtime structures
 |   `-- call/                   guarded native function calls

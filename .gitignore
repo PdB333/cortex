@@ -8,7 +8,8 @@
 # Vendored MinGW toolchain (fetched separately, not source)
 /toolchains/
 
-# Secrets
+# Secrets (generated at runtime beside the injected DLL / host exe)
+cortex.token
 cortex_host.token
 
 # Editor / OS cruft

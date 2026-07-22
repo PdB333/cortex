@@ -1,4 +1,5 @@
 #include "routes.h"
+#include "../process/address.h"
 #include "../dissect/dissect.h"
 #include "../overlay/overlay.h"
 
@@ -19,11 +20,7 @@ std::string Hex(uintptr_t a) {
     return s.str();
 }
 
-uintptr_t ParseAddress(const json& body, const char* key) {
-    const json& v = body.at(key);
-    if (v.is_string()) return static_cast<uintptr_t>(std::stoull(v.get<std::string>(), nullptr, 0));
-    return static_cast<uintptr_t>(v.get<uint64_t>());
-}
+uintptr_t ParseAddress(const json& body, const char* key) { return process::ResolveAddress(body.at(key)); }
 
 std::string BytesToHex(const std::vector<uint8_t>& buf) {
     std::ostringstream hex;

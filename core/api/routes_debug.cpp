@@ -1,4 +1,5 @@
 #include "routes.h"
+#include "../process/address.h"
 #include "../debugger/debugger.h"
 #include "../overlay/overlay.h"
 #include "../action/action.h"
@@ -13,10 +14,7 @@ namespace api {
 
 namespace {
 
-uintptr_t ParseAddress(const json& jaddr) {
-    if (jaddr.is_string()) return static_cast<uintptr_t>(std::stoull(jaddr.get<std::string>(), nullptr, 0));
-    return static_cast<uintptr_t>(jaddr.get<uint64_t>());
-}
+uintptr_t ParseAddress(const json& jaddr) { return process::ResolveAddress(jaddr); }
 
 std::string HexAddr(uintptr_t a) {
     std::ostringstream s;
@@ -98,8 +96,21 @@ void RegisterDebugRoutes(httplib::Server& svr) {
                 cond.value = c.value("value", static_cast<int64_t>(0));
             }
 
+            std::vector<dbg::BpCapture> captures;
+            if (body.contains("capture") && body["capture"].is_array()) {
+                for (const auto& c : body["capture"]) {
+                    dbg::BpCapture cap;
+                    cap.name = c.value("name", std::string(""));
+                    cap.expression = c.at("expression").get<std::string>();
+                    cap.size = c.value("size", 16);
+                    cap.type = c.value("type", std::string("bytes"));
+                    captures.push_back(std::move(cap));
+                }
+            }
+
             int id = dbg::AddBreakpoint(kind, address, size, pauseOnHit ? dbg::BpAction::Pause : dbg::BpAction::Log,
-                                         hasCondition ? &cond : nullptr);
+                                         hasCondition ? &cond : nullptr,
+                                         captures.empty() ? nullptr : &captures);
             if (id >= 0) action::Record("debug/breakpoint " + HexAddr(address), [id] { return dbg::RemoveBreakpoint(id); });
             json out;
             out["ok"] = id >= 0;
@@ -110,6 +121,44 @@ void RegisterDebugRoutes(httplib::Server& svr) {
             res.status = 400;
             res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
         }
+    });
+
+    // Wire a per-breakpoint auto-trace trigger. Body:
+    //   { "range": ["mod.exe+0xA000", "mod.exe+0xB000"],   // optional
+    //     "stop_on_return": true,                           // optional, default true
+    //     "once": true,                                     // optional, default true
+    //     "max_steps": 100000, "max_events": 50000 }        // optional
+    // On every hit, Cortex starts a trace on the hitting thread with the
+    // stopAddress patched to the caller (via [rsp/esp]) when stop_on_return.
+    svr.Post(R"(/debug/breakpoint/(\d+)/trigger)", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            int id = std::stoi(req.matches[1]);
+            json body = req.body.empty() ? json::object() : json::parse(req.body);
+            dbg::BpTrigger t;
+            if (body.contains("range") && body["range"].is_array() && body["range"].size() == 2) {
+                t.templateCfg.rangeStart = ParseAddress(body["range"][0]);
+                t.templateCfg.rangeEnd   = ParseAddress(body["range"][1]);
+            }
+            t.templateCfg.maxSteps  = body.value("max_steps",  (uint64_t)100000);
+            t.templateCfg.maxEvents = (size_t)body.value("max_events", 50000);
+            t.stopOnReturn = body.value("stop_on_return", true);
+            t.once = body.value("once", true);
+            bool ok = dbg::SetBreakpointTrigger(id, t);
+            if (!ok) { res.status = 404;
+                       res.set_content(json{{"ok", false}, {"error", "unknown_breakpoint"}}.dump(), "application/json");
+                       return; }
+            res.set_content(json{{"ok", true}}.dump(), "application/json");
+            overlay::LogApiCall("POST /debug/breakpoint/" + std::to_string(id) + "/trigger");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
+        }
+    });
+    svr.Delete(R"(/debug/breakpoint/(\d+)/trigger)", [](const httplib::Request& req, httplib::Response& res) {
+        int id = std::stoi(req.matches[1]);
+        bool ok = dbg::ClearBreakpointTrigger(id);
+        if (!ok) res.status = 404;
+        res.set_content(json{{"ok", ok}}.dump(), "application/json");
     });
 
     svr.Delete(R"(/debug/breakpoint/(\d+))", [](const httplib::Request& req, httplib::Response& res) {
@@ -183,15 +232,49 @@ void RegisterDebugRoutes(httplib::Server& svr) {
 
     svr.Get(R"(/debug/breakpoint/(\d+)/log)", [](const httplib::Request& req, httplib::Response& res) {
         int id = std::stoi(req.matches[1]);
+        uint64_t sinceSeq = 0;
+        size_t   limit    = 0;
+        auto p = req.get_param_value("since_seq");
+        if (!p.empty()) try { sinceSeq = std::stoull(p); } catch (...) {}
+        auto q = req.get_param_value("limit");
+        if (!q.empty()) try { limit = (size_t)std::stoul(q); } catch (...) {}
+
+        std::vector<dbg::BpLogEntry> entries;
+        uint64_t dropped = 0, total = 0;
+        if (!dbg::GetBreakpointLogPaged(id, sinceSeq, limit, entries, dropped, total)) {
+            res.status = 404;
+            res.set_content(json{{"ok", false}, {"error", "unknown_breakpoint"}}.dump(), "application/json");
+            return;
+        }
+
         json arr = json::array();
-        for (const auto& e : dbg::GetBreakpointLog(id)) {
+        uint64_t nextSeq = sinceSeq;
+        for (const auto& e : entries) {
             json stack=json::array();for(uintptr_t frame:e.stack)stack.push_back(HexAddr(frame));
             std::ostringstream bytes;bytes<<std::hex<<std::setfill('0');for(uint8_t byte:e.bytes)bytes<<std::setw(2)<<static_cast<unsigned>(byte);
+            json caps = json::array();
+            for (const auto& c : e.captures) {
+                std::ostringstream hex; hex<<std::hex<<std::setfill('0');
+                for (uint8_t b : c.bytes) hex<<std::setw(2)<<static_cast<unsigned>(b);
+                json cj = {{"name", c.name}, {"address", HexAddr(c.address)},
+                            {"ok", c.ok}, {"hex", hex.str()}};
+                if (!c.decoded.empty()) cj["value"] = c.decoded;
+                caps.push_back(cj);
+            }
             arr.push_back({{"seq", e.seq}, {"thread_id", e.threadId},
                             {"timestamp_ms", e.timestampMs}, {"instruction",HexAddr(e.instruction)},
-                            {"bytes",bytes.str()},{"registers", RegsToJson(e.regs)},{"stack",stack}});
+                            {"bytes",bytes.str()},{"registers", RegsToJson(e.regs)},{"stack",stack},
+                            {"captures", caps}});
+            if (e.seq >= nextSeq) nextSeq = e.seq + 1;
         }
-        res.set_content(json{{"ok", true}, {"entries", arr}}.dump(), "application/json");
+        res.set_content(json{
+            {"ok", true},
+            {"entries", arr},
+            {"returned", (uint64_t)entries.size()},
+            {"dropped_entries", dropped},
+            {"total_hits", total},
+            {"next_seq", nextSeq}
+        }.dump(), "application/json");
         overlay::LogApiCall("GET /debug/breakpoint/" + std::to_string(id) + "/log");
     });
 

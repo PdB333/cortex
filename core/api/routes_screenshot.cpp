@@ -60,23 +60,72 @@ void RegisterScreenshotRoutes(httplib::Server& svr) {
         if (timeoutMs < 100) timeoutMs = 100;
         if (timeoutMs > 20000) timeoutMs = 20000;
 
+        // mode selection -- see agents.md / README for the full contract.
+        //   render : hook Present in the render loop (default legacy path).
+        //   window : GDI PrintWindow of the game's top-level HWND -- works
+        //            with the game in the background as long as it isn't
+        //            minimized.
+        //   last   : return the most recent PNG ever produced, without
+        //            blocking. Fails only if nothing has ever been captured.
+        //   auto   : try render (short timeout), then window, then last.
+        std::string mode = req.get_param_value("mode");
+        if (mode.empty()) mode = "render";
+
         std::vector<uint8_t> png;
-        bool ok = capture::RequestCapture(png, timeoutMs);
+        std::string source;
+        std::string error;
+
+        auto tryRender = [&](int t) {
+            if (capture::RequestCapture(png, t)) { source = "render"; return true; }
+            return false;
+        };
+        auto tryWindow = [&]() {
+            if (capture::PrintWindowFallback(png)) { source = "window"; return true; }
+            return false;
+        };
+        auto tryLast = [&]() {
+            unsigned long long age = 0;
+            if (capture::GetLastPng(png, &age)) { source = "last"; return true; }
+            return false;
+        };
+
+        bool ok = false;
+        if (mode == "render") {
+            ok = tryRender(timeoutMs);
+            if (!ok) error = "capture_timeout";
+        } else if (mode == "window") {
+            ok = tryWindow();
+            if (!ok) error = "printwindow_failed";
+        } else if (mode == "last") {
+            ok = tryLast();
+            if (!ok) error = "no_frame_yet";
+        } else if (mode == "auto") {
+            // Short render attempt first: if the game is presenting, this
+            // returns almost immediately. Otherwise fall back to window,
+            // then to the last known frame.
+            int quick = timeoutMs < 1500 ? timeoutMs : 1500;
+            ok = tryRender(quick) || tryWindow() || tryLast();
+            if (!ok) error = "all_backends_failed";
+        } else {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", "invalid_mode"}}.dump(),
+                            "application/json");
+            return;
+        }
 
         if (!ok) {
             HWND hwnd = overlay::GetHwnd();
-            // The device's focus/render window may be a child of the actual
-            // top-level window that gets minimized -- check the root ancestor.
             HWND root = hwnd ? GetAncestor(hwnd, GA_ROOT) : nullptr;
             bool minimized = root && IsIconic(root);
             res.status = 504;
             res.set_content(json{
                 {"ok", false},
-                {"error", minimized ? "window_minimized" : "capture_timeout"},
+                {"error", minimized ? "window_minimized" : error},
+                {"mode", mode},
                 {"message", minimized
-                     ? "The game window is minimized: rendering (and therefore any capture) is "
-                       "suspended until it is restored."
-                     : "No frame received in time."}
+                     ? "The game window is minimized: no backend can capture a live frame. "
+                       "Try mode=last to get the most recent cached frame."
+                     : "Capture failed. Try mode=auto for automatic fallback."}
             }.dump(), "application/json");
             return;
         }
@@ -85,12 +134,16 @@ void RegisterScreenshotRoutes(httplib::Server& svr) {
         if (encoding == "base64") {
             json out;
             out["ok"] = true;
+            out["source"] = source;
             out["image_base64"] = Base64Encode(png);
             res.set_content(out.dump(), "application/json");
         } else {
+            // Also surface the source in a custom header so binary consumers
+            // can tell which backend produced this PNG without decoding it.
+            res.set_header("X-Cortex-Capture-Source", source);
             res.set_content(reinterpret_cast<const char*>(png.data()), png.size(), "image/png");
         }
-        overlay::LogApiCall("GET /screenshot");
+        overlay::LogApiCall("GET /screenshot mode=" + mode + " src=" + source);
     });
 }
 

@@ -166,6 +166,7 @@ add_library(core SHARED
     core/hook/input_hook.cpp
     core/hook/input_inject.cpp
     core/hook/dinput_hook.cpp
+    core/hook/net_hook.cpp
     core/overlay/overlay.cpp
     core/overlay/overlay_common.cpp
     core/memory/memory.cpp
@@ -177,6 +178,7 @@ add_library(core SHARED
     core/symbols/symbols.cpp
     core/project/project.cpp
     core/process/modules.cpp
+    core/process/address.cpp
     core/capture/capture_common.cpp
     core/prompt/prompt_queue.cpp
     core/patch/patch.cpp
@@ -219,6 +221,10 @@ add_library(core SHARED
     core/api/routes_trace.cpp
     core/api/routes_ghidra.cpp
     core/api/routes_timeline.cpp
+    core/api/routes_window.cpp
+    core/api/routes_net.cpp
+    core/api/routes_session.cpp
+    core/api/routes_mcp.cpp
 )
 
 target_include_directories(core PRIVATE core)
@@ -247,7 +253,7 @@ target_link_libraries(core PRIVATE
 )
 
 target_compile_definitions(core PRIVATE
-    CPPHTTPLIB_THREAD_POOL_COUNT=4
+    CPPHTTPLIB_THREAD_POOL_COUNT=12
     _WIN32_WINNT=0x0601
     WIN32_LEAN_AND_MEAN
     NOMINMAX
@@ -302,13 +308,31 @@ target_link_options(injector PRIVATE -static -static-libgcc -static-libstdc++)
 add_executable(cortex_host host/main.cpp)
 target_include_directories(cortex_host PRIVATE ${httplib_SOURCE_DIR})
 target_compile_definitions(cortex_host PRIVATE
-    CPPHTTPLIB_THREAD_POOL_COUNT=4
+    CPPHTTPLIB_THREAD_POOL_COUNT=12
     _WIN32_WINNT=0x0601
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
 target_link_libraries(cortex_host PRIVATE nlohmann_json::nlohmann_json ws2_32 bcrypt)
 target_link_options(cortex_host PRIVATE -static -static-libgcc -static-libstdc++)
+
+# =========================================================================
+# cortex_test_target -- fake game with known memory values / window / input
+# for exercising Cortex end-to-end without needing a real game. Built in
+# whichever bitness the tree is configured for; run both x86 and x64 tree
+# builds to get both binaries.
+# =========================================================================
+add_executable(cortex_test_target WIN32 test_target/main.cpp)
+target_compile_definitions(cortex_test_target PRIVATE
+    _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_options(cortex_test_target PRIVATE -static -static-libgcc -static-libstdc++
+    -Wl,--subsystem,console)  # keep stdout for the canary print
+target_link_libraries(cortex_test_target PRIVATE user32 gdi32)
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set_target_properties(cortex_test_target PROPERTIES OUTPUT_NAME "cortex_test_target_x86")
+else()
+    set_target_properties(cortex_test_target PROPERTIES OUTPUT_NAME "cortex_test_target_x64")
+endif()
 
 if(BUILD_TESTING)
     add_executable(cortex_core_tests
@@ -318,6 +342,7 @@ if(BUILD_TESTING)
         core/memory/provenance.cpp
         core/memory/scan.cpp
         core/process/modules.cpp
+        core/process/address.cpp
         core/patch/patch.cpp
         core/struct/infer.cpp
         core/timeline/timeline.cpp
@@ -331,6 +356,6 @@ if(BUILD_TESTING)
         NOMINMAX
     )
     target_link_options(cortex_core_tests PRIVATE -static -static-libgcc -static-libstdc++)
-    target_link_libraries(cortex_core_tests PRIVATE Zydis)
+    target_link_libraries(cortex_core_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_core_tests COMMAND cortex_core_tests)
 endif()

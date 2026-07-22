@@ -13,6 +13,7 @@
 #endif
 #include "hook/input_hook.h"
 #include "hook/dinput_hook.h"
+#include "hook/net_hook.h"
 #include "api/server.h"
 #include "debugger/debugger.h"
 #include "symbols/symbols.h"
@@ -84,6 +85,9 @@ namespace {
             printf("[Cortex] DirectInput hooked\n");
             dbglog::Line("InitDInputHook ok");
         }
+
+        if (!nethook::Init()) dbglog::Line("nethook::Init failed");
+        else                  dbglog::Line("nethook::Init ok");
 
         dbg::Init();
         dbglog::Line("dbg::Init done");

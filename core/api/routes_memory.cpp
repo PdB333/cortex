@@ -4,6 +4,7 @@
 #include "../memory/provenance.h"
 #include "../overlay/overlay.h"
 #include "../action/action.h"
+#include "../process/address.h"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -16,11 +17,10 @@ namespace api {
 
 namespace {
 
+// Delegates to the universal resolver which also accepts "module.ext+RVA"
+// and {module,rva} objects on top of the historical hex/decimal forms.
 uintptr_t ParseAddress(const json& jaddr) {
-    if (jaddr.is_string()) {
-        return static_cast<uintptr_t>(std::stoull(jaddr.get<std::string>(), nullptr, 0));
-    }
-    return static_cast<uintptr_t>(jaddr.get<uint64_t>());
+    return process::ResolveAddress(jaddr);
 }
 
 std::string BytesToHex(const std::vector<uint8_t>& buf) {

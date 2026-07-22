@@ -1,7 +1,12 @@
 #pragma once
 #include <httplib.h>
+#include <nlohmann/json.hpp>
 
 namespace api {
+
+// Master tool manifest -- single source of truth for /tools, /openapi.json,
+// and the MCP tools/list dispatch. Defined in routes_status.cpp.
+nlohmann::json BuildToolsManifest();
 
 void RegisterStatusRoutes(httplib::Server& svr);
 void RegisterModulesRoutes(httplib::Server& svr);
@@ -28,5 +33,9 @@ void RegisterPointerMapRoutes(httplib::Server& svr);
 void RegisterTraceRoutes(httplib::Server& svr);
 void RegisterGhidraRoutes(httplib::Server& svr);
 void RegisterTimelineRoutes(httplib::Server& svr);
+void RegisterWindowRoutes(httplib::Server& svr);
+void RegisterNetRoutes(httplib::Server& svr);
+void RegisterSessionRoutes(httplib::Server& svr);
+void RegisterMcpRoutes(httplib::Server& svr);
 
 } // namespace api

@@ -6,7 +6,10 @@
 #include <dinput.h>
 #include <MinHook.h>
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <mutex>
+#include <thread>
 
 namespace hook {
 
@@ -15,9 +18,19 @@ namespace {
 
     typedef HRESULT(STDMETHODCALLTYPE* Acquire_t)(void*);
     typedef HRESULT(STDMETHODCALLTYPE* Unacquire_t)(void*);
+    typedef HRESULT(STDMETHODCALLTYPE* GetDeviceState_t)(void*, DWORD, LPVOID);
 
     Acquire_t oAcquire = nullptr;
     Unacquire_t oUnacquire = nullptr;
+    GetDeviceState_t oGetDeviceState = nullptr;
+
+    // Synthetic state (see dinput_hook.h). All access under g_synthMutex.
+    std::mutex g_synthMutex;
+    uint8_t g_synthKeys[256] = {};
+    int g_synthDx = 0, g_synthDy = 0, g_synthDz = 0;
+    uint8_t g_synthButtons[8] = {};
+    std::atomic<bool> g_hookOk{false};
+    std::atomic<int>  g_seenDevices{0};
 
     // The game may have created its DirectInput devices (keyboard, mouse,
     // ...) before we got injected, so we can never see its actual device
@@ -32,7 +45,7 @@ namespace {
     void TrackAcquired(void* dev) {
         std::lock_guard<std::mutex> lock(g_devicesMutex);
         for (auto& slot : g_acquiredDevices) if (slot == dev) return;
-        for (auto& slot : g_acquiredDevices) if (!slot) { slot = dev; return; }
+        for (auto& slot : g_acquiredDevices) if (!slot) { slot = dev; g_seenDevices.fetch_add(1); return; }
     }
 
     void UntrackAcquired(void* dev) {
@@ -61,12 +74,40 @@ namespace {
         return hr;
     }
 
+    // Called on every polled read (usually once per frame per device). Runs
+    // on the game's main thread -- must stay cheap and never allocate.
+    HRESULT STDMETHODCALLTYPE hkGetDeviceState(void* self, DWORD cbData, LPVOID lpvData) {
+        HRESULT hr = oGetDeviceState(self, cbData, lpvData);
+        if (FAILED(hr) || !lpvData) return hr;
+
+        std::lock_guard<std::mutex> lock(g_synthMutex);
+        if (cbData == 256) {
+            // Keyboard: OR synthetic keys in. Don't clear real keys, so a
+            // synthetic "W" plus the user actually holding "W" both show as
+            // pressed (harmless), while a synthetic key alone still reaches
+            // the game.
+            uint8_t* kb = static_cast<uint8_t*>(lpvData);
+            for (int i = 0; i < 256; ++i) if (g_synthKeys[i]) kb[i] |= 0x80;
+        } else if (cbData == sizeof(DIMOUSESTATE)) {
+            auto* ms = static_cast<DIMOUSESTATE*>(lpvData);
+            ms->lX += g_synthDx; ms->lY += g_synthDy; ms->lZ += g_synthDz;
+            g_synthDx = g_synthDy = g_synthDz = 0;
+            for (int i = 0; i < 4; ++i) if (g_synthButtons[i]) ms->rgbButtons[i] |= 0x80;
+        } else if (cbData == sizeof(DIMOUSESTATE2)) {
+            auto* ms = static_cast<DIMOUSESTATE2*>(lpvData);
+            ms->lX += g_synthDx; ms->lY += g_synthDy; ms->lZ += g_synthDz;
+            g_synthDx = g_synthDy = g_synthDz = 0;
+            for (int i = 0; i < 8; ++i) if (g_synthButtons[i]) ms->rgbButtons[i] |= 0x80;
+        }
+        return hr;
+    }
+
     // Creates a throwaway mouse device solely to read Acquire/Unacquire
     // vtable addresses. Same trick as GetD3D8VTableAddresses: the vtable is
     // shared by every device instance from this DLL's DirectInput
     // implementation, so hooking these addresses also hooks the game's real
     // (already-created) devices.
-    bool GetDInputDeviceVTableAddresses(void** outAcquire, void** outUnacquire) {
+    bool GetDInputDeviceVTableAddresses(void** outAcquire, void** outUnacquire, void** outGetDeviceState) {
         HMODULE dinput8 = GetModuleHandleA("dinput8.dll");
         if (!dinput8) {
             dbglog::Line("dinput: dinput8.dll not loaded");
@@ -96,7 +137,9 @@ namespace {
                 void** devVtable = *reinterpret_cast<void***>(device);
                 *outAcquire = devVtable[7];
                 *outUnacquire = devVtable[8];
-                dbglog::Line("dinput: device vtable=%p Acquire=%p Unacquire=%p", (void*)devVtable, *outAcquire, *outUnacquire);
+                *outGetDeviceState = devVtable[9];
+                dbglog::Line("dinput: device vtable=%p Acquire=%p Unacquire=%p GetDeviceState=%p",
+                             (void*)devVtable, *outAcquire, *outUnacquire, *outGetDeviceState);
                 reinterpret_cast<IUnknown*>(device)->Release();
                 ok = true;
             }
@@ -109,20 +152,54 @@ namespace {
 bool InitDInputHook() {
     void* acquireAddr = nullptr;
     void* unacquireAddr = nullptr;
-    if (!GetDInputDeviceVTableAddresses(&acquireAddr, &unacquireAddr)) {
+    void* getStateAddr = nullptr;
+    if (!GetDInputDeviceVTableAddresses(&acquireAddr, &unacquireAddr, &getStateAddr)) {
         dbglog::Line("InitDInputHook: GetDInputDeviceVTableAddresses failed");
         return false;
     }
 
     MH_STATUS s1 = MH_CreateHook(acquireAddr, reinterpret_cast<void*>(&hkAcquire), reinterpret_cast<void**>(&oAcquire));
     MH_STATUS s2 = MH_CreateHook(unacquireAddr, reinterpret_cast<void*>(&hkUnacquire), reinterpret_cast<void**>(&oUnacquire));
-    dbglog::Line("InitDInputHook create: Acquire=%d Unacquire=%d", (int)s1, (int)s2);
-    if (s1 != MH_OK || s2 != MH_OK) return false;
+    MH_STATUS s3 = MH_CreateHook(getStateAddr, reinterpret_cast<void*>(&hkGetDeviceState), reinterpret_cast<void**>(&oGetDeviceState));
+    dbglog::Line("InitDInputHook create: Acquire=%d Unacquire=%d GetDeviceState=%d", (int)s1, (int)s2, (int)s3);
+    if (s1 != MH_OK || s2 != MH_OK || s3 != MH_OK) return false;
 
     MH_STATUS e1 = MH_EnableHook(acquireAddr);
     MH_STATUS e2 = MH_EnableHook(unacquireAddr);
-    dbglog::Line("InitDInputHook enable: Acquire=%d Unacquire=%d", (int)e1, (int)e2);
-    return e1 == MH_OK && e2 == MH_OK;
+    MH_STATUS e3 = MH_EnableHook(getStateAddr);
+    dbglog::Line("InitDInputHook enable: Acquire=%d Unacquire=%d GetDeviceState=%d", (int)e1, (int)e2, (int)e3);
+    bool ok = e1 == MH_OK && e2 == MH_OK && e3 == MH_OK;
+    g_hookOk.store(ok);
+    return ok;
+}
+
+void SetSyntheticKey(int dik, bool down) {
+    if (dik < 0 || dik > 255) return;
+    std::lock_guard<std::mutex> lock(g_synthMutex);
+    g_synthKeys[dik] = down ? 0x80 : 0;
+}
+
+void TapSyntheticKey(int dik, int holdMs) {
+    SetSyntheticKey(dik, true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(holdMs > 0 ? holdMs : 50));
+    SetSyntheticKey(dik, false);
+}
+
+void AddSyntheticMouseDelta(int dx, int dy, int dz) {
+    std::lock_guard<std::mutex> lock(g_synthMutex);
+    g_synthDx += dx;
+    g_synthDy += dy;
+    g_synthDz += dz;
+}
+
+void SetSyntheticMouseButton(int button, bool down) {
+    if (button < 0 || button > 7) return;
+    std::lock_guard<std::mutex> lock(g_synthMutex);
+    g_synthButtons[button] = down ? 0x80 : 0;
+}
+
+bool IsDInputActive() {
+    return g_hookOk.load() && g_seenDevices.load() > 0;
 }
 
 void SetDInputCaptureActive(bool active) {

@@ -1,4 +1,5 @@
 #include "routes.h"
+#include "../process/address.h"
 #include "../project/project.h"
 #include "../overlay/overlay.h"
 
@@ -11,10 +12,7 @@ namespace api {
 
 namespace {
 
-uintptr_t ParseAddress(const json& jaddr) {
-    if (jaddr.is_string()) return static_cast<uintptr_t>(std::stoull(jaddr.get<std::string>(), nullptr, 0));
-    return static_cast<uintptr_t>(jaddr.get<uint64_t>());
-}
+uintptr_t ParseAddress(const json& jaddr) { return process::ResolveAddress(jaddr); }
 
 // Same hex-string-or-number flexibility as ParseAddress, but signed --
 // pointer path offsets are routinely negative (Cheat Engine et al. show

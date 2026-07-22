@@ -38,6 +38,21 @@ json BuildToolsManifest() {
         j.push_back({{"name", "openapi"}, {"method", "GET"}, {"path", "/openapi.json"}, {"public", true},
                       {"description", "OpenAPI 3 description generated from the same manifest as /tools."}});
 
+        j.push_back({{"name", "mcp"}, {"method", "POST"}, {"path", "/mcp"},
+                      {"description", "Native Model Context Protocol endpoint. Speaks JSON-RPC 2.0 and "
+                                      "supports 'initialize', 'tools/list', 'tools/call', 'ping'. Every "
+                                      "route in this manifest is auto-exposed as an MCP tool with an "
+                                      "inputSchema derived from its body/query fields; 'tools/call' "
+                                      "loopback-dispatches to the same route so behavior stays in one "
+                                      "place. Use `_query` in arguments for query-string params and "
+                                      "`_path` for {id} substitutions."}});
+
+        j.push_back({{"name", "session_export"}, {"method", "POST"}, {"path", "/session/export"},
+                      {"description", "Dumps the current state (modules, breakpoints + their log ring "
+                                      "with captures, traces metadata, project data, screenshot) into "
+                                      "a folder under <module-dir>/cortex_sessions/session_<UTC>. "
+                                      "Returns {path} for post-hoc analysis or regression testing."}});
+
         j.push_back({{"name", "modules"}, {"method", "GET"}, {"path", "/modules"},
                       {"description", "List of modules (DLL/EXE) loaded in the process, with base and size."}});
 
@@ -201,16 +216,21 @@ json BuildToolsManifest() {
                       {"description", "Deletes a note."}});
 
         j.push_back({{"name", "screenshot"}, {"method", "GET"}, {"path", "/screenshot"},
-                      {"description", "Captures the current game frame as PNG. If the game window is "
-                                      "minimized (rendering is then entirely suspended, normal behavior "
-                                      "in exclusive fullscreen), returns a 504 error with "
-                                      "error='window_minimized' rather than a generic timeout. "
-                                      "Over RDP, D3D8 rendering can have 5s+ gaps "
-                                      "between frames even with the window visible/not minimized (measured "
-                                      "in cortex_debug.log); raise timeout_ms if capture_timeout keeps "
-                                      "coming back."},
+                      {"description", "Captures the current game frame as PNG. Four capture modes: "
+                                      "'render' hooks the game's Present (needs the game to be actively "
+                                      "rendering); 'window' uses GDI PrintWindow on the game's top-level "
+                                      "HWND (works when the game is in the background as long as it's "
+                                      "not minimized -- best for windowed/borderless titles); 'last' "
+                                      "returns the most recent PNG the render hook ever produced without "
+                                      "blocking (instant, works even when the game isn't rendering, but "
+                                      "may be stale); 'auto' tries render -> window -> last. Response "
+                                      "carries the actual source used in header X-Cortex-Capture-Source "
+                                      "(binary) or field 'source' (base64). Over RDP, D3D8 rendering "
+                                      "can have 5s+ gaps between frames; raise timeout_ms if "
+                                      "capture_timeout keeps coming back in render mode."},
                       {"query", {{"encoding", "binary (default, returns the image directly) | base64 (JSON)"},
-                                 {"timeout_ms", "wait time for a frame, 100-20000, default 8000"}}}});
+                                 {"mode", "render (default) | window | last | auto"},
+                                 {"timeout_ms", "wait time for a frame in render/auto mode, 100-20000, default 8000"}}}});
 
         j.push_back({{"name", "prompt_timed_test"}, {"method", "POST"}, {"path", "/prompt/timed_test"},
                       {"description", "Asks the player to play/test something for a given duration, "
@@ -275,6 +295,83 @@ json BuildToolsManifest() {
         j.push_back({{"name", "input_mouse_move"}, {"method", "POST"}, {"path", "/input/mouse_move"},
                       {"description", "Relative mouse movement (dx, dy) -- relative, not absolute, since that's what a game using exclusive DirectInput actually reads for its camera."},
                       {"body", {{"dx", "required"}, {"dy", "required"}}}});
+
+        j.push_back({{"name", "input_text"}, {"method", "POST"}, {"path", "/input/text"},
+                      {"description", "Types an arbitrary UTF-8 string. background=false uses SendInput "
+                                      "with KEYEVENTF_UNICODE (foreground required, works with in-game "
+                                      "consoles/chats and any text control). background=true posts "
+                                      "WM_CHAR to the game's HWND (background-safe but only reaches "
+                                      "WM_CHAR consumers)."},
+                      {"body", {{"text", "required: UTF-8 string"},
+                                {"background", "optional bool, default false"},
+                                {"per_char_ms", "optional int, sleep between chars, default 0"}}}});
+
+        j.push_back({{"name", "input_sequence"}, {"method", "POST"}, {"path", "/input/sequence"},
+                      {"description", "Runs a scripted sequence of key/mouse/delay steps on a worker "
+                                      "thread and returns immediately with a job id. mode=os uses "
+                                      "SendInput (foreground required, reaches DirectInput/RawInput "
+                                      "consumers); mode=game uses PostMessage on the game's top-level "
+                                      "HWND (background-safe, only reaches games that read WM_KEY*/"
+                                      "WM_MOUSE*/WM_CHAR); mode=dinput injects synthetic state into "
+                                      "the DirectInput GetDeviceState hook (background-safe, reaches "
+                                      "DirectInput-exclusive games like Hitman Contracts). Each step "
+                                      "is an object with one of: {vk,down} or {vk,tap_ms}; "
+                                      "{mouse_button,down}; {mouse_move:{dx,dy}}; {mouse_move_abs:"
+                                      "{x,y}} (client coords, ignored in dinput mode); {delay_ms}. "
+                                      "Poll status with GET /input/sequence/{id}, cancel with DELETE."},
+                      {"body", {{"mode", "os (default) | game | dinput"},
+                                {"steps", "required: array of step objects"}}}});
+
+        j.push_back({{"name", "input_sequence_status"}, {"method", "GET"}, {"path", "/input/sequence/{id}"},
+                      {"description", "Returns {status: pending|running|done|failed|cancelled, "
+                                      "step_index, step_count}."}});
+
+        j.push_back({{"name", "input_sequence_cancel"}, {"method", "DELETE"}, {"path", "/input/sequence/{id}"},
+                      {"description", "Cancels a running sequence at the next step boundary."}});
+
+        j.push_back({{"name", "window_get"}, {"method", "GET"}, {"path", "/window"},
+                      {"description", "Returns the game's top-level window state: hwnd, title, class, "
+                                      "pid, screen rect, client size, visible/minimized/maximized/"
+                                      "focused flags. Handy for the AI to check whether the game is "
+                                      "actually up and focused before deciding os vs game mode input."}});
+
+        j.push_back({{"name", "window_focus"}, {"method", "POST"}, {"path", "/window/focus"},
+                      {"description", "Restores if minimized, then brings the game window to the "
+                                      "foreground. Uses AllowSetForegroundWindow to bypass focus-"
+                                      "stealing prevention. Best-effort: still fails when Windows "
+                                      "explicitly disallows the transition."}});
+
+        j.push_back({{"name", "window_restore"}, {"method", "POST"}, {"path", "/window/restore"},
+                      {"description", "Un-minimizes the game window without changing focus."}});
+
+        j.push_back({{"name", "window_minimize"}, {"method", "POST"}, {"path", "/window/minimize"},
+                      {"description", "Minimizes the game window."}});
+
+        j.push_back({{"name", "input_record_start"}, {"method", "POST"}, {"path", "/input/record/start"},
+                      {"description", "Starts recording system-wide user input (WH_KEYBOARD_LL / "
+                                      "WH_MOUSE_LL). Idempotent."}});
+
+        j.push_back({{"name", "input_record_stop"}, {"method", "POST"}, {"path", "/input/record/stop"},
+                      {"description", "Stops recording and returns the captured events as a step array "
+                                      "ready to be fed back into POST /input/sequence."}});
+
+        j.push_back({{"name", "network_capture"}, {"method", "POST"}, {"path", "/network/capture"},
+                      {"description", "Enables or disables network capture via hooks on ws2_32.dll "
+                                      "recv/send/WSARecv/WSASend. Zero cost when disabled."},
+                      {"body", {{"enabled", "required: bool"}}}});
+
+        j.push_back({{"name", "network_events"}, {"method", "GET"}, {"path", "/network/events"},
+                      {"description", "Ring buffer snapshot of the most recent captured recv/send calls "
+                                      "with size + first 64 bytes as hex."},
+                      {"query", {{"limit", "optional int, default 200"}}}});
+
+        j.push_back({{"name", "window_move"}, {"method", "POST"}, {"path", "/window/move"},
+                      {"description", "Moves (and optionally resizes) the game window. Fires "
+                                      "SWP_NOACTIVATE so it does not steal focus."},
+                      {"body", {{"x", "required: int screen coord"},
+                                {"y", "required: int screen coord"},
+                                {"width", "optional int; if omitted or 0, size is preserved"},
+                                {"height", "optional int; if omitted or 0, size is preserved"}}}});
 
         j.push_back({{"name", "freeze_add"}, {"method", "POST"}, {"path", "/freeze"},
                       {"description", "Rewrites a value in a loop at a fixed interval (~16ms), Cheat Engine's \"Freeze\" checkbox -- for infinite health/ammo without going through a code patch. The value is reapplied until DELETE /freeze/{id}, the DLL unloading, or ttl_ms expiring if provided."},

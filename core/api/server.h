@@ -12,4 +12,8 @@ bool IsRunning();
 std::string GetLastError();
 std::string GetTokenPath();
 
+// Read the current server token. Only intended for in-process loopback
+// dispatchers (e.g. the MCP endpoint) -- never expose this over the wire.
+std::string GetToken();
+
 } // namespace api

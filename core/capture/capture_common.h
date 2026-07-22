@@ -17,6 +17,12 @@ extern std::condition_variable g_cv;
 extern bool g_requested;
 extern bool g_ready;
 extern std::vector<uint8_t> g_png;
+// Rolling copy of the most recent PNG we ever produced (any backend). Kept
+// so /screenshot?mode=last (and the auto fallback) can answer instantly
+// when the render loop has stalled -- e.g. the game is minimized, alt-tabbed
+// out of D3D8 exclusive fullscreen, or otherwise not currently Presenting.
+extern std::vector<uint8_t> g_lastPng;
+extern unsigned long long g_lastPngTickMs;
 
 // Encodes tightly-packed RGBA8 pixels to PNG and stashes the result as the
 // pending capture result. Must be called with g_mutex held. swapRB=false

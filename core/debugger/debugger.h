@@ -36,6 +36,33 @@ struct Registers {
 #endif
 };
 
+// Memory capture request. Evaluated at every hit against the thread's live
+// CONTEXT. Supported expression grammar (case-insensitive):
+//   term := register | integer | '[' expr ']'
+//   expr := term (('+'|'-') term)*
+// Registers: eax/rax/ecx/rcx/... (arch-specific), esp/rsp, ebp/rbp, eip/rip.
+// Integers: hex (0x...) or decimal.
+// A "[expr]" dereferences pointer-sized. Chained forms like `[[eax+0x18]+0x4]`
+// work naturally. Failed reads yield an empty `hex` result with `ok=false`.
+struct BpCapture {
+    std::string name;
+    std::string expression;
+    int size = 16;               // bytes to read at the resolved address
+    std::string type = "bytes";  // "bytes"|"cstring"|"u8"|"i8"|"u16"|"i16"|
+                                 // "u32"|"i32"|"u64"|"i64"|"float"|"double"
+};
+
+// One capture result attached to a BpLogEntry.
+struct BpCaptureResult {
+    std::string name;
+    uintptr_t address = 0;
+    bool ok = false;
+    std::vector<uint8_t> bytes;  // raw
+    // Type-decoded value, formatted as a string ("42", "3.14", "hello", ...).
+    // Empty when type == "bytes".
+    std::string decoded;
+};
+
 struct BreakpointInfo {
     int id;
     BpKind kind;
@@ -62,6 +89,7 @@ struct BpLogEntry {
     uintptr_t instruction;
     std::vector<uint8_t> bytes;
     std::vector<uintptr_t> stack;
+    std::vector<BpCaptureResult> captures; // optional per-hit memory snapshots
 };
 
 struct TraceConfig {
@@ -102,7 +130,9 @@ bool Shutdown();
 // thread of this process (size must be 1, 2 or 4; ignored for HwExecute which
 // is always 1). `condition`, if non-null, is copied and evaluated on every
 // hit; the hit is only counted/logged/paused when it passes.
-int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action, const BpCondition* condition = nullptr);
+int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
+                  const BpCondition* condition = nullptr,
+                  const std::vector<BpCapture>* captures = nullptr);
 bool RemoveBreakpoint(int id);
 std::vector<BreakpointInfo> ListBreakpoints();
 
@@ -112,8 +142,19 @@ std::vector<PausedThread> ListPausedThreads();
 bool GetPausedRegisters(DWORD threadId, Registers& out);
 
 // Captured register snapshots for a BpAction::Log breakpoint, oldest first,
-// capped at a fixed ring size (oldest entries silently dropped once full).
+// capped at a fixed ring size. Old entries are dropped once full but their
+// count is retained (see GetBreakpointLogPaged).
 std::vector<BpLogEntry> GetBreakpointLog(int id);
+
+// Non-destructive paged read. Returns entries with seq >= sinceSeq (0 = all
+// currently retained). `limit` caps the returned count. Fills:
+//   * outDropped: number of entries dropped from the ring since bp was set
+//     (== hitCount - retained.size() - seq of oldest still present, monotone).
+//   * outTotal: total hits ever recorded for this breakpoint (== hitCount).
+// Missing breakpoint returns false.
+bool GetBreakpointLogPaged(int id, uint64_t sinceSeq, size_t limit,
+                           std::vector<BpLogEntry>& out,
+                           uint64_t& outDropped, uint64_t& outTotal);
 
 // Resumes a paused thread normally.
 bool ContinueThread(DWORD threadId);
@@ -127,6 +168,21 @@ bool StepThread(DWORD threadId, DWORD timeoutMs, Registers& outRegs);
 bool ReadThreadRegisters(DWORD threadId, Registers& out);
 std::vector<uintptr_t> WalkStack(DWORD threadId, int maxFrames);
 std::vector<DWORD> ListThreadIds();
+
+// Wire a "trigger -> auto trace" behavior to an existing breakpoint. Every
+// time this breakpoint hits (BpAction::Log or ::Pause), Cortex spawns a
+// StartTrace() on the *hitting* thread using `templateCfg` (rangeStart/end,
+// maxSteps/Events). If stopOnReturn is true, stopAddress is patched at hit
+// time to the caller (memory read at [rsp/esp]) so the trace naturally ends
+// at the function's ret. When `once` is true the trigger disarms itself
+// after the first successful StartTrace.
+struct BpTrigger {
+    TraceConfig templateCfg;
+    bool stopOnReturn = true;
+    bool once         = true;
+};
+bool SetBreakpointTrigger(int id, const BpTrigger& trigger);
+bool ClearBreakpointTrigger(int id);
 
 // Conditional single-step recorder. It keeps a bounded instruction/register
 // ring and coverage counters without pausing the game on every instruction.

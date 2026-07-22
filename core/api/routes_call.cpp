@@ -1,4 +1,5 @@
 #include "routes.h"
+#include "../process/address.h"
 #include "../call/call.h"
 #include "../overlay/overlay.h"
 #include "../action/action.h"
@@ -12,12 +13,7 @@ namespace api {
 
 namespace {
 
-uintptr_t ParseAddress(const json& jaddr) {
-    if (jaddr.is_string()) {
-        return static_cast<uintptr_t>(std::stoull(jaddr.get<std::string>(), nullptr, 0));
-    }
-    return static_cast<uintptr_t>(jaddr.get<uint64_t>());
-}
+uintptr_t ParseAddress(const json& jaddr) { return process::ResolveAddress(jaddr); }
 
 std::string HexAddr(uintptr_t a) {
     std::ostringstream s;

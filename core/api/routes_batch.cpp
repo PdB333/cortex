@@ -1,4 +1,5 @@
 #include "routes.h"
+#include "../process/address.h"
 #include "../memory/memory.h"
 #include "../memory/scan.h"
 #include "../disasm/disasm.h"
@@ -38,10 +39,7 @@ std::string Hex(uintptr_t a) {
     return s.str();
 }
 
-uintptr_t ParseAddress(const json& v) {
-    if (v.is_string()) return static_cast<uintptr_t>(std::stoull(v.get<std::string>(), nullptr, 0));
-    return static_cast<uintptr_t>(v.get<uint64_t>());
-}
+uintptr_t ParseAddress(const json& v) { return process::ResolveAddress(v); }
 
 uintptr_t ParseAddressAt(const json& body, const char* key) { return ParseAddress(body.at(key)); }
 

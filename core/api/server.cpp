@@ -65,6 +65,19 @@ namespace {
     }
 
     bool IsLocalAuthority(const std::string& authority) {
+        // IPv6 loopback authority: [::1] or [::1]:port. Match the bracketed
+        // form explicitly -- the naked "::1" case doesn't appear in HTTP Host
+        // headers (RFC 3986 requires the brackets for IPv6).
+        if (!authority.empty() && authority.front() == '[') {
+            const size_t rb = authority.find(']');
+            if (rb == std::string::npos) return false;
+            const std::string host = authority.substr(1, rb - 1);
+            if (host != "::1") return false;
+            if (rb + 1 == authority.size()) return true;
+            if (authority[rb + 1] != ':') return false;
+            const std::string port = authority.substr(rb + 2);
+            return !port.empty() && port.find_first_not_of("0123456789") == std::string::npos;
+        }
         const size_t colon = authority.find(':');
         const std::string host = authority.substr(0, colon);
         if (host != "127.0.0.1" && host != "localhost") return false;
@@ -172,6 +185,10 @@ bool Start(int port, const std::string& configuredToken) {
     RegisterTraceRoutes(*g_server);
     RegisterGhidraRoutes(*g_server);
     RegisterTimelineRoutes(*g_server);
+    RegisterWindowRoutes(*g_server);
+    RegisterNetRoutes(*g_server);
+    RegisterSessionRoutes(*g_server);
+    RegisterMcpRoutes(*g_server);
 
     if (!g_server->bind_to_port("127.0.0.1", port)) {
         SetLastError("bind_failed");
@@ -208,5 +225,6 @@ std::string GetLastError() {
     return g_lastError;
 }
 std::string GetTokenPath() { return g_tokenPath; }
+std::string GetToken() { std::lock_guard<std::mutex> lock(g_stateMutex); return g_token; }
 
 } // namespace api

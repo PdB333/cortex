@@ -2,6 +2,7 @@
 #include "../memory/memory.h"
 
 #include <tlhelp32.h>
+#include <dbghelp.h>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -14,6 +15,8 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
+#include <sstream>
+#include <iomanip>
 #include <stdexcept>
 
 namespace dbg {
@@ -56,12 +59,19 @@ void SetCtxIp(PCONTEXT ctx, uintptr_t v) {
 #endif
 }
 
+struct BpTriggerState {
+    BpTrigger cfg;
+    bool fired = false;
+};
+
 struct SwEntry {
     uintptr_t address;
     uint8_t origByte;
     BpAction action;
     uint64_t hitCount;
     std::optional<BpCondition> condition;
+    std::vector<BpCapture> captures;
+    std::optional<BpTriggerState> trigger;
 };
 
 struct HwEntry {
@@ -72,6 +82,8 @@ struct HwEntry {
     BpAction action;
     uint64_t hitCount;
     std::optional<BpCondition> condition;
+    std::vector<BpCapture> captures;
+    std::optional<BpTriggerState> trigger;
 };
 
 // State for a single thread of the *target* process while it is (or was)
@@ -98,12 +110,24 @@ std::atomic<bool> g_hwMonitorRunning{false};
 std::thread g_hwMonitorThread;
 std::set<DWORD> g_hwConfiguredThreads;
 
+// Trigger -> auto-trace dispatcher.
+struct TriggerReq { DWORD tid; TraceConfig cfg; };
+std::mutex g_trigMutex;
+std::deque<TriggerReq> g_trigQueue;
+std::atomic<bool> g_trigRunning{false};
+std::thread g_trigThread;
+
 // Per-breakpoint ring buffer for BpAction::Log hits. Capped so a hot
 // breakpoint (hit thousands of times/sec) can't grow this unbounded --
 // callers polling GET /debug/breakpoint/{id}/log just see the most recent
 // window. Must be accessed with g_mutex held.
 constexpr size_t kMaxBpLogEntries = 500;
-std::map<int, std::deque<BpLogEntry>> g_bpLogs;
+struct BpLogRing {
+    std::deque<BpLogEntry> entries;
+    uint64_t dropped = 0;   // # of entries evicted from the ring since creation
+    uint64_t total   = 0;   // # of entries ever pushed (== hitCount for logs)
+};
+std::map<int, BpLogRing> g_bpLogs;
 
 struct TraceState {
     TraceConfig config;
@@ -118,23 +142,280 @@ struct TraceState {
 std::map<int, TraceState> g_traces;
 int g_nextTraceId = 1;
 
+static bool IsExecAddr(uintptr_t a) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQueryEx(GetCurrentProcess(), (LPCVOID)a, &mbi, sizeof(mbi))) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    constexpr DWORD kExec = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return (mbi.Protect & kExec) != 0;
+}
+
+static std::atomic<bool> g_symInitTried{false};
+static bool EnsureSymInit() {
+    static bool ok = false;
+    bool expected = false;
+    if (g_symInitTried.compare_exchange_strong(expected, true)) {
+        SymSetOptions(SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
+        ok = SymInitialize(GetCurrentProcess(), nullptr, TRUE) != 0;
+    }
+    return ok;
+}
+
+// StackWalk64 needs a mutable copy of CONTEXT. Returns up to maxFrames IPs
+// (first entry is the current IP). Empty if StackWalk64 can't advance.
+static std::vector<uintptr_t> StackWalkFromContext(CONTEXT ctx, HANDLE thread, int maxFrames) {
+    std::vector<uintptr_t> out;
+    if (!EnsureSymInit()) return out;
+    STACKFRAME64 sf{};
+    DWORD machine;
+#ifdef _WIN64
+    machine = IMAGE_FILE_MACHINE_AMD64;
+    sf.AddrPC.Offset    = ctx.Rip;
+    sf.AddrFrame.Offset = ctx.Rbp;
+    sf.AddrStack.Offset = ctx.Rsp;
+#else
+    machine = IMAGE_FILE_MACHINE_I386;
+    sf.AddrPC.Offset    = ctx.Eip;
+    sf.AddrFrame.Offset = ctx.Ebp;
+    sf.AddrStack.Offset = ctx.Esp;
+#endif
+    sf.AddrPC.Mode = sf.AddrFrame.Mode = sf.AddrStack.Mode = AddrModeFlat;
+    for (int i = 0; i < maxFrames; ++i) {
+        if (!StackWalk64(machine, GetCurrentProcess(), thread, &sf, &ctx,
+                         nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr)) break;
+        if (!sf.AddrPC.Offset) break;
+        out.push_back((uintptr_t)sf.AddrPC.Offset);
+    }
+    return out;
+}
+
+// Heuristic fallback: when frame-pointer chain is broken (FPO/omit-fp code)
+// and StackWalk64 lacks unwind info, scan the stack slots above SP and keep
+// values that look like return addresses -- i.e. sit inside a committed
+// executable page. False positives are possible; ordering matches stack
+// depth reasonably in practice.
+static std::vector<uintptr_t> HeuristicStackScan(uintptr_t sp, int maxFrames) {
+    std::vector<uintptr_t> out;
+    constexpr size_t kPtrSize = sizeof(void*);
+    // Sweep at most 512 slots up the stack.
+    for (size_t off = 0; off < 512 * kPtrSize && (int)out.size() < maxFrames; off += kPtrSize) {
+        std::vector<uint8_t> b;
+        if (!memory::ReadBytes(sp + off, kPtrSize, b) || b.size() != kPtrSize) break;
+        uintptr_t v = 0; std::memcpy(&v, b.data(), kPtrSize);
+        if (v && IsExecAddr(v)) out.push_back(v);
+    }
+    return out;
+}
+
 std::vector<uintptr_t> WalkContextStack(PCONTEXT ctx, int maxFrames) {
     std::vector<uintptr_t> frames{GetCtxIp(ctx)};
 #ifdef _WIN64
-    uintptr_t frame=ctx->Rbp; constexpr size_t ptrSize=8;
+    uintptr_t frame = ctx->Rbp, sp = ctx->Rsp; constexpr size_t ptrSize = 8;
 #else
-    uintptr_t frame=ctx->Ebp; constexpr size_t ptrSize=4;
+    uintptr_t frame = ctx->Ebp, sp = ctx->Esp; constexpr size_t ptrSize = 4;
 #endif
-    for(int i=1;i<maxFrames&&frame;++i){std::vector<uint8_t>b;if(!memory::ReadBytes(frame,ptrSize*2,b))break;uintptr_t next=0,ret=0;memcpy(&next,b.data(),ptrSize);memcpy(&ret,b.data()+ptrSize,ptrSize);if(!ret||next<=frame)break;frames.push_back(ret);frame=next;}
+    // Try classical EBP chain first (cheap, correct when frame pointers exist).
+    for (int i = 1; i < maxFrames && frame; ++i) {
+        std::vector<uint8_t> b;
+        if (!memory::ReadBytes(frame, ptrSize * 2, b)) break;
+        uintptr_t next = 0, ret = 0;
+        std::memcpy(&next, b.data(), ptrSize);
+        std::memcpy(&ret, b.data() + ptrSize, ptrSize);
+        if (!ret || next <= frame) break;
+        frames.push_back(ret);
+        frame = next;
+    }
+    if ((int)frames.size() >= 2) return frames;
+
+    // EBP walk yielded nothing beyond IP -- try StackWalk64 (works with PDBs
+    // or PE unwind info on x64) then a heuristic stack-return-address scan.
+    auto sw = StackWalkFromContext(*ctx, GetCurrentThread(), maxFrames);
+    if (sw.size() > frames.size()) return sw;
+    auto heur = HeuristicStackScan(sp, maxFrames - 1);
+    frames.insert(frames.end(), heur.begin(), heur.end());
     return frames;
 }
 
+// ---- Capture expression evaluator ---------------------------------------
+// Grammar: expr = term (('+'|'-') term)* ; term = reg | int | '[' expr ']'.
+// Case-insensitive registers, uses the hitting thread's CONTEXT.
+struct ExprEval {
+    const std::string& s; PCONTEXT ctx; size_t p = 0; bool err = false;
+    ExprEval(const std::string& s_, PCONTEXT c) : s(s_), ctx(c) {}
+    void skip() { while (p < s.size() && std::isspace((unsigned char)s[p])) ++p; }
+    uint64_t regVal(std::string n) {
+        for (auto& ch : n) ch = (char)std::tolower((unsigned char)ch);
+#ifdef _WIN64
+        if (n=="rax") return ctx->Rax; if (n=="rbx") return ctx->Rbx;
+        if (n=="rcx") return ctx->Rcx; if (n=="rdx") return ctx->Rdx;
+        if (n=="rsi") return ctx->Rsi; if (n=="rdi") return ctx->Rdi;
+        if (n=="rbp") return ctx->Rbp; if (n=="rsp") return ctx->Rsp;
+        if (n=="r8")  return ctx->R8;  if (n=="r9")  return ctx->R9;
+        if (n=="r10") return ctx->R10; if (n=="r11") return ctx->R11;
+        if (n=="r12") return ctx->R12; if (n=="r13") return ctx->R13;
+        if (n=="r14") return ctx->R14; if (n=="r15") return ctx->R15;
+        if (n=="rip") return ctx->Rip;
+        // Common aliases so a caller writing "eax" on x64 gets the low dword.
+        if (n=="eax") return (uint32_t)ctx->Rax; if (n=="ebx") return (uint32_t)ctx->Rbx;
+        if (n=="ecx") return (uint32_t)ctx->Rcx; if (n=="edx") return (uint32_t)ctx->Rdx;
+        if (n=="esi") return (uint32_t)ctx->Rsi; if (n=="edi") return (uint32_t)ctx->Rdi;
+        if (n=="ebp") return (uint32_t)ctx->Rbp; if (n=="esp") return (uint32_t)ctx->Rsp;
+#else
+        if (n=="eax") return ctx->Eax; if (n=="ebx") return ctx->Ebx;
+        if (n=="ecx") return ctx->Ecx; if (n=="edx") return ctx->Edx;
+        if (n=="esi") return ctx->Esi; if (n=="edi") return ctx->Edi;
+        if (n=="ebp") return ctx->Ebp; if (n=="esp") return ctx->Esp;
+        if (n=="eip") return ctx->Eip;
+#endif
+        err = true; return 0;
+    }
+    uint64_t term() {
+        skip(); if (p >= s.size()) { err = true; return 0; }
+        if (s[p] == '[') {
+            ++p; uint64_t inner = expr(); skip();
+            if (p >= s.size() || s[p] != ']') { err = true; return 0; }
+            ++p;
+            // Dereference pointer-sized.
+            std::vector<uint8_t> buf;
+            if (!memory::ReadBytes((uintptr_t)inner, sizeof(void*), buf) || buf.size() != sizeof(void*)) {
+                err = true; return 0;
+            }
+            uintptr_t v = 0; std::memcpy(&v, buf.data(), sizeof(void*));
+            return (uint64_t)v;
+        }
+        if (std::isalpha((unsigned char)s[p]) || s[p] == '_') {
+            std::string name;
+            while (p < s.size() && (std::isalnum((unsigned char)s[p]) || s[p] == '_')) name += s[p++];
+            return regVal(name);
+        }
+        if (std::isdigit((unsigned char)s[p]) ||
+            (s[p] == '-' && p + 1 < s.size() && std::isdigit((unsigned char)s[p+1]))) {
+            size_t consumed = 0;
+            try {
+                bool neg = false; if (s[p] == '-') { neg = true; ++p; }
+                uint64_t v = std::stoull(s.substr(p), &consumed, 0);
+                p += consumed;
+                return neg ? (uint64_t)-(int64_t)v : v;
+            } catch (...) { err = true; return 0; }
+        }
+        err = true; return 0;
+    }
+    uint64_t expr() {
+        uint64_t v = term();
+        while (!err) {
+            skip(); if (p >= s.size()) break;
+            char op = s[p]; if (op != '+' && op != '-') break;
+            ++p; uint64_t rhs = term();
+            v = (op == '+') ? v + rhs : v - rhs;
+        }
+        return v;
+    }
+};
+
+static uint64_t EvalExpression(const std::string& s, PCONTEXT ctx, bool& ok) {
+    ExprEval e(s, ctx); uint64_t v = e.expr(); ok = !e.err; return v;
+}
+
+static std::string DecodeCapture(const std::string& type, const std::vector<uint8_t>& b) {
+    auto sz = b.size();
+    auto asHex = [&]{ std::ostringstream o; o << std::hex << std::setfill('0');
+                      for (uint8_t x : b) o << std::setw(2) << (int)x; return o.str(); };
+    if (type == "bytes") return "";
+    if (type == "cstring") {
+        std::string s; for (uint8_t c : b) { if (!c) break; s.push_back((char)c); }
+        return s;
+    }
+    auto ok = [&](size_t n){ return sz >= n; };
+    #define GET(T) T v{}; std::memcpy(&v, b.data(), sizeof(T)); return std::to_string(v)
+    if (type == "u8"  && ok(1)) { GET(uint8_t); }
+    if (type == "i8"  && ok(1)) { GET(int8_t); }
+    if (type == "u16" && ok(2)) { GET(uint16_t); }
+    if (type == "i16" && ok(2)) { GET(int16_t); }
+    if (type == "u32" && ok(4)) { GET(uint32_t); }
+    if (type == "i32" && ok(4)) { GET(int32_t); }
+    if (type == "u64" && ok(8)) { GET(uint64_t); }
+    if (type == "i64" && ok(8)) { GET(int64_t); }
+    if (type == "float"  && ok(4)) { float f{}; std::memcpy(&f, b.data(), 4); std::ostringstream o; o << f; return o.str(); }
+    if (type == "double" && ok(8)) { double d{}; std::memcpy(&d, b.data(), 8); std::ostringstream o; o << d; return o.str(); }
+    #undef GET
+    return {};
+}
+
+static std::vector<BpCaptureResult> RunCaptures(const std::vector<BpCapture>& caps, PCONTEXT ctx) {
+    std::vector<BpCaptureResult> out;
+    out.reserve(caps.size());
+    for (const auto& c : caps) {
+        BpCaptureResult r; r.name = c.name;
+        bool ok = false;
+        uint64_t addr = EvalExpression(c.expression, ctx, ok);
+        r.address = (uintptr_t)addr;
+        if (!ok || !addr) { out.push_back(std::move(r)); continue; }
+        int sz = c.size > 0 ? c.size : 16;
+        if (sz > 4096) sz = 4096;
+        if (memory::ReadBytes(r.address, sz, r.bytes)) {
+            r.ok = true;
+            r.decoded = DecodeCapture(c.type, r.bytes);
+            // cstring may finish early -- truncate buf to actual length.
+            if (c.type == "cstring") {
+                size_t n = 0; while (n < r.bytes.size() && r.bytes[n]) ++n;
+                r.bytes.resize(n);
+            }
+        }
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+// ---- end evaluator ------------------------------------------------------
+
+// Reads the caller return address from [sp] using the hitting CONTEXT.
+static uintptr_t ReadReturnAddress(PCONTEXT ctx) {
+#ifdef _WIN64
+    uintptr_t sp = ctx->Rsp;
+#else
+    uintptr_t sp = ctx->Esp;
+#endif
+    std::vector<uint8_t> b;
+    if (!memory::ReadBytes(sp, sizeof(void*), b) || b.size() != sizeof(void*)) return 0;
+    uintptr_t v = 0; std::memcpy(&v, b.data(), sizeof(void*));
+    return v;
+}
+
+// Called under g_mutex from PushLogEntry. Enqueues a StartTrace request to
+// be picked up by the trigger worker thread -- must not call StartTrace
+// synchronously (it grabs g_mutex + SuspendThread and would deadlock).
+static void MaybeEnqueueTrigger(int id, DWORD tid, PCONTEXT ctx) {
+    auto handle = [&](std::optional<BpTriggerState>& t) {
+        if (!t || (t->fired && t->cfg.once)) return;
+        TriggerReq req;
+        req.tid = tid;
+        req.cfg = t->cfg.templateCfg;
+        if (t->cfg.stopOnReturn) req.cfg.stopAddress = ReadReturnAddress(ctx);
+        req.cfg.threadId = tid;
+        t->fired = true;
+        std::lock_guard<std::mutex> lock(g_trigMutex);
+        g_trigQueue.push_back(std::move(req));
+    };
+    if (auto sw = g_swBps.find(id); sw != g_swBps.end()) handle(sw->second.trigger);
+    else if (auto hw = g_hwBps.find(id); hw != g_hwBps.end()) handle(hw->second.trigger);
+}
+
 void PushLogEntry(int id, DWORD tid, uint64_t seq, PCONTEXT ctx) {
-    auto& dq = g_bpLogs[id];
+    auto& ring = g_bpLogs[id];
     std::vector<uint8_t> bytes; memory::ReadBytes(GetCtxIp(ctx),16,bytes);
-    dq.push_back(BpLogEntry{seq, tid, GetTickCount64(), CtxToRegs(ctx), GetCtxIp(ctx),
-                            std::move(bytes), WalkContextStack(ctx,16)});
-    if (dq.size() > kMaxBpLogEntries) dq.pop_front();
+    // Fetch captures configured for this bp id.
+    std::vector<BpCapture> caps;
+    if (auto sw = g_swBps.find(id); sw != g_swBps.end()) caps = sw->second.captures;
+    else if (auto hw = g_hwBps.find(id); hw != g_hwBps.end()) caps = hw->second.captures;
+    auto captureResults = caps.empty() ? std::vector<BpCaptureResult>{} : RunCaptures(caps, ctx);
+    MaybeEnqueueTrigger(id, tid, ctx);
+    ring.entries.push_back(BpLogEntry{seq, tid, GetTickCount64(), CtxToRegs(ctx), GetCtxIp(ctx),
+                                       std::move(bytes), WalkContextStack(ctx,16),
+                                       std::move(captureResults)});
+    ring.total = seq;
+    if (ring.entries.size() > kMaxBpLogEntries) {
+        ring.entries.pop_front();
+        ring.dropped++;
+    }
 }
 
 bool HandleTraceStep(DWORD tid, PCONTEXT ctx, bool& handled) {
@@ -509,16 +790,33 @@ void HwThreadMonitor() {
 
 } // namespace
 
+static void TriggerWorker() {
+    while (g_trigRunning.load()) {
+        TriggerReq req; bool got = false;
+        {
+            std::lock_guard<std::mutex> lock(g_trigMutex);
+            if (!g_trigQueue.empty()) { req = std::move(g_trigQueue.front()); g_trigQueue.pop_front(); got = true; }
+        }
+        if (!got) { std::this_thread::sleep_for(std::chrono::milliseconds(20)); continue; }
+        std::string err;
+        StartTrace(req.cfg, err);
+    }
+}
+
 void Init() {
     if (g_vehHandle) return;
     g_vehHandle = AddVectoredExceptionHandler(1, VectoredHandler);
     g_hwMonitorRunning = true;
     g_hwMonitorThread = std::thread(HwThreadMonitor);
+    g_trigRunning = true;
+    g_trigThread = std::thread(TriggerWorker);
 }
 
 bool Shutdown() {
     g_hwMonitorRunning = false;
     if (g_hwMonitorThread.joinable()) g_hwMonitorThread.join();
+    g_trigRunning = false;
+    if (g_trigThread.joinable()) g_trigThread.join();
 
     // Release any game threads paused inside our VEH before removing the
     // handler or unloading this DLL. They must leave FreezeCurrentThread and
@@ -575,8 +873,10 @@ bool Shutdown() {
     return true;
 }
 
-int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action, const BpCondition* condition) {
+int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
+                  const BpCondition* condition, const std::vector<BpCapture>* captures) {
     std::optional<BpCondition> cond = condition ? std::optional<BpCondition>(*condition) : std::nullopt;
+    std::vector<BpCapture> caps = captures ? *captures : std::vector<BpCapture>{};
 
     if (kind == BpKind::Software) {
         // INT3 only makes sense on executable code -- writing it into a data
@@ -594,7 +894,7 @@ int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action, con
         if (!memory::WriteBytes(address, {0xCC})) return -1;
         std::lock_guard<std::mutex> lock(g_mutex);
         int id = g_nextBpId++;
-        g_swBps[id] = SwEntry{address, orig[0], action, 0, cond};
+        g_swBps[id] = SwEntry{address, orig[0], action, 0, cond, caps};
         return id;
     }
 
@@ -616,7 +916,7 @@ int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action, con
     ULONG_PTR len = (effSize == 1) ? 0u : (effSize == 2 ? 1u : 3u);
 
     int id;
-    HwEntry newEntry{address, effSize, kind, slot, action, 0, cond};
+    HwEntry newEntry{address, effSize, kind, slot, action, 0, cond, caps};
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         id = g_nextBpId++;
@@ -629,6 +929,26 @@ int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action, con
         }
     }
     return id;
+}
+
+bool SetBreakpointTrigger(int id, const BpTrigger& trigger) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (auto sw = g_swBps.find(id); sw != g_swBps.end()) {
+        sw->second.trigger = BpTriggerState{trigger, false};
+        return true;
+    }
+    if (auto hw = g_hwBps.find(id); hw != g_hwBps.end()) {
+        hw->second.trigger = BpTriggerState{trigger, false};
+        return true;
+    }
+    return false;
+}
+
+bool ClearBreakpointTrigger(int id) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (auto sw = g_swBps.find(id); sw != g_swBps.end()) { sw->second.trigger.reset(); return true; }
+    if (auto hw = g_hwBps.find(id); hw != g_hwBps.end()) { hw->second.trigger.reset(); return true; }
+    return false;
 }
 
 bool RemoveBreakpoint(int id) {
@@ -685,7 +1005,26 @@ std::vector<BpLogEntry> GetBreakpointLog(int id) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_bpLogs.find(id);
     if (it == g_bpLogs.end()) return {};
-    return std::vector<BpLogEntry>(it->second.begin(), it->second.end());
+    return std::vector<BpLogEntry>(it->second.entries.begin(), it->second.entries.end());
+}
+
+bool GetBreakpointLogPaged(int id, uint64_t sinceSeq, size_t limit,
+                           std::vector<BpLogEntry>& out,
+                           uint64_t& outDropped, uint64_t& outTotal) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = g_bpLogs.find(id);
+    if (it == g_bpLogs.end()) return false;
+    outDropped = it->second.dropped;
+    outTotal   = it->second.total;
+    out.clear();
+    if (limit == 0) limit = kMaxBpLogEntries;
+    out.reserve(std::min(limit, it->second.entries.size()));
+    for (const auto& e : it->second.entries) {
+        if (e.seq < sinceSeq) continue;
+        out.push_back(e);
+        if (out.size() >= limit) break;
+    }
+    return true;
 }
 
 bool ContinueThread(DWORD threadId) {
@@ -748,28 +1087,41 @@ std::vector<uintptr_t> WalkStack(DWORD threadId, int maxFrames) {
     std::vector<uintptr_t> frames;
     Registers regs;
     if (!ReadThreadRegisters(threadId, regs)) return frames;
-
 #ifdef _WIN64
-    frames.push_back(regs.rip);
-    uintptr_t ebp = regs.rbp;
-    constexpr size_t kPtrSize = 8;
-    auto readPtr = [](const uint8_t* p) -> uintptr_t { return *reinterpret_cast<const uint64_t*>(p); };
+    uintptr_t ip = regs.rip, fp = regs.rbp, sp = regs.rsp; constexpr size_t kPtrSize = 8;
 #else
-    frames.push_back(regs.eip);
-    uintptr_t ebp = regs.ebp;
-    constexpr size_t kPtrSize = 4;
-    auto readPtr = [](const uint8_t* p) -> uintptr_t { return *reinterpret_cast<const uint32_t*>(p); };
+    uintptr_t ip = regs.eip, fp = regs.ebp, sp = regs.esp; constexpr size_t kPtrSize = 4;
 #endif
-    for (int i = 0; i < maxFrames && ebp; ++i) {
+    frames.push_back(ip);
+    // Classical EBP chain first.
+    for (int i = 1; i < maxFrames && fp; ++i) {
         std::vector<uint8_t> buf;
-        if (!memory::ReadBytes(ebp, kPtrSize * 2, buf)) break;
-        uintptr_t savedEbp = readPtr(&buf[0]);
-        uintptr_t retAddr = readPtr(&buf[kPtrSize]);
-        if (retAddr == 0) break;
-        frames.push_back(retAddr);
-        if (savedEbp <= ebp) break; // guard against a corrupt/cyclic frame chain
-        ebp = savedEbp;
+        if (!memory::ReadBytes(fp, kPtrSize * 2, buf)) break;
+        uintptr_t savedFp = 0, ret = 0;
+        std::memcpy(&savedFp, buf.data(), kPtrSize);
+        std::memcpy(&ret, buf.data() + kPtrSize, kPtrSize);
+        if (!ret) break;
+        frames.push_back(ret);
+        if (savedFp <= fp) break;
+        fp = savedFp;
     }
+    if ((int)frames.size() >= 2) return frames;
+
+    // Fallback: StackWalk64 with a fresh CONTEXT, then heuristic scan.
+    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
+                               FALSE, threadId);
+    if (thread) {
+        SuspendThread(thread);
+        CONTEXT ctx{}; ctx.ContextFlags = CONTEXT_FULL;
+        if (GetThreadContext(thread, &ctx)) {
+            auto sw = StackWalkFromContext(ctx, thread, maxFrames);
+            if (sw.size() > frames.size()) { ResumeThread(thread); CloseHandle(thread); return sw; }
+        }
+        ResumeThread(thread);
+        CloseHandle(thread);
+    }
+    auto heur = HeuristicStackScan(sp, maxFrames - 1);
+    frames.insert(frames.end(), heur.begin(), heur.end());
     return frames;
 }
 

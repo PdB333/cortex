@@ -47,4 +47,19 @@ void OnEndScene(IDirect3DDevice8* device);
 // game window is minimized, which suspends the render loop entirely).
 bool RequestCapture(std::vector<uint8_t>& out_png, int timeout_ms);
 
+// Returns the most recent PNG the render hook ever produced, without waiting
+// for a new frame. Useful when the game has stopped presenting (minimized,
+// alt-tabbed out of D3D8 exclusive fullscreen) but the caller still wants
+// the last known visual state. `outAgeMs` receives the milliseconds since
+// that frame was captured. Returns false only if no frame has ever been
+// captured this session.
+bool GetLastPng(std::vector<uint8_t>& out, unsigned long long* outAgeMs);
+
+// GDI fallback: renders the game's top-level window into a PNG via
+// PrintWindow(PW_RENDERFULLCONTENT). Works while the window is in the
+// background but visible (windowed / borderless). Fails on minimized
+// windows and on exclusive-fullscreen D3D that isn't currently rendering
+// to a DC. Returns false on any failure.
+bool PrintWindowFallback(std::vector<uint8_t>& out_png);
+
 } // namespace capture

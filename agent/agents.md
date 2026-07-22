@@ -49,8 +49,13 @@ The only routes that need no token are `/status`, `/health`, `/tools`, and
 - Numeric types for memory routes: `i8/i16/i32/i64`, `u8/u16/u32/u64`,
   `float`, `double`, `bytes` (hex), `string`.
 - Addresses may be sent as hex strings (`"0x13B7161C"`) or numbers.
-- Absolute addresses change on every restart. Persist a **pointer path** or an
-  **AOB signature** (via `/project`) so an address can be re-resolved later.
+- **`module.ext+RVA` form** is accepted everywhere addresses are expected —
+  either as a single string (`"godfather2.exe+0x554820"`) or as an object
+  (`{"module":"godfather2.exe","rva":"0x554820"}`). Cortex re-resolves the
+  base at every call, so persisted scripts survive ASLR across sessions.
+- Absolute addresses change on every restart. Persist a **pointer path**, an
+  **AOB signature**, or the `module+RVA` form (via `/project`) so an address
+  can be re-resolved later.
 
 ## Typical reverse-engineering loop
 
