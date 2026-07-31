@@ -12,6 +12,7 @@ struct Api {
     decltype(&CortexDiagRegisterMod) registerMod = nullptr;
     decltype(&CortexDiagUnregisterMod) unregisterMod = nullptr;
     decltype(&CortexDiagBreadcrumb) breadcrumb = nullptr;
+    decltype(&CortexDiagHeartbeat) heartbeat = nullptr;
     decltype(&CortexDiagScopeEnter) scopeEnter = nullptr;
     decltype(&CortexDiagScopeExit) scopeExit = nullptr;
     decltype(&CortexDiagValuePointer) valuePointer = nullptr;
@@ -48,6 +49,7 @@ inline Api* Resolve() {
         CORTEX_DIAG_RESOLVE(registerMod, "CortexDiagRegisterMod");
         CORTEX_DIAG_RESOLVE(unregisterMod, "CortexDiagUnregisterMod");
         CORTEX_DIAG_RESOLVE(breadcrumb, "CortexDiagBreadcrumb");
+        CORTEX_DIAG_RESOLVE(heartbeat, "CortexDiagHeartbeat");
         CORTEX_DIAG_RESOLVE(scopeEnter, "CortexDiagScopeEnter");
         CORTEX_DIAG_RESOLVE(scopeExit, "CortexDiagScopeExit");
         CORTEX_DIAG_RESOLVE(valuePointer, "CortexDiagValuePointer");
@@ -98,6 +100,11 @@ inline void UnregisterMod(HMODULE module) {
 inline void Breadcrumb(const char* message, const char* category = "user") {
     auto* api = detail::Resolve();
     if (api && api->breadcrumb) api->breadcrumb(category, message);
+}
+
+inline void Heartbeat(const char* source) {
+    auto* api = detail::Resolve();
+    if (api && api->heartbeat) api->heartbeat(source);
 }
 
 class Scope {
@@ -244,6 +251,7 @@ private:
     ::cortex::diag::Scope CORTEX_DIAG_JOIN(cortex_diag_scope_, __LINE__)((name), __FILE__, __LINE__)
 #define CORTEX_DIAG_BREADCRUMB(message) ::cortex::diag::Breadcrumb((message))
 #define CORTEX_DIAG_BREADCRUMB_AS(category, message) ::cortex::diag::Breadcrumb((message), (category))
+#define CORTEX_DIAG_HEARTBEAT(source) ::cortex::diag::Heartbeat((source))
 #define CORTEX_DIAG_VALUE(name, value) ::cortex::diag::Value((name), (value))
 #define CORTEX_DIAG_POINTER(name, value) ::cortex::diag::Pointer((name), (value))
 #define CORTEX_DIAG_REGISTER_MOD(module, name, version, author, commit, build_id, source_root, symbol_path) \
