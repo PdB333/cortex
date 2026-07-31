@@ -5,7 +5,18 @@
 #include <intrin.h>
 #endif
 
+// The injected core provides the ABI exports. Public mod code includes
+// diag_c.h directly without CORTEX_DIAG_EXPORTS, so it remains a runtime-only
+// consumer with no import-library dependency.
+#ifndef CORTEX_DIAG_EXPORTS
+#define CORTEX_DIAG_EXPORTS 1
+#define CORTEX_DIAG_UNDEFINE_EXPORTS 1
+#endif
 #include "../../sdk/include/cortex/diag_c.h"
+#ifdef CORTEX_DIAG_UNDEFINE_EXPORTS
+#undef CORTEX_DIAG_UNDEFINE_EXPORTS
+#undef CORTEX_DIAG_EXPORTS
+#endif
 
 #include <cstddef>
 #include <cstdint>
