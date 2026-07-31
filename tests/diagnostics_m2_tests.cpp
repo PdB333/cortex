@@ -19,6 +19,11 @@ void Check(bool condition, const char* message) {
     ++g_failures;
 }
 
+void Stage(const char* name) {
+    std::printf("RUN: %s\n", name);
+    std::fflush(stdout);
+}
+
 std::string ReadFile(const char* path) {
     std::ifstream file(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
@@ -44,7 +49,7 @@ void TestModRegistration() {
     CortexDiagModInfo info = TestModInfo();
     Check(CortexDiagRegisterMod(&info) != FALSE, "manual mod registration should succeed");
 
-    std::array<diagnostics::ModSnapshot, diagnostics::kMaxRegisteredMods> mods{};
+    static std::array<diagnostics::ModSnapshot, diagnostics::kMaxRegisteredMods> mods{};
     const size_t count = diagnostics::SnapshotMods(mods.data(), mods.size());
     Check(count == 1, "one manually registered mod should be visible");
     Check(std::strcmp(mods[0].name, "DiagnosticsTestMod") == 0,
@@ -77,14 +82,14 @@ void TestScopesAndValues() {
     CortexDiagValueText("weapon", "nullptr");
     CortexDiagValueBool("alive", TRUE);
 
-    std::array<diagnostics::ScopeSnapshot, diagnostics::kMaxActiveScopes> scopes{};
+    static std::array<diagnostics::ScopeSnapshot, diagnostics::kMaxActiveScopes> scopes{};
     const size_t scopeCount = diagnostics::SnapshotScopes(scopes.data(), scopes.size());
     Check(scopeCount == 2, "both active scopes should be captured");
     Check(scopes[0].depth == 0 && scopes[1].depth == 1,
           "nested scopes should preserve depth");
     Check(scopes[1].parentId == scopes[0].id, "inner scope should reference its parent");
 
-    std::array<diagnostics::ValueSnapshot, diagnostics::kValueCapacity> values{};
+    static std::array<diagnostics::ValueSnapshot, diagnostics::kValueCapacity> values{};
     uint64_t dropped = 0;
     const size_t valueCount = diagnostics::SnapshotValues(values.data(), values.size(), &dropped);
     Check(valueCount == 4 && dropped == 0, "typed values should be retained");
@@ -146,16 +151,20 @@ void TestUnregister() {
     CortexDiagModInfo info = TestModInfo();
     Check(CortexDiagRegisterMod(&info) != FALSE, "mod registration should succeed");
     CortexDiagUnregisterMod(info.module);
-    std::array<diagnostics::ModSnapshot, diagnostics::kMaxRegisteredMods> mods{};
+    static std::array<diagnostics::ModSnapshot, diagnostics::kMaxRegisteredMods> mods{};
     Check(diagnostics::SnapshotMods(mods.data(), mods.size()) == 0,
           "unregistered mod should disappear");
 }
 } // namespace
 
 int main() {
+    Stage("mod registration");
     TestModRegistration();
+    Stage("scopes and typed values");
     TestScopesAndValues();
+    Stage("registry JSON files");
     TestRegistryFiles();
+    Stage("unregister");
     TestUnregister();
     if (g_failures != 0) {
         std::fprintf(stderr, "%d milestone 2 diagnostic test(s) failed\n", g_failures);
