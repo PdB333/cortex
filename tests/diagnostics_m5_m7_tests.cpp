@@ -86,6 +86,48 @@ void TestSharedChannel() {
     diagnostics::SharedChannelShutdown();
 }
 
+void TestExternalCapture() {
+    char temp[MAX_PATH]{};
+    GetTempPathA(MAX_PATH, temp);
+    char directory[MAX_PATH]{};
+    std::snprintf(directory, sizeof(directory), "%scortex_diag_m5_%lu",
+                  temp, static_cast<unsigned long>(GetCurrentProcessId()));
+    CreateDirectoryA(directory, nullptr);
+    const std::string root = directory;
+    const std::string dumpPath = root + "\\self.dmp";
+    const std::string threadsPath = root + "\\threads.json";
+
+    const hostdiag::DumpResult dump = hostdiag::WriteProcessDump(
+        GetCurrentProcessId(), dumpPath, nullptr, false);
+    Check(dump.success, "external dump writer should dump the current test process");
+    WIN32_FILE_ATTRIBUTE_DATA dumpData{};
+    Check(GetFileAttributesExA(dumpPath.c_str(), GetFileExInfoStandard, &dumpData) != FALSE &&
+          (dumpData.nFileSizeHigh != 0 || dumpData.nFileSizeLow != 0),
+          "external dump should be non-empty");
+
+    std::vector<hostdiag::ThreadSnapshot> threads;
+    std::string error;
+    Check(hostdiag::CaptureThreads(GetCurrentProcessId(), threadsPath, &threads, error),
+          "thread snapshot should be written");
+    Check(!threads.empty(), "thread snapshot should contain at least one thread");
+    bool currentThreadRecorded = false;
+    for (const auto& thread : threads) {
+        if (thread.threadId == GetCurrentThreadId()) {
+            currentThreadRecorded = true;
+            Check(thread.error == ERROR_BUSY,
+                  "the capture worker must never suspend its own current thread");
+        }
+    }
+    Check(currentThreadRecorded, "current thread should be listed as intentionally skipped");
+    const std::string threadJson = ReadText(threadsPath);
+    Check(threadJson.find("\"threads\"") != std::string::npos,
+          "threads.json should have the expected schema");
+
+    DeleteFileA(dumpPath.c_str());
+    DeleteFileA(threadsPath.c_str());
+    RemoveDirectoryA(root.c_str());
+}
+
 void TestAnalyzer() {
     char temp[MAX_PATH]{};
     GetTempPathA(MAX_PATH, temp);
@@ -136,6 +178,7 @@ void TestAnalyzer() {
 
 int main() {
     TestSharedChannel();
+    TestExternalCapture();
     TestAnalyzer();
     if (g_failures) {
         std::fprintf(stderr, "%d milestone 5-7 diagnostic test(s) failed\n", g_failures);
