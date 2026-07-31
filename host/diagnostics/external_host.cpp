@@ -136,7 +136,8 @@ bool SharedClient::Snapshot(SharedSnapshot& output, std::string& error) const {
     std::memcpy(&crashCopy, const_cast<const CortexDiagSharedCrash*>(&state_->crash),
                 sizeof(crashCopy));
     output.crash = crashCopy;
-    const LONG count = (std::min)(state_->heartbeat_count,
+    const LONG rawCount = state_->heartbeat_count;
+    const LONG count = (std::min)(rawCount,
                                   static_cast<LONG>(CORTEX_DIAG_MAX_HEARTBEATS));
     output.heartbeats.reserve(static_cast<size_t>(count));
     for (LONG i = 0; i < count; ++i) {
@@ -264,34 +265,40 @@ bool CaptureThreads(DWORD processId, const std::string& path,
             if (entry.th32OwnerProcessID != processId) continue;
             ThreadSnapshot thread;
             thread.threadId = entry.th32ThreadID;
-            HANDLE handle = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
-                                       THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
-            if (!handle) {
-                thread.error = GetLastError();
+            const bool isCurrentThread = processId == GetCurrentProcessId() &&
+                                         entry.th32ThreadID == GetCurrentThreadId();
+            if (isCurrentThread) {
+                thread.error = ERROR_BUSY;
             } else {
-                const DWORD suspended = SuspendThread(handle);
-                if (suspended == static_cast<DWORD>(-1)) {
+                HANDLE handle = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
+                                           THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
+                if (!handle) {
                     thread.error = GetLastError();
                 } else {
-                    thread.suspendCount = suspended;
-                    CONTEXT context{};
-                    context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-                    if (GetThreadContext(handle, &context)) {
-#ifdef _WIN64
-                        thread.instruction = context.Rip;
-                        thread.stackPointer = context.Rsp;
-                        thread.framePointer = context.Rbp;
-#else
-                        thread.instruction = context.Eip;
-                        thread.stackPointer = context.Esp;
-                        thread.framePointer = context.Ebp;
-#endif
-                    } else {
+                    const DWORD suspended = SuspendThread(handle);
+                    if (suspended == static_cast<DWORD>(-1)) {
                         thread.error = GetLastError();
+                    } else {
+                        thread.suspendCount = suspended;
+                        CONTEXT context{};
+                        context.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+                        if (GetThreadContext(handle, &context)) {
+#ifdef _WIN64
+                            thread.instruction = context.Rip;
+                            thread.stackPointer = context.Rsp;
+                            thread.framePointer = context.Rbp;
+#else
+                            thread.instruction = context.Eip;
+                            thread.stackPointer = context.Esp;
+                            thread.framePointer = context.Ebp;
+#endif
+                        } else {
+                            thread.error = GetLastError();
+                        }
+                        ResumeThread(handle);
                     }
-                    ResumeThread(handle);
+                    CloseHandle(handle);
                 }
-                CloseHandle(handle);
             }
             if (snapshots) snapshots->push_back(thread);
             if (!first) std::fputs(",\n", file);
