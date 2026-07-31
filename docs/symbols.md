@@ -37,7 +37,7 @@ diagnostics_max_stack_frames = 64
 
 When `diagnostics_symbol_path` is empty, Cortex uses a `cortex_symbols` directory next to `cortex_core.dll`. `_NT_SYMBOL_PATH`, the module directory and each mod's registered `symbol_path` are also considered.
 
-The external symbolizer is not launched inside the crashing process. It is only used by the offline `cortex_symbolize` utility.
+The external symbolizer is not launched inside the crashing process. It is only used by the offline `cortex_host symbolize` command.
 
 ## MSVC and clang-cl mods
 
@@ -75,27 +75,29 @@ Build with DWARF information:
 g++ -g -O0 -shared mod.cpp -o MyMod.dll
 ```
 
-Use the offline utility with `llvm-symbolizer.exe` or `addr2line.exe`:
+Use the unified host with `llvm-symbolizer.exe` or `addr2line.exe`:
 
 ```powershell
-cortex_symbolize.exe `
+cortex_host.exe symbolize `
   --image C:\mods\MyMod.dll `
   --rva 0x1832 `
   --tool C:\mingw64\bin\addr2line.exe
 ```
 
-The tool emits one JSON object containing the backend, function, source file and line. With no `--tool`, it tries DbgHelp/PDB first, then automatically searches for `llvm-symbolizer.exe` and `addr2line.exe`.
+The command emits one JSON object containing the backend, function, source file and line. With no `--tool`, it tries DbgHelp/PDB first, then automatically searches for `llvm-symbolizer.exe` and `addr2line.exe`.
 
-Build the utility independently with:
+Build only the unified host independently with:
 
 ```powershell
-cmake -S tools -B build-symbolizer
-cmake --build build-symbolizer --config Release
+cmake -S tools/unified_host -B build-unified-host
+cmake --build build-unified-host --config Release
 ```
+
+The historical `cmake -S tools ...` command now redirects to this unified build and no longer creates a separate `cortex_symbolize.exe`.
 
 ## API
 
-`GET /symbols/resolve?address=0x...` now returns module information, RVA, build ID, function, line, loaded PDB and exact-match status.
+`GET /symbols/resolve?address=0x...` returns module information, RVA, build ID, function, line, loaded PDB and exact-match status.
 
 `GET /symbols/module?address=0x...` returns the complete PE/PDB identity and verification result for the containing module.
 
