@@ -46,7 +46,7 @@ jobs:
           host\diagnostics\analyzer.cpp
           /Icore /Isdk\include
           /Fe:diagnostics_m5_m7_tests.exe
-          /link dbghelp.lib
+          /link dbghelp.lib user32.lib
 
       - name: Run external diagnostics tests
         shell: pwsh
@@ -78,7 +78,7 @@ jobs:
           host\diagnostics\analyzer.cpp
           /Icore /Isdk\include
           /Fe:cortex_diag_host.exe
-          /link dbghelp.lib
+          /link dbghelp.lib user32.lib
 
       - name: Smoke test external diagnostics host
         shell: cmd
