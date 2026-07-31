@@ -3,32 +3,22 @@
 // Exposes well-known memory values at exported symbols so tests can verify
 // /memory/read, scans, and freezes without needing a real game.
 //
-// Optionally opens a small window and reads keyboard state each frame,
-// updating a counter so a Cortex screenshot / input-sequence test can
-// observe the effect.
-//
-// Build produces cortex_test_target_x86.exe and cortex_test_target_x64.exe.
-// Symbols kept extern-visible + non-inlined so their addresses are stable.
+// Pass --crash-null to trigger an intentional unhandled access violation
+// after startup. This is used to verify Cortex crash-report generation.
 
 #include <windows.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
-// --- Well-known constant values ------------------------------------------
-// These are the "canary" values Cortex tests read back to prove the memory
-// pipeline works. Kept as static-init non-const so Cortex writes can flip
-// them and tests can round-trip.
 extern "C" __declspec(dllexport) uint32_t g_cortex_u32   = 0xDEADBEEFu;
 extern "C" __declspec(dllexport) uint64_t g_cortex_u64   = 0x0123456789ABCDEFull;
 extern "C" __declspec(dllexport) float    g_cortex_float = 3.14159265f;
 extern "C" __declspec(dllexport) double   g_cortex_double = 2.7182818284;
 extern "C" __declspec(dllexport) char     g_cortex_str[32] = "cortex-canary";
 
-// Live counters mutated by the frame loop -- Cortex can scan for these
-// changing values as a comparative-scan smoke test.
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
-extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0; // # times W was seen down this run
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
 
 static void PrintCanary() {
@@ -51,7 +41,13 @@ static void PrintCanary() {
     std::fflush(stdout);
 }
 
-// Simple window for screenshot / focus tests.
+__declspec(noinline) static void TriggerNullCrash() {
+    std::puts("cortex_test_target: triggering intentional null write");
+    std::fflush(stdout);
+    volatile uint32_t* pointer = nullptr;
+    *pointer = 0xC07ECAFEu;
+}
+
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
         case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -59,8 +55,6 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             PAINTSTRUCT ps;
             HDC dc = BeginPaint(h, &ps);
             RECT rc; GetClientRect(h, &rc);
-            // Distinctive fill color = 0x336699 so a captured PNG can be
-            // pixel-checked. Bright rectangle with the current frame count.
             HBRUSH bg = CreateSolidBrush(RGB(0x33, 0x66, 0x99));
             FillRect(dc, &rc, bg);
             DeleteObject(bg);
@@ -93,8 +87,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int show) {
                            640, 200, nullptr, nullptr, inst, nullptr);
     ShowWindow(h, show);
 
-    // ~60 fps loop. Reads W key state (Win32 path -- covers os mode + game
-    // mode PostMessage tests) and mutates counters.
+    const bool crashNull = std::strstr(GetCommandLineA(), "--crash-null") != nullptr;
+    uint32_t crashCountdown = crashNull ? 60 : 0;
+
     for (;;) {
         MSG msg;
         while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -105,6 +100,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int show) {
         g_cortex_frame++;
         if (GetAsyncKeyState('W') & 0x8000) g_cortex_wpress++;
         InvalidateRect(h, nullptr, FALSE);
+        if (crashCountdown > 0 && --crashCountdown == 0) TriggerNullCrash();
         Sleep(16);
     }
 }
