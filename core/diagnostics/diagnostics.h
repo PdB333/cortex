@@ -1,6 +1,9 @@
 #pragma once
 
 #include <windows.h>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -58,8 +61,7 @@ void Shutdown();
 bool IsEnabled();
 
 // Fixed-capacity, process-wide diagnostic breadcrumbs. Old entries are
-// overwritten after kBreadcrumbCapacity events. Safe to call from hot hooks;
-// the crash path never blocks waiting for the breadcrumb lock.
+// overwritten after kBreadcrumbCapacity events. Safe to call from hot hooks.
 void BreadcrumbLog(const char* category, const char* message, uintptr_t caller = 0);
 size_t SnapshotBreadcrumbs(Breadcrumb* output, size_t capacity, uint64_t* dropped = nullptr);
 
