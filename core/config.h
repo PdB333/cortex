@@ -8,6 +8,10 @@ struct Config {
     int toggle_key = 0x7B; // VK_F12
     bool log_console = true;
     std::string api_token; // optional fixed token; empty = load/create cortex.token
+
+    bool diagnostics_enabled = true;
+    bool diagnostics_write_minidump = true;
+    std::string diagnostics_crash_directory; // empty = <module-dir>/cortex_crashes
 };
 
 // Reads cortex.ini next to this DLL. Missing file/keys fall back to defaults.

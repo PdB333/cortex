@@ -5,6 +5,11 @@
 
 #include "config.h"
 #include "log.h"
+#include "diagnostics/diagnostics.h"
+// diagnostics.cpp is kept in the same translation unit for milestone 1 so
+// existing build definitions do not need a broad source-list rewrite. It is
+// split as a normal implementation file and can move to target_sources later.
+#include "diagnostics/diagnostics.cpp"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -43,6 +48,16 @@ namespace {
         config::Config cfg = config::Load();
 
         if (cfg.log_console) SetupConsole();
+
+        diagnostics::Options diagOptions;
+        diagOptions.enabled = cfg.diagnostics_enabled;
+        diagOptions.writeMinidump = cfg.diagnostics_write_minidump;
+        diagOptions.outputDirectory = cfg.diagnostics_crash_directory;
+        if (diagnostics::Init(diagOptions)) {
+            dbglog::Line("diagnostics::Init done, enabled=%d", diagnostics::IsEnabled() ? 1 : 0);
+        } else {
+            dbglog::Line("diagnostics::Init failed");
+        }
 
         if (MH_Initialize() != MH_OK) {
             printf("[Cortex] MH_Initialize failed\n");
@@ -140,6 +155,7 @@ namespace {
 #ifdef CORTEX_D3D8
         hook::ShutdownD3D8Hook();
 #endif
+        diagnostics::Shutdown();
         MH_Uninitialize();
         FreeConsole();
         g_shutdownState = 2;

@@ -16,6 +16,11 @@ namespace {
         size_t b = s.find_last_not_of(" \t\r\n");
         return s.substr(a, b - a + 1);
     }
+
+    bool ParseBool(std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    }
 }
 
 std::string GetModuleDir() {
@@ -54,10 +59,15 @@ Config Load() {
         } else if (key == "toggle_key") {
             cfg.toggle_key = std::stoi(val, nullptr, 0); // supports 0x.. hex
         } else if (key == "log_console") {
-            std::transform(val.begin(), val.end(), val.begin(), ::tolower);
-            cfg.log_console = (val == "1" || val == "true" || val == "yes");
+            cfg.log_console = ParseBool(val);
         } else if (key == "api_token") {
             cfg.api_token = val;
+        } else if (key == "diagnostics_enabled") {
+            cfg.diagnostics_enabled = ParseBool(val);
+        } else if (key == "diagnostics_write_minidump") {
+            cfg.diagnostics_write_minidump = ParseBool(val);
+        } else if (key == "diagnostics_crash_directory") {
+            cfg.diagnostics_crash_directory = val;
         }
     }
     return cfg;
