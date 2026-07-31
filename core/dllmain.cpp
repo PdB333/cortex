@@ -9,11 +9,13 @@
 #include "diagnostics/diagnostics.h"
 #include "diagnostics/registry.h"
 #include "diagnostics/symbolizer.h"
+#include "diagnostics/hooks.h"
 // Keep diagnostics implementation in the injected core translation unit.
 // Dedicated test targets compile these files separately.
 #include "diagnostics/diagnostics.cpp"
 #include "diagnostics/registry.cpp"
 #include "diagnostics/symbolizer.cpp"
+#include "diagnostics/hooks.cpp"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -141,6 +143,11 @@ namespace {
             dbglog::Line("diagnostics::SymbolizerInit %s", symbolizerReady ? "done" : "failed");
         }
 
+        if (cfg.diagnostics_enabled && diagnostics::IsEnabled()) {
+            const bool hooksReady = diagnostics::HookRegistryInit(crashDirectory.c_str());
+            dbglog::Line("diagnostics::HookRegistryInit %s", hooksReady ? "done" : "failed");
+        }
+
         project::Init();
         dbglog::Line("project::Init done");
 
@@ -174,6 +181,7 @@ namespace {
         watch::Shutdown();
         remotecall::Shutdown();
         freeze::Shutdown();
+        diagnostics::HookRegistryShutdown();
         diagnostics::SymbolizerShutdown();
         symbols::Shutdown();
         if (!dbg::Shutdown()) {
