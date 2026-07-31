@@ -10,6 +10,14 @@
 #define CORTEX_DIAG_MAPPING_PREFIX "Local\\CortexDiag_"
 #define CORTEX_DIAG_EVENT_PREFIX "Local\\CortexDiagEvent_"
 
+#if defined(_MSC_VER)
+#define CORTEX_DIAG_ALIGN(bytes) __declspec(align(bytes))
+#elif defined(__GNUC__) || defined(__clang__)
+#define CORTEX_DIAG_ALIGN(bytes) __attribute__((aligned(bytes)))
+#else
+#define CORTEX_DIAG_ALIGN(bytes)
+#endif
+
 typedef enum CortexDiagSharedAccessType {
     CORTEX_DIAG_ACCESS_UNKNOWN = 0,
     CORTEX_DIAG_ACCESS_READ = 1,
@@ -21,8 +29,8 @@ typedef struct CortexDiagSharedHeartbeat {
     char source[CORTEX_DIAG_HEARTBEAT_NAME_SIZE];
     DWORD thread_id;
     DWORD reserved;
-    __declspec(align(8)) volatile LONG64 last_tick_ms;
-    __declspec(align(8)) volatile LONG64 sequence;
+    CORTEX_DIAG_ALIGN(8) volatile LONG64 last_tick_ms;
+    CORTEX_DIAG_ALIGN(8) volatile LONG64 sequence;
 } CortexDiagSharedHeartbeat;
 
 typedef struct CortexDiagSharedCrash {
@@ -32,7 +40,7 @@ typedef struct CortexDiagSharedCrash {
     DWORD access_type;
     uint64_t exception_address;
     uint64_t accessed_address;
-    __declspec(align(16)) CONTEXT context;
+    CORTEX_DIAG_ALIGN(16) CONTEXT context;
 } CortexDiagSharedCrash;
 
 typedef struct CortexDiagSharedState {
@@ -42,10 +50,12 @@ typedef struct CortexDiagSharedState {
     uint32_t pointer_size;
     volatile LONG ready;
     volatile LONG lock;
-    __declspec(align(8)) volatile LONG64 started_tick_ms;
-    __declspec(align(8)) volatile LONG64 last_core_heartbeat_ms;
+    CORTEX_DIAG_ALIGN(8) volatile LONG64 started_tick_ms;
+    CORTEX_DIAG_ALIGN(8) volatile LONG64 last_core_heartbeat_ms;
     volatile LONG heartbeat_count;
     DWORD reserved;
     CortexDiagSharedHeartbeat heartbeats[CORTEX_DIAG_MAX_HEARTBEATS];
     CortexDiagSharedCrash crash;
 } CortexDiagSharedState;
+
+#undef CORTEX_DIAG_ALIGN
