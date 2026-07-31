@@ -8,10 +8,12 @@
 #include "log.h"
 #include "diagnostics/diagnostics.h"
 #include "diagnostics/registry.h"
+#include "diagnostics/symbolizer.h"
 // Keep diagnostics implementation in the injected core translation unit.
 // Dedicated test targets compile these files separately.
 #include "diagnostics/diagnostics.cpp"
 #include "diagnostics/registry.cpp"
+#include "diagnostics/symbolizer.cpp"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -120,8 +122,24 @@ namespace {
         dbg::Init();
         dbglog::Line("dbg::Init done");
 
-        symbols::Init();
-        dbglog::Line("symbols::Init done");
+        std::string symbolSearchPath = cfg.diagnostics_symbol_path;
+        if (symbolSearchPath.empty())
+            symbolSearchPath = config::GetModuleDir() + "\\cortex_symbols";
+        symbols::Init(symbolSearchPath, true);
+        dbglog::Line("symbols::Init %s, path=%s",
+                     symbols::IsInitialized() ? "done" : "failed",
+                     symbolSearchPath.c_str());
+
+        if (cfg.diagnostics_enabled && diagnostics::IsEnabled() && cfg.diagnostics_symbolize) {
+            diagnostics::SymbolizerOptions symbolizerOptions;
+            symbolizerOptions.enabled = true;
+            symbolizerOptions.crashOutputDirectory = crashDirectory;
+            symbolizerOptions.symbolSearchPath = symbolSearchPath;
+            symbolizerOptions.externalToolPath = cfg.diagnostics_external_symbolizer;
+            symbolizerOptions.maxFrames = static_cast<size_t>(cfg.diagnostics_max_stack_frames);
+            const bool symbolizerReady = diagnostics::SymbolizerInit(symbolizerOptions);
+            dbglog::Line("diagnostics::SymbolizerInit %s", symbolizerReady ? "done" : "failed");
+        }
 
         project::Init();
         dbglog::Line("project::Init done");
@@ -156,6 +174,7 @@ namespace {
         watch::Shutdown();
         remotecall::Shutdown();
         freeze::Shutdown();
+        diagnostics::SymbolizerShutdown();
         symbols::Shutdown();
         if (!dbg::Shutdown()) {
             dbglog::Line("shutdown refused: a debugger-paused thread did not leave Cortex code in time");
