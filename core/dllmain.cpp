@@ -5,6 +5,9 @@
 
 #include "config.h"
 #include "log.h"
+#if !defined(_MSC_VER) && !defined(_ReturnAddress)
+#define _ReturnAddress() __builtin_return_address(0)
+#endif
 #include "diagnostics/diagnostics.h"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
