@@ -28,6 +28,22 @@ typedef struct CortexDiagModInfo {
     const char* symbol_path;
 } CortexDiagModInfo;
 
+typedef struct CortexDiagHookInfo {
+    uint32_t struct_size;
+    uint32_t abi_version;
+    HMODULE owner_module;
+    const char* name;
+    const char* library;
+    uintptr_t target;
+    uintptr_t detour;
+    uintptr_t trampoline;
+    uint32_t overwrite_size;
+    const uint8_t* original_bytes;
+    uint32_t original_size;
+    const uint8_t* installed_bytes;
+    uint32_t installed_size;
+} CortexDiagHookInfo;
+
 CORTEX_DIAG_API BOOL CortexDiagRegisterMod(const CortexDiagModInfo* info);
 CORTEX_DIAG_API void CortexDiagUnregisterMod(HMODULE module);
 CORTEX_DIAG_API void CortexDiagBreadcrumb(const char* category, const char* message);
@@ -41,6 +57,12 @@ CORTEX_DIAG_API void CortexDiagValueUInt64(const char* name, uint64_t value);
 CORTEX_DIAG_API void CortexDiagValueDouble(const char* name, double value);
 CORTEX_DIAG_API void CortexDiagValueBool(const char* name, BOOL value);
 CORTEX_DIAG_API void CortexDiagValueText(const char* name, const char* value);
+
+CORTEX_DIAG_API uint64_t CortexDiagRegisterHook(const CortexDiagHookInfo* info);
+CORTEX_DIAG_API void CortexDiagUnregisterHook(uint64_t hook_id);
+CORTEX_DIAG_API uint32_t CortexDiagHookEnter(uint64_t hook_id);
+CORTEX_DIAG_API void CortexDiagHookLeave(uint64_t hook_id);
+CORTEX_DIAG_API void CortexDiagHookException(uint64_t hook_id, DWORD exception_code);
 
 #ifdef __cplusplus
 }
