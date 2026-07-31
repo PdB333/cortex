@@ -5,10 +5,11 @@
 
 #include "config.h"
 #include "log.h"
-#if !defined(_MSC_VER) && !defined(_ReturnAddress)
-#define _ReturnAddress() __builtin_return_address(0)
-#endif
 #include "diagnostics/diagnostics.h"
+// diagnostics.cpp is kept in the same translation unit for milestone 1 so
+// existing build definitions do not need a broad source-list rewrite. It is
+// split as a normal implementation file and can move to target_sources later.
+#include "diagnostics/diagnostics.cpp"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -48,8 +49,12 @@ namespace {
 
         if (cfg.log_console) SetupConsole();
 
-        if (diagnostics::Init()) {
-            dbglog::Line("diagnostics::Init done");
+        diagnostics::Options diagOptions;
+        diagOptions.enabled = cfg.diagnostics_enabled;
+        diagOptions.writeMinidump = cfg.diagnostics_write_minidump;
+        diagOptions.outputDirectory = cfg.diagnostics_crash_directory;
+        if (diagnostics::Init(diagOptions)) {
+            dbglog::Line("diagnostics::Init done, enabled=%d", diagnostics::IsEnabled() ? 1 : 0);
         } else {
             dbglog::Line("diagnostics::Init failed");
         }
