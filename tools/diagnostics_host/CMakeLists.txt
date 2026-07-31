@@ -22,4 +22,4 @@ target_compile_definitions(cortex_diag_host PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-target_link_libraries(cortex_diag_host PRIVATE dbghelp)
+target_link_libraries(cortex_diag_host PRIVATE dbghelp user32)
