@@ -132,18 +132,18 @@ void ResetRegistry() {
     RegistryShutdown();
     {
         RegistrySpinGuard guard(g_modLock);
-        g_mods = {};
+        for (auto& mod : g_mods) mod = {};
         g_nextModId.store(1, std::memory_order_release);
         g_scanGeneration.store(0, std::memory_order_release);
     }
     {
         RegistrySpinGuard guard(g_scopeLock);
-        g_scopes = {};
+        for (auto& scope : g_scopes) scope = {};
         g_nextScopeId.store(1, std::memory_order_release);
     }
     {
         RegistrySpinGuard guard(g_valueLock);
-        g_values = {};
+        for (auto& value : g_values) value = {};
         g_nextValueSequence.store(0, std::memory_order_release);
     }
     g_cortexModule = ModuleFromAddress(reinterpret_cast<uintptr_t>(&ResetRegistry));
