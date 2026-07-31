@@ -47,6 +47,7 @@ typedef struct CortexDiagHookInfo {
 CORTEX_DIAG_API BOOL CortexDiagRegisterMod(const CortexDiagModInfo* info);
 CORTEX_DIAG_API void CortexDiagUnregisterMod(HMODULE module);
 CORTEX_DIAG_API void CortexDiagBreadcrumb(const char* category, const char* message);
+CORTEX_DIAG_API void CortexDiagHeartbeat(const char* source);
 
 CORTEX_DIAG_API uint64_t CortexDiagScopeEnter(const char* name, const char* file, int line);
 CORTEX_DIAG_API void CortexDiagScopeExit(uint64_t scope_id);
