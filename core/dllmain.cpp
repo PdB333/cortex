@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "log.h"
+#include "diagnostics/diagnostics.h"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -43,6 +44,12 @@ namespace {
         config::Config cfg = config::Load();
 
         if (cfg.log_console) SetupConsole();
+
+        if (diagnostics::Init()) {
+            dbglog::Line("diagnostics::Init done");
+        } else {
+            dbglog::Line("diagnostics::Init failed");
+        }
 
         if (MH_Initialize() != MH_OK) {
             printf("[Cortex] MH_Initialize failed\n");
@@ -140,6 +147,7 @@ namespace {
 #ifdef CORTEX_D3D8
         hook::ShutdownD3D8Hook();
 #endif
+        diagnostics::Shutdown();
         MH_Uninitialize();
         FreeConsole();
         g_shutdownState = 2;
