@@ -20,6 +20,7 @@ jobs:
   diagnostics-m2:
     name: diagnostics-m2-${{ matrix.arch }}
     runs-on: windows-latest
+    timeout-minutes: 3
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +34,7 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
 
-      - name: Compile and run registry tests
+      - name: Compile registry tests
         shell: cmd
         run: >-
           cl /nologo /std:c++17 /EHsc /W4
@@ -43,9 +44,12 @@ jobs:
           /Icore /Isdk\include
           /Fe:diagnostics_m2_tests.exe
           /link
-          && diagnostics_m2_tests.exe
 
-      - name: Compile and run SDK smoke test
+      - name: Run registry tests
+        shell: cmd
+        run: diagnostics_m2_tests.exe
+
+      - name: Compile SDK smoke test
         shell: cmd
         run: >-
           cl /nologo /std:c++17 /EHsc /W4
@@ -53,7 +57,10 @@ jobs:
           /Icore /Isdk\include
           /Fe:diagnostics_sdk_smoke.exe
           /link
-          && diagnostics_sdk_smoke.exe
+
+      - name: Run SDK smoke test
+        shell: cmd
+        run: diagnostics_sdk_smoke.exe
 
       - name: Compile combined diagnostics translation unit
         shell: cmd
@@ -65,4 +72,7 @@ jobs:
           /Icore /Isdk\include
           /Fe:diagnostics_bundle_smoke.exe
           /link dbghelp.lib
-          && diagnostics_bundle_smoke.exe
+
+      - name: Run combined diagnostics smoke test
+        shell: cmd
+        run: diagnostics_bundle_smoke.exe
