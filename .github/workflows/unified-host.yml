@@ -1,0 +1,79 @@
+name: Unified Cortex Host
+
+on:
+  push:
+    branches:
+      - agent/unified-cortex-host
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "host/**"
+      - "injector/**"
+      - "mcp_bridge/**"
+      - "tools/**"
+      - "core/symbols/**"
+      - "docs/**"
+      - "README.md"
+      - ".github/workflows/unified-host.yml"
+  workflow_dispatch:
+
+jobs:
+  unified-host:
+    name: unified-host-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Configure standalone unified host
+        shell: pwsh
+        run: >-
+          cmake -S tools/unified_host
+          -B build/unified-${{ matrix.arch }}
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build unified host
+        shell: pwsh
+        run: cmake --build build/unified-${{ matrix.arch }} --target cortex_host
+
+      - name: Validate unified command dispatcher
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "build/unified-${{ matrix.arch }}/cortex_host.exe"
+
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $exe symbolize --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          "" | & $exe mcp --token ci-smoke-token --port 1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $help = & $exe help 2>&1 | Out-String
+          foreach ($command in @("serve", "inject", "diagnose", "analyze", "symbolize", "mcp")) {
+            if ($help -notmatch "\b$command\b") {
+              throw "unified help is missing command: $command"
+            }
+          }
+
+      - name: Verify legacy executables are not produced
+        shell: pwsh
+        run: |
+          $directory = "build/unified-${{ matrix.arch }}"
+          foreach ($legacy in @("injector.exe", "cortex_mcp_bridge.exe", "cortex_diag_host.exe", "cortex_symbolize.exe")) {
+            if (Test-Path (Join-Path $directory $legacy)) {
+              throw "legacy executable should not be produced: $legacy"
+            }
+          }
