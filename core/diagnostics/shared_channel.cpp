@@ -43,7 +43,8 @@ void SharedUnlock() {
 }
 
 int FindHeartbeatLocked(const char* source) {
-    const LONG count = (std::min)(g_state->heartbeat_count,
+    const LONG rawCount = g_state->heartbeat_count;
+    const LONG count = (std::min)(rawCount,
                                   static_cast<LONG>(CORTEX_DIAG_MAX_HEARTBEATS));
     for (LONG i = 0; i < count; ++i) {
         if (std::strncmp(g_state->heartbeats[i].source, source,
