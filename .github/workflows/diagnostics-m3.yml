@@ -1,0 +1,110 @@
+name: Diagnostics M3
+
+on:
+  push:
+    branches:
+      - agent/mod-diagnostics-m3
+  pull_request:
+    paths:
+      - "core/diagnostics/**"
+      - "core/symbols/**"
+      - "core/config.*"
+      - "core/dllmain.cpp"
+      - "core/api/routes_symbols.cpp"
+      - "tools/symbolize_main.cpp"
+      - "tests/diagnostics_m3_tests.cpp"
+      - "tests/diagnostics_m3_bundle_smoke.cpp"
+      - "tests/dwarf_fixture.cpp"
+      - "docs/symbols.md"
+      - ".github/workflows/diagnostics-m3.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnostics-m3:
+    name: diagnostics-m3-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile PDB and crash artifact tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4 /Zi /Od
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m3_tests.cpp
+          core\diagnostics\registry.cpp
+          core\diagnostics\symbolizer.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m3_tests.exe
+          /Fd:diagnostics_m3_tests.pdb
+          /link /DEBUG /PDB:diagnostics_m3_tests.pdb dbghelp.lib
+
+      - name: Run PDB and crash artifact tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m3_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m3_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile offline symbolizer
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tools\symbolize_main.cpp
+          core\symbols\symbols.cpp
+          core\symbols\external.cpp
+          /Icore
+          /Fe:cortex_symbolize.exe
+          /link dbghelp.lib
+
+      - name: Smoke test offline symbolizer
+        shell: cmd
+        run: cortex_symbolize.exe --help
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m3_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m3_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m3_bundle_smoke.exe
+
+      - name: Validate MinGW DWARF fallback
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $gxx = (Get-Command g++.exe).Source
+          & $gxx -g -O0 tests\dwarf_fixture.cpp -o dwarf_fixture.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $rva = (& .\dwarf_fixture.exe).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $addr2line = (Get-Command addr2line.exe).Source
+          $image = (Resolve-Path .\dwarf_fixture.exe).Path
+          $result = & .\cortex_symbolize.exe --image $image --rva $rva --tool $addr2line
+          $result | Set-Content dwarf_symbolization.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($result -notmatch '"backend":"external"') { throw "external backend was not used" }
+          if ($result -notmatch 'DwarfTarget') { throw "DWARF function was not resolved" }
