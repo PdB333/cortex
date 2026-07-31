@@ -1,0 +1,56 @@
+name: Diagnostics M1
+
+on:
+  push:
+    branches:
+      - agent/mod-diagnostics-m1
+  pull_request:
+    paths:
+      - "core/diagnostics/**"
+      - "core/config.*"
+      - "core/dllmain.cpp"
+      - "tests/diagnostics_tests.cpp"
+      - "test_target/main.cpp"
+      - ".github/workflows/diagnostics-m1.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnostics-tests:
+    name: diagnostics-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile diagnostics tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_tests.cpp
+          core\diagnostics\diagnostics.cpp
+          core\config.cpp
+          /Icore
+          /Fe:diagnostics_tests.exe
+          /link dbghelp.lib
+
+      - name: Run diagnostics tests
+        shell: cmd
+        run: diagnostics_tests.exe
+
+      - name: Compile crash test target
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          test_target\main.cpp
+          /Fe:cortex_crash_test_target.exe
+          /link user32.lib gdi32.lib /SUBSYSTEM:WINDOWS
