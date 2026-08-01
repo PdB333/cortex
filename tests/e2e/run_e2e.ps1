@@ -13,9 +13,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $BuildRoot = (Resolve-Path $BuildRoot).Path
-if (-not $ResultsRoot) {
-    $ResultsRoot = Join-Path $BuildRoot "e2e-results-$Architecture"
-}
+if (-not $ResultsRoot) { $ResultsRoot = Join-Path $BuildRoot "e2e-results-$Architecture" }
 New-Item -ItemType Directory -Force -Path $ResultsRoot | Out-Null
 $CrashRoot = Join-Path $ResultsRoot "crashes"
 New-Item -ItemType Directory -Force -Path $CrashRoot | Out-Null
@@ -30,10 +28,8 @@ $TokenPath = Join-Path $BuildRoot "cortex.token"
 $ConfigPath = Join-Path $BuildRoot "cortex.ini"
 $BaseUri = "http://127.0.0.1:6969"
 
-foreach ($required in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $D3D9Exe, $D3D11Exe)) {
-    if (-not (Test-Path $required)) {
-        throw "Missing E2E artifact: $required"
-    }
+foreach ($path in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $D3D9Exe, $D3D11Exe)) {
+    if (-not (Test-Path $path)) { throw "Missing E2E artifact: $path" }
 }
 
 @"
@@ -57,44 +53,35 @@ public static class CortexE2EWin32 {
 }
 "@
 
-$script:Results = [System.Collections.Generic.List[object]]::new()
 $script:Token = ""
+$script:Results = [System.Collections.Generic.List[object]]::new()
 
-function Assert-True {
-    param([bool]$Condition, [string]$Message)
+function Assert-That([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Wait-Until {
-    param(
-        [scriptblock]$Condition,
-        [int]$TimeoutMs = 15000,
-        [int]$PollMs = 100,
-        [string]$Description = "condition"
-    )
-    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+function Wait-For {
+    param([scriptblock]$Condition, [int]$TimeoutMs = 15000, [int]$PollMs = 100, [string]$Description = "condition")
+    $watch = [Diagnostics.Stopwatch]::StartNew()
     while ($watch.ElapsedMilliseconds -lt $TimeoutMs) {
-        try {
-            if (& $Condition) { return }
-        } catch {}
+        try { if (& $Condition) { return } } catch {}
         Start-Sleep -Milliseconds $PollMs
     }
     throw "Timed out waiting for $Description"
 }
 
-function Invoke-CortexRequest {
+function Request-Json {
     param(
         [string]$Method,
         [string]$Path,
         $Body = $null,
-        [string]$Token = $script:Token,
+        [AllowEmptyString()][string]$Token = $script:Token,
         [int[]]$ExpectedStatus = @(200),
         [string]$ContentType = "application/json"
     )
-
     $headers = @{}
     if ($Token) { $headers["X-Cortex-Token"] = $Token }
-    $arguments = @{
+    $request = @{
         Uri = "$BaseUri$Path"
         Method = $Method
         Headers = $headers
@@ -102,353 +89,270 @@ function Invoke-CortexRequest {
         SkipHttpErrorCheck = $true
     }
     if ($null -ne $Body) {
-        $arguments["ContentType"] = $ContentType
-        $arguments["Body"] = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 -Compress }
+        $request.ContentType = $ContentType
+        $request.Body = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 -Compress }
     }
-
-    $response = Invoke-WebRequest @arguments
-    Assert-True ($ExpectedStatus -contains [int]$response.StatusCode) \
-        "$Method $Path returned HTTP $($response.StatusCode), expected $($ExpectedStatus -join ',') body=$($response.Content)"
-
-    $content = [string]$response.Content
-    if (-not $content) { return $null }
-    if ($response.Headers["Content-Type"] -match "application/json" -or $content.TrimStart().StartsWith("{") -or $content.TrimStart().StartsWith("[")) {
-        return $content | ConvertFrom-Json
-    }
-    return $content
+    $response = Invoke-WebRequest @request
+    Assert-That ($ExpectedStatus -contains [int]$response.StatusCode) "$Method $Path returned HTTP $($response.StatusCode): $($response.Content)"
+    $text = [string]$response.Content
+    if (-not $text) { return $null }
+    if ($text.TrimStart().StartsWith("{") -or $text.TrimStart().StartsWith("[")) { return $text | ConvertFrom-Json }
+    return $text
 }
 
-function Wait-CortexApi {
-    Wait-Until -TimeoutMs 20000 -PollMs 200 -Description "Cortex /health" -Condition {
+function Wait-Api {
+    Wait-For -TimeoutMs 20000 -PollMs 200 -Description "Cortex /health" -Condition {
         $response = Invoke-WebRequest -Uri "$BaseUri/health" -TimeoutSec 1 -SkipHttpErrorCheck
-        return $response.StatusCode -eq 200
+        $response.StatusCode -eq 200
     }
-
-    Wait-Until -TimeoutMs 10000 -Description "cortex.token" -Condition { Test-Path $TokenPath }
+    Wait-For -TimeoutMs 10000 -Description "cortex.token" -Condition { Test-Path $TokenPath }
     $script:Token = (Get-Content $TokenPath -Raw).Trim()
-    Assert-True ($script:Token.Length -ge 32) "Generated Cortex token is too short"
+    Assert-That ($script:Token.Length -ge 32) "Cortex token was not generated"
 }
 
-function Wait-PortClosed {
-    Wait-Until -TimeoutMs 10000 -PollMs 200 -Description "Cortex API shutdown" -Condition {
+function Wait-ApiClosed {
+    Wait-For -TimeoutMs 10000 -PollMs 200 -Description "Cortex API shutdown" -Condition {
         try {
-            $response = Invoke-WebRequest -Uri "$BaseUri/health" -TimeoutSec 1 -SkipHttpErrorCheck
+            [void](Invoke-WebRequest -Uri "$BaseUri/health" -TimeoutSec 1 -SkipHttpErrorCheck)
             return $false
-        } catch {
-            return $true
-        }
+        } catch { return $true }
     }
 }
 
-function Inject-Dll {
-    param([int]$Pid, [string]$Dll)
-    $output = & $HostExe inject $Pid $Dll 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        throw "Injection failed for $Dll into $Pid (exit $LASTEXITCODE): $output"
-    }
+function Inject-Dll([int]$ProcessId, [string]$DllPath) {
+    $output = & $HostExe inject $ProcessId $DllPath 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "Injection failed for $DllPath into $ProcessId`: $output" }
 }
 
-function Signal-NamedEvent {
-    param([string]$Name)
+function Signal-Event([string]$Name) {
     $handle = [CortexE2EWin32]::OpenEvent(0x0002, $false, $Name)
-    if ($handle -eq [IntPtr]::Zero) {
-        throw "OpenEvent failed for $Name, win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
-    }
+    if ($handle -eq [IntPtr]::Zero) { throw "OpenEvent failed for $Name" }
     try {
-        if (-not [CortexE2EWin32]::SetEvent($handle)) {
-            throw "SetEvent failed for $Name, win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
-        }
-    } finally {
-        [void][CortexE2EWin32]::CloseHandle($handle)
-    }
+        if (-not [CortexE2EWin32]::SetEvent($handle)) { throw "SetEvent failed for $Name" }
+    } finally { [void][CortexE2EWin32]::CloseHandle($handle) }
 }
 
-function Start-ControlledTarget {
-    param([string]$Scenario)
-    $scenarioRoot = Join-Path $ResultsRoot $Scenario
-    New-Item -ItemType Directory -Force -Path $scenarioRoot | Out-Null
-    $manifestPath = Join-Path $scenarioRoot "target-manifest.json"
+function Start-Fixture([string]$Name) {
+    $root = Join-Path $ResultsRoot $Name
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $manifestPath = Join-Path $root "target-manifest.json"
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
     $process = Start-Process -FilePath $TargetExe -ArgumentList "--e2e-manifest=$manifestPath" -PassThru
-    Wait-Until -TimeoutMs 10000 -Description "$Scenario target manifest" -Condition { Test-Path $manifestPath }
+    Wait-For -TimeoutMs 10000 -Description "$Name manifest" -Condition { Test-Path $manifestPath }
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-    Assert-True ([int]$manifest.pid -eq $process.Id) "Manifest PID does not match target PID"
-    $expectedPointerSize = if ($Architecture -eq "x64") { 8 } else { 4 }
-    Assert-True ([int]$manifest.pointer_size -eq $expectedPointerSize) "Target bitness mismatch"
-    return [pscustomobject]@{ Process = $process; Manifest = $manifest; Root = $scenarioRoot }
+    Assert-That ([int]$manifest.pid -eq $process.Id) "Target manifest PID mismatch"
+    $expected = if ($Architecture -eq "x64") { 8 } else { 4 }
+    Assert-That ([int]$manifest.pointer_size -eq $expected) "Target pointer size mismatch"
+    [pscustomobject]@{ Process = $process; Manifest = $manifest; Root = $root }
 }
 
-function Stop-ControlledTarget {
-    param($Target)
-    if (-not $Target) { return }
-    try {
-        if (-not $Target.Process.HasExited) {
-            try { Signal-NamedEvent $Target.Manifest.stop_event } catch {}
-            if (-not $Target.Process.WaitForExit(3000)) {
-                Stop-Process -Id $Target.Process.Id -Force -ErrorAction SilentlyContinue
-            }
-        }
-    } finally {
-        Wait-PortClosed
-    }
-}
-
-function Stop-ProcessSafe {
-    param($Process)
+function Stop-ProcessSafe($Process) {
     if ($Process -and -not $Process.HasExited) {
         Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
         [void]$Process.WaitForExit(3000)
     }
 }
 
-function Read-AddressNumber {
-    param([string]$Address)
-    return [Convert]::ToUInt64($Address.Substring(2), 16)
+function Stop-Fixture($Fixture) {
+    if (-not $Fixture) { return }
+    if (-not $Fixture.Process.HasExited) {
+        try { Signal-Event $Fixture.Manifest.stop_event } catch {}
+        if (-not $Fixture.Process.WaitForExit(3000)) { Stop-ProcessSafe $Fixture.Process }
+    }
+    try { Wait-ApiClosed } catch {}
 }
 
-function Find-NewestCapture {
-    param([string]$Prefix, [int]$Pid)
-    $match = Get-ChildItem -Path $CrashRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "$Prefix*_$Pid*" -or $_.Name -like "$Prefix*" } |
+function Address-Number([string]$Address) { [Convert]::ToUInt64($Address.Substring(2), 16) }
+
+function Newest-Capture([string]$Prefix) {
+    $directory = Get-ChildItem $CrashRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object Name -Like "$Prefix*" |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
-    if (-not $match) { throw "No $Prefix capture directory found for PID $Pid" }
-    return $match.FullName
+    if (-not $directory) { throw "No $Prefix capture directory was generated" }
+    $directory.FullName
 }
 
-function Assert-NonEmptyFile {
-    param([string]$Directory, [string]$Name)
+function Require-File([string]$Directory, [string]$Name) {
     $path = Join-Path $Directory $Name
-    Assert-True (Test-Path $path) "Missing report artifact: $path"
-    Assert-True ((Get-Item $path).Length -gt 0) "Empty report artifact: $path"
+    Assert-That (Test-Path $path) "Missing artifact: $path"
+    Assert-That ((Get-Item $path).Length -gt 0) "Empty artifact: $path"
 }
 
-function Run-Scenario {
-    param([string]$Name, [scriptblock]$Body)
-    Write-Host "`n=== E2E scenario: $Name ==="
-    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+function Run-Scenario([string]$Name, [scriptblock]$Body) {
+    Write-Host "`n=== $Name ==="
+    $watch = [Diagnostics.Stopwatch]::StartNew()
     try {
         & $Body
         $watch.Stop()
-        $script:Results.Add([pscustomobject]@{
-            name = $Name
-            status = "passed"
-            duration_ms = $watch.ElapsedMilliseconds
-            error = ""
-        })
-        Write-Host "PASS $Name ($($watch.ElapsedMilliseconds) ms)"
+        $script:Results.Add([pscustomobject]@{ name = $Name; status = "passed"; duration_ms = $watch.ElapsedMilliseconds; error = "" })
+        Write-Host "PASS $Name"
     } catch {
         $watch.Stop()
         $message = $_.Exception.Message
-        $script:Results.Add([pscustomobject]@{
-            name = $Name
-            status = "failed"
-            duration_ms = $watch.ElapsedMilliseconds
-            error = $message
-        })
-        Write-Warning "FAIL $Name: $message"
+        $script:Results.Add([pscustomobject]@{ name = $Name; status = "failed"; duration_ms = $watch.ElapsedMilliseconds; error = $message })
+        Write-Warning "FAIL $Name`: $message"
     }
 }
 
 Run-Scenario "api-memory-security" {
-    $target = $null
+    $fixture = $null
     try {
-        $target = Start-ControlledTarget "api-memory-security"
-        Inject-Dll $target.Process.Id $CoreDll
-        Wait-CortexApi
+        $fixture = Start-Fixture "api-memory-security"
+        Inject-Dll $fixture.Process.Id $CoreDll
+        Wait-Api
 
-        $health = Invoke-CortexRequest GET "/health"
-        Assert-True $health.ok "Health endpoint did not report ok"
-        $status = Invoke-CortexRequest GET "/status"
-        Assert-True ([int]$status.pid -eq $target.Process.Id) "Status endpoint PID mismatch"
-        $tools = Invoke-CortexRequest GET "/tools"
-        Assert-True (($tools | ConvertTo-Json -Depth 8) -match 'memory_read') "Tools manifest lacks memory_read"
-        $openApi = Invoke-CortexRequest GET "/openapi.json"
-        Assert-True (($openApi | ConvertTo-Json -Depth 12) -match '/memory/read') "OpenAPI lacks /memory/read"
+        $health = Request-Json GET "/health"
+        Assert-That $health.ok "Health endpoint failed"
+        $status = Request-Json GET "/status"
+        Assert-That ([int]$status.pid -eq $fixture.Process.Id) "Status PID mismatch"
+        $tools = Request-Json GET "/tools"
+        Assert-That (($tools | ConvertTo-Json -Depth 8) -match "memory_read") "Tools manifest is incomplete"
+        $openApi = Request-Json GET "/openapi.json"
+        Assert-That (($openApi | ConvertTo-Json -Depth 12) -match "/memory/read") "OpenAPI is incomplete"
 
-        [void](Invoke-CortexRequest GET "/modules" -Token "" -ExpectedStatus @(401))
-        [void](Invoke-CortexRequest GET "/modules" -Token "not-the-token" -ExpectedStatus @(401))
-        [void](Invoke-CortexRequest POST "/memory/read" -Body '{"address":"0x1","type":"u8"}' -ContentType "text/plain" -ExpectedStatus @(415))
+        [void](Request-Json GET "/modules" -Token "" -ExpectedStatus @(401))
+        [void](Request-Json GET "/modules" -Token "wrong-token" -ExpectedStatus @(401))
+        [void](Request-Json POST "/memory/read" -Body '{"address":"0x1","type":"u8"}' -ContentType "text/plain" -ExpectedStatus @(415))
 
-        $modules = Invoke-CortexRequest GET "/modules"
+        $modules = Request-Json GET "/modules"
         $moduleText = $modules | ConvertTo-Json -Depth 8
-        Assert-True ($moduleText -match 'cortex_core.dll') "Loaded modules omit cortex_core.dll"
-        Assert-True ($moduleText -match "cortex_test_target_$Architecture.exe") "Loaded modules omit test target"
+        Assert-That ($moduleText -match "cortex_core.dll") "cortex_core.dll is absent from /modules"
+        Assert-That ($moduleText -match "cortex_test_target_$Architecture.exe") "Test target is absent from /modules"
 
-        $u32 = Invoke-CortexRequest POST "/memory/read" @{ address = $target.Manifest.u32; type = "u32" }
-        Assert-True ($u32.ok -and [uint64]$u32.value -eq 0xDEADBEEF) "u32 memory read returned the wrong value"
-        $string = Invoke-CortexRequest POST "/memory/read" @{ address = $target.Manifest.string; type = "string"; count = 32 }
-        Assert-True ($string.ok -and $string.value -eq "cortex-canary") "String memory read returned the wrong value"
+        $u32 = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.u32; type = "u32" }
+        Assert-That ($u32.ok -and [uint64]$u32.value -eq 0xDEADBEEF) "u32 read failed"
+        $string = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.string; type = "string"; count = 32 }
+        Assert-That ($string.ok -and $string.value -eq "cortex-canary") "String read failed"
+        $batch = Request-Json POST "/memory/read_batch" @{ reads = @(
+            @{ address = $fixture.Manifest.u32; type = "u32" },
+            @{ address = $fixture.Manifest.u64; type = "u64" },
+            @{ address = $fixture.Manifest.float; type = "float" }
+        ) }
+        Assert-That ($batch.results.Count -eq 3) "Batch read count mismatch"
+        Assert-That (@($batch.results | Where-Object { -not $_.ok }).Count -eq 0) "Batch read failed"
 
-        $batch = Invoke-CortexRequest POST "/memory/read_batch" @{
-            reads = @(
-                @{ address = $target.Manifest.u32; type = "u32" },
-                @{ address = $target.Manifest.u64; type = "u64" },
-                @{ address = $target.Manifest.float; type = "float" }
-            )
-        }
-        Assert-True ($batch.results.Count -eq 3) "Batch read did not return three entries"
-        Assert-True (($batch.results | Where-Object { -not $_.ok }).Count -eq 0) "A batch read entry failed"
+        $write = Request-Json POST "/memory/write" @{ address = $fixture.Manifest.health; type = "u32"; value = 777 }
+        Assert-That $write.ok "Memory write failed"
+        $written = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
+        Assert-That ([int]$written.value -eq 777) "Memory write was not visible"
 
-        $write = Invoke-CortexRequest POST "/memory/write" @{ address = $target.Manifest.health; type = "u32"; value = 777 }
-        Assert-True $write.ok "Memory write failed"
-        $written = Invoke-CortexRequest POST "/memory/read" @{ address = $target.Manifest.health; type = "u32" }
-        Assert-True ([int]$written.value -eq 777) "Memory write was not observable"
-
-        $freeze = Invoke-CortexRequest POST "/freeze" @{
-            address = $target.Manifest.health
-            type = "u32"
-            value = 4242
-            label = "e2e-health"
-        }
-        Assert-True ($freeze.ok -and [int]$freeze.id -gt 0) "Freeze creation failed"
+        $freeze = Request-Json POST "/freeze" @{ address = $fixture.Manifest.health; type = "u32"; value = 4242; label = "e2e-health" }
+        Assert-That ($freeze.ok -and [int]$freeze.id -gt 0) "Freeze creation failed"
         Start-Sleep -Milliseconds 800
-        for ($sample = 0; $sample -lt 3; ++$sample) {
-            $frozen = Invoke-CortexRequest POST "/memory/read" @{ address = $target.Manifest.health; type = "u32" }
-            Assert-True ([int]$frozen.value -eq 4242) "Frozen value changed"
+        1..3 | ForEach-Object {
+            $sample = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
+            Assert-That ([int]$sample.value -eq 4242) "Frozen value changed"
             Start-Sleep -Milliseconds 150
         }
-        [void](Invoke-CortexRequest DELETE "/freeze/$($freeze.id)")
+        [void](Request-Json DELETE "/freeze/$($freeze.id)")
         Start-Sleep -Milliseconds 700
-        $unfrozen = Invoke-CortexRequest POST "/memory/read" @{ address = $target.Manifest.health; type = "u32" }
-        Assert-True ([int]$unfrozen.value -ne 4242) "Value did not resume changing after freeze removal"
+        $afterFreeze = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
+        Assert-That ([int]$afterFreeze.value -ne 4242) "Value did not resume after unfreeze"
 
-        $start = Read-AddressNumber $target.Manifest.u32
+        $start = Address-Number $fixture.Manifest.u32
         $end = $start + 4
-        $scan = Invoke-CortexRequest POST "/scan/new" @{
-            type = "u32"
-            value = "3735928559"
-            start = "0x$($start.ToString('x'))"
-            end = "0x$($end.ToString('x'))"
-            writable_only = $false
-            alignment = 1
+        $scan = Request-Json POST "/scan/new" @{
+            type = "u32"; value = "3735928559"
+            start = "0x$($start.ToString('x'))"; end = "0x$($end.ToString('x'))"
+            writable_only = $false; alignment = 1
         }
-        Assert-True ($scan.ok -and [int]$scan.count -ge 1) "Exact range scan did not find the canary"
-        $scanResults = Invoke-CortexRequest GET "/scan/results/$($scan.scan_id)?limit=10"
-        Assert-True ([int]$scanResults.total -ge 1) "Scan results are empty"
-        [void](Invoke-CortexRequest DELETE "/scan/$($scan.scan_id)")
+        Assert-That ($scan.ok -and [int]$scan.count -ge 1) "Range scan missed the canary"
+        $scanResults = Request-Json GET "/scan/results/$($scan.scan_id)?limit=10"
+        Assert-That ([int]$scanResults.total -ge 1) "Scan results are empty"
+        [void](Request-Json DELETE "/scan/$($scan.scan_id)")
 
-        $symbolModule = Invoke-CortexRequest GET "/symbols/module?address=$($target.Manifest.anchor)"
-        Assert-True ($symbolModule.ok -and $symbolModule.module -match "cortex_test_target") "Symbol module resolution failed"
+        $symbolModule = Request-Json GET "/symbols/module?address=$($fixture.Manifest.anchor)"
+        Assert-That ($symbolModule.ok -and $symbolModule.module -match "cortex_test_target") "Module/RVA resolution failed"
+        $lua = Request-Json POST "/lua/exec" @{ code = "return 6 * 7"; timeout_ms = 2000 }
+        Assert-That ($lua.ok -and [int]$lua.result -eq 42) "Lua execution failed"
 
-        $lua = Invoke-CortexRequest POST "/lua/exec" @{ code = "return 6 * 7"; timeout_ms = 2000 }
-        Assert-True ($lua.ok -and [int]$lua.result -eq 42) "Lua execution failed"
-
-        $mcpInit = Invoke-CortexRequest POST "/mcp" @{
-            jsonrpc = "2.0"
-            id = 1
-            method = "initialize"
-            params = @{
-                protocolVersion = "2024-11-05"
-                capabilities = @{}
-                clientInfo = @{ name = "cortex-e2e"; version = "1.0" }
-            }
+        $mcpInit = Request-Json POST "/mcp" @{
+            jsonrpc = "2.0"; id = 1; method = "initialize"
+            params = @{ protocolVersion = "2024-11-05"; capabilities = @{}; clientInfo = @{ name = "cortex-e2e"; version = "1.0" } }
         }
-        Assert-True ($mcpInit.jsonrpc -eq "2.0" -and $null -ne $mcpInit.result) "MCP initialize failed"
-        $mcpTools = Invoke-CortexRequest POST "/mcp" @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
-        Assert-True ($mcpTools.result.tools.Count -gt 20) "MCP tools/list returned too few tools"
-
-        $session = Invoke-CortexRequest POST "/session/export" @{}
-        Assert-True ($session.ok -and $session.path) "Session export failed"
-    } finally {
-        Stop-ControlledTarget $target
-    }
+        Assert-That ($mcpInit.jsonrpc -eq "2.0" -and $null -ne $mcpInit.result) "MCP initialize failed"
+        $mcpTools = Request-Json POST "/mcp" @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
+        Assert-That ($mcpTools.result.tools.Count -gt 20) "MCP tools/list is incomplete"
+        $session = Request-Json POST "/session/export" @{}
+        Assert-That ($session.ok -and $session.path) "Session export failed"
+    } finally { Stop-Fixture $fixture }
 }
 
 Run-Scenario "instrumented-mod-crash" {
-    $target = $null
+    $fixture = $null
     $diagnose = $null
     try {
         Remove-Item (Join-Path $CrashRoot "*") -Recurse -Force -ErrorAction SilentlyContinue
-        $target = Start-ControlledTarget "instrumented-mod-crash"
-        Inject-Dll $target.Process.Id $CoreDll
-        Wait-CortexApi
-        Inject-Dll $target.Process.Id $FakeModDll
+        $fixture = Start-Fixture "instrumented-mod-crash"
+        Inject-Dll $fixture.Process.Id $CoreDll
+        Wait-Api
+        Inject-Dll $fixture.Process.Id $FakeModDll
         Start-Sleep -Seconds 2
-
-        $diagnoseLog = Join-Path $target.Root "diagnose.log"
         $diagnose = Start-Process -FilePath $HostExe -ArgumentList @(
-            "diagnose", "--pid", $target.Process.Id,
-            "--output", $CrashRoot,
-            "--heartbeat", "render",
-            "--hang-ms", "1500",
-            "--poll-ms", "100",
-            "--once"
-        ) -RedirectStandardOutput $diagnoseLog -RedirectStandardError (Join-Path $target.Root "diagnose-error.log") -PassThru
+            "diagnose", "--pid", $fixture.Process.Id, "--output", $CrashRoot,
+            "--heartbeat", "render", "--hang-ms", "1500", "--poll-ms", "100", "--once"
+        ) -RedirectStandardOutput (Join-Path $fixture.Root "diagnose.log") -RedirectStandardError (Join-Path $fixture.Root "diagnose-error.log") -PassThru
         Start-Sleep -Milliseconds 700
-        Signal-NamedEvent $target.Manifest.crash_event
+        Signal-Event $fixture.Manifest.crash_event
+        Assert-That ($fixture.Process.WaitForExit(20000)) "Crash target did not exit"
+        Assert-That ($diagnose.WaitForExit(20000)) "Diagnostics host did not finish crash capture"
+        Assert-That ($diagnose.ExitCode -eq 0) "Diagnostics host failed during crash capture"
 
-        Assert-True ($target.Process.WaitForExit(20000)) "Crash target did not exit"
-        Assert-True ($diagnose.WaitForExit(20000)) "External diagnostics host did not finish crash capture"
-        Assert-True ($diagnose.ExitCode -eq 0) "External diagnostics host failed during crash capture"
-
-        $capture = Find-NewestCapture "crash_" $target.Process.Id
-        foreach ($file in @(
+        $capture = Newest-Capture "crash_"
+        foreach ($name in @(
             "crash.dmp", "external_crash.dmp", "report.json", "breadcrumbs.json",
-            "mods.json", "scopes.json", "values.json", "hooks.json",
-            "stack.json", "build_info.json", "report.txt", "external_report.json",
-            "analysis.json", "analysis.txt"
-        )) { Assert-NonEmptyFile $capture $file }
+            "mods.json", "scopes.json", "values.json", "hooks.json", "stack.json",
+            "build_info.json", "report.txt", "external_report.json", "analysis.json", "analysis.txt"
+        )) { Require-File $capture $name }
 
         $report = Get-Content (Join-Path $capture "report.json") -Raw
-        Assert-True ($report -match 'C0000005|EXCEPTION_ACCESS_VIOLATION') "Crash report lacks access violation evidence"
-        $mods = Get-Content (Join-Path $capture "mods.json") -Raw
-        Assert-True ($mods -match 'CortexE2EFakeMod') "Crash report lacks fake mod registration"
-        $scopes = Get-Content (Join-Path $capture "scopes.json") -Raw
-        Assert-True ($scopes -match 'E2EWorker') "Crash report lacks active fake mod scope"
+        Assert-That ($report -match "C0000005|EXCEPTION_ACCESS_VIOLATION") "Crash evidence is missing"
+        Assert-That ((Get-Content (Join-Path $capture "mods.json") -Raw) -match "CortexE2EFakeMod") "Mod registration is missing"
+        Assert-That ((Get-Content (Join-Path $capture "scopes.json") -Raw) -match "E2EWorker") "Active scope is missing"
         $values = Get-Content (Join-Path $capture "values.json") -Raw
-        Assert-True ($values -match 'e2e_counter' -and $values -match 'fixture_ready') "Crash report lacks fake mod values"
+        Assert-That ($values -match "e2e_counter" -and $values -match "fixture_ready") "Diagnostic values are missing"
         $hooks = Get-Content (Join-Path $capture "hooks.json") -Raw
-        Assert-True ($hooks -match 'E2EPrimaryHook' -and $hooks -match 'E2EOverlappingHook') "Crash report lacks registered hooks"
-        Assert-True ($hooks -match 'overlap|installed_bytes_changed|jump_target_mismatch') "Hook corruption/conflict was not detected"
+        Assert-That ($hooks -match "E2EPrimaryHook" -and $hooks -match "E2EOverlappingHook") "Registered hooks are missing"
+        Assert-That ($hooks -match "overlap|installed_bytes_changed|jump_target_mismatch") "Hook conflict/corruption was not detected"
         $analysis = Get-Content (Join-Path $capture "analysis.json") -Raw
-        Assert-True ($analysis -match 'null_dereference') "Analyzer missed the null dereference"
-        Assert-True ($analysis -match 'overlapping_hooks|hook_replaced|recursive_hook') "Analyzer missed hook evidence"
+        Assert-That ($analysis -match "null_dereference") "Analyzer missed the null dereference"
+        Assert-That ($analysis -match "overlapping_hooks|hook_replaced|recursive_hook") "Analyzer missed hook evidence"
     } finally {
         Stop-ProcessSafe $diagnose
-        Stop-ProcessSafe $(if ($target) { $target.Process } else { $null })
-        try { Wait-PortClosed } catch {}
+        if ($fixture) { Stop-ProcessSafe $fixture.Process }
+        try { Wait-ApiClosed } catch {}
     }
 }
 
 Run-Scenario "external-hang-watchdog" {
-    $target = $null
+    $fixture = $null
     $diagnose = $null
     try {
         Remove-Item (Join-Path $CrashRoot "*") -Recurse -Force -ErrorAction SilentlyContinue
-        $target = Start-ControlledTarget "external-hang-watchdog"
-        Inject-Dll $target.Process.Id $CoreDll
-        Wait-CortexApi
-        Inject-Dll $target.Process.Id $FakeModDll
+        $fixture = Start-Fixture "external-hang-watchdog"
+        Inject-Dll $fixture.Process.Id $CoreDll
+        Wait-Api
+        Inject-Dll $fixture.Process.Id $FakeModDll
         Start-Sleep -Seconds 2
-
         $diagnose = Start-Process -FilePath $HostExe -ArgumentList @(
-            "diagnose", "--pid", $target.Process.Id,
-            "--output", $CrashRoot,
-            "--heartbeat", "render",
-            "--hang-ms", "1200",
-            "--poll-ms", "100",
-            "--once"
-        ) -RedirectStandardOutput (Join-Path $target.Root "diagnose.log") -RedirectStandardError (Join-Path $target.Root "diagnose-error.log") -PassThru
+            "diagnose", "--pid", $fixture.Process.Id, "--output", $CrashRoot,
+            "--heartbeat", "render", "--hang-ms", "1200", "--poll-ms", "100", "--once"
+        ) -RedirectStandardOutput (Join-Path $fixture.Root "diagnose.log") -RedirectStandardError (Join-Path $fixture.Root "diagnose-error.log") -PassThru
         Start-Sleep -Milliseconds 600
-        Signal-NamedEvent $target.Manifest.hang_event
-
-        Assert-True ($diagnose.WaitForExit(20000)) "External diagnostics host did not finish hang capture"
-        Assert-True ($diagnose.ExitCode -eq 0) "External diagnostics host failed during hang capture"
-        $capture = Find-NewestCapture "hang_" $target.Process.Id
-        foreach ($file in @("hang.dmp", "threads.json", "hang_report.json", "analysis.json", "analysis.txt")) {
-            Assert-NonEmptyFile $capture $file
-        }
+        Signal-Event $fixture.Manifest.hang_event
+        Assert-That ($diagnose.WaitForExit(20000)) "Diagnostics host did not finish hang capture"
+        Assert-That ($diagnose.ExitCode -eq 0) "Diagnostics host failed during hang capture"
+        $capture = Newest-Capture "hang_"
+        foreach ($name in @("hang.dmp", "threads.json", "hang_report.json", "analysis.json", "analysis.txt")) { Require-File $capture $name }
         $hang = Get-Content (Join-Path $capture "hang_report.json") -Raw
-        Assert-True ($hang -match '"kind":"hang"' -and $hang -match '"responsive":false') "Hang report did not confirm an unresponsive window"
-        $threads = Get-Content (Join-Path $capture "threads.json") -Raw
-        Assert-True ($threads -match 'instruction_pointer' -and $threads -match 'thread_id') "Thread capture lacks control contexts"
-        $analysis = Get-Content (Join-Path $capture "analysis.json") -Raw
-        Assert-True ($analysis -match 'hang_snapshot') "Analyzer missed the hang snapshot"
+        Assert-That ($hang -match '"kind":"hang"' -and $hang -match '"responsive":false') "Hang report did not confirm the freeze"
+        Assert-That ((Get-Content (Join-Path $capture "threads.json") -Raw) -match '"threads"') "Thread snapshot is invalid"
+        Assert-That ((Get-Content (Join-Path $capture "analysis.json") -Raw) -match "hang_snapshot") "Analyzer missed the hang"
     } finally {
         Stop-ProcessSafe $diagnose
-        Stop-ProcessSafe $(if ($target) { $target.Process } else { $null })
-        try { Wait-PortClosed } catch {}
+        if ($fixture) { Stop-ProcessSafe $fixture.Process }
+        try { Wait-ApiClosed } catch {}
     }
 }
 
@@ -461,44 +365,47 @@ foreach ($renderer in @(
         try {
             $process = Start-Process -FilePath $renderer.Exe -PassThru
             Start-Sleep -Seconds 2
-            Assert-True (-not $process.HasExited) "$($renderer.Name) target exited before injection"
+            Assert-That (-not $process.HasExited) "$($renderer.Name) target exited before injection"
             Inject-Dll $process.Id $CoreDll
-            Wait-CortexApi
-
+            Wait-Api
             $screenshotPath = Join-Path $ResultsRoot "$($renderer.Name).png"
             $captured = $false
-            for ($attempt = 0; $attempt -lt 30 -and -not $captured; ++$attempt) {
-                $response = Invoke-WebRequest -Uri "$BaseUri/screenshot?mode=auto" -Headers @{ "X-Cortex-Token" = $script:Token } -TimeoutSec 3 -SkipHttpErrorCheck
-                if ($response.StatusCode -eq 200 -and $response.RawContentStream.Length -gt 64) {
-                    [IO.File]::WriteAllBytes($screenshotPath, $response.Content)
-                    $captured = $true
-                    break
+            $client = [Net.Http.HttpClient]::new()
+            $client.DefaultRequestHeaders.Add("X-Cortex-Token", $script:Token)
+            try {
+                for ($attempt = 0; $attempt -lt 30; ++$attempt) {
+                    $response = $client.GetAsync("$BaseUri/screenshot?mode=auto").Result
+                    if ([int]$response.StatusCode -eq 200) {
+                        $bytes = $response.Content.ReadAsByteArrayAsync().Result
+                        if ($bytes.Length -gt 64) {
+                            [IO.File]::WriteAllBytes($screenshotPath, $bytes)
+                            $captured = $true
+                            break
+                        }
+                    }
+                    Start-Sleep -Milliseconds 300
                 }
-                Start-Sleep -Milliseconds 300
-            }
-            Assert-True $captured "$($renderer.Name) screenshot was not captured"
-            $bytes = [IO.File]::ReadAllBytes($screenshotPath)
-            Assert-True ($bytes.Length -gt 64 -and $bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) \
-                "$($renderer.Name) screenshot is not a PNG"
+            } finally { $client.Dispose() }
+            Assert-That $captured "$($renderer.Name) screenshot was not captured"
+            $png = [IO.File]::ReadAllBytes($screenshotPath)
+            $isPng = $png.Length -gt 64 -and $png[0] -eq 0x89 -and $png[1] -eq 0x50 -and $png[2] -eq 0x4E -and $png[3] -eq 0x47
+            Assert-That $isPng "$($renderer.Name) screenshot is not a PNG"
         } finally {
             Stop-ProcessSafe $process
-            try { Wait-PortClosed } catch {}
+            try { Wait-ApiClosed } catch {}
         }
     }
 }
 
 Run-Scenario "repeated-injection-cycles" {
-    for ($cycle = 1; $cycle -le 3; ++$cycle) {
-        $target = $null
+    foreach ($cycle in 1..3) {
+        $fixture = $null
         try {
-            $target = Start-ControlledTarget "cycle-$cycle"
-            Inject-Dll $target.Process.Id $CoreDll
-            Wait-CortexApi
-            $health = Invoke-CortexRequest GET "/health"
-            Assert-True $health.ok "Cycle $cycle health check failed"
-        } finally {
-            Stop-ControlledTarget $target
-        }
+            $fixture = Start-Fixture "cycle-$cycle"
+            Inject-Dll $fixture.Process.Id $CoreDll
+            Wait-Api
+            Assert-That (Request-Json GET "/health").ok "Cycle $cycle health check failed"
+        } finally { Stop-Fixture $fixture }
     }
 }
 
@@ -507,18 +414,15 @@ $failed = @($script:Results | Where-Object status -eq "failed").Count
 $summary = [pscustomobject]@{
     schema_version = 1
     architecture = $Architecture
-    build_root = $BuildRoot
     generated_utc = [DateTime]::UtcNow.ToString("o")
     passed = $passed
     failed = $failed
     scenarios = $script:Results
 }
-$summaryPath = Join-Path $ResultsRoot "e2e-summary.json"
-$summary | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 $summaryPath
+$summary | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $ResultsRoot "e2e-summary.json")
 
-$junitPath = Join-Path $ResultsRoot "e2e-junit.xml"
-$xml = [System.Text.StringBuilder]::new()
-[void]$xml.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+$xml = [Text.StringBuilder]::new()
+[void]$xml.AppendLine('<?xml version="1.0" encoding="utf-8"?>')
 [void]$xml.AppendLine("<testsuite name=\"cortex-e2e-$Architecture\" tests=\"$($script:Results.Count)\" failures=\"$failed\">")
 foreach ($result in $script:Results) {
     $name = [Security.SecurityElement]::Escape($result.name)
@@ -530,8 +434,7 @@ foreach ($result in $script:Results) {
     [void]$xml.AppendLine("</testcase>")
 }
 [void]$xml.AppendLine("</testsuite>")
-$xml.ToString() | Set-Content -Encoding utf8 $junitPath
+$xml.ToString() | Set-Content -Encoding utf8 (Join-Path $ResultsRoot "e2e-junit.xml")
 
-Write-Host "`nCortex E2E result: $passed passed, $failed failed"
-Write-Host "Summary: $summaryPath"
+Write-Host "`nCortex E2E: $passed passed, $failed failed"
 if ($failed -ne 0) { exit 1 }
