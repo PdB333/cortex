@@ -422,18 +422,19 @@ $summary = [pscustomobject]@{
 $summary | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 (Join-Path $ResultsRoot "e2e-summary.json")
 
 $xml = [Text.StringBuilder]::new()
-[void]$xml.AppendLine('<?xml version="1.0" encoding="utf-8"?>')
-[void]$xml.AppendLine("<testsuite name=\"cortex-e2e-$Architecture\" tests=\"$($script:Results.Count)\" failures=\"$failed\">")
+[void]$xml.AppendLine('<?xml version="1.0" encoding="utf-8"?>'.Replace('\"', '"'))
+[void]$xml.AppendLine(('<testsuite name="cortex-e2e-{0}" tests="{1}" failures="{2}">' -f $Architecture, $script:Results.Count, $failed))
 foreach ($result in $script:Results) {
     $name = [Security.SecurityElement]::Escape($result.name)
-    [void]$xml.Append("  <testcase name=\"$name\" time=\"$([Math]::Round($result.duration_ms / 1000.0, 3))\">")
+    $seconds = [Math]::Round($result.duration_ms / 1000.0, 3)
+    [void]$xml.Append(('  <testcase name="{0}" time="{1}">' -f $name, $seconds))
     if ($result.status -eq "failed") {
         $errorText = [Security.SecurityElement]::Escape($result.error)
-        [void]$xml.Append("<failure message=\"$errorText\">$errorText</failure>")
+        [void]$xml.Append(('<failure message="{0}">{0}</failure>' -f $errorText))
     }
-    [void]$xml.AppendLine("</testcase>")
+    [void]$xml.AppendLine('</testcase>')
 }
-[void]$xml.AppendLine("</testsuite>")
+[void]$xml.AppendLine('</testsuite>')
 $xml.ToString() | Set-Content -Encoding utf8 (Join-Path $ResultsRoot "e2e-junit.xml")
 
 Write-Host "`nCortex E2E: $passed passed, $failed failed"
