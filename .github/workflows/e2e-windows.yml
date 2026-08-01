@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: cortex-e2e-${{ github.ref }}-${{ matrix.arch }}
+  group: cortex-e2e-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
