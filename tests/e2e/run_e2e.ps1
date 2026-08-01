@@ -221,7 +221,7 @@ Run-Scenario "api-memory-security" {
         Assert-That ($moduleText -match "cortex_test_target_$Architecture.exe") "Test target is absent from /modules"
 
         $u32 = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.u32; type = "u32" }
-        Assert-That ($u32.ok -and [uint64]$u32.value -eq 0xDEADBEEF) "u32 read failed"
+        Assert-That ($u32.ok -and [uint64]$u32.value -eq [uint64]3735928559) "u32 read failed: value=$($u32.value)"
         $string = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.string; type = "string"; count = 32 }
         Assert-That ($string.ok -and $string.value -eq "cortex-canary") "String read failed"
         $batch = Request-Json POST "/memory/read_batch" @{ reads = @(
