@@ -72,6 +72,22 @@ std::string OptionValue(const std::vector<std::string>& arguments, const char* o
     return {};
 }
 
+std::string EscapeJson(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size() + 8);
+    for (unsigned char character : value) {
+        switch (character) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped.push_back(static_cast<char>(character)); break;
+        }
+    }
+    return escaped;
+}
+
 void PrintCanary() {
     std::printf("cortex_test_target ready pid=%lu\n"
                 "  &g_cortex_u32    = %p  = 0x%08X\n"
@@ -130,7 +146,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"schema_version\": 1,\n"
          << "  \"pid\": " << GetCurrentProcessId() << ",\n"
          << "  \"pointer_size\": " << sizeof(void*) << ",\n"
-         << "  \"module_path\": \"" << modulePath << "\",\n"
+         << "  \"module_path\": \"" << EscapeJson(modulePath) << "\",\n"
          << "  \"window\": \"0x" << std::hex << reinterpret_cast<uintptr_t>(window) << "\",\n"
          << "  \"u32\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_u32) << "\",\n"
          << "  \"u64\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_u64) << "\",\n"
@@ -141,9 +157,9 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << std::dec
-         << "  \"crash_event\": \"" << control.crashEventName << "\",\n"
-         << "  \"hang_event\": \"" << control.hangEventName << "\",\n"
-         << "  \"stop_event\": \"" << control.stopEventName << "\"\n"
+         << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
+         << "  \"hang_event\": \"" << EscapeJson(control.hangEventName) << "\",\n"
+         << "  \"stop_event\": \"" << EscapeJson(control.stopEventName) << "\"\n"
          << "}\n";
     file.flush();
 }
