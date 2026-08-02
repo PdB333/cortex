@@ -2,7 +2,7 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [v0.2.0] - 2026-08-02
+## [v0.3.0] - 2026-08-02
 
 ### Unified Windows tooling
 
@@ -92,6 +92,10 @@ All notable changes to Cortex are documented in this file.
 - Added dedicated diagnostics workflows for milestones 2 through 7.
 - Added full Windows build, unified-host, and E2E workflows.
 - Added Release builds and packaging for both Windows x86 and x64.
+
+## [v0.2.0] - 2026-07-22
+
+- Added background capture and input, network hooks, the native MCP endpoint, expression-based debugger captures, session export, and the v0.2.0 quickstart documentation.
 
 ## [v0.1.0] - 2026-07-14
 
