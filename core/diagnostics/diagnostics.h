@@ -5,6 +5,19 @@
 #include <intrin.h>
 #endif
 
+// The injected core provides the ABI exports. Public mod code includes
+// diag_c.h directly without CORTEX_DIAG_EXPORTS, so it remains a runtime-only
+// consumer with no import-library dependency.
+#ifndef CORTEX_DIAG_EXPORTS
+#define CORTEX_DIAG_EXPORTS 1
+#define CORTEX_DIAG_UNDEFINE_EXPORTS 1
+#endif
+#include "../../sdk/include/cortex/diag_c.h"
+#ifdef CORTEX_DIAG_UNDEFINE_EXPORTS
+#undef CORTEX_DIAG_UNDEFINE_EXPORTS
+#undef CORTEX_DIAG_EXPORTS
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -76,9 +89,3 @@ bool WriteReport(const char* directory, const CrashContext& context,
 #endif
 
 } // namespace diagnostics
-
-// C ABI intentionally keeps existing C++ mods independent from Cortex's C++
-// compiler and standard-library ABI. Mods may resolve this export dynamically;
-// when Cortex is absent they simply skip the call.
-extern "C" __declspec(dllexport) void CortexDiagBreadcrumb(const char* category,
-                                                            const char* message);

@@ -2,14 +2,16 @@
 #include <MinHook.h>
 #include <cstdio>
 #include <atomic>
+#include <string>
 
 #include "config.h"
 #include "log.h"
 #include "diagnostics/diagnostics.h"
-// diagnostics.cpp is kept in the same translation unit for milestone 1 so
-// existing build definitions do not need a broad source-list rewrite. It is
-// split as a normal implementation file and can move to target_sources later.
+#include "diagnostics/registry.h"
+// Keep diagnostics implementation in the injected core translation unit.
+// Dedicated test targets compile these files separately.
 #include "diagnostics/diagnostics.cpp"
+#include "diagnostics/registry.cpp"
 #ifdef CORTEX_KIERO
 #include "hook/kiero_hook.h"
 #endif
@@ -49,14 +51,25 @@ namespace {
 
         if (cfg.log_console) SetupConsole();
 
+        std::string crashDirectory = cfg.diagnostics_crash_directory;
+        if (crashDirectory.empty())
+            crashDirectory = config::GetModuleDir() + "\\cortex_crashes";
+
         diagnostics::Options diagOptions;
         diagOptions.enabled = cfg.diagnostics_enabled;
         diagOptions.writeMinidump = cfg.diagnostics_write_minidump;
-        diagOptions.outputDirectory = cfg.diagnostics_crash_directory;
+        diagOptions.outputDirectory = crashDirectory;
+
+        bool registryReady = true;
+        if (cfg.diagnostics_enabled) {
+            registryReady = diagnostics::RegistryInit(crashDirectory.c_str());
+            dbglog::Line("diagnostics::RegistryInit %s", registryReady ? "done" : "failed");
+        }
         if (diagnostics::Init(diagOptions)) {
             dbglog::Line("diagnostics::Init done, enabled=%d", diagnostics::IsEnabled() ? 1 : 0);
         } else {
             dbglog::Line("diagnostics::Init failed");
+            if (registryReady && cfg.diagnostics_enabled) diagnostics::RegistryShutdown();
         }
 
         if (MH_Initialize() != MH_OK) {
@@ -156,6 +169,7 @@ namespace {
         hook::ShutdownD3D8Hook();
 #endif
         diagnostics::Shutdown();
+        diagnostics::RegistryShutdown();
         MH_Uninitialize();
         FreeConsole();
         g_shutdownState = 2;
@@ -170,7 +184,7 @@ extern "C" __declspec(dllexport) BOOL CortexShutdown() {
     return ShutdownThread(nullptr) == 0 ? TRUE : FALSE;
 }
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpvReserved) {
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     switch (reason) {
         case DLL_PROCESS_ATTACH: {
             g_hModule = hModule;

@@ -1,0 +1,78 @@
+name: Diagnostics M2
+
+on:
+  push:
+    branches:
+      - agent/mod-diagnostics-m2
+  pull_request:
+    paths:
+      - "core/diagnostics/**"
+      - "core/dllmain.cpp"
+      - "sdk/**"
+      - "tests/diagnostics_m2_tests.cpp"
+      - "tests/diagnostics_sdk_smoke.cpp"
+      - "tests/diagnostics_bundle_smoke.cpp"
+      - "docs/mod-sdk.md"
+      - ".github/workflows/diagnostics-m2.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnostics-m2:
+    name: diagnostics-m2-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile registry tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m2_tests.cpp
+          core\diagnostics\registry.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m2_tests.exe
+          /link
+
+      - name: Run registry tests
+        shell: cmd
+        run: diagnostics_m2_tests.exe
+
+      - name: Compile SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_sdk_smoke.exe
+          /link
+
+      - name: Run SDK smoke test
+        shell: cmd
+        run: diagnostics_sdk_smoke.exe
+
+      - name: Compile combined diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_bundle_smoke.cpp
+          core\config.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined diagnostics smoke test
+        shell: cmd
+        run: diagnostics_bundle_smoke.exe
