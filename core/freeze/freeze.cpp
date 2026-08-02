@@ -119,12 +119,19 @@ void Shutdown() {
 
 int Add(uintptr_t address, const std::string& type, const std::vector<uint8_t>& valueBytes, const std::string& label,
         int64_t ttlMs) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    int id = g_nextId++;
-    Entry e{address, type, valueBytes, label, ttlMs, 0};
-    if (ttlMs > 0) e.expiresAt = GetTickCount64() + static_cast<ULONGLONG>(ttlMs);
-    g_entries[id] = std::move(e);
-    SyncToProject();
+    int id = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        id = g_nextId++;
+        Entry e{address, type, valueBytes, label, ttlMs, 0};
+        if (ttlMs > 0) e.expiresAt = GetTickCount64() + static_cast<ULONGLONG>(ttlMs);
+        g_entries[id] = std::move(e);
+        SyncToProject();
+    }
+
+    // Apply the requested value before returning from the API call. The worker
+    // thread continues to reassert it at the normal interval afterwards.
+    memory::WriteBytes(address, valueBytes);
     return id;
 }
 
