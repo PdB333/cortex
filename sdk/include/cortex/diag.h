@@ -12,6 +12,7 @@ struct Api {
     decltype(&CortexDiagRegisterMod) registerMod = nullptr;
     decltype(&CortexDiagUnregisterMod) unregisterMod = nullptr;
     decltype(&CortexDiagBreadcrumb) breadcrumb = nullptr;
+    decltype(&CortexDiagHeartbeat) heartbeat = nullptr;
     decltype(&CortexDiagScopeEnter) scopeEnter = nullptr;
     decltype(&CortexDiagScopeExit) scopeExit = nullptr;
     decltype(&CortexDiagValuePointer) valuePointer = nullptr;
@@ -20,6 +21,11 @@ struct Api {
     decltype(&CortexDiagValueDouble) valueDouble = nullptr;
     decltype(&CortexDiagValueBool) valueBool = nullptr;
     decltype(&CortexDiagValueText) valueText = nullptr;
+    decltype(&CortexDiagRegisterHook) registerHook = nullptr;
+    decltype(&CortexDiagUnregisterHook) unregisterHook = nullptr;
+    decltype(&CortexDiagHookEnter) hookEnter = nullptr;
+    decltype(&CortexDiagHookLeave) hookLeave = nullptr;
+    decltype(&CortexDiagHookException) hookException = nullptr;
 };
 
 inline Api* Resolve() {
@@ -43,6 +49,7 @@ inline Api* Resolve() {
         CORTEX_DIAG_RESOLVE(registerMod, "CortexDiagRegisterMod");
         CORTEX_DIAG_RESOLVE(unregisterMod, "CortexDiagUnregisterMod");
         CORTEX_DIAG_RESOLVE(breadcrumb, "CortexDiagBreadcrumb");
+        CORTEX_DIAG_RESOLVE(heartbeat, "CortexDiagHeartbeat");
         CORTEX_DIAG_RESOLVE(scopeEnter, "CortexDiagScopeEnter");
         CORTEX_DIAG_RESOLVE(scopeExit, "CortexDiagScopeExit");
         CORTEX_DIAG_RESOLVE(valuePointer, "CortexDiagValuePointer");
@@ -51,6 +58,11 @@ inline Api* Resolve() {
         CORTEX_DIAG_RESOLVE(valueDouble, "CortexDiagValueDouble");
         CORTEX_DIAG_RESOLVE(valueBool, "CortexDiagValueBool");
         CORTEX_DIAG_RESOLVE(valueText, "CortexDiagValueText");
+        CORTEX_DIAG_RESOLVE(registerHook, "CortexDiagRegisterHook");
+        CORTEX_DIAG_RESOLVE(unregisterHook, "CortexDiagUnregisterHook");
+        CORTEX_DIAG_RESOLVE(hookEnter, "CortexDiagHookEnter");
+        CORTEX_DIAG_RESOLVE(hookLeave, "CortexDiagHookLeave");
+        CORTEX_DIAG_RESOLVE(hookException, "CortexDiagHookException");
 #undef CORTEX_DIAG_RESOLVE
         api = next;
     }
@@ -88,6 +100,11 @@ inline void UnregisterMod(HMODULE module) {
 inline void Breadcrumb(const char* message, const char* category = "user") {
     auto* api = detail::Resolve();
     if (api && api->breadcrumb) api->breadcrumb(category, message);
+}
+
+inline void Heartbeat(const char* source) {
+    auto* api = detail::Resolve();
+    if (api && api->heartbeat) api->heartbeat(source);
 }
 
 class Scope {
@@ -143,6 +160,89 @@ inline void Pointer(const char* name, T* value) {
     Value(name, static_cast<const void*>(value));
 }
 
+inline uint64_t RegisterHook(HMODULE ownerModule, const char* name, const char* library,
+                             uintptr_t target, uintptr_t detour, uintptr_t trampoline,
+                             uint32_t overwriteSize,
+                             const uint8_t* originalBytes = nullptr, uint32_t originalSize = 0,
+                             const uint8_t* installedBytes = nullptr, uint32_t installedSize = 0) {
+    auto* api = detail::Resolve();
+    if (!api || !api->registerHook) return 0;
+    CortexDiagHookInfo info{};
+    info.struct_size = sizeof(info);
+    info.abi_version = CORTEX_DIAG_ABI_VERSION;
+    info.owner_module = ownerModule;
+    info.name = name;
+    info.library = library;
+    info.target = target;
+    info.detour = detour;
+    info.trampoline = trampoline;
+    info.overwrite_size = overwriteSize;
+    info.original_bytes = originalBytes;
+    info.original_size = originalSize;
+    info.installed_bytes = installedBytes;
+    info.installed_size = installedSize;
+    return api->registerHook(&info);
+}
+
+inline void UnregisterHook(uint64_t hookId) {
+    auto* api = detail::Resolve();
+    if (api && api->unregisterHook) api->unregisterHook(hookId);
+}
+
+inline void HookException(uint64_t hookId, DWORD exceptionCode) {
+    auto* api = detail::Resolve();
+    if (api && api->hookException) api->hookException(hookId, exceptionCode);
+}
+
+class HookRegistration {
+public:
+    HookRegistration(HMODULE ownerModule, const char* name, const char* library,
+                     uintptr_t target, uintptr_t detour, uintptr_t trampoline,
+                     uint32_t overwriteSize,
+                     const uint8_t* originalBytes = nullptr, uint32_t originalSize = 0,
+                     const uint8_t* installedBytes = nullptr, uint32_t installedSize = 0)
+        : id_(RegisterHook(ownerModule, name, library, target, detour, trampoline,
+                           overwriteSize, originalBytes, originalSize,
+                           installedBytes, installedSize)) {}
+    ~HookRegistration() { reset(); }
+    HookRegistration(const HookRegistration&) = delete;
+    HookRegistration& operator=(const HookRegistration&) = delete;
+    HookRegistration(HookRegistration&& other) noexcept : id_(other.id_) { other.id_ = 0; }
+    HookRegistration& operator=(HookRegistration&& other) noexcept {
+        if (this != &other) {
+            reset();
+            id_ = other.id_;
+            other.id_ = 0;
+        }
+        return *this;
+    }
+    uint64_t id() const { return id_; }
+    explicit operator bool() const { return id_ != 0; }
+    void reset() {
+        if (id_) UnregisterHook(id_);
+        id_ = 0;
+    }
+private:
+    uint64_t id_ = 0;
+};
+
+class HookInvocation {
+public:
+    explicit HookInvocation(uint64_t hookId) : id_(hookId), api_(detail::Resolve()) {
+        if (id_ && api_ && api_->hookEnter) recursionDepth_ = api_->hookEnter(id_);
+    }
+    ~HookInvocation() {
+        if (id_ && api_ && api_->hookLeave) api_->hookLeave(id_);
+    }
+    HookInvocation(const HookInvocation&) = delete;
+    HookInvocation& operator=(const HookInvocation&) = delete;
+    uint32_t recursionDepth() const { return recursionDepth_; }
+private:
+    uint64_t id_ = 0;
+    detail::Api* api_ = nullptr;
+    uint32_t recursionDepth_ = 0;
+};
+
 } // namespace cortex::diag
 
 #define CORTEX_DIAG_JOIN_INNER(a, b) a##b
@@ -151,8 +251,13 @@ inline void Pointer(const char* name, T* value) {
     ::cortex::diag::Scope CORTEX_DIAG_JOIN(cortex_diag_scope_, __LINE__)((name), __FILE__, __LINE__)
 #define CORTEX_DIAG_BREADCRUMB(message) ::cortex::diag::Breadcrumb((message))
 #define CORTEX_DIAG_BREADCRUMB_AS(category, message) ::cortex::diag::Breadcrumb((message), (category))
+#define CORTEX_DIAG_HEARTBEAT(source) ::cortex::diag::Heartbeat((source))
 #define CORTEX_DIAG_VALUE(name, value) ::cortex::diag::Value((name), (value))
 #define CORTEX_DIAG_POINTER(name, value) ::cortex::diag::Pointer((name), (value))
 #define CORTEX_DIAG_REGISTER_MOD(module, name, version, author, commit, build_id, source_root, symbol_path) \
     ::cortex::diag::RegisterMod((module), (name), (version), (author), (commit), (build_id), (source_root), (symbol_path))
 #define CORTEX_DIAG_UNREGISTER_MOD(module) ::cortex::diag::UnregisterMod((module))
+#define CORTEX_DIAG_HOOK_SCOPE(hook_id) \
+    ::cortex::diag::HookInvocation CORTEX_DIAG_JOIN(cortex_diag_hook_scope_, __LINE__)((hook_id))
+#define CORTEX_DIAG_HOOK_EXCEPTION(hook_id, exception_code) \
+    ::cortex::diag::HookException((hook_id), (exception_code))

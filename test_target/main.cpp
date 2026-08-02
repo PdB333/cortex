@@ -1,15 +1,15 @@
 // cortex_test_target: minimal x86/x64 target for testing Cortex end-to-end.
 //
 // Exposes well-known memory values at exported symbols so tests can verify
-// /memory/read, scans, and freezes without needing a real game.
-//
-// Pass --crash-null to trigger an intentional unhandled access violation
-// after startup. This is used to verify Cortex crash-report generation.
+// /memory/read, scans, freezes, crash capture and hangs without a real game.
 
 #include <windows.h>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
 
 extern "C" __declspec(dllexport) uint32_t g_cortex_u32   = 0xDEADBEEFu;
 extern "C" __declspec(dllexport) uint64_t g_cortex_u64   = 0x0123456789ABCDEFull;
@@ -21,7 +21,74 @@ extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
 
-static void PrintCanary() {
+namespace {
+
+struct E2EControl {
+    bool enabled = false;
+    std::string manifestPath;
+    std::string crashEventName;
+    std::string hangEventName;
+    std::string stopEventName;
+    HANDLE crashEvent = nullptr;
+    HANDLE hangEvent = nullptr;
+    HANDLE stopEvent = nullptr;
+};
+
+std::vector<std::string> CommandLineArguments() {
+    std::vector<std::string> arguments;
+    std::string current;
+    bool quoted = false;
+    const char* commandLine = GetCommandLineA();
+    for (const char* cursor = commandLine; cursor && *cursor; ++cursor) {
+        if (*cursor == '"') {
+            quoted = !quoted;
+        } else if ((*cursor == ' ' || *cursor == '\t') && !quoted) {
+            if (!current.empty()) {
+                arguments.push_back(current);
+                current.clear();
+            }
+        } else {
+            current.push_back(*cursor);
+        }
+    }
+    if (!current.empty()) arguments.push_back(current);
+    return arguments;
+}
+
+bool HasArgument(const std::vector<std::string>& arguments, const char* value) {
+    for (const auto& argument : arguments)
+        if (argument == value) return true;
+    return false;
+}
+
+std::string OptionValue(const std::vector<std::string>& arguments, const char* option) {
+    const std::string prefix = std::string(option) + "=";
+    for (size_t index = 0; index < arguments.size(); ++index) {
+        if (arguments[index].rfind(prefix, 0) == 0)
+            return arguments[index].substr(prefix.size());
+        if (arguments[index] == option && index + 1 < arguments.size())
+            return arguments[index + 1];
+    }
+    return {};
+}
+
+std::string EscapeJson(const std::string& value) {
+    std::string escaped;
+    escaped.reserve(value.size() + 8);
+    for (unsigned char character : value) {
+        switch (character) {
+            case '\\': escaped += "\\\\"; break;
+            case '"': escaped += "\\\""; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped.push_back(static_cast<char>(character)); break;
+        }
+    }
+    return escaped;
+}
+
+void PrintCanary() {
     std::printf("cortex_test_target ready pid=%lu\n"
                 "  &g_cortex_u32    = %p  = 0x%08X\n"
                 "  &g_cortex_u64    = %p  = 0x%016llX\n"
@@ -29,77 +96,161 @@ static void PrintCanary() {
                 "  &g_cortex_double = %p  = %f\n"
                 "  &g_cortex_str    = %p  = \"%s\"\n"
                 "  &g_cortex_frame  = %p\n"
-                "  &g_cortex_health = %p (starts at 100, use freeze to test)\n",
+                "  &g_cortex_health = %p\n",
                 GetCurrentProcessId(),
-                (void*)&g_cortex_u32,    g_cortex_u32,
-                (void*)&g_cortex_u64,    (unsigned long long)g_cortex_u64,
-                (void*)&g_cortex_float,  g_cortex_float,
-                (void*)&g_cortex_double, g_cortex_double,
-                (void*)&g_cortex_str,    g_cortex_str,
-                (void*)&g_cortex_frame,
-                (void*)&g_cortex_health);
+                static_cast<void*>(&g_cortex_u32), g_cortex_u32,
+                static_cast<void*>(&g_cortex_u64), static_cast<unsigned long long>(g_cortex_u64),
+                static_cast<void*>(&g_cortex_float), g_cortex_float,
+                static_cast<void*>(&g_cortex_double), g_cortex_double,
+                static_cast<void*>(&g_cortex_str), g_cortex_str,
+                const_cast<uint32_t*>(&g_cortex_frame),
+                const_cast<uint32_t*>(&g_cortex_health));
     std::fflush(stdout);
 }
 
-__declspec(noinline) static void TriggerNullCrash() {
+__declspec(noinline) void TriggerNullCrash() {
     std::puts("cortex_test_target: triggering intentional null write");
     std::fflush(stdout);
     volatile uint32_t* pointer = nullptr;
     *pointer = 0xC07ECAFEu;
 }
 
-static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    switch (m) {
-        case WM_DESTROY: PostQuitMessage(0); return 0;
+std::string EventName(const char* kind) {
+    char name[96]{};
+    std::snprintf(name, sizeof(name), "Local\\CortexE2E_%s_%lu", kind,
+                  static_cast<unsigned long>(GetCurrentProcessId()));
+    return name;
+}
+
+bool InitializeE2E(const std::vector<std::string>& arguments, E2EControl& control) {
+    control.manifestPath = OptionValue(arguments, "--e2e-manifest");
+    if (control.manifestPath.empty()) return true;
+
+    control.enabled = true;
+    control.crashEventName = EventName("Crash");
+    control.hangEventName = EventName("Hang");
+    control.stopEventName = EventName("Stop");
+    control.crashEvent = CreateEventA(nullptr, TRUE, FALSE, control.crashEventName.c_str());
+    control.hangEvent = CreateEventA(nullptr, TRUE, FALSE, control.hangEventName.c_str());
+    control.stopEvent = CreateEventA(nullptr, TRUE, FALSE, control.stopEventName.c_str());
+    return control.crashEvent && control.hangEvent && control.stopEvent;
+}
+
+void WriteManifest(const E2EControl& control, HWND window) {
+    if (!control.enabled) return;
+    char modulePath[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+
+    std::ofstream file(control.manifestPath, std::ios::binary | std::ios::trunc);
+    file << "{\n"
+         << "  \"schema_version\": 1,\n"
+         << "  \"pid\": " << GetCurrentProcessId() << ",\n"
+         << "  \"pointer_size\": " << sizeof(void*) << ",\n"
+         << "  \"module_path\": \"" << EscapeJson(modulePath) << "\",\n"
+         << "  \"window\": \"0x" << std::hex << reinterpret_cast<uintptr_t>(window) << "\",\n"
+         << "  \"u32\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_u32) << "\",\n"
+         << "  \"u64\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_u64) << "\",\n"
+         << "  \"float\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_float) << "\",\n"
+         << "  \"double\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_double) << "\",\n"
+         << "  \"string\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_str) << "\",\n"
+         << "  \"frame\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_frame) << "\",\n"
+         << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
+         << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
+         << std::dec
+         << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
+         << "  \"hang_event\": \"" << EscapeJson(control.hangEventName) << "\",\n"
+         << "  \"stop_event\": \"" << EscapeJson(control.stopEventName) << "\"\n"
+         << "}\n";
+    file.flush();
+}
+
+void CloseE2E(E2EControl& control) {
+    if (control.crashEvent) CloseHandle(control.crashEvent);
+    if (control.hangEvent) CloseHandle(control.hangEvent);
+    if (control.stopEvent) CloseHandle(control.stopEvent);
+    control = {};
+}
+
+LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    switch (message) {
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
         case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC dc = BeginPaint(h, &ps);
-            RECT rc; GetClientRect(h, &rc);
-            HBRUSH bg = CreateSolidBrush(RGB(0x33, 0x66, 0x99));
-            FillRect(dc, &rc, bg);
-            DeleteObject(bg);
-            char buf[128];
-            std::snprintf(buf, sizeof(buf),
+            PAINTSTRUCT paint{};
+            HDC dc = BeginPaint(window, &paint);
+            RECT rectangle{};
+            GetClientRect(window, &rectangle);
+            HBRUSH background = CreateSolidBrush(RGB(0x33, 0x66, 0x99));
+            FillRect(dc, &rectangle, background);
+            DeleteObject(background);
+            char text[128]{};
+            std::snprintf(text, sizeof(text),
                           "cortex_test_target  frame=%u  W=%u  health=%u",
                           g_cortex_frame, g_cortex_wpress, g_cortex_health);
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, RGB(255, 255, 255));
-            TextOutA(dc, 10, 10, buf, (int)std::strlen(buf));
-            EndPaint(h, &ps);
+            TextOutA(dc, 10, 10, text, static_cast<int>(std::strlen(text)));
+            EndPaint(window, &paint);
             return 0;
         }
     }
-    return DefWindowProcA(h, m, w, l);
+    return DefWindowProcA(window, message, wparam, lparam);
 }
 
-int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int show) {
+} // namespace
+
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     PrintCanary();
+    const auto arguments = CommandLineArguments();
 
-    WNDCLASSA wc{};
-    wc.lpfnWndProc   = WndProc;
-    wc.hInstance     = inst;
-    wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName = "CortexTestTarget";
-    RegisterClassA(&wc);
+    WNDCLASSA windowClass{};
+    windowClass.lpfnWndProc = WndProc;
+    windowClass.hInstance = instance;
+    windowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    windowClass.lpszClassName = "CortexTestTarget";
+    RegisterClassA(&windowClass);
 
-    HWND h = CreateWindowA("CortexTestTarget", "cortex_test_target",
-                           WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                           640, 200, nullptr, nullptr, inst, nullptr);
-    ShowWindow(h, show);
+    HWND window = CreateWindowA(
+        "CortexTestTarget", "cortex_test_target", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 640, 200,
+        nullptr, nullptr, instance, nullptr);
+    ShowWindow(window, show);
 
-    const bool crashNull = std::strstr(GetCommandLineA(), "--crash-null") != nullptr;
+    E2EControl e2e;
+    if (!InitializeE2E(arguments, e2e)) return 3;
+    WriteManifest(e2e, window);
+
+    const bool crashNull = HasArgument(arguments, "--crash-null");
     uint32_t crashCountdown = crashNull ? 60 : 0;
 
     for (;;) {
-        MSG msg;
-        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) return 0;
-            TranslateMessage(&msg);
-            DispatchMessageA(&msg);
+        MSG message{};
+        while (PeekMessageA(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.message == WM_QUIT) {
+                CloseE2E(e2e);
+                return 0;
+            }
+            TranslateMessage(&message);
+            DispatchMessageA(&message);
         }
-        g_cortex_frame++;
-        if (GetAsyncKeyState('W') & 0x8000) g_cortex_wpress++;
-        InvalidateRect(h, nullptr, FALSE);
+
+        if (e2e.enabled && WaitForSingleObject(e2e.stopEvent, 0) == WAIT_OBJECT_0) {
+            CloseE2E(e2e);
+            return 0;
+        }
+        if (e2e.enabled && WaitForSingleObject(e2e.crashEvent, 0) == WAIT_OBJECT_0)
+            TriggerNullCrash();
+        if (e2e.enabled && WaitForSingleObject(e2e.hangEvent, 0) == WAIT_OBJECT_0) {
+            while (WaitForSingleObject(e2e.stopEvent, 100) == WAIT_TIMEOUT) {}
+            CloseE2E(e2e);
+            return 0;
+        }
+
+        ++g_cortex_frame;
+        if (GetAsyncKeyState('W') & 0x8000) ++g_cortex_wpress;
+        if (e2e.enabled && (g_cortex_frame % 15) == 0) ++g_cortex_health;
+        InvalidateRect(window, nullptr, FALSE);
         if (crashCountdown > 0 && --crashCountdown == 0) TriggerNullCrash();
         Sleep(16);
     }

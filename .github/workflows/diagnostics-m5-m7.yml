@@ -1,0 +1,101 @@
+name: Diagnostics M5-M7
+
+on:
+  push:
+    branches:
+      - agent/mod-diagnostics-m5-m7
+  pull_request:
+    paths:
+      - "core/diagnostics/shared_channel.*"
+      - "host/diagnostics/**"
+      - "tools/diagnostics_host/**"
+      - "sdk/include/cortex/diag*.h"
+      - "core/dllmain.cpp"
+      - "tests/diagnostics_m5*.cpp"
+      - "tests/diagnostics_m5_m7_tests.cpp"
+      - "docs/external-diagnostics.md"
+      - ".github/workflows/diagnostics-m5-m7.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnostics-m5-m7:
+    name: diagnostics-m5-m7-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile external diagnostics tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m5_m7_tests.cpp
+          core\diagnostics\shared_channel.cpp
+          host\diagnostics\external_host.cpp
+          host\diagnostics\analyzer.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_m7_tests.exe
+          /link dbghelp.lib user32.lib
+
+      - name: Run external diagnostics tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m5_m7_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m5_m7_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile and run heartbeat SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_m5_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_sdk_smoke.exe
+          /link
+          && diagnostics_m5_sdk_smoke.exe
+
+      - name: Compile external diagnostics host
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS
+          tools\diagnostics_host\main.cpp
+          host\diagnostics\external_host.cpp
+          host\diagnostics\analyzer.cpp
+          /Icore /Isdk\include
+          /Fe:cortex_diag_host.exe
+          /link dbghelp.lib user32.lib
+
+      - name: Smoke test external diagnostics host
+        shell: cmd
+        run: cortex_diag_host.exe
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m5_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m5_bundle_smoke.exe

@@ -107,6 +107,25 @@ namespace {
     bool IsPublicPath(const std::string& path) {
         return path == "/status" || path == "/health" || path == "/tools" || path == "/openapi.json";
     }
+
+    bool RequestDeclaresPayload(const httplib::Request& req) {
+        // cpp-httplib invokes the pre-routing handler before it has populated
+        // req.body. Inspect the transport headers instead so content-type
+        // enforcement cannot be bypassed by reaching the route parser first.
+        const std::string transferEncoding = req.get_header_value("Transfer-Encoding");
+        if (!transferEncoding.empty()) return true;
+
+        const std::string contentLength = req.get_header_value("Content-Length");
+        if (contentLength.empty()) return false;
+        try {
+            size_t consumed = 0;
+            const unsigned long long length = std::stoull(contentLength, &consumed, 10);
+            return consumed == contentLength.size() && length != 0;
+        } catch (...) {
+            // A malformed Content-Length must not bypass the stricter branch.
+            return true;
+        }
+    }
 }
 
 bool Start(int port, const std::string& configuredToken) {
@@ -147,7 +166,8 @@ bool Start(int port, const std::string& configuredToken) {
             res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json");
             return httplib::Server::HandlerResponse::Handled;
         }
-        if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") && !req.body.empty()) {
+        if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") &&
+            RequestDeclaresPayload(req)) {
             std::string contentType = req.get_header_value("Content-Type");
             std::transform(contentType.begin(), contentType.end(), contentType.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
