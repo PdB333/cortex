@@ -85,6 +85,7 @@ All notable changes to Cortex are documented in this file.
 - Fixed an x64 stack-overflow risk caused by large temporary registry resets and test buffers.
 - Added crash-time non-blocking registry snapshots to reduce deadlock risk.
 - Fixed private helper collisions in Cortex's combined injected translation unit.
+- Applied new freezes immediately and made the E2E freeze test verify bounded restoration after deliberate perturbations.
 
 ### Documentation and build system
 
