@@ -1,0 +1,81 @@
+name: Diagnostics M4
+
+on:
+  push:
+    branches:
+      - agent/mod-diagnostics-m4
+  pull_request:
+    paths:
+      - "core/diagnostics/hooks.*"
+      - "core/dllmain.cpp"
+      - "sdk/include/cortex/diag*.h"
+      - "tests/diagnostics_m4_*.cpp"
+      - "docs/hooks.md"
+      - ".github/workflows/diagnostics-m4.yml"
+  workflow_dispatch:
+
+jobs:
+  diagnostics-m4:
+    name: diagnostics-m4-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile hook registry tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m4_tests.cpp
+          core\diagnostics\registry.cpp
+          core\diagnostics\hooks.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_tests.exe
+          /link
+
+      - name: Run hook registry tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m4_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m4_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile and run SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_m4_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_sdk_smoke.exe
+          /link
+          && diagnostics_m4_sdk_smoke.exe
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m4_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m4_bundle_smoke.exe

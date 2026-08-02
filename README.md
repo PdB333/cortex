@@ -10,8 +10,8 @@
 Cortex is a hybrid external host and injectable Windows agent that exposes a
 running process through a local, authenticated REST + MCP API. Memory
 scanning, disassembly, debugging, patching, input automation, screenshots,
-OCR, Lua scripting, network capture, and persistent project state — one
-machine-readable interface designed for tools and AI agents.
+OCR, Lua scripting, network capture, crash diagnostics, and persistent project
+state — one machine-readable interface designed for tools and AI agents.
 
 The HTTP server binds only to `127.0.0.1`. Protected routes require a
 256-bit token generated beside the DLL.
@@ -28,6 +28,7 @@ The HTTP server binds only to `127.0.0.1`. Protected routes require a
 | Memory | Typed read/write, batches, region enumeration, external scans (exact/comparative/AOB/strings/code caves), persistent pointer maps |
 | Reverse engineering | x86/x64 disassembly, CFG, xrefs, vtables, PE headers, inferred structures, Ghidra bridge |
 | Debugger | HW/SW breakpoints, expression-based memory captures on hit, `StackWalk64` + heuristic fallback, trigger→auto-trace, paginated logs |
+| Diagnostics | Crash dumps, breadcrumbs, registered mods/scopes/values/hooks, PDB/DWARF symbolization, freeze capture and evidence-based analysis |
 | Automation | **Background** screenshots (any renderer) & input (Win32 + DirectInput synthesis), sequences, record/replay, window control |
 | Networking | ws2_32 recv/send/WSA* interceptor with ring buffer |
 | Scripting | Embedded **Lua 5.4** sandbox with `cortex.*` bindings + persisted catalog |
@@ -43,7 +44,7 @@ Renderer hooks: D3D8 (x86), D3D9/10/11 (x86+x64), D3D12 (x64), OpenGL. Vulkan no
 
 ```powershell
 # 1. Launch your target, then inject
-.\injector_x64.exe game.exe
+.\cortex_host.exe inject game.exe
 
 # 2. Verify with the generated token
 $h = @{ "X-Cortex-Token" = (Get-Content .\cortex.token -Raw).Trim() }
@@ -60,6 +61,22 @@ Invoke-WebRequest "http://127.0.0.1:6969/screenshot?mode=auto" -Headers $h -OutF
 
 Any other route: consult `GET /tools` (self-documenting manifest) or `GET /openapi.json`.
 
+## One host executable
+
+All user-facing command-line tools are exposed through `cortex_host.exe`:
+
+```text
+cortex_host.exe serve ...       external REST controller and scanner
+cortex_host.exe inject ...      inject cortex_core.dll
+cortex_host.exe diagnose ...    monitor crashes and freezes
+cortex_host.exe analyze ...     analyze a crash/freeze directory
+cortex_host.exe symbolize ...   resolve PDB or DWARF symbols
+cortex_host.exe mcp ...         stdio MCP bridge
+```
+
+The historical `cortex_host.exe --pid ...` syntax remains supported and maps to
+`cortex_host.exe serve --pid ...`.
+
 ## Build
 
 Requires CMake 3.20+, Ninja, MinGW-w64 (x86 and/or x64). Deps are pinned in
@@ -75,9 +92,16 @@ cmake --build build --config Release
 # 64-bit (mirror the above with x86_64-w64-mingw32-*)
 ```
 
-Each build produces `cortex_core.dll` (injected), `injector.exe`,
-`cortex_host.exe` (external scanner), and `cortex_mcp_bridge.exe` (stdio
-bridge). Run `ctest --test-dir build` to check.
+Each normal build produces `cortex_core.dll` and the single user-facing
+`cortex_host.exe`. Test executables are generated only for validation targets.
+Run `ctest --test-dir build` to check.
+
+To build only the lightweight host and skip renderer/injected-core dependencies:
+
+```powershell
+cmake -S tools/unified_host -B build/unified-host
+cmake --build build/unified-host --config Release
+```
 
 Use `-DCORTEX_OFFLINE=ON` to prevent network access after the first configure.
 
@@ -85,33 +109,56 @@ Use `-DCORTEX_OFFLINE=ON` to prevent network access after the first configure.
 
 Two ways:
 
-**Injector.** Start the process, then `.\injector.exe <name-or-pid> [dll]`.
+**Unified host.** Start the process, then run:
+
+```powershell
+.\cortex_host.exe inject <name-or-pid> [cortex_core.dll]
+```
 
 **ASI loader.** If the target has an ASI loader, rename `cortex_core.dll` to
 `cortex.asi` and drop it in the game's `scripts`/ASI directory.
 
-Bitness must match the target process.
+The host and DLL bitness must match the target process for injection and full
+CPU-context diagnostics.
 
 ## Connecting an MCP client
 
 Cortex exposes MCP two ways:
 
 - **HTTP + JSON-RPC 2.0** on `POST /mcp` (custom agents).
-- **stdio bridge** (`cortex_mcp_bridge_x{86,64}.exe`) for out-of-the-box
-  clients like Claude Desktop, Cursor, Cline. Register it:
+- **stdio bridge** through `cortex_host.exe mcp` for out-of-the-box clients like
+  Claude Desktop, Cursor, and Cline. Register it:
 
   ```json
   {
     "mcpServers": {
       "cortex": {
-        "command": "C:/path/cortex_mcp_bridge_x64.exe",
-        "args": ["--token-file", "C:/path/cortex.token"]
+        "command": "C:/path/cortex_host.exe",
+        "args": ["mcp", "--token-file", "C:/path/cortex.token"]
       }
     }
   }
   ```
 
 Tools are auto-derived from the same `/tools` manifest — no second registry.
+
+## Crash and freeze diagnostics
+
+Watch an injected process from outside the game:
+
+```powershell
+.\cortex_host.exe diagnose --pid 1234 --heartbeat render --hang-ms 5000
+```
+
+Analyze an existing report or symbolize an address later:
+
+```powershell
+.\cortex_host.exe analyze C:\path\to\crash_directory
+.\cortex_host.exe symbolize --image C:\mods\MyMod.dll --rva 0x1832
+```
+
+See [`docs/external-diagnostics.md`](docs/external-diagnostics.md),
+[`docs/symbols.md`](docs/symbols.md), and [`docs/hooks.md`](docs/hooks.md).
 
 ## Lua scripting
 
@@ -219,11 +266,14 @@ Stack walks combine EBP chain → `StackWalk64` → heuristic exec-page scan.
 
 ## Known limitations
 
-- Windows only; injector and DLL bitness must match the target.
+- Windows only; host, injector path and DLL bitness must match the target for
+  injection and trusted register contexts.
 - Native Vulkan rendering is not hooked.
 - Arbitrary memory writes, patches, and native calls can crash the target.
 - Dynamic addresses require signatures or pointer paths across restarts
   (use `module+RVA` or `/project` for stable ids).
+- Production readiness still requires validation inside representative real
+  games, launchers, overlays and crash-handler combinations.
 
 ## Dependencies
 

@@ -17,8 +17,13 @@ namespace {
         return s.substr(a, b - a + 1);
     }
 
+    void LowerInPlace(std::string& value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    }
+
     bool ParseBool(std::string value) {
-        std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+        LowerInPlace(value);
         return value == "1" || value == "true" || value == "yes" || value == "on";
     }
 }
@@ -52,7 +57,7 @@ Config Load() {
         if (eq == std::string::npos) continue;
         std::string key = Trim(line.substr(0, eq));
         std::string val = Trim(line.substr(eq + 1));
-        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+        LowerInPlace(key);
 
         if (key == "port") {
             cfg.port = std::atoi(val.c_str());
@@ -68,6 +73,14 @@ Config Load() {
             cfg.diagnostics_write_minidump = ParseBool(val);
         } else if (key == "diagnostics_crash_directory") {
             cfg.diagnostics_crash_directory = val;
+        } else if (key == "diagnostics_symbolize") {
+            cfg.diagnostics_symbolize = ParseBool(val);
+        } else if (key == "diagnostics_symbol_path") {
+            cfg.diagnostics_symbol_path = val;
+        } else if (key == "diagnostics_external_symbolizer") {
+            cfg.diagnostics_external_symbolizer = val;
+        } else if (key == "diagnostics_max_stack_frames") {
+            cfg.diagnostics_max_stack_frames = (std::max)(1, (std::min)(128, std::atoi(val.c_str())));
         }
     }
     return cfg;

@@ -1,0 +1,89 @@
+name: Cortex E2E Windows
+
+on:
+  push:
+    branches:
+      - agent/automated-e2e-matrix
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "core/**"
+      - "host/**"
+      - "injector/**"
+      - "mcp_bridge/**"
+      - "sdk/**"
+      - "test_target/**"
+      - "tests/e2e/**"
+      - "tools/**"
+      - ".github/workflows/e2e-windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cortex-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure complete Cortex tree
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/e2e-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build complete Cortex tree
+        shell: msys2 {0}
+        run: cmake --build build/e2e-${{ matrix.arch }} --parallel 2
+
+      - name: Build instrumented fake mod
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O1 -g -shared
+          tests/e2e/fake_mod.cpp
+          -Isdk/include
+          -o build/e2e-${{ matrix.arch }}/cortex_e2e_mod.dll
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run deterministic E2E scenarios
+        shell: pwsh
+        run: >-
+          ./tests/e2e/run_e2e.ps1
+          -BuildRoot "build/e2e-${{ matrix.arch }}"
+          -Architecture "${{ matrix.arch }}"
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-e2e-${{ matrix.arch }}
+          path: build/e2e-${{ matrix.arch }}/e2e-results-${{ matrix.arch }}
+          if-no-files-found: warn
+          retention-days: 14

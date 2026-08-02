@@ -318,30 +318,52 @@ set_target_properties(core PROPERTIES
 target_link_options(core PRIVATE -static -static-libgcc -static-libstdc++)
 
 # =========================================================================
-# injector.exe -- standalone CLI to inject core.dll into a running process
+# cortex_host.exe -- all user-facing Cortex command-line tools in one binary
 # =========================================================================
-add_executable(injector
-    injector/main.cpp
-)
-target_compile_definitions(injector PRIVATE
-    _WIN32_WINNT=0x0601
-    WIN32_LEAN_AND_MEAN
-    NOMINMAX
-)
-target_link_options(injector PRIVATE -static -static-libgcc -static-libstdc++)
+# Preserve the existing, already-tested implementations by renaming each
+# source file's main() at compile time and dispatching from unified_main.cpp.
+set_source_files_properties(host/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexServeMain")
+set_source_files_properties(injector/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexInjectMain")
+set_source_files_properties(mcp_bridge/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexMcpMain")
+set_source_files_properties(tools/diagnostics_host/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
+set_source_files_properties(tools/symbolize_main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
 
-# =========================================================================
-# cortex_host.exe -- external controller/scanner (never lives in game memory)
-# =========================================================================
-add_executable(cortex_host host/main.cpp)
-target_include_directories(cortex_host PRIVATE ${httplib_SOURCE_DIR})
+add_executable(cortex_host
+    host/unified_main.cpp
+    host/main.cpp
+    injector/main.cpp
+    mcp_bridge/main.cpp
+    tools/diagnostics_host/main.cpp
+    tools/symbolize_main.cpp
+    host/diagnostics/external_host.cpp
+    host/diagnostics/analyzer.cpp
+    core/symbols/symbols.cpp
+    core/symbols/external.cpp
+)
+target_include_directories(cortex_host PRIVATE
+    core
+    sdk/include
+    ${httplib_SOURCE_DIR}
+)
 target_compile_definitions(cortex_host PRIVATE
     CPPHTTPLIB_THREAD_POOL_COUNT=12
     _WIN32_WINNT=0x0601
     WIN32_LEAN_AND_MEAN
     NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
 )
-target_link_libraries(cortex_host PRIVATE nlohmann_json::nlohmann_json ws2_32 bcrypt)
+target_link_libraries(cortex_host PRIVATE
+    nlohmann_json::nlohmann_json
+    ws2_32
+    bcrypt
+    dbghelp
+    user32
+)
 target_link_options(cortex_host PRIVATE -static -static-libgcc -static-libstdc++)
 
 # =========================================================================
@@ -361,17 +383,6 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4)
 else()
     set_target_properties(cortex_test_target PROPERTIES OUTPUT_NAME "cortex_test_target_x64")
 endif()
-
-# =========================================================================
-# cortex_mcp_bridge -- stdio<->HTTP bridge for MCP clients (Claude Desktop
-# etc.) that only speak the stdio transport variant of the MCP spec.
-# =========================================================================
-add_executable(cortex_mcp_bridge mcp_bridge/main.cpp)
-target_include_directories(cortex_mcp_bridge PRIVATE ${httplib_SOURCE_DIR})
-target_compile_definitions(cortex_mcp_bridge PRIVATE
-    _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(cortex_mcp_bridge PRIVATE ws2_32)
-target_link_options(cortex_mcp_bridge PRIVATE -static -static-libgcc -static-libstdc++)
 
 # =========================================================================
 # Renderer-specific test targets: same canary layout, D3D9 and D3D11
