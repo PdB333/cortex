@@ -6,21 +6,29 @@ on:
       - master
     paths:
       - CHANGELOG.md
+      - README_INSTALL.txt
       - .github/workflows/publish-release.yml
+  pull_request:
+    paths:
+      - CHANGELOG.md
+      - README_INSTALL.txt
+      - injector/**
+      - .github/workflows/publish-release.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.3.0
+  group: publish-v0.3.1-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.3.0
+  RELEASE_TAG: v0.3.1
 
 jobs:
   build:
-    if: startsWith(github.event.head_commit.message, 'Release v0.3.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.3.1')
     strategy:
       fail-fast: false
       matrix:
@@ -28,9 +36,11 @@ jobs:
           - arch: x86
             msystem: MINGW32
             prefix: mingw-w64-i686
+            target_name: cortex_test_target_x86.exe
           - arch: x64
             msystem: MINGW64
             prefix: mingw-w64-x86_64
+            target_name: cortex_test_target_x64.exe
     runs-on: windows-2025
     steps:
       - name: Checkout release commit
@@ -55,20 +65,57 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/release-${{ matrix.arch }} --parallel 2
 
-      - name: Package release
+      - name: Build standalone compatibility injector
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 injector/main.cpp
+          -o build/release-${{ matrix.arch }}/injector.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Package and verify release
         shell: pwsh
         run: |
           $name = "cortex-${env:RELEASE_TAG}-windows-${{ matrix.arch }}"
           $stage = Join-Path $PWD "dist/$name"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
           Copy-Item "build/release-${{ matrix.arch }}/cortex_host.exe" $stage
           Copy-Item "build/release-${{ matrix.arch }}/cortex_core.dll" $stage
+          Copy-Item "build/release-${{ matrix.arch }}/cortex_core.dll" (Join-Path $stage "cortex.asi")
+          Copy-Item "build/release-${{ matrix.arch }}/injector.exe" $stage
+          Copy-Item "build/release-${{ matrix.arch }}/${{ matrix.target_name }}" $stage
+          Copy-Item README_INSTALL.txt $stage
           Copy-Item README.md $stage
           Copy-Item LICENSE $stage
           Copy-Item CHANGELOG.md $stage
           Copy-Item -Recurse docs (Join-Path $stage "docs")
           Copy-Item -Recurse sdk (Join-Path $stage "sdk")
+
+          $required = @(
+            "cortex_host.exe",
+            "cortex_core.dll",
+            "cortex.asi",
+            "injector.exe",
+            "${{ matrix.target_name }}",
+            "README_INSTALL.txt",
+            "README.md",
+            "LICENSE",
+            "CHANGELOG.md"
+          )
+          foreach ($file in $required) {
+            $path = Join-Path $stage $file
+            if (-not (Test-Path $path)) { throw "missing packaged file: $file" }
+            if ((Get-Item $path).Length -eq 0) { throw "empty packaged file: $file" }
+          }
+
+          $dllHash = (Get-FileHash (Join-Path $stage "cortex_core.dll") -Algorithm SHA256).Hash
+          $asiHash = (Get-FileHash (Join-Path $stage "cortex.asi") -Algorithm SHA256).Hash
+          if ($dllHash -ne $asiHash) {
+            throw "cortex.asi must be byte-identical to cortex_core.dll"
+          }
+
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
+          if (-not (Test-Path "dist/$name.zip")) { throw "release ZIP was not created" }
 
       - name: Upload packaged build
         uses: actions/upload-artifact@v4
@@ -79,7 +126,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: startsWith(github.event.head_commit.message, 'Release v0.3.0')
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.3.1')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -97,7 +144,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.3.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.3.1\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Publish GitHub release
