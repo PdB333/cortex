@@ -1,0 +1,35 @@
+name: Consolidate Final Stack
+
+on:
+  push:
+    branches:
+      - agent/automated-e2e-matrix
+    paths:
+      - .github/workflows/consolidate-final.yml
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create clean consolidation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin master agent/automated-e2e-matrix
+          git checkout -B agent/release-consolidation origin/master
+          git checkout origin/agent/automated-e2e-matrix -- .
+          rm -f .github/workflows/consolidate-final.yml
+          git add -A
+          git commit -m "Complete Cortex diagnostics and automated E2E"
+          git push --force origin agent/release-consolidation
