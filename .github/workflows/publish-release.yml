@@ -12,15 +12,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.2.0
+  group: publish-v0.3.0
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.2.0
+  RELEASE_TAG: v0.3.0
 
 jobs:
   build:
-    if: startsWith(github.event.head_commit.message, 'Release v0.2.0')
+    if: startsWith(github.event.head_commit.message, 'Release v0.3.0')
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +79,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: startsWith(github.event.head_commit.message, 'Release v0.2.0')
+    if: startsWith(github.event.head_commit.message, 'Release v0.3.0')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.2.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.3.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Publish GitHub release
