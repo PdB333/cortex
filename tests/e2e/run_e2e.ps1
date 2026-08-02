@@ -239,16 +239,25 @@ Run-Scenario "api-memory-security" {
 
         $freeze = Request-Json POST "/freeze" @{ address = $fixture.Manifest.health; type = "u32"; value = 4242; label = "e2e-health" }
         Assert-That ($freeze.ok -and [int]$freeze.id -gt 0) "Freeze creation failed"
-        Start-Sleep -Milliseconds 800
-        1..3 | ForEach-Object {
+        Wait-For -TimeoutMs 2000 -PollMs 20 -Description "initial frozen value" -Condition {
             $sample = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
-            Assert-That ([int]$sample.value -eq 4242) "Frozen value changed"
-            Start-Sleep -Milliseconds 150
+            [int]$sample.value -eq 4242
+        }
+        1..3 | ForEach-Object {
+            $perturbedValue = 5000 + $_
+            $perturb = Request-Json POST "/memory/write" @{ address = $fixture.Manifest.health; type = "u32"; value = $perturbedValue }
+            Assert-That $perturb.ok "Failed to perturb frozen value"
+            Wait-For -TimeoutMs 2000 -PollMs 20 -Description "freeze restoration $($_)" -Condition {
+                $sample = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
+                [int]$sample.value -eq 4242
+            }
         }
         [void](Request-Json DELETE "/freeze/$($freeze.id)")
-        Start-Sleep -Milliseconds 700
+        $unfrozen = Request-Json POST "/memory/write" @{ address = $fixture.Manifest.health; type = "u32"; value = 7331 }
+        Assert-That $unfrozen.ok "Failed to write after unfreeze"
+        Start-Sleep -Milliseconds 100
         $afterFreeze = Request-Json POST "/memory/read" @{ address = $fixture.Manifest.health; type = "u32" }
-        Assert-That ([int]$afterFreeze.value -ne 4242) "Value did not resume after unfreeze"
+        Assert-That ([int]$afterFreeze.value -ne 4242) "Value remained frozen after deletion"
 
         $start = Address-Number $fixture.Manifest.u32
         $end = $start + 4
