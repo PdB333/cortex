@@ -1,0 +1,117 @@
+name: Publish Release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - CHANGELOG.md
+      - .github/workflows/publish-release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v0.2.0
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.2.0
+
+jobs:
+  build:
+    if: startsWith(github.event.head_commit.message, 'Release v0.2.0')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            msystem: MINGW32
+            prefix: mingw-w64-i686
+          - arch: x64
+            msystem: MINGW64
+            prefix: mingw-w64-x86_64
+    runs-on: windows-2025
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.prefix }}-gcc
+            ${{ matrix.prefix }}-cmake
+            ${{ matrix.prefix }}-ninja
+
+      - name: Configure Cortex
+        shell: msys2 {0}
+        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+      - name: Build Cortex
+        shell: msys2 {0}
+        run: cmake --build build/release-${{ matrix.arch }} --parallel 2
+
+      - name: Package release
+        shell: pwsh
+        run: |
+          $name = "cortex-${env:RELEASE_TAG}-windows-${{ matrix.arch }}"
+          $stage = Join-Path $PWD "dist/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "build/release-${{ matrix.arch }}/cortex_host.exe" $stage
+          Copy-Item "build/release-${{ matrix.arch }}/cortex_core.dll" $stage
+          Copy-Item README.md $stage
+          Copy-Item LICENSE $stage
+          Copy-Item CHANGELOG.md $stage
+          Copy-Item -Recurse docs (Join-Path $stage "docs")
+          Copy-Item -Recurse sdk (Join-Path $stage "sdk")
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
+
+      - name: Upload packaged build
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-${{ env.RELEASE_TAG }}-windows-${{ matrix.arch }}
+          path: dist/cortex-${{ env.RELEASE_TAG }}-windows-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.event.head_commit.message, 'Release v0.2.0')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout changelog
+        uses: actions/checkout@v4
+
+      - name: Download packaged builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cortex-${{ env.RELEASE_TAG }}-windows-*
+          path: dist
+          merge-multiple: true
+
+      - name: Extract release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '/^## \[v0.2.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md \
+            dist/*.zip
