@@ -61,37 +61,44 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/full-${{ matrix.arch }} --parallel 2
 
+      - name: Build standalone compatibility injector
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 injector/main.cpp
+          -o build/full-${{ matrix.arch }}/injector.exe
+          -static -static-libgcc -static-libstdc++
+
       - name: Run CTest suite
         shell: msys2 {0}
         run: ctest --test-dir build/full-${{ matrix.arch }} --output-on-failure
 
-      - name: Verify unified artifacts
+      - name: Verify release-compatible artifacts
         shell: pwsh
         run: |
           $root = Resolve-Path "build/full-${{ matrix.arch }}"
-          foreach ($required in @("cortex_host.exe", "cortex_core.dll", "${{ matrix.target_name }}")) {
+          foreach ($required in @("cortex_host.exe", "cortex_core.dll", "injector.exe", "${{ matrix.target_name }}")) {
             if (-not (Test-Path (Join-Path $root $required))) {
               throw "missing required artifact: $required"
             }
           }
-          foreach ($legacy in @("injector.exe", "cortex_mcp_bridge.exe", "cortex_diag_host.exe", "cortex_symbolize.exe")) {
+          foreach ($legacy in @("cortex_mcp_bridge.exe", "cortex_diag_host.exe", "cortex_symbolize.exe")) {
             if (Test-Path (Join-Path $root $legacy)) {
               throw "legacy executable should not be produced: $legacy"
             }
           }
 
-      - name: Inject Cortex into the test target
+      - name: Inject Cortex with the standalone injector
         shell: pwsh
         run: |
           $root = Resolve-Path "build/full-${{ matrix.arch }}"
           $targetPath = Join-Path $root "${{ matrix.target_name }}"
-          $hostPath = Join-Path $root "cortex_host.exe"
+          $injectorPath = Join-Path $root "injector.exe"
           $corePath = Join-Path $root "cortex_core.dll"
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
-            & $hostPath inject $target.Id $corePath
-            if ($LASTEXITCODE -ne 0) { throw "Cortex injection failed" }
+            & $injectorPath $target.Id $corePath
+            if ($LASTEXITCODE -ne 0) { throw "Standalone Cortex injection failed" }
 
             $healthy = $false
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
