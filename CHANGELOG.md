@@ -2,6 +2,17 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.3.1] - 2026-08-02
+
+### Release packaging compatibility
+
+- Restored a standalone `injector.exe` in every Windows x86 and x64 release archive.
+- Added a ready-to-use `cortex.asi` beside `cortex_core.dll`; both files are verified byte-identical during packaging.
+- Restored the architecture-matched `cortex_test_target_x86.exe` or `cortex_test_target_x64.exe` demonstration program.
+- Added `README_INSTALL.txt`, a French installation and troubleshooting tutorial covering the standalone injector, unified host, ASI loader, token usage, diagnostics, and common errors.
+- Added pull-request packaging validation so every required file is built and checked before a release can be published.
+- Kept `cortex_host.exe inject` as the primary unified workflow while preserving the v0.2.0-compatible injector usage.
+
 ## [v0.3.0] - 2026-08-02
 
 ### Unified Windows tooling
