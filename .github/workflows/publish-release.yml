@@ -10,6 +10,8 @@ on:
       - core/api/routes_mcp.cpp
       - core/api/semantic_tools.h
       - agent/semantic-tools.md
+      - tests/semantic_tools_tests.cpp
+      - tests/semantic_mcp_e2e.ps1
       - .github/workflows/publish-release.yml
   pull_request:
     paths:
@@ -18,6 +20,8 @@ on:
       - core/api/routes_mcp.cpp
       - core/api/semantic_tools.h
       - agent/semantic-tools.md
+      - tests/semantic_tools_tests.cpp
+      - tests/semantic_mcp_e2e.ps1
       - injector/**
       - .github/workflows/publish-release.yml
   workflow_dispatch:
@@ -48,6 +52,7 @@ jobs:
             prefix: mingw-w64-x86_64
             target_name: cortex_test_target_x64.exe
     runs-on: windows-2025
+    timeout-minutes: 40
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -65,11 +70,29 @@ jobs:
 
       - name: Configure Cortex
         shell: msys2 {0}
-        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 
       - name: Build Cortex
         shell: msys2 {0}
         run: cmake --build build/release-${{ matrix.arch }} --parallel 2
+
+      - name: Build semantic catalog tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
+          -Ibuild/release-${{ matrix.arch }}/_deps/json-src/include
+          -o build/release-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run semantic catalog tests
+        shell: msys2 {0}
+        run: >-
+          build/release-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          core/api/routes_status.cpp
+
+      - name: Run existing CTest suite
+        shell: msys2 {0}
+        run: ctest --test-dir build/release-${{ matrix.arch }} --output-on-failure
 
       - name: Build standalone compatibility injector
         shell: msys2 {0}
@@ -77,6 +100,41 @@ jobs:
           c++ -std=c++17 -O2 injector/main.cpp
           -o build/release-${{ matrix.arch }}/injector.exe
           -static -static-libgcc -static-libstdc++
+
+      - name: Inject Cortex and test all semantic MCP tools
+        shell: pwsh
+        run: |
+          $root = Resolve-Path "build/release-${{ matrix.arch }}"
+          $targetPath = Join-Path $root "${{ matrix.target_name }}"
+          $injectorPath = Join-Path $root "injector.exe"
+          $corePath = Join-Path $root "cortex_core.dll"
+          $tokenPath = Join-Path $root "cortex.token"
+          $semanticTests = Resolve-Path "tests/semantic_mcp_e2e.ps1"
+          $target = Start-Process -FilePath $targetPath -PassThru
+          try {
+            Start-Sleep -Seconds 2
+            & $injectorPath $target.Id $corePath
+            if ($LASTEXITCODE -ne 0) { throw "Standalone Cortex injection failed" }
+
+            $healthy = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                $response = Invoke-RestMethod -Uri "http://127.0.0.1:6969/health" -TimeoutSec 1
+                if ($response.ok) {
+                  $healthy = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Milliseconds 250
+              }
+            }
+            if (-not $healthy) { throw "Injected Cortex API did not become healthy" }
+            if (-not (Test-Path $tokenPath)) { throw "Cortex token was not created at $tokenPath" }
+
+            & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
+          } finally {
+            if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }
+          }
 
       - name: Package and verify release
         shell: pwsh
