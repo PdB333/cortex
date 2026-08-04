@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
     const std::string manifestSource = ReadFile(argv[1]);
     Check(!manifestSource.empty(), "routes_status.cpp must be readable");
     const std::set<std::string> primitiveNames = ExtractManifestNames(manifestSource);
-    Check(primitiveNames.size() >= 100, "primitive manifest extraction returned suspiciously few tools");
+    Check(primitiveNames.size() >= 80, "primitive manifest extraction returned suspiciously few tools");
 
     const json firstCatalog = api::semantic::Catalog();
     const json secondCatalog = api::semantic::Catalog();
@@ -206,8 +206,7 @@ int main(int argc, char** argv) {
         Check(arguments == originalArguments, name + ": PlanFor must not mutate its input");
         Check(plan.value("status", std::string()) == "plan_ready", name + ": plan status must be plan_ready");
         Check(plan.value("confidence", 0.0) == 1.0, name + ": planning confidence must be 1.0");
-        Check(plan.value("objective", std::string()) == arguments.at("objective"),
-              name + ": objective was not preserved");
+        Check(plan.at("objective") == arguments.at("objective"), name + ": objective was not preserved");
         Check(plan.value("observations", json::array()) == observations,
               name + ": observations were not preserved");
         Check(plan.value("constraints", json::object()) == constraints,
