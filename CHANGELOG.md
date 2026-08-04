@@ -15,6 +15,14 @@ All notable changes to Cortex are documented in this file.
 - Added `agent/semantic-tools.md` with the full catalog, agent rules, failure semantics, and validation guidance.
 - Release archives now include the `agent` documentation directory.
 
+### Automated validation
+
+- Added standalone catalog and contract tests for all 30 semantic tools on Windows x86 and x64.
+- Added dependency validation so every semantic step must resolve to a live primitive or another acyclic semantic tool that reaches a primitive.
+- Added live MCP tests after real DLL injection for initialization, discovery, all 30 individual calls, batched calls, structured/text agreement, input validation, side-effect freedom, and primitive dispatch compatibility.
+- Added semantic tests to both the full Windows build and the v0.4.0 release gate; a failing test prevents packaging or publication.
+- Fixed unresolved `timeline_start`, `timeline_stop`, and `timeline_mark` recipe dependencies found by the new validation.
+
 ### Scope and safety
 
 - v0.4.0 exposes deterministic semantic planning over the existing REST/MCP primitives. Long-running server-side execution is intentionally deferred until cancellation, timeout, persistence, and rollback semantics are implemented.
