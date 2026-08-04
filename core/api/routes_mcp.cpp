@@ -128,10 +128,18 @@ json HandleToolsList(const json& id) {
     return JsonRpcResult(id, {{"tools", tools}});
 }
 
+bool IsToolError(const json& result) {
+    if (result.contains("status")) {
+        if (result["status"].is_number_integer() && result["status"].get<int>() >= 400) return true;
+        if (result["status"].is_string() && result["status"].get<std::string>() == "failed") return true;
+    }
+    return result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>();
+}
+
 json ToolCallResult(const json& id, const json& result) {
     return JsonRpcResult(id, {{"content", json::array({{{"type", "text"}, {"text", result.dump(2)}}})},
                               {"structuredContent", result},
-                              {"isError", result.value("status", 200) >= 400 || result.value("status", std::string()) == "failed"}});
+                              {"isError", IsToolError(result)}});
 }
 
 json HandleToolsCall(const json& id, const json& params) {
