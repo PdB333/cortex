@@ -95,7 +95,9 @@ $list = Invoke-Mcp -Payload ([ordered]@{
     params = @{}
 })
 $allTools = @($list.result.tools)
-$semanticTools = @($allTools | Where-Object { $_._semantic -eq $true })
+$semanticTools = @($allTools | Where-Object {
+    (Property-Names $_) -contains "_semantic" -and [bool]$_._semantic
+})
 Assert-True ($semanticTools.Count -eq 30) "tools/list must expose exactly 30 semantic tools"
 Assert-SetEqual -Expected $expectedNames -Actual @($semanticTools.name) `
     -Message "live MCP semantic names differ from the locked v0.4.0 catalog"
@@ -203,7 +205,8 @@ foreach ($tool in $semanticTools) {
     ++$batchId
 }
 
-$executeResponses = @(Invoke-Mcp -Payload $executeBatch.ToArray())
+$executePayload = $executeBatch.ToArray()
+$executeResponses = @(Invoke-Mcp -Payload $executePayload)
 Assert-True ($executeResponses.Count -eq 30) "batched execute test did not return 30 responses"
 foreach ($response in $executeResponses) {
     Assert-True ($response.result.structuredContent.status -eq "execution_not_available") `
