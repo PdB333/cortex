@@ -61,6 +61,20 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/full-${{ matrix.arch }} --parallel 2
 
+      - name: Build semantic catalog tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
+          -Ibuild/full-${{ matrix.arch }}/_deps/json-src/include
+          -o build/full-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run semantic catalog tests
+        shell: msys2 {0}
+        run: >-
+          build/full-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          core/api/routes_status.cpp
+
       - name: Build standalone compatibility injector
         shell: msys2 {0}
         run: >-
@@ -76,7 +90,7 @@ jobs:
         shell: pwsh
         run: |
           $root = Resolve-Path "build/full-${{ matrix.arch }}"
-          foreach ($required in @("cortex_host.exe", "cortex_core.dll", "injector.exe", "${{ matrix.target_name }}")) {
+          foreach ($required in @("cortex_host.exe", "cortex_core.dll", "injector.exe", "${{ matrix.target_name }}", "cortex_semantic_tools_tests.exe")) {
             if (-not (Test-Path (Join-Path $root $required))) {
               throw "missing required artifact: $required"
             }
@@ -87,13 +101,15 @@ jobs:
             }
           }
 
-      - name: Inject Cortex with the standalone injector
+      - name: Inject Cortex and test all semantic MCP tools
         shell: pwsh
         run: |
           $root = Resolve-Path "build/full-${{ matrix.arch }}"
           $targetPath = Join-Path $root "${{ matrix.target_name }}"
           $injectorPath = Join-Path $root "injector.exe"
           $corePath = Join-Path $root "cortex_core.dll"
+          $tokenPath = Join-Path $root "cortex.token"
+          $semanticTests = Resolve-Path "tests/semantic_mcp_e2e.ps1"
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
@@ -113,6 +129,9 @@ jobs:
               }
             }
             if (-not $healthy) { throw "Injected Cortex API did not become healthy" }
+            if (-not (Test-Path $tokenPath)) { throw "Cortex token was not created at $tokenPath" }
+
+            & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
           } finally {
             if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }
           }
