@@ -7,11 +7,17 @@ on:
     paths:
       - CHANGELOG.md
       - README_INSTALL.txt
+      - core/api/routes_mcp.cpp
+      - core/api/semantic_tools.h
+      - agent/semantic-tools.md
       - .github/workflows/publish-release.yml
   pull_request:
     paths:
       - CHANGELOG.md
       - README_INSTALL.txt
+      - core/api/routes_mcp.cpp
+      - core/api/semantic_tools.h
+      - agent/semantic-tools.md
       - injector/**
       - .github/workflows/publish-release.yml
   workflow_dispatch:
@@ -20,15 +26,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.3.1-${{ github.ref }}
+  group: publish-v0.4.0-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.3.1
+  RELEASE_TAG: v0.4.0
 
 jobs:
   build:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.3.1')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.4.0')
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +96,7 @@ jobs:
           Copy-Item CHANGELOG.md $stage
           Copy-Item -Recurse docs (Join-Path $stage "docs")
           Copy-Item -Recurse sdk (Join-Path $stage "sdk")
+          Copy-Item -Recurse agent (Join-Path $stage "agent")
 
           $required = @(
             "cortex_host.exe",
@@ -100,7 +107,8 @@ jobs:
             "README_INSTALL.txt",
             "README.md",
             "LICENSE",
-            "CHANGELOG.md"
+            "CHANGELOG.md",
+            "agent/semantic-tools.md"
           )
           foreach ($file in $required) {
             $path = Join-Path $stage $file
@@ -110,9 +118,7 @@ jobs:
 
           $dllHash = (Get-FileHash (Join-Path $stage "cortex_core.dll") -Algorithm SHA256).Hash
           $asiHash = (Get-FileHash (Join-Path $stage "cortex.asi") -Algorithm SHA256).Hash
-          if ($dllHash -ne $asiHash) {
-            throw "cortex.asi must be byte-identical to cortex_core.dll"
-          }
+          if ($dllHash -ne $asiHash) { throw "cortex.asi must be byte-identical to cortex_core.dll" }
 
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
           if (-not (Test-Path "dist/$name.zip")) { throw "release ZIP was not created" }
@@ -126,7 +132,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.3.1')
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.4.0')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -144,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.3.1\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.4.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Publish GitHub release
