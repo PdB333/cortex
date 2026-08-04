@@ -2,6 +2,25 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.4.0] - 2026-08-04
+
+### Semantic tools for AI agents
+
+- Added 30 domain-neutral semantic MCP tools for observation, memory discovery, pointer analysis, execution tracing, structure inference, candidate classification, causal validation, and reversible patching.
+- Semantic tools start from observable runtime behaviour instead of assuming that a game contains concepts such as health, ammunition, money, or score.
+- Added a shared evidence-oriented result contract with explicit status, confidence, evidence, candidates, rejected alternatives, tested hypotheses, next action, and reversible actions.
+- Added deterministic orchestration plans that map each semantic goal onto the existing Cortex primitive tool catalog.
+- Added `structuredContent` to MCP tool results while retaining text content for compatibility with existing clients.
+- Updated MCP server metadata to report version `0.4.0`.
+- Added `agent/semantic-tools.md` with the full catalog, agent rules, failure semantics, and validation guidance.
+- Release archives now include the `agent` documentation directory.
+
+### Scope and safety
+
+- v0.4.0 exposes deterministic semantic planning over the existing REST/MCP primitives. Long-running server-side execution is intentionally deferred until cancellation, timeout, persistence, and rollback semantics are implemented.
+- Semantic tools must return `not_found` or `inconclusive` instead of inventing a result when evidence is insufficient.
+- Controlled mutations are expected to use Cortex's action journal and rollback support.
+
 ## [v0.3.1] - 2026-08-02
 
 ### Release packaging compatibility
