@@ -206,8 +206,13 @@ foreach ($tool in $semanticTools) {
 }
 
 $executePayload = $executeBatch.ToArray()
-$executeResponses = @(Invoke-Mcp -Payload $executePayload)
-Assert-True ($executeResponses.Count -eq 30) "batched execute test did not return 30 responses"
+$executeBody = ConvertTo-Json -InputObject $executePayload -Depth 40 -Compress
+Assert-True ($executeBody.TrimStart().StartsWith("[")) "batched MCP payload was not encoded as a JSON array"
+$executeHttp = Invoke-WebRequest -Method Post -Uri "$BaseUrl/mcp" -Headers $script:Headers `
+    -ContentType "application/json" -Body $executeBody -TimeoutSec 30
+$executeResponses = @($executeHttp.Content | ConvertFrom-Json -Depth 40)
+Assert-True ($executeResponses.Count -eq 30) `
+    "batched execute test returned $($executeResponses.Count) responses instead of 30"
 foreach ($response in $executeResponses) {
     Assert-True ($response.result.structuredContent.status -eq "execution_not_available") `
         "execute=true was not rejected explicitly"
