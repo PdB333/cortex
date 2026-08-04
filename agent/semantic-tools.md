@@ -27,7 +27,7 @@ Confidence is not a substitute for validation. A value scan only identifies corr
 
 1. `capture_runtime_state` — capture modules, memory regions, threads, project state, watches, breakpoints, patches, freezes, and window state.
 2. `observe_visual_state` — capture a frame and optionally run OCR to expose visible state to an agent.
-3. `record_interaction_window` — record input, screenshots, watches, and timeline evidence during a bounded action window.
+3. `record_interaction_window` — record input, screenshots, watches, and snapshot evidence during a bounded action window.
 4. `discover_changing_values` — create or refine unknown-value scans around an observed action.
 5. `discover_stable_values` — retain candidates that remain unchanged during control observations.
 6. `discover_event_correlations` — rank memory or execution changes by repeated temporal correlation with labelled events.
@@ -50,7 +50,7 @@ Confidence is not a substitute for validation. A value scan only identifies corr
 17. `find_code_accessing_address` — use a page-access watch or read/write breakpoint to identify code touching a region.
 18. `find_code_writing_address` — use a hardware write breakpoint and capture registers, stack, and hit history.
 19. `find_addresses_accessed_by_code` — trace or capture effective addresses produced by a selected instruction.
-20. `trace_execution_from_event` — start a bounded trace linked to a prompt, input sequence, breakpoint, or timeline marker.
+20. `trace_execution_from_event` — start a bounded trace linked to a prompt, input sequence, breakpoint, or observation marker.
 21. `analyze_function_behavior` — combine disassembly, CFG, structure hints, symbols, trace coverage, and call graph.
 22. `discover_callers_and_callees` — combine static xrefs with dynamic trace call graphs.
 23. `infer_function_purpose` — produce a labelled hypothesis from evidence without renaming or persisting unless requested.
@@ -78,3 +78,23 @@ Confidence is not a substitute for validation. A value scan only identifies corr
 - Do not persist a candidate as fact until it survives a controlled validation.
 - Store rejected hypotheses so later agents do not repeat failed experiments.
 - Explicitly report when a concept does not appear to exist or cannot be observed locally.
+
+## Validation battery
+
+Every pull request touching the semantic layer runs the following tests on Windows x86 and x64:
+
+- a standalone C++ catalog test locks the count and names of all 30 tools;
+- every schema must require a non-empty `objective` and expose correctly typed optional fields;
+- every dependency must resolve to a live primitive or another semantic tool;
+- the semantic dependency graph must be acyclic and eventually reach a primitive tool;
+- every tool must generate a deterministic, side-effect-free plan with the common result contract;
+- malformed arguments and unknown tools must return stable machine-readable errors;
+- after real DLL injection, `initialize`, `tools/list`, and `tools/call` are tested over HTTP MCP;
+- all 30 tools are called individually and in a batch;
+- text and `structuredContent` responses must agree;
+- `execute=true` must remain side-effect free while server-side execution is unavailable;
+- the action journal is compared before and after the complete semantic run;
+- a primitive `health` call is executed through MCP to detect dispatch regressions;
+- the existing CTest suite and release packaging checks still run.
+
+The v0.4.0 release workflow performs the same checks before creating either x86 or x64 archive. A failing semantic test prevents publication.
