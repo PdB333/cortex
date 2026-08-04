@@ -96,6 +96,13 @@ Each normal build produces `cortex_core.dll` and the single user-facing
 `cortex_host.exe`. Test executables are generated only for validation targets.
 Run `ctest --test-dir build` to check.
 
+Cortex v0.4 also ships a semantic-agent validation battery. CI compiles
+`tests/semantic_tools_tests.cpp`, injects Cortex into the architecture-matched
+test target, then runs `tests/semantic_mcp_e2e.ps1`. The suite validates all
+30 semantic tools, live MCP schemas and dependencies, individual and batched
+calls, failure contracts, side-effect freedom, and primitive dispatch on both
+x86 and x64. The release workflow runs the same checks before packaging.
+
 To build only the lightweight host and skip renderer/injected-core dependencies:
 
 ```powershell
@@ -258,39 +265,6 @@ Stack walks combine EBP chain → `StackWalk64` → heuristic exec-page scan.
 ## Security model
 
 - Server binds `127.0.0.1` only (IPv4 + IPv6 loopback).
-- All non-public routes require `X-Cortex-Token` (constant-time compare).
-- Host/Origin headers must be loopback; POST/PUT/PATCH require
-  `application/json`.
-- Public routes: `/status`, `/health`, `/tools`, `/openapi.json`.
-- Anti-cheat-protected processes are out of scope.
-
-## Known limitations
-
-- Windows only; host, injector path and DLL bitness must match the target for
-  injection and trusted register contexts.
-- Native Vulkan rendering is not hooked.
-- Arbitrary memory writes, patches, and native calls can crash the target.
-- Dynamic addresses require signatures or pointer paths across restarts
-  (use `module+RVA` or `/project` for stable ids).
-- Production readiness still requires validation inside representative real
-  games, launchers, overlays and crash-handler combinations.
-
-## Dependencies
-
-Pinned in `CMakeLists.txt`: [Dear ImGui](https://github.com/ocornut/imgui),
-[MinHook](https://github.com/TsudaKageyu/minhook),
-[cpp-httplib](https://github.com/yhirose/cpp-httplib),
-[nlohmann/json](https://github.com/nlohmann/json),
-[Zydis](https://github.com/zyantific/zydis),
-[stb](https://github.com/nothings/stb),
-[kiero](https://github.com/Rebzzel/kiero),
-[Lua 5.4](https://github.com/lua/lua).
-
-## For AI agents
-
-See [`agent/agents.md`](agent/agents.md) for connection, authentication, and
-workflow conventions.
-
-## License
-
-[MIT](LICENSE).
+- Every protected route requires `X-Cortex-Token`.
+- Host and Origin headers are restricted to loopback authorities.
+- Mutation endpoints use JSON-only request bodies and record reversible changes where supported.
