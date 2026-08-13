@@ -44,9 +44,19 @@ int main() {
     check(set.Has(Capability::Modules), "modules present");
     check(set.Has(Capability::Diagnostics), "diagnostics present");
     check(set.Names().size() == 3, "stable capability count");
+
+    const CapabilitySet requested{Capability::ProcessInfo, Capability::Modules};
+    const CapabilitySet supported{Capability::ProcessInfo, Capability::Modules, Capability::Diagnostics};
+    check(requested.Intersect(supported).ContainsAll(requested), "capability intersection works");
+    check(supported.ContainsAll(requested), "capability subset detection works");
+    check(!requested.ContainsAll(supported), "missing capabilities are detected");
+    check(requested.Unite(CapabilitySet{Capability::Diagnostics}).Has(Capability::Diagnostics),
+          "capability union works");
+
     check(std::string(PlatformName(Platform::Windows)) == "windows", "windows platform name");
     check(std::string(PlatformName(Platform::Linux)) == "linux", "linux platform name");
     check(std::string(PlatformName(Platform::PS4)) == "ps4", "ps4 platform name");
+    check(std::string(ArchitectureName(Architecture::Arm64)) == "arm64", "arm64 architecture name");
 
     const auto node = MakeLocalNode("node-a", "Desktop", Platform::Windows, Architecture::X64);
     check(node.Valid(), "local node descriptor is valid");
