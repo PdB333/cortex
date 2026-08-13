@@ -3,8 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
+
+#include "../mcp_bridge/policy.h"
 
 // These entry points are the existing tool mains, renamed per-source by CMake.
 // Keeping each implementation in its own translation unit avoids anonymous
@@ -45,7 +48,7 @@ void PrintUsage(FILE* stream = stdout) {
         "  diagnose    Watch crashes, freezes and write external dumps\n"
         "  analyze     Analyze an existing crash/freeze directory\n"
         "  symbolize   Resolve a PE module RVA through PDB or DWARF tools\n"
-        "  mcp         Run the stdio-to-HTTP MCP bridge\n",
+        "  mcp         Run the local-only stdio-to-HTTP MCP bridge\n",
         stream);
 }
 
@@ -72,6 +75,30 @@ bool LooksLikeLegacyServeInvocation(const char* argument) {
     if (argument[0] == '-') return true;
     const std::string value = Lower(argument);
     return value.find(".exe") != std::string::npos;
+}
+
+bool ValidateMcpArguments(int argc, char** argv, int firstArgument) {
+    std::string host = "127.0.0.1";
+    int port = 6969;
+    for (int index = firstArgument; index < argc; ++index) {
+        const std::string arg = argv[index] ? argv[index] : "";
+        if (arg == "--host") {
+            if (index + 1 >= argc) return false;
+            host = argv[++index] ? argv[index] : "";
+        } else if (arg == "--port") {
+            if (index + 1 >= argc) return false;
+            const std::string raw = argv[++index] ? argv[index] : "";
+            try {
+                size_t consumed = 0;
+                const int parsed = std::stoi(raw, &consumed, 10);
+                if (consumed != raw.size()) return false;
+                port = parsed;
+            } catch (...) {
+                return false;
+            }
+        }
+    }
+    return mcp_bridge::policy::IsLoopbackHost(host) && mcp_bridge::policy::IsValidPort(port);
 }
 
 } // namespace
@@ -111,8 +138,13 @@ int main(int argc, char** argv) {
     }
     if (command == "symbolize" || command == "symbolise" || command == "symbols")
         return Forward(CortexSymbolizeMain, "cortex_host symbolize", argc, argv, 2);
-    if (command == "mcp" || command == "mcp-bridge")
+    if (command == "mcp" || command == "mcp-bridge") {
+        if (!ValidateMcpArguments(argc, argv, 2)) {
+            std::fputs("cortex_host mcp: --host must be loopback and --port must be 1..65535\n", stderr);
+            return 2;
+        }
         return Forward(CortexMcpMain, "cortex_host mcp", argc, argv, 2);
+    }
 
     // Preserve the original cortex_host command line so existing scripts that
     // pass --pid/--process directly do not break during the consolidation.
