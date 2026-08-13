@@ -1,0 +1,80 @@
+name: P2 Contracts
+
+on:
+  push:
+    branches:
+      - agent/p2-mcp-contracts
+  pull_request:
+    paths:
+      - "core/api/mcp_contract.h"
+      - "tests/mcp_schema_tests.cpp"
+      - "tests/request_id_tests.cpp"
+      - "tests/pagination_tests.cpp"
+      - ".github/workflows/p2-contracts.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: p2-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p2-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build Cortex
+        shell: msys2 {0}
+        run: cmake --build build/p2-${{ matrix.arch }} --parallel 2
+
+      - name: Run core tests
+        shell: msys2 {0}
+        run: ctest --test-dir build/p2-${{ matrix.arch }} --output-on-failure
+
+      - name: Build and run MCP schema tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_schema_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+
+      - name: Build and run inherited request tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/request_id_tests.cpp
+          -o build/p2-${{ matrix.arch }}/request_id_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/request_id_tests.exe
+          && c++ -std=c++17 -O2 tests/pagination_tests.cpp
+          -o build/p2-${{ matrix.arch }}/pagination_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/pagination_tests.exe
