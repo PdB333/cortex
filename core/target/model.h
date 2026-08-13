@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,8 @@ enum class Platform : uint8_t {
 enum class Architecture : uint8_t {
     Unknown = 0,
     X86,
-    X64
+    X64,
+    Arm64
 };
 
 enum class TargetKind : uint8_t {
@@ -62,6 +64,7 @@ inline const char* ArchitectureName(Architecture value) {
     switch (value) {
         case Architecture::X86: return "x86";
         case Architecture::X64: return "x64";
+        case Architecture::Arm64: return "arm64";
         default: return "unknown";
     }
 }
@@ -120,6 +123,22 @@ public:
         const auto bit = static_cast<uint8_t>(capability);
         if (bit < 64) bits_ &= ~(uint64_t{1} << bit);
         return *this;
+    }
+
+    bool ContainsAll(const CapabilitySet& other) const {
+        return (bits_ & other.bits_) == other.bits_;
+    }
+
+    CapabilitySet Intersect(const CapabilitySet& other) const {
+        CapabilitySet result;
+        result.bits_ = bits_ & other.bits_;
+        return result;
+    }
+
+    CapabilitySet Unite(const CapabilitySet& other) const {
+        CapabilitySet result;
+        result.bits_ = bits_ | other.bits_;
+        return result;
     }
 
     bool Empty() const { return bits_ == 0; }
