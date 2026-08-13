@@ -58,7 +58,6 @@ std::vector<RollbackResult> RollbackTo(uint64_t checkpoint) {
         bool ok = false;
         try { ok = entry.undo(); } catch (...) { ok = false; }
         result.push_back({entry.id, ok});
-        // Keep failed actions so an operator can retry the rollback later.
         if (!ok) failed.push_back(std::move(entry));
     }
     for (auto it = failed.rbegin(); it != failed.rend(); ++it) g_entries.push_back(std::move(*it));
@@ -72,6 +71,25 @@ std::vector<RollbackResult> RollbackAll() { return RollbackTo(0); }
 void Clear() {
     std::lock_guard<std::recursive_mutex> lock(g_mutex);
     g_entries.clear();
+}
+
+Transaction::Transaction()
+    : guard_(LockMutations()), checkpoint_(Checkpoint()) {}
+
+Transaction::~Transaction() {
+    if (!active_) return;
+    try { RollbackTo(checkpoint_); } catch (...) {}
+}
+
+void Transaction::Commit() {
+    active_ = false;
+}
+
+std::vector<RollbackResult> Transaction::Rollback() {
+    if (!active_) return {};
+    auto result = RollbackTo(checkpoint_);
+    active_ = false;
+    return result;
 }
 
 } // namespace action
