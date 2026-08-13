@@ -46,7 +46,10 @@ json ManifestEntryToMcpTool(const json& e) {
         json querySchema = {{"type", "object"},
                             {"properties", std::move(qprops)},
                             {"description", "Query-string parameters."}};
-        if (!qrequired.empty()) querySchema["required"] = std::move(qrequired);
+        if (!qrequired.empty()) {
+            querySchema["required"] = std::move(qrequired);
+            required.push_back("_query");
+        }
         props["_query"] = std::move(querySchema);
     }
 
