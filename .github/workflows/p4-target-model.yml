@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/p4-target-capabilities
+      - agent/final-integration
   pull_request:
     paths:
       - "core/target/**"
