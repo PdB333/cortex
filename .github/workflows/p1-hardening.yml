@@ -1,0 +1,89 @@
+name: P1 Hardening
+
+on:
+  push:
+    branches:
+      - agent/p1-hardening
+  pull_request:
+    paths:
+      - "core/action/**"
+      - "core/scripting/**"
+      - "core/api/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/p1-hardening.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: p1-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex with tests
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p1-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build Cortex
+        shell: msys2 {0}
+        run: cmake --build build/p1-${{ matrix.arch }} --parallel 2
+
+      - name: Run existing CTest suite
+        shell: msys2 {0}
+        run: ctest --test-dir build/p1-${{ matrix.arch }} --output-on-failure
+
+      - name: Build action transaction tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2
+          tests/action_transaction_tests.cpp
+          core/action/action.cpp
+          core/events/events.cpp
+          -Icore
+          -o build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run action transaction tests
+        shell: msys2 {0}
+        run: build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
+
+      - name: Build semantic plan tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
+          -Ibuild/p1-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run semantic plan tests
+        shell: msys2 {0}
+        run: >-
+          build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          core/api/routes_status.cpp
