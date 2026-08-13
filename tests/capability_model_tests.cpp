@@ -1,4 +1,5 @@
 #include "../core/target/backend.h"
+#include "../core/target/catalog.h"
 #include "../core/target/model.h"
 #include "../core/target/node.h"
 #include "../core/target/windows_local.h"
@@ -6,6 +7,7 @@
 #include <windows.h>
 
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -72,6 +74,18 @@ int main() {
     check(discovered.size() == 1, "backend discovery returns target list");
     check(discovered.front().id == descriptor.id, "backend discovery preserves target identity");
 
+    Catalog catalog;
+    check(catalog.AddBackend(std::make_shared<FakeBackend>(node, std::vector<TargetDescriptor>{descriptor})),
+          "catalog accepts valid backend");
+    check(!catalog.AddBackend(std::make_shared<FakeBackend>(node, std::vector<TargetDescriptor>{descriptor})),
+          "catalog rejects duplicate node id");
+    check(catalog.BackendCount() == 1, "catalog backend count is stable");
+    check(catalog.Nodes().size() == 1, "catalog aggregates nodes");
+    check(catalog.Targets().size() == 1, "catalog aggregates targets");
+    const auto found = catalog.FindTarget(descriptor.id);
+    check(found.has_value() && found->id == descriptor.id, "catalog finds target by stable id");
+    check(!catalog.FindTarget("missing").has_value(), "catalog reports missing target");
+
     const auto localWindows = cortex::target::windows::DescribeLocalNode();
     check(localWindows.Valid(), "Windows local adapter returns a valid node");
     check(localWindows.platform == Platform::Windows, "Windows local adapter declares Windows");
@@ -86,6 +100,6 @@ int main() {
           "target process id is preserved");
 
     if (failures) return 1;
-    std::cout << "PASS: target/node/backend capability model\n";
+    std::cout << "PASS: target/node/backend/catalog capability model\n";
     return 0;
 }
