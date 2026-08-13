@@ -1,4 +1,5 @@
 #include "../core/api/pagination.h"
+#include "../core/api/request_limits.h"
 
 #include <iostream>
 #include <limits>
@@ -43,10 +44,28 @@ int main() {
     Check(!page && page.error == Error::LimitTooLarge,
           "default larger than maximum is rejected");
 
+    using api::request_limits::ContentLengthError;
+    using api::request_limits::ParseContentLength;
+    using api::request_limits::kMaxPayloadBytes;
+
+    auto length = ParseContentLength("1024");
+    Check(length && length.length == 1024, "normal API payload length is accepted");
+
+    length = ParseContentLength(std::to_string(kMaxPayloadBytes));
+    Check(length && length.length == kMaxPayloadBytes, "payload at hard limit is accepted");
+
+    length = ParseContentLength(std::to_string(kMaxPayloadBytes + 1));
+    Check(!length && length.error == ContentLengthError::TooLarge,
+          "payload above hard limit is rejected");
+
+    length = ParseContentLength("not-a-size");
+    Check(!length && length.error == ContentLengthError::Invalid,
+          "invalid content length is rejected");
+
     if (failures) {
-        std::cerr << failures << " pagination test(s) failed\n";
+        std::cerr << failures << " utility test(s) failed\n";
         return 1;
     }
-    std::cout << "PASS: pagination defaults, limits, and overflow handling\n";
+    std::cout << "PASS: pagination and API request limit policy\n";
     return 0;
 }
