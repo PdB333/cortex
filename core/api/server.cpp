@@ -1,5 +1,7 @@
 #include "server.h"
 #include "routes.h"
+#include "request_id.h"
+#include "response_contract.h"
 #include "../config.h"
 #include "../log.h"
 #include "../events/events.h"
@@ -16,10 +18,13 @@
 #include <algorithm>
 #include <mutex>
 #include <cctype>
+#include <limits>
 
 namespace api {
 
 namespace {
+    constexpr size_t kMaxApiPayloadBytes = 16u * 1024u * 1024u;
+
     std::unique_ptr<httplib::Server> g_server;
     std::thread g_thread;
     int g_port = 0;
@@ -28,6 +33,7 @@ namespace {
     std::string g_tokenPath;
     std::string g_lastError;
     std::mutex g_stateMutex;
+    std::atomic<uint64_t> g_requestSequence{0};
 
     void SetLastError(std::string error) {
         std::lock_guard<std::mutex> lock(g_stateMutex);
@@ -41,6 +47,11 @@ namespace {
         out << std::hex << std::setfill('0');
         for (unsigned char b : bytes) out << std::setw(2) << static_cast<unsigned int>(b);
         return out.str();
+    }
+
+    std::string NextRequestId() {
+        const uint64_t sequence = g_requestSequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        return request_id::Format(GetTickCount64(), GetCurrentProcessId(), sequence);
     }
 
     std::string LoadOrCreateToken(const std::string& configured) {
@@ -126,6 +137,30 @@ namespace {
             return true;
         }
     }
+
+    bool ParseContentLength(const httplib::Request& req, size_t& length) {
+        length = 0;
+        const std::string raw = req.get_header_value("Content-Length");
+        if (raw.empty()) return true;
+        try {
+            size_t consumed = 0;
+            const unsigned long long parsed = std::stoull(raw, &consumed, 10);
+            if (consumed != raw.size() || parsed > (std::numeric_limits<size_t>::max)()) return false;
+            length = static_cast<size_t>(parsed);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void SetJsonError(httplib::Response& res,
+                      int status,
+                      const std::string& code,
+                      const std::string& requestId,
+                      const std::string& message = {}) {
+        res.status = status;
+        res.set_content(response::Error(code, message, requestId).dump(), "application/json");
+    }
 }
 
 bool Start(int port, const std::string& configuredToken) {
@@ -136,6 +171,7 @@ bool Start(int port, const std::string& configuredToken) {
     }
     g_port = port;
     g_startTimeMs = GetTickCount64();
+    g_requestSequence.store(0, std::memory_order_relaxed);
     SetLastError({});
     g_token = LoadOrCreateToken(configuredToken);
     if (g_token.size() < 32) {
@@ -144,40 +180,82 @@ bool Start(int port, const std::string& configuredToken) {
     }
 
     g_server = std::make_unique<httplib::Server>();
+    g_server->set_payload_max_length(kMaxApiPayloadBytes);
 
     g_server->set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
+        const std::string requestId = NextRequestId();
+        res.set_header("X-Cortex-Request-Id", requestId);
         res.set_header("Cache-Control", "no-store");
         res.set_header("X-Content-Type-Options", "nosniff");
 
         const std::string host = req.get_header_value("Host");
         if (!host.empty() && !IsLocalAuthority(host)) {
-            res.status = 403;
-            res.set_content("{\"ok\":false,\"error\":\"invalid_host\"}", "application/json");
+            SetJsonError(res, 403, "invalid_host", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
         const std::string origin = req.get_header_value("Origin");
         if (!origin.empty() && !IsLocalOrigin(origin)) {
-            res.status = 403;
-            res.set_content("{\"ok\":false,\"error\":\"untrusted_origin\"}", "application/json");
+            SetJsonError(res, 403, "untrusted_origin", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
         if (!IsPublicPath(req.path) && !SecureTokenEquals(req.get_header_value("X-Cortex-Token"))) {
-            res.status = 401;
-            res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json");
+            SetJsonError(res, 401, "invalid_token", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
+
+        if (RequestDeclaresPayload(req)) {
+            const std::string transferEncoding = req.get_header_value("Transfer-Encoding");
+            if (!transferEncoding.empty()) {
+                SetJsonError(res, 411, "bounded_content_length_required", requestId,
+                             "chunked request bodies are not accepted by the local API");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+
+            size_t contentLength = 0;
+            if (!ParseContentLength(req, contentLength)) {
+                SetJsonError(res, 400, "invalid_content_length", requestId);
+                return httplib::Server::HandlerResponse::Handled;
+            }
+            if (contentLength > kMaxApiPayloadBytes) {
+                SetJsonError(res, 413, "payload_too_large", requestId,
+                             "request body exceeds the 16 MiB API limit");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
+
         if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") &&
             RequestDeclaresPayload(req)) {
             std::string contentType = req.get_header_value("Content-Type");
             std::transform(contentType.begin(), contentType.end(), contentType.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (contentType.rfind("application/json", 0) != 0) {
-                res.status = 415;
-                res.set_content("{\"ok\":false,\"error\":\"application_json_required\"}", "application/json");
+                SetJsonError(res, 415, "application_json_required", requestId);
                 return httplib::Server::HandlerResponse::Handled;
             }
         }
         return httplib::Server::HandlerResponse::Unhandled;
+    });
+
+    // Add the server-generated request identifier to JSON object responses
+    // without forcing every existing route to change its response shape at once.
+    g_server->set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
+        const std::string requestId = res.get_header_value("X-Cortex-Request-Id");
+        if (requestId.empty() || res.body.empty()) return;
+
+        std::string contentType = res.get_header_value("Content-Type");
+        std::transform(contentType.begin(), contentType.end(), contentType.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (contentType.rfind("application/json", 0) != 0) return;
+
+        try {
+            auto body = nlohmann::json::parse(res.body);
+            if (!body.is_object() || body.contains("request_id")) return;
+            body["request_id"] = requestId;
+            res.set_content(body.dump(), "application/json");
+        } catch (...) {
+            // Preserve legacy/non-object JSON exactly; the correlation header
+            // remains available even if the body cannot be augmented safely.
+        }
     });
 
     RegisterStatusRoutes(*g_server);
