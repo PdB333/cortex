@@ -1,6 +1,10 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cstdint>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -70,6 +74,24 @@ inline bool IsBlank(const std::string& value) {
     return value.find_first_not_of(" \t\r\n") == std::string::npos;
 }
 
+inline std::string StablePlanId(const std::string& wanted, const json& arguments) {
+    const std::string input = wanted + "\n" + arguments.dump();
+    uint64_t hash = 1469598103934665603ull;
+    for (unsigned char c : input) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 1099511628211ull;
+    }
+    std::ostringstream out;
+    out << "plan_" << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return out.str();
+}
+
+inline double EvidenceConfidence(const json& observations) {
+    if (!observations.is_array() || observations.empty()) return 0.20;
+    const double value = 0.20 + static_cast<double>(observations.size()) * 0.10;
+    return (std::min)(0.90, value);
+}
+
 inline json PlanFor(const std::string& wanted, const json& arguments) {
     for (const auto& tool : Catalog()) {
         if (tool.value("name", std::string()) != wanted) continue;
@@ -86,14 +108,33 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
         if (arguments.contains("execute") && !arguments["execute"].is_boolean())
             return Failure("invalid_execute", "execute must be a JSON boolean.");
 
+        const json observations = arguments.value("observations", json::array());
+        const json constraints = arguments.value("constraints", json::object());
         json result = {
             {"status", "plan_ready"},
+            {"plan_id", StablePlanId(wanted, arguments)},
             {"confidence", 1.0},
+            {"evidence_confidence", EvidenceConfidence(observations)},
             {"summary", "Semantic orchestration plan generated. Execute the listed primitive tools, attach their outputs as evidence, and validate before persisting conclusions."},
             {"objective", arguments.at("objective")},
-            {"observations", arguments.value("observations", json::array())},
-            {"constraints", arguments.value("constraints", json::object())},
+            {"observations", observations},
+            {"constraints", constraints},
             {"primitive_sequence", tool.at("_primitives")},
+            {"lifecycle", {
+                {"states", json::array({"planned", "running", "cancelled", "rolled_back", "completed", "failed"})},
+                {"current", "planned"}
+            }},
+            {"execution_policy", {
+                {"server_side_execution", false},
+                {"cancellation_required", true},
+                {"timeout_required", true},
+                {"rollback_required_for_mutations", true},
+                {"evidence_required_for_confirmation", true}
+            }},
+            {"evidence_model", {
+                {"states", json::array({"observed", "candidate", "hypothesis", "confirmed", "rejected", "inconclusive"})},
+                {"confidence_source", "evidence_only"}
+            }},
             {"result_contract", {
                 {"status", "candidate_found|confirmed|not_found|inconclusive|failed"},
                 {"confidence", "0.0..1.0"},
@@ -114,7 +155,7 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
         };
         if (arguments.value("execute", false)) {
             result["status"] = "execution_not_available";
-            result["summary"] = "v0.4.0 exposes deterministic orchestration plans; server-side multi-step execution is intentionally deferred until cancellation, timeout, and rollback semantics are implemented.";
+            result["summary"] = "Server-side multi-step execution remains disabled until cancellation, timeout, permission, and rollback semantics are enforced end-to-end.";
         }
         return result;
     }
