@@ -8,7 +8,6 @@ struct Config {
     int toggle_key = 0x7B; // VK_F12
     bool log_console = true;
     std::string api_token; // optional fixed token; empty = load/create cortex.token
-    bool mcp_read_only = true; // conservative default for MCP tool dispatch
 
     bool diagnostics_enabled = true;
     bool diagnostics_write_minidump = true;
