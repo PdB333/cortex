@@ -1,0 +1,56 @@
+name: P3 Probe Build
+
+on:
+  push:
+    branches:
+      - agent/p3-runtime-validation
+  pull_request:
+    paths:
+      - "host/unified_main.cpp"
+      - "host/diagnostics/**"
+      - ".github/workflows/p3-probe-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-probe:
+    name: probe-build-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p3-probe-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=OFF
+
+      - name: Build unified host with probe command
+        shell: msys2 {0}
+        run: >-
+          cmake --build build/p3-probe-${{ matrix.arch }}
+          --target cortex_host
+          --parallel 2
