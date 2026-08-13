@@ -184,4 +184,28 @@ inline bool IsRequiredSpec(const json& spec) {
     return spec.is_string() && spec.get<std::string>().rfind("required", 0) == 0;
 }
 
+struct QuerySchemaResult {
+    json schema;
+    bool containerRequired = false;
+};
+
+inline QuerySchemaResult BuildQuerySchema(const json& queryManifest) {
+    json properties = json::object();
+    json required = json::array();
+    if (queryManifest.is_object()) {
+        for (auto it = queryManifest.begin(); it != queryManifest.end(); ++it) {
+            properties[it.key()] = SchemaForProperty(it.key(), it.value());
+            if (IsRequiredSpec(it.value())) required.push_back(it.key());
+        }
+    }
+
+    QuerySchemaResult result;
+    result.schema = {{"type", "object"},
+                     {"properties", std::move(properties)},
+                     {"description", "Query-string parameters."}};
+    result.containerRequired = !required.empty();
+    if (result.containerRequired) result.schema["required"] = std::move(required);
+    return result;
+}
+
 } // namespace api::mcp_contract
