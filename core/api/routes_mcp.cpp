@@ -37,20 +37,9 @@ json ManifestEntryToMcpTool(const json& e) {
     }
 
     if (e.contains("query") && e["query"].is_object()) {
-        json qprops = json::object();
-        json qrequired = json::array();
-        for (auto it = e["query"].begin(); it != e["query"].end(); ++it) {
-            qprops[it.key()] = mcp_contract::SchemaForProperty(it.key(), it.value());
-            if (mcp_contract::IsRequiredSpec(it.value())) qrequired.push_back(it.key());
-        }
-        json querySchema = {{"type", "object"},
-                            {"properties", std::move(qprops)},
-                            {"description", "Query-string parameters."}};
-        if (!qrequired.empty()) {
-            querySchema["required"] = std::move(qrequired);
-            required.push_back("_query");
-        }
-        props["_query"] = std::move(querySchema);
+        auto querySchema = mcp_contract::BuildQuerySchema(e["query"]);
+        if (querySchema.containerRequired) required.push_back("_query");
+        props["_query"] = std::move(querySchema.schema);
     }
 
     const auto pathParameters = mcp_contract::PathParameters(e.value("path", std::string()));
