@@ -4,11 +4,14 @@ on:
   push:
     branches:
       - agent/p2-mcp-contracts
+      - agent/final-integration
   pull_request:
     paths:
       - "core/api/mcp_contract.h"
+      - "core/api/routes_mcp.cpp"
       - "mcp_bridge/policy.h"
       - "tests/mcp_schema_tests.cpp"
+      - "tests/mcp_query_schema_tests.cpp"
       - "tests/mcp_bridge_policy_tests.cpp"
       - "tests/request_id_tests.cpp"
       - "tests/pagination_tests.cpp"
@@ -68,6 +71,11 @@ jobs:
           -o build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+          && c++ -std=c++17 -O2 tests/mcp_query_schema_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
 
       - name: Build and run MCP bridge policy tests
         shell: msys2 {0}
