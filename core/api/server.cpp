@@ -1,6 +1,7 @@
 #include "server.h"
 #include "routes.h"
 #include "request_id.h"
+#include "request_limits.h"
 #include "response_contract.h"
 #include "../config.h"
 #include "../log.h"
@@ -18,13 +19,10 @@
 #include <algorithm>
 #include <mutex>
 #include <cctype>
-#include <limits>
 
 namespace api {
 
 namespace {
-    constexpr size_t kMaxApiPayloadBytes = 16u * 1024u * 1024u;
-
     std::unique_ptr<httplib::Server> g_server;
     std::thread g_thread;
     int g_port = 0;
@@ -128,29 +126,8 @@ namespace {
 
         const std::string contentLength = req.get_header_value("Content-Length");
         if (contentLength.empty()) return false;
-        try {
-            size_t consumed = 0;
-            const unsigned long long length = std::stoull(contentLength, &consumed, 10);
-            return consumed == contentLength.size() && length != 0;
-        } catch (...) {
-            // A malformed Content-Length must not bypass the stricter branch.
-            return true;
-        }
-    }
-
-    bool ParseContentLength(const httplib::Request& req, size_t& length) {
-        length = 0;
-        const std::string raw = req.get_header_value("Content-Length");
-        if (raw.empty()) return true;
-        try {
-            size_t consumed = 0;
-            const unsigned long long parsed = std::stoull(raw, &consumed, 10);
-            if (consumed != raw.size() || parsed > (std::numeric_limits<size_t>::max)()) return false;
-            length = static_cast<size_t>(parsed);
-            return true;
-        } catch (...) {
-            return false;
-        }
+        const auto parsed = request_limits::ParseContentLength(contentLength, (std::numeric_limits<size_t>::max)());
+        return !parsed || parsed.length != 0;
     }
 
     void SetJsonError(httplib::Response& res,
@@ -180,7 +157,7 @@ bool Start(int port, const std::string& configuredToken) {
     }
 
     g_server = std::make_unique<httplib::Server>();
-    g_server->set_payload_max_length(kMaxApiPayloadBytes);
+    g_server->set_payload_max_length(request_limits::kMaxPayloadBytes);
 
     g_server->set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
         const std::string requestId = NextRequestId();
@@ -211,12 +188,12 @@ bool Start(int port, const std::string& configuredToken) {
                 return httplib::Server::HandlerResponse::Handled;
             }
 
-            size_t contentLength = 0;
-            if (!ParseContentLength(req, contentLength)) {
+            const auto contentLength = request_limits::ParseContentLength(req.get_header_value("Content-Length"));
+            if (contentLength.error == request_limits::ContentLengthError::Invalid) {
                 SetJsonError(res, 400, "invalid_content_length", requestId);
                 return httplib::Server::HandlerResponse::Handled;
             }
-            if (contentLength > kMaxApiPayloadBytes) {
+            if (contentLength.error == request_limits::ContentLengthError::TooLarge) {
                 SetJsonError(res, 413, "payload_too_large", requestId,
                              "request body exceeds the 16 MiB API limit");
                 return httplib::Server::HandlerResponse::Handled;
