@@ -1,3 +1,4 @@
+#include "../core/target/backend.h"
 #include "../core/target/model.h"
 #include "../core/target/node.h"
 #include "../core/target/windows_local.h"
@@ -6,6 +7,25 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
+
+namespace {
+
+class FakeBackend final : public cortex::target::Backend {
+public:
+    FakeBackend(cortex::target::NodeDescriptor node,
+                std::vector<cortex::target::TargetDescriptor> targets)
+        : node_(std::move(node)), targets_(std::move(targets)) {}
+
+    cortex::target::NodeDescriptor Node() const override { return node_; }
+    std::vector<cortex::target::TargetDescriptor> ListTargets() override { return targets_; }
+
+private:
+    cortex::target::NodeDescriptor node_;
+    std::vector<cortex::target::TargetDescriptor> targets_;
+};
+
+} // namespace
 
 int main() {
     using namespace cortex::target;
@@ -46,6 +66,12 @@ int main() {
     descriptor.capabilities = set;
     check(descriptor.Valid(), "descriptor validation");
 
+    FakeBackend backend(node, {descriptor});
+    check(backend.Node().id == node.id, "backend exposes its node descriptor");
+    const auto discovered = backend.ListTargets();
+    check(discovered.size() == 1, "backend discovery returns target list");
+    check(discovered.front().id == descriptor.id, "backend discovery preserves target identity");
+
     const auto localWindows = cortex::target::windows::DescribeLocalNode();
     check(localWindows.Valid(), "Windows local adapter returns a valid node");
     check(localWindows.platform == Platform::Windows, "Windows local adapter declares Windows");
@@ -60,6 +86,6 @@ int main() {
           "target process id is preserved");
 
     if (failures) return 1;
-    std::cout << "PASS: target/node capability model\n";
+    std::cout << "PASS: target/node/backend capability model\n";
     return 0;
 }
