@@ -1,0 +1,59 @@
+name: P1 Response Contract
+
+on:
+  push:
+    branches:
+      - agent/p1-hardening
+    paths:
+      - "core/api/response_contract.h"
+      - "tests/response_contract_tests.cpp"
+      - ".github/workflows/p1-response-contract.yml"
+  pull_request:
+    paths:
+      - "core/api/response_contract.h"
+      - "tests/response_contract_tests.cpp"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: p1-response-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure dependencies
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p1-response-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build and run response contract test
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/response_contract_tests.cpp
+          -Ibuild/p1-response-${{ matrix.arch }}/_deps/json-src/include
+          -o response_contract_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && ./response_contract_tests.exe
