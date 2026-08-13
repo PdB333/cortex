@@ -10,16 +10,14 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 FetchContent_Declare(
     httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.15.3
-    GIT_SHALLOW TRUE
+    GIT_TAG 5c00bbf36ba8ff47b4fb97712fc38cb2884e5b98
 )
 FetchContent_MakeAvailable(httplib)
 
 FetchContent_Declare(
     json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-    GIT_SHALLOW TRUE
+    GIT_TAG 9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
 )
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
