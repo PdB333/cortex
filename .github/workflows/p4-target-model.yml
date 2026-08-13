@@ -1,0 +1,49 @@
+name: P4 Target Model
+
+on:
+  push:
+    branches:
+      - agent/p4-target-capabilities
+  pull_request:
+    paths:
+      - "core/target/**"
+      - "tests/capability_model_tests.cpp"
+      - ".github/workflows/p4-target-model.yml"
+  workflow_dispatch:
+
+jobs:
+  target-model:
+    name: target-model-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: ${{ matrix.package_prefix }}-gcc
+
+      - name: Build capability model test
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/capability_model_tests.cpp
+          -o capability_model_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run capability model test
+        shell: msys2 {0}
+        run: ./capability_model_tests.exe
