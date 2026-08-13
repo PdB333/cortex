@@ -7,7 +7,9 @@ on:
   pull_request:
     paths:
       - "core/api/mcp_contract.h"
+      - "mcp_bridge/policy.h"
       - "tests/mcp_schema_tests.cpp"
+      - "tests/mcp_bridge_policy_tests.cpp"
       - "tests/request_id_tests.cpp"
       - "tests/pagination_tests.cpp"
       - ".github/workflows/p2-contracts.yml"
@@ -66,6 +68,14 @@ jobs:
           -o build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+
+      - name: Build and run MCP bridge policy tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_bridge_policy_tests.cpp
+          -o build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
 
       - name: Build and run inherited request tests
         shell: msys2 {0}
