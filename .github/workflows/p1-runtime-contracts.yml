@@ -1,0 +1,85 @@
+name: P1 Runtime Contracts
+
+on:
+  push:
+    branches:
+      - agent/p1-hardening
+    paths:
+      - "core/scripting/**"
+      - "core/api/semantic_tools.h"
+      - "tests/lua_sandbox_tests.cpp"
+      - "tests/semantic_plan_p1_tests.cpp"
+      - ".github/workflows/p1-runtime-contracts.yml"
+  pull_request:
+    paths:
+      - "core/scripting/**"
+      - "core/api/semantic_tools.h"
+      - "tests/lua_sandbox_tests.cpp"
+      - "tests/semantic_plan_p1_tests.cpp"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: p1-runtime-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure dependencies
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p1-runtime-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build Lua library
+        shell: msys2 {0}
+        run: cmake --build build/p1-runtime-${{ matrix.arch }} --target lua --parallel 2
+
+      - name: Build and run Lua sandbox tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2
+          tests/lua_sandbox_tests.cpp
+          core/scripting/lua_engine.cpp
+          core/action/action.cpp
+          core/events/events.cpp
+          -Icore
+          -Ibuild/p1-runtime-${{ matrix.arch }}/_deps/json-src/include
+          -Ibuild/p1-runtime-${{ matrix.arch }}/_deps/lua-src
+          build/p1-runtime-${{ matrix.arch }}/liblua.a
+          -o build/p1-runtime-${{ matrix.arch }}/lua_sandbox_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p1-runtime-${{ matrix.arch }}/lua_sandbox_tests.exe
+
+      - name: Build and run semantic lifecycle tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_plan_p1_tests.cpp
+          -Ibuild/p1-runtime-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p1-runtime-${{ matrix.arch }}/semantic_plan_p1_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p1-runtime-${{ matrix.arch }}/semantic_plan_p1_tests.exe
