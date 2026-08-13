@@ -1,0 +1,64 @@
+name: P3 Runtime Validation
+
+on:
+  push:
+    branches:
+      - agent/p3-runtime-validation
+  pull_request:
+    paths:
+      - "test_target/main_opengl.cpp"
+      - ".github/workflows/p3-runtime-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  opengl-fixture:
+    name: opengl-fixture-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.package_prefix }}-gcc
+
+      - name: Build OpenGL fixture
+        shell: msys2 {0}
+        run: >-
+          mkdir -p build/p3-${{ matrix.arch }}
+          && c++ -std=c++17 -O2 test_target/main_opengl.cpp
+          -o build/p3-${{ matrix.arch }}/cortex_test_target_opengl_${{ matrix.arch }}.exe
+          -static -static-libgcc -static-libstdc++
+          -lopengl32 -lgdi32 -luser32
+          -Wl,--subsystem,windows
+
+      - name: Smoke-test OpenGL context
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "build/p3-${{ matrix.arch }}/cortex_test_target_opengl_${{ matrix.arch }}.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 2
+            if ($process.HasExited) {
+              throw "OpenGL fixture exited early with code $($process.ExitCode)"
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
