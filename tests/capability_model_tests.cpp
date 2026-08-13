@@ -1,4 +1,5 @@
 #include "../core/target/model.h"
+#include "../core/target/node.h"
 
 #include <iostream>
 #include <string>
@@ -21,21 +22,28 @@ int main() {
     check(std::string(PlatformName(Platform::Windows)) == "windows", "windows platform name");
     check(std::string(PlatformName(Platform::Linux)) == "linux", "linux platform name");
     check(std::string(PlatformName(Platform::PS4)) == "ps4", "ps4 platform name");
-    check(MakeProcessTargetId("node-a", Platform::Windows, 42) == "node-a:windows:process:42",
+
+    const auto node = MakeLocalNode("node-a", "Desktop", Platform::Windows, Architecture::X64);
+    check(node.Valid(), "local node descriptor is valid");
+    check(node.online, "local node starts online");
+    check(node.transport == NodeTransport::Local, "local node transport is explicit");
+    check(std::string(NodeTransportName(node.transport)) == "local", "transport name is stable");
+
+    check(MakeProcessTargetId(node.id, node.platform, 42) == "node-a:windows:process:42",
           "stable target id");
 
     TargetDescriptor descriptor;
-    descriptor.id = "node-a:windows:process:42";
-    descriptor.nodeId = "node-a";
+    descriptor.id = MakeProcessTargetId(node.id, node.platform, 42);
+    descriptor.nodeId = node.id;
     descriptor.name = "sample";
-    descriptor.platform = Platform::Windows;
-    descriptor.architecture = Architecture::X64;
+    descriptor.platform = node.platform;
+    descriptor.architecture = node.architecture;
     descriptor.kind = TargetKind::Process;
     descriptor.processId = 42;
     descriptor.capabilities = set;
     check(descriptor.Valid(), "descriptor validation");
 
     if (failures) return 1;
-    std::cout << "PASS: capability model\n";
+    std::cout << "PASS: target/node capability model\n";
     return 0;
 }
