@@ -1,5 +1,8 @@
 #include "../core/target/model.h"
 #include "../core/target/node.h"
+#include "../core/target/windows_local.h"
+
+#include <windows.h>
 
 #include <iostream>
 #include <string>
@@ -42,6 +45,19 @@ int main() {
     descriptor.processId = 42;
     descriptor.capabilities = set;
     check(descriptor.Valid(), "descriptor validation");
+
+    const auto localWindows = cortex::target::windows::DescribeLocalNode();
+    check(localWindows.Valid(), "Windows local adapter returns a valid node");
+    check(localWindows.platform == Platform::Windows, "Windows local adapter declares Windows");
+    check(localWindows.architecture == cortex::target::windows::BuildArchitecture(),
+          "Windows node architecture follows build architecture");
+
+    const auto current = cortex::target::windows::DescribeProcess(
+        localWindows, static_cast<uint64_t>(GetCurrentProcessId()), "capability_model_tests", set);
+    check(current.Valid(), "Windows process adapter returns a valid target");
+    check(current.nodeId == localWindows.id, "target belongs to local node");
+    check(current.processId == static_cast<uint64_t>(GetCurrentProcessId()),
+          "target process id is preserved");
 
     if (failures) return 1;
     std::cout << "PASS: target/node capability model\n";
