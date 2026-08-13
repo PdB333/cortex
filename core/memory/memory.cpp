@@ -1,11 +1,12 @@
 #include "memory.h"
+#include "range.h"
 #include <windows.h>
 #include <cstring>
 
 namespace memory {
 
 bool ReadBytes(uintptr_t address, size_t size, std::vector<uint8_t>& out) {
-    if (address == 0 || size == 0 || size > (64u * 1024 * 1024)) return false;
+    if (!IsValidRange(address, size)) return false;
     out.resize(size);
     SIZE_T bytesRead = 0;
     BOOL ok = ReadProcessMemory(
@@ -22,7 +23,7 @@ bool ReadBytes(uintptr_t address, size_t size, std::vector<uint8_t>& out) {
 }
 
 bool WriteBytes(uintptr_t address, const std::vector<uint8_t>& data) {
-    if (address == 0 || data.empty()) return false;
+    if (!IsValidRange(address, data.size())) return false;
 
     // Memory protecting the region might not be writable (e.g. .text);
     // temporarily relax it, write, then restore.
@@ -47,7 +48,7 @@ bool WriteBytes(uintptr_t address, const std::vector<uint8_t>& data) {
 }
 
 std::optional<std::string> ReadString(uintptr_t address, size_t max_len) {
-    if (address == 0 || max_len == 0) return std::nullopt;
+    if (!IsValidRange(address, max_len)) return std::nullopt;
     std::vector<uint8_t> buf;
     if (!ReadBytes(address, max_len, buf)) return std::nullopt;
     size_t len = 0;
