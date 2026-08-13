@@ -3,6 +3,7 @@
 #include "model.h"
 
 #include <string>
+#include <utility>
 
 namespace cortex::target {
 
@@ -43,6 +44,21 @@ inline NodeDescriptor MakeLocalNode(std::string id,
     node.architecture = architecture;
     node.transport = NodeTransport::Local;
     node.online = true;
+    return node;
+}
+
+inline NodeDescriptor MakeRemoteNode(std::string id,
+                                     std::string name,
+                                     Platform platform,
+                                     Architecture architecture,
+                                     bool online = false) {
+    NodeDescriptor node;
+    node.id = std::move(id);
+    node.name = std::move(name);
+    node.platform = platform;
+    node.architecture = architecture;
+    node.transport = NodeTransport::Remote;
+    node.online = online;
     return node;
 }
 
