@@ -22,7 +22,7 @@ inline json Tool(const char* name, const char* description, json primitives) {
                 {"objective", {{"type", "string"}, {"description", "Observable runtime goal; do not assume a game-specific variable exists."}}},
                 {"observations", {{"type", "array"}, {"description", "Known observations, labelled events, values, screenshots, addresses, or prior evidence."}}},
                 {"constraints", {{"type", "object"}, {"description", "Optional module/range/type/time/safety constraints."}}},
-                {"execute", {{"type", "boolean"}, {"description", "Reserved for future server-side execution. v0.4 returns an orchestration plan."}}}
+                {"execute", {{"type", "boolean"}, {"description", "Reserved for future server-side execution. v0.5 returns an orchestration plan."}}}
             }},
             {"required", json::array({"objective"})}
         }},
