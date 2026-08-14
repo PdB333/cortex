@@ -213,27 +213,12 @@ bool Start(int port, const std::string& configuredToken) {
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    // Add the server-generated request identifier to JSON object responses
-    // without forcing every existing route to change its response shape at once.
-    g_server->set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
-        const std::string requestId = res.get_header_value("X-Cortex-Request-Id");
-        if (requestId.empty() || res.body.empty()) return;
-
-        std::string contentType = res.get_header_value("Content-Type");
-        std::transform(contentType.begin(), contentType.end(), contentType.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (contentType.rfind("application/json", 0) != 0) return;
-
-        try {
-            auto body = nlohmann::json::parse(res.body);
-            if (!body.is_object() || body.contains("request_id")) return;
-            body["request_id"] = requestId;
-            res.set_content(body.dump(), "application/json");
-        } catch (...) {
-            // Preserve legacy/non-object JSON exactly; the correlation header
-            // remains available even if the body cannot be augmented safely.
-        }
-    });
+    // Keep the request identifier in the response header. Normal route bodies
+    // are intentionally left untouched here: cpp-httplib computes
+    // Content-Length before its post-routing hook, so mutating res.body in a
+    // post-routing handler can make the declared length stale and truncate the
+    // JSON seen by clients. Structured errors above may still include the same
+    // request ID because their body is created before response serialization.
 
     RegisterStatusRoutes(*g_server);
     RegisterModulesRoutes(*g_server);
