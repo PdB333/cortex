@@ -1,6 +1,6 @@
 # Cortex semantic tools
 
-Cortex v0.4 adds a semantic layer for AI agents. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
+Cortex v0.5 includes a semantic layer for AI agents. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
 
 The semantic layer does not invent domain objects. Every conclusion must include evidence, confidence, alternatives, and a recommended next action. When evidence is insufficient, return `status: not_found` or `status: inconclusive` instead of guessing.
 
@@ -97,4 +97,4 @@ Every pull request touching the semantic layer runs the following tests on Windo
 - a primitive `health` call is executed through MCP to detect dispatch regressions;
 - the existing CTest suite and release packaging checks still run.
 
-The v0.4.0 release workflow performs the same checks before creating either x86 or x64 archive. A failing semantic test prevents publication.
+The v0.5.0 release workflow performs the same checks before creating either x86 or x64 archive. A failing semantic test prevents publication.
