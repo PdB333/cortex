@@ -2,6 +2,46 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.5.0] - 2026-08-14
+
+### Security, API reliability, and mutation safety
+
+- Added nested action transactions, explicit mutation checkpoints, automatic rollback guards, and rollback verification foundations for controlled experiments.
+- Hardened the local REST API with bounded payload handling, request IDs, stable JSON error helpers, pagination primitives, and stricter request validation.
+- Kept request correlation in `X-Cortex-Request-Id` while fixing a response truncation regression caused by mutating JSON bodies after `Content-Length` had already been calculated.
+- Added checked memory-range arithmetic and validation to reduce overflow and invalid-range risks around low-level memory operations.
+- Hardened Lua execution with sandbox restrictions, resource limits, cancellation-aware execution foundations, and mutation journaling support.
+
+### MCP and semantic contracts
+
+- Added typed MCP input schemas derived from the HTTP tool contract instead of exposing loosely typed argument objects.
+- Added safe percent-encoded path and query rendering, required `_query` containers when required query fields exist, and validation for unresolved path placeholders.
+- Added local-only MCP bridge policy checks and stricter Host validation so the AI-facing bridge remains bound to authorized local Cortex endpoints.
+- Added stable semantic `plan_id` generation, explicit plan lifecycle states, evidence confidence, evidence-state vocabulary, timeout/cancellation requirements, and rollback requirements for mutations.
+- Server-side multi-step semantic execution remains intentionally disabled until cancellation, timeout, permission, and rollback semantics are enforced end to end.
+- Updated MCP server metadata to report version `0.5.0`.
+
+### Generic target architecture
+
+- Added platform-neutral `Target`, `Node`, `Backend`, `Catalog`, architecture, and capability abstractions so Cortex is no longer structurally tied to a game-only target model.
+- Added explicit capability sets and capability union/intersection/subset operations so tools can adapt to what a target actually supports instead of assuming every feature is available.
+- Added Windows, Linux, and PS4 platform identities plus x86, x64, and ARM64 architecture identities to the shared model without leaking platform APIs into the common contract.
+- Added a Windows-local descriptor adapter as the first concrete bridge from the generic target model to the existing Windows runtime.
+- Added portable C++17 target-model validation on Linux plus Windows x86/x64 capability-model tests.
+
+### Runtime tooling and validation
+
+- Added the read-only `cortex_host probe --pid ...` command for external process inspection without requiring injection.
+- Added a real OpenGL/WGL runtime fixture and renderer validation alongside the existing Windows runtime coverage.
+- Added dedicated P1, P2, P3, and P4 CI workflows covering request contracts, mutation hardening, MCP schemas and bridge policy, runtime probing, renderer validation, and the generic target model.
+- Revalidated the complete Windows tree on x86 and x64, including CTest, semantic MCP calls after real injection, unified-host checks, deterministic E2E scenarios, and release packaging.
+- Release archives continue to ship both Windows x86 and x64 builds with `cortex_host.exe`, `cortex_core.dll`, `cortex.asi`, standalone `injector.exe`, the architecture-matched test target, documentation, SDK files, and agent documentation.
+
+### Scope
+
+- v0.5.0 introduces the generic cross-platform model and capability contracts, not full Linux or PS4 runtime instrumentation.
+- Remote-control transport, Windows-wide process enumeration, Linux process instrumentation, PS4 process instrumentation, and dedicated D3D8/D3D12 runtime fixtures remain future work.
+
 ## [v0.4.0] - 2026-08-04
 
 ### Semantic tools for AI agents
