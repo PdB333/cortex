@@ -1,0 +1,29 @@
+name: P4 Portable Target Model
+
+on:
+  push:
+    branches:
+      - agent/final-integration
+  pull_request:
+    paths:
+      - "core/target/**"
+      - "tests/target_model_portable_tests.cpp"
+      - ".github/workflows/p4-portable-model.yml"
+  workflow_dispatch:
+
+jobs:
+  portable-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build portable target model test
+        run: >-
+          g++ -std=c++17 -Wall -Wextra -Werror
+          tests/target_model_portable_tests.cpp
+          -I.
+          -o target_model_portable_tests
+
+      - name: Run portable target model test
+        run: ./target_model_portable_tests

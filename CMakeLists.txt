@@ -22,11 +22,11 @@ if(CORTEX_OFFLINE)
 endif()
 
 # ---- Dear ImGui (no CMake support upstream, vendor sources directly) ----
+# v1.90.9, pinned to the immutable commit resolved from the release tag.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.90.9
-    GIT_SHALLOW    TRUE
+    GIT_TAG        cb16be3a3fc1f9cd146ae24d52b615f8a05fa93d
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -88,20 +88,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(minhook)
 
 # ---- cpp-httplib (header-only) ----
+# v0.15.3.
 FetchContent_Declare(
     httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.15.3
-    GIT_SHALLOW    TRUE
+    GIT_TAG        5c00bbf36ba8ff47b4fb97712fc38cb2884e5b98
 )
 FetchContent_MakeAvailable(httplib)
 
 # ---- nlohmann/json (header-only) ----
+# v3.11.3.
 FetchContent_Declare(
     json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
-    GIT_SHALLOW    TRUE
+    GIT_TAG        9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
 )
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
@@ -111,11 +111,11 @@ FetchContent_MakeAvailable(json)
 # dependencies/zycore; FetchContent doesn't check out submodules, so we
 # FetchContent Zycore ourselves first -- Zydis's "if (NOT TARGET Zycore)"
 # guard then sees it already exists and skips the submodule requirement.
+# Zycore v1.5.0.
 FetchContent_Declare(
     zycore
     GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
-    GIT_TAG        v1.5.0
-    GIT_SHALLOW    TRUE
+    GIT_TAG        74620eefd233bec20daeb66e78e744ff06e273b7
 )
 # Zycore 1.5 creates its Doxygen target unconditionally whenever Doxygen is
 # installed. Cortex does not ship dependency documentation, and making it an
@@ -123,11 +123,11 @@ FetchContent_Declare(
 set(CMAKE_DISABLE_FIND_PACKAGE_Doxygen TRUE CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(zycore)
 
+# Zydis v4.1.0.
 FetchContent_Declare(
     zydis
     GIT_REPOSITORY https://github.com/zyantific/zydis.git
-    GIT_TAG        v4.1.0
-    GIT_SHALLOW    TRUE
+    GIT_TAG        569320ad3c4856da13b9dbf1f0d9e20bda63870e
 )
 set(ZYDIS_BUILD_TOOLS OFF CACHE INTERNAL "")
 set(ZYDIS_BUILD_EXAMPLES OFF CACHE INTERNAL "")
@@ -139,11 +139,11 @@ FetchContent_MakeAvailable(zydis)
 # ---- Lua 5.4 (upstream repo has no CMakeLists; compile the library sources
 #      directly. Skips lua.c/luac.c which are the standalone interpreter and
 #      compiler CLI drivers we do not need.) ----
+# v5.4.7.
 FetchContent_Declare(
     lua
     GIT_REPOSITORY https://github.com/lua/lua.git
-    GIT_TAG        v5.4.7
-    GIT_SHALLOW    TRUE
+    GIT_TAG        1ab3208a1fceb12fca8f24ba57d6e13c5bff15e3
 )
 FetchContent_MakeAvailable(lua)
 

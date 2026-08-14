@@ -6,6 +6,7 @@
 #include "routes.h"
 #include "server.h"
 #include "semantic_tools.h"
+#include "mcp_contract.h"
 #include "../overlay/overlay.h"
 
 #include <httplib.h>
@@ -24,54 +25,52 @@ std::string SanitizeToolName(std::string s) {
 }
 
 json ManifestEntryToMcpTool(const json& e) {
-    std::string name = e.value("name", std::string());
+    const std::string name = e.value("name", std::string());
     json props = json::object();
     json required = json::array();
+
     if (e.contains("body") && e["body"].is_object()) {
         for (auto it = e["body"].begin(); it != e["body"].end(); ++it) {
-            props[it.key()] = {{"type", "string"}, {"description", it.value().is_string() ? it.value().get<std::string>() : it.value().dump()}};
-            if (it.value().is_string() && it.value().get<std::string>().rfind("required", 0) == 0) required.push_back(it.key());
+            props[it.key()] = mcp_contract::SchemaForProperty(it.key(), it.value());
+            if (mcp_contract::IsRequiredSpec(it.value())) required.push_back(it.key());
         }
     }
-    if (e.contains("query") && e["query"].is_object()) {
-        json qprops = json::object();
-        for (auto it = e["query"].begin(); it != e["query"].end(); ++it) {
-            qprops[it.key()] = {{"type", "string"}, {"description", it.value().is_string() ? it.value().get<std::string>() : it.value().dump()}};
-        }
-        props["_query"] = {{"type", "object"}, {"properties", qprops}, {"description", "Query-string parameters."}};
-    }
-    if (e.value("path", std::string()).find('{') != std::string::npos)
-        props["_path"] = {{"type", "object"}, {"description", "Substitutions for path placeholders."}};
 
-    json schema = {{"type", "object"}, {"properties", props}};
-    if (!required.empty()) schema["required"] = required;
+    if (e.contains("query") && e["query"].is_object()) {
+        auto querySchema = mcp_contract::BuildQuerySchema(e["query"]);
+        if (querySchema.containerRequired) required.push_back("_query");
+        props["_query"] = std::move(querySchema.schema);
+    }
+
+    const auto pathParameters = mcp_contract::PathParameters(e.value("path", std::string()));
+    if (!pathParameters.empty()) {
+        json pathProps = json::object();
+        json pathRequired = json::array();
+        for (const auto& parameter : pathParameters) {
+            pathProps[parameter] = {{"oneOf", json::array({{{"type", "integer"}}, {{"type", "string"}}})},
+                                    {"description", "Required path parameter."}};
+            pathRequired.push_back(parameter);
+        }
+        props["_path"] = {{"type", "object"},
+                          {"properties", std::move(pathProps)},
+                          {"required", std::move(pathRequired)},
+                          {"description", "Substitutions for path placeholders."}};
+        required.push_back("_path");
+    }
+
+    json schema = {{"type", "object"}, {"properties", std::move(props)}};
+    if (!required.empty()) schema["required"] = std::move(required);
+
+    const auto risk = mcp_contract::ClassifyTool(name,
+                                                  e.value("method", std::string("GET")),
+                                                  e.value("path", std::string()));
     return {{"name", SanitizeToolName(name)},
             {"description", e.value("description", std::string())},
-            {"inputSchema", schema},
-            {"_http", {{"method", e.value("method", std::string("GET"))}, {"path", e.value("path", std::string())}}}};
-}
-
-std::string RenderPath(std::string path, const json& args) {
-    if (args.contains("_path") && args["_path"].is_object()) {
-        for (auto it = args["_path"].begin(); it != args["_path"].end(); ++it) {
-            const std::string needle = "{" + it.key() + "}";
-            const size_t p = path.find(needle);
-            if (p != std::string::npos) {
-                const std::string value = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
-                path.replace(p, needle.size(), value);
-            }
-        }
-    }
-    if (args.contains("_query") && args["_query"].is_object()) {
-        std::string qs;
-        for (auto it = args["_query"].begin(); it != args["_query"].end(); ++it) {
-            if (!qs.empty()) qs += '&';
-            const std::string value = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
-            qs += it.key() + "=" + value;
-        }
-        if (!qs.empty()) path += "?" + qs;
-    }
-    return path;
+            {"inputSchema", std::move(schema)},
+            {"_cortex", {{"risk", mcp_contract::RiskName(risk)},
+                          {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}}},
+            {"_http", {{"method", e.value("method", std::string("GET"))},
+                         {"path", e.value("path", std::string())}}}};
 }
 
 json BodyPayload(const json& args) {
@@ -143,9 +142,12 @@ json ToolCallResult(const json& id, const json& result) {
 }
 
 json HandleToolsCall(const json& id, const json& params) {
-    if (!params.is_object() || !params.contains("name")) return JsonRpcError(id, -32602, "invalid_params");
+    if (!params.is_object() || !params.contains("name") || !params.at("name").is_string())
+        return JsonRpcError(id, -32602, "invalid_params");
+
     const std::string wanted = params.at("name").get<std::string>();
     const json args = params.value("arguments", json::object());
+    if (!args.is_object()) return JsonRpcError(id, -32602, "arguments_must_be_object");
 
     for (const auto& entry : semantic::Catalog()) {
         if (entry.value("name", std::string()) == wanted) return ToolCallResult(id, semantic::PlanFor(wanted, args));
@@ -154,8 +156,9 @@ json HandleToolsCall(const json& id, const json& params) {
     for (const auto& entry : BuildToolsManifest()) {
         if (SanitizeToolName(entry.value("name", std::string())) != wanted) continue;
         const std::string method = entry.value("method", std::string("GET"));
-        const std::string path = RenderPath(entry.value("path", std::string()), args);
-        return ToolCallResult(id, Dispatch(method, path, BodyPayload(args)));
+        const auto rendered = mcp_contract::RenderPath(entry.value("path", std::string()), args);
+        if (!rendered) return JsonRpcError(id, -32602, rendered.error);
+        return ToolCallResult(id, Dispatch(method, rendered.path, BodyPayload(args)));
     }
     return JsonRpcError(id, -32601, "unknown_tool");
 }

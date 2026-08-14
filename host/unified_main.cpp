@@ -3,8 +3,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "../mcp_bridge/policy.h"
+#include "diagnostics/external_host.h"
 
 // These entry points are the existing tool mains, renamed per-source by CMake.
 // Keeping each implementation in its own translation unit avoids anonymous
@@ -18,6 +24,7 @@ int CortexSymbolizeMain(int argc, char** argv);
 namespace {
 
 using EntryPoint = int (*)(int, char**);
+using json = nlohmann::json;
 
 std::string Lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
@@ -33,6 +40,7 @@ void PrintUsage(FILE* stream = stdout) {
         "Usage:\n"
         "  cortex_host serve --pid <pid> | --process <game.exe> [server options]\n"
         "  cortex_host inject <process-name-or-pid> [cortex_core.dll]\n"
+        "  cortex_host probe --pid <pid> [--heartbeat render]\n"
         "  cortex_host diagnose --pid <pid> [diagnostic options]\n"
         "  cortex_host analyze <crash-directory>\n"
         "  cortex_host symbolize --image <dll-or-exe> --rva <hex> [symbol options]\n"
@@ -42,10 +50,11 @@ void PrintUsage(FILE* stream = stdout) {
         "Commands:\n"
         "  serve       External controller, memory scanner and HTTP API\n"
         "  inject      Inject cortex_core.dll into a matching process\n"
+        "  probe       Read-only process/shared-channel health report as JSON\n"
         "  diagnose    Watch crashes, freezes and write external dumps\n"
         "  analyze     Analyze an existing crash/freeze directory\n"
         "  symbolize   Resolve a PE module RVA through PDB or DWARF tools\n"
-        "  mcp         Run the stdio-to-HTTP MCP bridge\n",
+        "  mcp         Run the local-only stdio-to-HTTP MCP bridge\n",
         stream);
 }
 
@@ -74,6 +83,142 @@ bool LooksLikeLegacyServeInvocation(const char* argument) {
     return value.find(".exe") != std::string::npos;
 }
 
+bool ValidateMcpArguments(int argc, char** argv, int firstArgument) {
+    std::string host = "127.0.0.1";
+    int port = 6969;
+    for (int index = firstArgument; index < argc; ++index) {
+        const std::string arg = argv[index] ? argv[index] : "";
+        if (arg == "--host") {
+            if (index + 1 >= argc) return false;
+            host = argv[++index] ? argv[index] : "";
+        } else if (arg == "--port") {
+            if (index + 1 >= argc) return false;
+            const std::string raw = argv[++index] ? argv[index] : "";
+            try {
+                size_t consumed = 0;
+                const int parsed = std::stoi(raw, &consumed, 10);
+                if (consumed != raw.size()) return false;
+                port = parsed;
+            } catch (...) {
+                return false;
+            }
+        }
+    }
+    return mcp_bridge::policy::IsLoopbackHost(host) && mcp_bridge::policy::IsValidPort(port);
+}
+
+struct ProbeOptions {
+    DWORD processId = 0;
+    std::string heartbeatSource = "render";
+};
+
+bool ParseProbeArguments(int argc, char** argv, int firstArgument, ProbeOptions& options) {
+    for (int index = firstArgument; index < argc; ++index) {
+        const std::string arg = argv[index] ? argv[index] : "";
+        if (arg == "--pid") {
+            if (index + 1 >= argc) return false;
+            const std::string raw = argv[++index] ? argv[index] : "";
+            try {
+                size_t consumed = 0;
+                const unsigned long parsed = std::stoul(raw, &consumed, 10);
+                if (consumed != raw.size() || parsed == 0) return false;
+                options.processId = static_cast<DWORD>(parsed);
+            } catch (...) {
+                return false;
+            }
+        } else if (arg == "--heartbeat") {
+            if (index + 1 >= argc) return false;
+            options.heartbeatSource = argv[++index] ? argv[index] : "";
+            if (options.heartbeatSource.empty()) return false;
+        } else {
+            return false;
+        }
+    }
+    return options.processId != 0;
+}
+
+int RunProbe(const ProbeOptions& options) {
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                                 FALSE, options.processId);
+    if (!process) {
+        const DWORD error = GetLastError();
+        const json output{{"schema_version", 1},
+                          {"ok", false},
+                          {"process_id", options.processId},
+                          {"error", "open_process_failed"},
+                          {"win32_error", error}};
+        std::puts(output.dump(2).c_str());
+        return 3;
+    }
+
+    const bool processAlive = hostdiag::IsProcessAlive(process);
+    bool windowFound = false;
+    const bool windowResponsive = processAlive &&
+        hostdiag::IsWindowResponsive(options.processId, windowFound);
+
+    hostdiag::SharedClient shared;
+    std::string openError;
+    const bool sharedOpen = shared.Open(options.processId, openError);
+    hostdiag::SharedSnapshot snapshot;
+    std::string snapshotError;
+    const bool haveSnapshot = sharedOpen && shared.Snapshot(snapshot, snapshotError);
+
+    const uint64_t now = GetTickCount64();
+    bool heartbeatFound = false;
+    uint64_t heartbeatAge = 0;
+    if (haveSnapshot) {
+        heartbeatAge = hostdiag::HeartbeatAgeMs(snapshot, options.heartbeatSource,
+                                                now, heartbeatFound);
+    }
+
+    json allHeartbeats = json::array();
+    if (haveSnapshot) {
+        for (const auto& heartbeat : snapshot.heartbeats) {
+            json item{{"source", heartbeat.source},
+                      {"thread_id", heartbeat.threadId},
+                      {"sequence", heartbeat.sequence},
+                      {"last_tick_ms", heartbeat.lastTickMs}};
+            if (heartbeat.lastTickMs && now >= heartbeat.lastTickMs)
+                item["age_ms"] = now - heartbeat.lastTickMs;
+            else
+                item["age_ms"] = nullptr;
+            allHeartbeats.push_back(std::move(item));
+        }
+    }
+
+    json sharedState{{"available", haveSnapshot},
+                     {"ready", haveSnapshot && snapshot.ready},
+                     {"same_bitness", haveSnapshot && snapshot.sameBitness},
+                     {"pointer_size", haveSnapshot ? snapshot.pointerSize : 0},
+                     {"started_tick_ms", haveSnapshot ? snapshot.startedTickMs : 0},
+                     {"last_core_heartbeat_ms", haveSnapshot ? snapshot.lastCoreHeartbeatMs : 0},
+                     {"heartbeats", std::move(allHeartbeats)}};
+    if (haveSnapshot && snapshot.lastCoreHeartbeatMs && now >= snapshot.lastCoreHeartbeatMs)
+        sharedState["core_heartbeat_age_ms"] = now - snapshot.lastCoreHeartbeatMs;
+    else
+        sharedState["core_heartbeat_age_ms"] = nullptr;
+
+    json requestedHeartbeat{{"source", options.heartbeatSource}, {"found", heartbeatFound}};
+    requestedHeartbeat["age_ms"] = heartbeatFound ? json(heartbeatAge) : json(nullptr);
+
+    json errors = json::object();
+    if (!openError.empty()) errors["shared_open"] = openError;
+    if (!snapshotError.empty()) errors["shared_snapshot"] = snapshotError;
+
+    const json output{{"schema_version", 1},
+                      {"ok", processAlive},
+                      {"process_id", options.processId},
+                      {"process_alive", processAlive},
+                      {"host_pointer_size", sizeof(void*)},
+                      {"window", {{"found", windowFound}, {"responsive", windowResponsive}}},
+                      {"shared", std::move(sharedState)},
+                      {"heartbeat", std::move(requestedHeartbeat)},
+                      {"errors", std::move(errors)}};
+    std::puts(output.dump(2).c_str());
+    CloseHandle(process);
+    return processAlive ? 0 : 5;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -99,6 +244,14 @@ int main(int argc, char** argv) {
         return Forward(CortexServeMain, "cortex_host serve", argc, argv, 2);
     if (command == "inject" || command == "injector")
         return Forward(CortexInjectMain, "cortex_host inject", argc, argv, 2);
+    if (command == "probe") {
+        ProbeOptions options;
+        if (!ParseProbeArguments(argc, argv, 2, options)) {
+            std::fputs("cortex_host probe: usage: cortex_host probe --pid <pid> [--heartbeat source]\n", stderr);
+            return 2;
+        }
+        return RunProbe(options);
+    }
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return Forward(CortexDiagnoseMain, "cortex_host diagnose", argc, argv, 2);
     if (command == "analyze" || command == "analyse") {
@@ -111,8 +264,13 @@ int main(int argc, char** argv) {
     }
     if (command == "symbolize" || command == "symbolise" || command == "symbols")
         return Forward(CortexSymbolizeMain, "cortex_host symbolize", argc, argv, 2);
-    if (command == "mcp" || command == "mcp-bridge")
+    if (command == "mcp" || command == "mcp-bridge") {
+        if (!ValidateMcpArguments(argc, argv, 2)) {
+            std::fputs("cortex_host mcp: --host must be loopback and --port must be 1..65535\n", stderr);
+            return 2;
+        }
         return Forward(CortexMcpMain, "cortex_host mcp", argc, argv, 2);
+    }
 
     // Preserve the original cortex_host command line so existing scripts that
     // pass --pid/--process directly do not break during the consolidation.

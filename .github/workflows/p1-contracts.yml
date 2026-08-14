@@ -1,0 +1,67 @@
+name: P1 Contracts
+
+on:
+  push:
+    branches:
+      - agent/p1-hardening
+    paths:
+      - "core/api/request_id.h"
+      - "core/api/request_limits.h"
+      - "core/api/pagination.h"
+      - "core/api/semantic_tools.h"
+      - "tests/request_id_tests.cpp"
+      - "tests/pagination_tests.cpp"
+      - "tests/semantic_plan_p1_tests.cpp"
+      - ".github/workflows/p1-contracts.yml"
+  pull_request:
+    paths:
+      - "core/api/request_id.h"
+      - "core/api/request_limits.h"
+      - "core/api/pagination.h"
+      - "core/api/semantic_tools.h"
+      - "tests/request_id_tests.cpp"
+      - "tests/pagination_tests.cpp"
+      - "tests/semantic_plan_p1_tests.cpp"
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    name: p1-contracts-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.package_prefix }}-gcc
+
+      - name: Request ID tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/request_id_tests.cpp
+          -o request_id_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && ./request_id_tests.exe
+
+      - name: Pagination and request-limit tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/pagination_tests.cpp
+          -o pagination_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && ./pagination_tests.exe

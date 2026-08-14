@@ -1,5 +1,8 @@
 #include "server.h"
 #include "routes.h"
+#include "request_id.h"
+#include "request_limits.h"
+#include "response_contract.h"
 #include "../config.h"
 #include "../log.h"
 #include "../events/events.h"
@@ -28,6 +31,7 @@ namespace {
     std::string g_tokenPath;
     std::string g_lastError;
     std::mutex g_stateMutex;
+    std::atomic<uint64_t> g_requestSequence{0};
 
     void SetLastError(std::string error) {
         std::lock_guard<std::mutex> lock(g_stateMutex);
@@ -41,6 +45,11 @@ namespace {
         out << std::hex << std::setfill('0');
         for (unsigned char b : bytes) out << std::setw(2) << static_cast<unsigned int>(b);
         return out.str();
+    }
+
+    std::string NextRequestId() {
+        const uint64_t sequence = g_requestSequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        return request_id::Format(GetTickCount64(), GetCurrentProcessId(), sequence);
     }
 
     std::string LoadOrCreateToken(const std::string& configured) {
@@ -117,14 +126,17 @@ namespace {
 
         const std::string contentLength = req.get_header_value("Content-Length");
         if (contentLength.empty()) return false;
-        try {
-            size_t consumed = 0;
-            const unsigned long long length = std::stoull(contentLength, &consumed, 10);
-            return consumed == contentLength.size() && length != 0;
-        } catch (...) {
-            // A malformed Content-Length must not bypass the stricter branch.
-            return true;
-        }
+        const auto parsed = request_limits::ParseContentLength(contentLength, (std::numeric_limits<size_t>::max)());
+        return !parsed || parsed.length != 0;
+    }
+
+    void SetJsonError(httplib::Response& res,
+                      int status,
+                      const std::string& code,
+                      const std::string& requestId,
+                      const std::string& message = {}) {
+        res.status = status;
+        res.set_content(response::Error(code, message, requestId).dump(), "application/json");
     }
 }
 
@@ -136,6 +148,7 @@ bool Start(int port, const std::string& configuredToken) {
     }
     g_port = port;
     g_startTimeMs = GetTickCount64();
+    g_requestSequence.store(0, std::memory_order_relaxed);
     SetLastError({});
     g_token = LoadOrCreateToken(configuredToken);
     if (g_token.size() < 32) {
@@ -144,41 +157,68 @@ bool Start(int port, const std::string& configuredToken) {
     }
 
     g_server = std::make_unique<httplib::Server>();
+    g_server->set_payload_max_length(request_limits::kMaxPayloadBytes);
 
     g_server->set_pre_routing_handler([](const httplib::Request& req, httplib::Response& res) {
+        const std::string requestId = NextRequestId();
+        res.set_header("X-Cortex-Request-Id", requestId);
         res.set_header("Cache-Control", "no-store");
         res.set_header("X-Content-Type-Options", "nosniff");
 
         const std::string host = req.get_header_value("Host");
         if (!host.empty() && !IsLocalAuthority(host)) {
-            res.status = 403;
-            res.set_content("{\"ok\":false,\"error\":\"invalid_host\"}", "application/json");
+            SetJsonError(res, 403, "invalid_host", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
         const std::string origin = req.get_header_value("Origin");
         if (!origin.empty() && !IsLocalOrigin(origin)) {
-            res.status = 403;
-            res.set_content("{\"ok\":false,\"error\":\"untrusted_origin\"}", "application/json");
+            SetJsonError(res, 403, "untrusted_origin", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
         if (!IsPublicPath(req.path) && !SecureTokenEquals(req.get_header_value("X-Cortex-Token"))) {
-            res.status = 401;
-            res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json");
+            SetJsonError(res, 401, "invalid_token", requestId);
             return httplib::Server::HandlerResponse::Handled;
         }
+
+        if (RequestDeclaresPayload(req)) {
+            const std::string transferEncoding = req.get_header_value("Transfer-Encoding");
+            if (!transferEncoding.empty()) {
+                SetJsonError(res, 411, "bounded_content_length_required", requestId,
+                             "chunked request bodies are not accepted by the local API");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+
+            const auto contentLength = request_limits::ParseContentLength(req.get_header_value("Content-Length"));
+            if (contentLength.error == request_limits::ContentLengthError::Invalid) {
+                SetJsonError(res, 400, "invalid_content_length", requestId);
+                return httplib::Server::HandlerResponse::Handled;
+            }
+            if (contentLength.error == request_limits::ContentLengthError::TooLarge) {
+                SetJsonError(res, 413, "payload_too_large", requestId,
+                             "request body exceeds the 16 MiB API limit");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
+
         if ((req.method == "POST" || req.method == "PUT" || req.method == "PATCH") &&
             RequestDeclaresPayload(req)) {
             std::string contentType = req.get_header_value("Content-Type");
             std::transform(contentType.begin(), contentType.end(), contentType.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             if (contentType.rfind("application/json", 0) != 0) {
-                res.status = 415;
-                res.set_content("{\"ok\":false,\"error\":\"application_json_required\"}", "application/json");
+                SetJsonError(res, 415, "application_json_required", requestId);
                 return httplib::Server::HandlerResponse::Handled;
             }
         }
         return httplib::Server::HandlerResponse::Unhandled;
     });
+
+    // Keep the request identifier in the response header. Normal route bodies
+    // are intentionally left untouched here: cpp-httplib computes
+    // Content-Length before its post-routing hook, so mutating res.body in a
+    // post-routing handler can make the declared length stale and truncate the
+    // JSON seen by clients. Structured errors above may still include the same
+    // request ID because their body is created before response serialization.
 
     RegisterStatusRoutes(*g_server);
     RegisterModulesRoutes(*g_server);
