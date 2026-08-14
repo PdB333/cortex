@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     }
 
     Check(semanticNames == std::set<std::string>(expectedNames.begin(), expectedNames.end()),
-          "catalog names differ from the locked v0.4.0 list");
+          "catalog names differ from the locked v0.5.0 list");
 
     for (const auto& pair : dependencyGraph) {
         for (const auto& dependency : pair.second) {
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
         executeArguments["execute"] = true;
         const json executionPlan = api::semantic::PlanFor(name, executeArguments);
         Check(executionPlan.value("status", std::string()) == "execution_not_available",
-              name + ": execute=true must be rejected explicitly in v0.4.0");
+              name + ": execute=true must be rejected explicitly in v0.5.0");
         Check(executionPlan.value("primitive_sequence", json::array()) == tool.at("_primitives"),
               name + ": execute=true must still return the safe plan");
     }
