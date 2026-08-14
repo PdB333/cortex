@@ -85,7 +85,7 @@ $initialize = Invoke-Mcp -Payload ([ordered]@{
     params = @{}
 })
 Assert-True ($initialize.result.serverInfo.name -eq "cortex") "initialize returned wrong server name"
-Assert-True ($initialize.result.serverInfo.version -eq "0.4.0") "initialize did not report v0.4.0"
+Assert-True ($initialize.result.serverInfo.version -eq "0.5.0") "initialize did not report v0.5.0"
 Assert-True ($initialize.result.protocolVersion -eq "2024-11-05") "unexpected MCP protocol version"
 
 $list = Invoke-Mcp -Payload ([ordered]@{
@@ -100,7 +100,7 @@ $semanticTools = @($allTools | Where-Object {
 })
 Assert-True ($semanticTools.Count -eq 30) "tools/list must expose exactly 30 semantic tools"
 Assert-SetEqual -Expected $expectedNames -Actual @($semanticTools.name) `
-    -Message "live MCP semantic names differ from the locked v0.4.0 catalog"
+    -Message "live MCP semantic names differ from the locked v0.5.0 catalog"
 
 $uniqueNames = @($semanticTools.name | Sort-Object -Unique)
 Assert-True ($uniqueNames.Count -eq 30) "semantic tool names are not unique"
