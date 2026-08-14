@@ -1,5 +1,5 @@
 // Native Model Context Protocol (MCP) endpoint.
-// Primitive tools are derived from /tools. Cortex v0.4 also exposes a
+// Primitive tools are derived from /tools. Cortex v0.5 also exposes a
 // semantic catalog for AI agents; semantic calls return deterministic,
 // evidence-oriented orchestration plans over the primitive tools.
 
@@ -117,7 +117,7 @@ json JsonRpcResult(const json& id, json result) {
 json HandleInitialize(const json& id) {
     return JsonRpcResult(id, {{"protocolVersion", "2024-11-05"},
                               {"capabilities", {{"tools", {{"listChanged", false}}}}},
-                              {"serverInfo", {{"name", "cortex"}, {"version", "0.4.0"}}}});
+                              {"serverInfo", {{"name", "cortex"}, {"version", "0.5.0"}}}});
 }
 
 json HandleToolsList(const json& id) {
