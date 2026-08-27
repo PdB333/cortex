@@ -7,11 +7,11 @@
 #include "server.h"
 #include "semantic_tools.h"
 #include "mcp_contract.h"
+#include "mcp_protocol.h"
 #include "../overlay/overlay.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
-#include <sstream>
 #include <string>
 
 using json = nlohmann::json;
@@ -106,88 +106,92 @@ json Dispatch(const std::string& method, const std::string& path, const json& bo
     return output;
 }
 
-json JsonRpcError(const json& id, int code, const std::string& message) {
-    return {{"jsonrpc", "2.0"}, {"id", id}, {"error", {{"code", code}, {"message", message}}}};
-}
-
-json JsonRpcResult(const json& id, json result) {
-    return {{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}};
-}
-
-json HandleInitialize(const json& id) {
-    return JsonRpcResult(id, {{"protocolVersion", "2024-11-05"},
-                              {"capabilities", {{"tools", {{"listChanged", false}}}}},
-                              {"serverInfo", {{"name", "cortex"}, {"version", "0.5.0"}}}});
-}
-
-json HandleToolsList(const json& id) {
-    json tools = json::array();
-    for (const auto& entry : BuildToolsManifest()) tools.push_back(ManifestEntryToMcpTool(entry));
-    for (const auto& entry : semantic::Catalog()) tools.push_back(entry);
-    return JsonRpcResult(id, {{"tools", tools}});
-}
-
 bool IsToolError(const json& result) {
     if (result.contains("status")) {
         if (result["status"].is_number_integer() && result["status"].get<int>() >= 400) return true;
-        if (result["status"].is_string() && result["status"].get<std::string>() == "failed") return true;
+        if (result["status"].is_string()) {
+            const std::string status = result["status"].get<std::string>();
+            if (status == "failed" || status == "execution_not_available") return true;
+        }
     }
     return result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>();
 }
 
-json ToolCallResult(const json& id, const json& result) {
-    return JsonRpcResult(id, {{"content", json::array({{{"type", "text"}, {"text", result.dump(2)}}})},
-                              {"structuredContent", result},
-                              {"isError", IsToolError(result)}});
+json ToolCallPayload(const json& result) {
+    return {{"content", json::array({{{"type", "text"}, {"text", result.dump(2)}}})},
+            {"structuredContent", result},
+            {"isError", IsToolError(result)}};
 }
 
-json HandleToolsCall(const json& id, const json& params) {
-    if (!params.is_object() || !params.contains("name") || !params.at("name").is_string())
-        return JsonRpcError(id, -32602, "invalid_params");
+bool IsSemanticTool(const std::string& wanted) {
+    for (const auto& entry : semantic::Catalog())
+        if (entry.value("name", std::string()) == wanted) return true;
+    return false;
+}
 
-    const std::string wanted = params.at("name").get<std::string>();
-    const json args = params.value("arguments", json::object());
-    if (!args.is_object()) return JsonRpcError(id, -32602, "arguments_must_be_object");
+json ListTools(mcp_protocol::ToolProfile profile) {
+    json tools = json::array();
+    for (const auto& entry : semantic::Catalog()) tools.push_back(entry);
+    if (profile == mcp_protocol::ToolProfile::All) {
+        for (const auto& entry : BuildToolsManifest()) {
+            const std::string name = entry.value("name", std::string());
+            if (name == "mcp") continue;
+            tools.push_back(ManifestEntryToMcpTool(entry));
+        }
+    }
+    return tools;
+}
 
-    for (const auto& entry : semantic::Catalog()) {
-        if (entry.value("name", std::string()) == wanted) return ToolCallResult(id, semantic::PlanFor(wanted, args));
+json CallTool(const std::string& wanted,
+              const json& args,
+              mcp_protocol::ToolProfile profile,
+              const json&) {
+    if (IsSemanticTool(wanted)) return ToolCallPayload(semantic::PlanFor(wanted, args));
+
+    if (profile != mcp_protocol::ToolProfile::All) {
+        return ToolCallPayload({{"ok", false},
+                                {"error", "primitive_tool_hidden"},
+                                {"message", "Primitive tools are hidden in the compact MCP profile. Start Cortex MCP with --tools all to expose them."}});
     }
 
     for (const auto& entry : BuildToolsManifest()) {
         if (SanitizeToolName(entry.value("name", std::string())) != wanted) continue;
+        if (entry.value("name", std::string()) == "mcp") break;
         const std::string method = entry.value("method", std::string("GET"));
         const auto rendered = mcp_contract::RenderPath(entry.value("path", std::string()), args);
-        if (!rendered) return JsonRpcError(id, -32602, rendered.error);
-        return ToolCallResult(id, Dispatch(method, rendered.path, BodyPayload(args)));
+        if (!rendered) return ToolCallPayload({{"ok", false}, {"error", rendered.error}});
+        return ToolCallPayload(Dispatch(method, rendered.path, BodyPayload(args)));
     }
-    return JsonRpcError(id, -32601, "unknown_tool");
+    return ToolCallPayload({{"ok", false}, {"error", "unknown_tool"}});
+}
+
+mcp_protocol::ToolProfile ProfileFromRequest(const httplib::Request& request) {
+    const std::string value = request.get_header_value("X-Cortex-MCP-Tools");
+    return value == "compact" ? mcp_protocol::ToolProfile::Compact
+                              : mcp_protocol::ToolProfile::All;
 }
 
 } // namespace
 
 void RegisterMcpRoutes(httplib::Server& server) {
     server.Post("/mcp", [](const httplib::Request& request, httplib::Response& response) {
-        json output;
         try {
-            const json body = json::parse(request.body);
-            auto handleOne = [](const json& message) -> json {
-                const json id = message.value("id", json());
-                const std::string method = message.value("method", std::string());
-                const json params = message.value("params", json::object());
-                if (method == "initialize") return HandleInitialize(id);
-                if (method == "tools/list") return HandleToolsList(id);
-                if (method == "tools/call") return HandleToolsCall(id, params);
-                if (method == "ping") return JsonRpcResult(id, json::object());
-                return JsonRpcError(id, -32601, "method_not_found");
-            };
-            if (body.is_array()) {
-                output = json::array();
-                for (const auto& message : body) output.push_back(handleOne(message));
-            } else output = handleOne(body);
+            mcp_protocol::Handler handler;
+            handler.profile = ProfileFromRequest(request);
+            handler.transportProtocolVersion = request.get_header_value("MCP-Protocol-Version");
+            handler.listTools = ListTools;
+            handler.callTool = CallTool;
+
+            const auto result = mcp_protocol::Handle(json::parse(request.body), handler);
+            if (!result.hasResponse) {
+                response.status = 202;
+                response.set_content("", "application/json");
+            } else {
+                response.set_content(result.response.dump(), "application/json");
+            }
         } catch (const std::exception& error) {
-            output = JsonRpcError(nullptr, -32700, error.what());
+            response.set_content(mcp_protocol::Error(nullptr, -32700, error.what()).dump(), "application/json");
         }
-        response.set_content(output.dump(), "application/json");
         overlay::LogApiCall("POST /mcp");
     });
 }
