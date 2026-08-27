@@ -1,5 +1,7 @@
 #include "native_routes.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <mutex>
@@ -109,9 +111,6 @@ NativeRouteResult DispatchNativeRoute(const std::string& method,
         try {
             matched = std::regex_match(path, matches, std::regex(route.pattern));
         } catch (const std::regex_error&) {
-            // cpp-httplib accepts ordinary literal patterns too. Escaping a
-            // malformed regex here would risk changing route semantics, so a
-            // bad native pattern is simply skipped and remains REST-only.
             continue;
         }
         if (!matched) continue;
