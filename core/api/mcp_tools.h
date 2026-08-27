@@ -20,6 +20,7 @@ json CallTool(const std::string& name,
 
 mcp_protocol::Result Handle(const json& input,
                             mcp_protocol::ToolProfile profile,
-                            const std::string& transportProtocolVersion = {});
+                            const std::string& transportProtocolVersion = {},
+                            const std::string& cancellationScope = {});
 
 } // namespace api::mcp_tools
