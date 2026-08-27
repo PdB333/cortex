@@ -67,6 +67,7 @@ struct Handler {
     std::string transportProtocolVersion;
     std::function<json(ToolProfile)> listTools;
     std::function<json(const std::string&, const json&, ToolProfile, const json&)> callTool;
+    std::function<void(const json&)> notification;
 };
 
 struct Result {
@@ -112,10 +113,13 @@ inline Result HandleOne(const json& message, const Handler& handler) {
         return {true, Error(hasId ? id : json(nullptr), -32600, "invalid_request")};
     const std::string method = methodIt->get<std::string>();
 
-    // JSON-RPC notifications intentionally have no response, including
-    // unknown notifications. This covers legacy notifications/initialized and
-    // notifications/cancelled without creating spurious id:null errors.
-    if (!hasId) return {};
+    // JSON-RPC notifications intentionally have no response. The executor is
+    // still allowed to observe them so notifications/cancelled can interrupt
+    // an active semantic orchestration request.
+    if (!hasId) {
+        if (handler.notification) handler.notification(message);
+        return {};
+    }
 
     const json params = message.value("params", json::object());
 
