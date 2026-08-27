@@ -1,4 +1,4 @@
-CORTEX v0.3.1 - INSTALLATION ET DEMARRAGE RAPIDE
+CORTEX v0.6.0 - INSTALLATION ET DEMARRAGE RAPIDE
 ================================================
 
 Cortex est fourni en deux archives distinctes : Windows x86 et Windows x64.
@@ -36,8 +36,8 @@ README.md
 README_INSTALL.txt
     Ce tutoriel.
 
-CHANGELOG.md, LICENSE, docs, sdk
-    Historique, licence, documentation technique et SDK pour les mods.
+CHANGELOG.md, LICENSE, docs, sdk, agent
+    Historique, licence, documentation technique, SDK et documentation agent.
 
 
 METHODE 1 - INJECTEUR AUTONOME
@@ -83,6 +83,7 @@ Commandes principales :
 
        cortex_host.exe serve ...
        cortex_host.exe inject ...
+       cortex_host.exe probe --pid ...
        cortex_host.exe diagnose ...
        cortex_host.exe analyze ...
        cortex_host.exe symbolize ...
@@ -91,6 +92,32 @@ Commandes principales :
 Affichez l'aide avec :
 
        .\cortex_host.exe help
+
+
+MCP NATIF POUR CLIENTS IA
+-------------------------
+
+v0.6.0 utilise par defaut un transport MCP stdio -> Named Pipe Windows local et
+authentifie. Le bridge n'a plus besoin de repasser par HTTP pour executer les
+outils MCP.
+
+Pour injecter Cortex et demarrer MCP en une seule commande :
+
+       .\cortex_host.exe mcp --process game.exe
+
+Ou, si Cortex est deja injecte :
+
+       .\cortex_host.exe mcp --token-file .\cortex.token
+
+Le profil par defaut expose les 30 outils semantiques. Pour exposer aussi les
+primitives bas niveau :
+
+       .\cortex_host.exe mcp --token-file .\cortex.token --tools all
+
+Le transport HTTP historique reste disponible explicitement pour compatibilite
+et diagnostic :
+
+       .\cortex_host.exe mcp --transport http --token-file .\cortex.token
 
 
 METHODE 3 - ASI LOADER
@@ -186,6 +213,10 @@ PROBLEMES COURANTS
 L'API ne repond pas
     Verifiez que Cortex n'est pas deja charge, que le port 6969 est libre et
     consultez les fichiers de log generes a cote de Cortex.
+
+Le client MCP indique "cortex_unreachable"
+    Verifiez que Cortex est bien injecte, que cortex.token correspond au runtime
+    courant et que cortex_host.exe/cortex_core.dll ont la meme architecture.
 
 L'ASI ne se charge pas
     Verifiez l'architecture de l'ASI loader, son dossier de plugins et ses logs.
