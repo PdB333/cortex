@@ -22,9 +22,8 @@ enum class ToolProfile {
     All
 };
 
-inline const std::vector<std::string>& SupportedVersions() {
+inline const std::vector<std::string>& LegacyProtocolVersions() {
     static const std::vector<std::string> versions = {
-        kModernProtocolVersion,
         "2025-11-25",
         "2025-06-18",
         "2025-03-26",
@@ -33,8 +32,8 @@ inline const std::vector<std::string>& SupportedVersions() {
     return versions;
 }
 
-inline bool IsSupportedVersion(const std::string& version) {
-    const auto& supported = SupportedVersions();
+inline bool IsSupportedLegacyVersion(const std::string& version) {
+    const auto& supported = LegacyProtocolVersions();
     return std::find(supported.begin(), supported.end(), version) != supported.end();
 }
 
@@ -43,8 +42,7 @@ inline bool IsModernVersion(const std::string& version) {
 }
 
 inline std::string NegotiateLegacyVersion(const std::string& requested) {
-    if (!requested.empty() && requested != kModernProtocolVersion && IsSupportedVersion(requested))
-        return requested;
+    if (IsSupportedLegacyVersion(requested)) return requested;
     return kLatestLegacyProtocolVersion;
 }
 
@@ -91,10 +89,8 @@ inline std::string EffectiveProtocolVersion(const json& message, const Handler& 
 }
 
 inline json DiscoverResult() {
-    json versions = json::array();
-    for (const auto& version : SupportedVersions()) versions.push_back(version);
     return {
-        {"supportedVersions", std::move(versions)},
+        {"supportedVersions", json::array({kModernProtocolVersion})},
         {"capabilities", {{"tools", {{"listChanged", false}}}}},
         {"instructions", "Cortex exposes runtime-analysis tools. Prefer semantic tools and bounded, reversible experiments before raw mutation primitives."},
         {"ttlMs", kCatalogTtlMs},
