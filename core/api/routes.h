@@ -41,3 +41,14 @@ void RegisterLuaRoutes(RouteRegistrar& svr);
 void RegisterOcrRoutes(RouteRegistrar& svr);
 
 } // namespace api
+
+// Every routes_*.cpp historically spells its registration parameter as
+// `httplib::Server&`. For those translation units only, CMake defines
+// CORTEX_ROUTE_REGISTRAR; this compatibility alias keeps all route bodies
+// untouched while making their `svr.Get/Post/...` calls hit RouteRegistrar.
+// server.cpp is compiled without the define and continues to use the real
+// httplib::Server for transport concerns.
+#ifdef CORTEX_ROUTE_REGISTRAR
+namespace httplib { using RouteRegistrar = ::api::RouteRegistrar; }
+#define Server RouteRegistrar
+#endif
