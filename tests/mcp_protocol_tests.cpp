@@ -12,6 +12,9 @@ int main() {
         if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
     };
 
+    int notifications = 0;
+    json lastNotification;
+
     Handler handler;
     handler.profile = ToolProfile::Compact;
     handler.listTools = [](ToolProfile profile) {
@@ -20,13 +23,23 @@ int main() {
     handler.callTool = [](const std::string& name, const json&, ToolProfile, const json&) {
         return json{{"content", json::array({{{"type", "text"}, {"text", name}}})}, {"isError", false}};
     };
+    handler.notification = [&](const json& message) {
+        ++notifications;
+        lastNotification = message;
+    };
 
     const auto initialized = Handle({{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}, handler);
     check(!initialized.hasResponse, "legacy initialized notification has no response");
+    check(notifications == 1, "notification callback sees initialized notification");
 
     const auto cancelled = Handle({{"jsonrpc", "2.0"}, {"method", "notifications/cancelled"},
                                    {"params", {{"requestId", 4}}}}, handler);
     check(!cancelled.hasResponse, "cancel notification has no response");
+    check(notifications == 2, "notification callback sees cancellation");
+    check(lastNotification.value("method", std::string()) == "notifications/cancelled",
+          "notification callback receives cancellation payload");
+    check(lastNotification["params"].value("requestId", 0) == 4,
+          "notification callback preserves cancellation requestId");
 
     const auto legacy = Handle({{"jsonrpc", "2.0"}, {"id", 1}, {"method", "initialize"},
                                 {"params", {{"protocolVersion", "2024-11-05"}}}}, handler);
@@ -59,8 +72,9 @@ int main() {
     }), handler);
     check(batch.hasResponse && batch.response.is_array() && batch.response.size() == 1,
           "batch filters notification responses");
+    check(notifications == 3, "batch notifications still reach callback");
 
     if (failures) return 1;
-    std::cout << "PASS: MCP protocol lifecycle and transport-neutral handler\n";
+    std::cout << "PASS: MCP protocol lifecycle, notifications, cancellation, and transport-neutral handler\n";
     return 0;
 }
