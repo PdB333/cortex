@@ -24,9 +24,15 @@
 #include <io.h>
 #include <cstdio>
 #include <cstdint>
+#include <condition_variable>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 int CortexInjectMain(int argc, char** argv);
@@ -54,6 +60,12 @@ std::string ExecutableDir() {
 std::string DirectoryOf(const std::string& path) {
     const size_t slash = path.find_last_of("\\/");
     return slash == std::string::npos ? std::string() : path.substr(0, slash);
+}
+
+std::string MakeSessionId() {
+    std::ostringstream out;
+    out << std::hex << GetCurrentProcessId() << '-' << GetTickCount64();
+    return out.str();
 }
 
 int RunInjectorQuietly(const std::string& target, const std::string& dllPath) {
@@ -142,6 +154,7 @@ HANDLE OpenPipe(const std::string& pipeName, int attempts = 100) {
 bool NativeRoundTrip(const std::string& pipeName,
                      const std::string& token,
                      const std::string& toolProfile,
+                     const std::string& session,
                      const json& message,
                      std::string& response) {
     HANDLE pipe = OpenPipe(pipeName, 20);
@@ -150,6 +163,7 @@ bool NativeRoundTrip(const std::string& pipeName,
     const json envelope = {
         {"token", token},
         {"tools", toolProfile},
+        {"session", session},
         {"message", message}
     };
     const std::string payload = envelope.dump();
@@ -170,16 +184,39 @@ bool WaitForHttpRuntime(const std::string& host, int port) {
     return false;
 }
 
-void WriteBridgeError(const std::string& code, const std::string& message) {
-    std::cout << json({
+json BridgeError(const json& id, const std::string& code, const std::string& message) {
+    return {
         {"jsonrpc", "2.0"},
-        {"id", nullptr},
+        {"id", id},
         {"error", {{"code", -32000}, {"message", message}, {"data", {{"code", code}}}}}
-    }).dump() << '\n';
+    };
+}
+
+json MessageId(const json& message) {
+    return message.is_object() && message.contains("id") ? message.at("id") : json(nullptr);
+}
+
+bool IsCancellationNotification(const json& message) {
+    return message.is_object() && !message.contains("id") &&
+           message.value("method", std::string()) == "notifications/cancelled";
+}
+
+struct NativeRunState {
+    std::mutex outputMutex;
+    std::mutex activeMutex;
+    std::condition_variable activeChanged;
+    size_t active = 0;
+};
+
+void WriteOutput(const std::shared_ptr<NativeRunState>& state, const std::string& response) {
+    if (response.empty()) return;
+    std::lock_guard<std::mutex> lock(state->outputMutex);
+    std::cout << response << '\n';
 }
 
 int RunNative(const std::string& token, const std::string& toolProfile) {
     const std::string pipeName = api::mcp_pipe_protocol::PipeNameForToken(token);
+    const std::string session = MakeSessionId();
     HANDLE ready = OpenPipe(pipeName, 100);
     if (ready == INVALID_HANDLE_VALUE) {
         std::cerr << "cortex_host mcp: native Cortex pipe did not become reachable\n";
@@ -188,6 +225,9 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
     CloseHandle(ready);
 
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    auto state = std::make_shared<NativeRunState>();
+    constexpr size_t kMaxConcurrentRequests = 64;
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
@@ -196,22 +236,50 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
         try {
             message = json::parse(line);
         } catch (const std::exception& error) {
-            std::cout << json({
+            WriteOutput(state, json({
                 {"jsonrpc", "2.0"},
                 {"id", nullptr},
                 {"error", {{"code", -32700}, {"message", error.what()}}}
-            }).dump() << '\n';
+            }).dump());
             continue;
         }
 
-        std::string response;
-        if (!NativeRoundTrip(pipeName, token, toolProfile, message, response)) {
-            WriteBridgeError("cortex_unreachable", "Cortex native MCP transport is unreachable");
+        // Cancellation bypasses the normal worker limit and is dispatched on
+        // the reader thread, so it can reach the runtime while a long tool
+        // call is still executing on another pipe instance.
+        if (IsCancellationNotification(message)) {
+            std::string ignored;
+            NativeRoundTrip(pipeName, token, toolProfile, session, message, ignored);
             continue;
         }
-        // A zero-length frame represents a JSON-RPC notification.
-        if (!response.empty()) std::cout << response << '\n';
+
+        {
+            std::lock_guard<std::mutex> lock(state->activeMutex);
+            if (state->active >= kMaxConcurrentRequests) {
+                WriteOutput(state, BridgeError(MessageId(message), "too_many_requests",
+                                               "Cortex MCP bridge concurrency limit reached").dump());
+                continue;
+            }
+            ++state->active;
+        }
+
+        std::thread([state, pipeName, token, toolProfile, session, message] {
+            std::string response;
+            if (!NativeRoundTrip(pipeName, token, toolProfile, session, message, response)) {
+                response = BridgeError(MessageId(message), "cortex_unreachable",
+                                       "Cortex native MCP transport is unreachable").dump();
+            }
+            WriteOutput(state, response);
+            {
+                std::lock_guard<std::mutex> lock(state->activeMutex);
+                --state->active;
+            }
+            state->activeChanged.notify_all();
+        }).detach();
     }
+
+    std::unique_lock<std::mutex> lock(state->activeMutex);
+    state->activeChanged.wait(lock, [&] { return state->active == 0; });
     return 0;
 }
 
@@ -225,12 +293,14 @@ int RunHttp(const std::string& host,
         return 3;
     }
 
+    const std::string session = MakeSessionId();
     httplib::Client client(host.c_str(), port);
     client.set_read_timeout(60, 0);
     httplib::Headers headers = {
         {"X-Cortex-Token", token},
         {"Host", host},
-        {"X-Cortex-MCP-Tools", toolProfile}
+        {"X-Cortex-MCP-Tools", toolProfile},
+        {"X-Cortex-MCP-Session", session}
     };
 
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -239,7 +309,8 @@ int RunHttp(const std::string& host,
         if (line.empty()) continue;
         auto response = client.Post("/mcp", headers, line, "application/json");
         if (!response) {
-            WriteBridgeError("cortex_unreachable", "Cortex HTTP MCP transport is unreachable");
+            std::cout << BridgeError(nullptr, "cortex_unreachable",
+                                     "Cortex HTTP MCP transport is unreachable").dump() << '\n';
             continue;
         }
         if (response->status == 202 || response->body.empty()) continue;
