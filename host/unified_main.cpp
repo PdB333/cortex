@@ -44,7 +44,7 @@ void PrintUsage(FILE* stream = stdout) {
         "  cortex_host diagnose --pid <pid> [diagnostic options]\n"
         "  cortex_host analyze <crash-directory>\n"
         "  cortex_host symbolize --image <dll-or-exe> --rva <hex> [symbol options]\n"
-        "  cortex_host mcp [--host 127.0.0.1] [--port 6969] [--token-file file]\n\n"
+        "  cortex_host mcp [--process <name>|--pid <pid>] [--transport native|http] [--tools compact|all] [--token-file file]\n\n"
         "Compatibility:\n"
         "  cortex_host --pid <pid> ... still starts the external HTTP server.\n\n"
         "Commands:\n"
@@ -54,7 +54,7 @@ void PrintUsage(FILE* stream = stdout) {
         "  diagnose    Watch crashes, freezes and write external dumps\n"
         "  analyze     Analyze an existing crash/freeze directory\n"
         "  symbolize   Resolve a PE module RVA through PDB or DWARF tools\n"
-        "  mcp         Run the local-only stdio-to-HTTP MCP bridge\n",
+        "  mcp         Run the local stdio MCP bridge (native pipe by default)\n",
         stream);
 }
 
