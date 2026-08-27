@@ -1,5 +1,6 @@
 #include "server.h"
 #include "routes.h"
+#include "mcp_pipe.h"
 #include "request_id.h"
 #include "request_limits.h"
 #include "response_contract.h"
@@ -250,16 +251,25 @@ bool Start(int port, const std::string& configuredToken) {
         return false;
     }
 
+    if (!mcp_pipe::Start(g_token)) {
+        SetLastError("mcp_pipe_failed:" + mcp_pipe::GetLastError());
+        ClearNativeRoutes();
+        g_server.reset();
+        return false;
+    }
+
     g_thread = std::thread([] {
         if (!g_server->listen_after_bind()) SetLastError("listen_failed");
     });
     dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    dbglog::Line("MCP native pipe: %s", mcp_pipe::GetPipeName().c_str());
     return true;
 }
 
 void Stop() {
     if (!g_server) return;
     events::WakeAll();
+    mcp_pipe::Stop();
     g_server->stop();
     if (g_thread.joinable()) g_thread.join();
     g_server.reset();
