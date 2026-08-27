@@ -158,7 +158,7 @@ bool NativeRoundTrip(const std::string& pipeName,
                      const std::string& session,
                      const json& message,
                      std::string& response) {
-    HANDLE pipe = OpenPipe(pipeName, 20);
+    HANDLE pipe = OpenPipe(pipeName, 100);
     if (pipe == INVALID_HANDLE_VALUE) return false;
 
     const json envelope = {
@@ -266,13 +266,10 @@ void WaitForWorkers(const std::shared_ptr<RunState>& state) {
 int RunNative(const std::string& token, const std::string& toolProfile) {
     const std::string pipeName = api::mcp_pipe_protocol::PipeNameForToken(token);
     const std::string session = MakeSessionId();
-    HANDLE ready = OpenPipe(pipeName, 100);
-    if (ready == INVALID_HANDLE_VALUE) {
-        std::cerr << "cortex_host mcp: native Cortex pipe did not become reachable\n";
-        return 3;
-    }
-    CloseHandle(ready);
 
+    // Do not consume a one-shot pipe instance only to probe readiness. The
+    // first real JSON-RPC request performs the connection with bounded retries,
+    // avoiding a race while the runtime rotates to its next pipe instance.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     auto state = std::make_shared<RunState>();
     constexpr size_t kMaxConcurrentRequests = 64;
