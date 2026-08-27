@@ -43,21 +43,27 @@ inline bool StartsWith(const std::string& value, const std::string& prefix) {
 inline ToolRisk ClassifyTool(const std::string& name,
                              const std::string& method,
                              const std::string& path) {
+    // A GET route is observational even if its tool name shares a prefix with
+    // the mutating half of a subsystem (patch_list, freeze_list,
+    // watch_events, debug_breakpoint_log, ...).
+    if (method == "GET") return ToolRisk::Observe;
+
     if (name == "call_function" || path == "/call/function") return ToolRisk::NativeCall;
 
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||
         StartsWith(name, "input_") || StartsWith(name, "lua_") ||
-        name == "snapshot_rewind" || name == "actions_rollback") {
+        name == "snapshot_rewind" || name == "actions_rollback" ||
+        name == "session_import") {
         return ToolRisk::Mutate;
     }
 
     if (StartsWith(name, "debug_") || name == "trace_start" ||
-        name == "actions_clear" || StartsWith(name, "watch_")) {
+        name == "actions_clear" || StartsWith(name, "watch_") ||
+        name == "project_note_add" || name == "project_pointer_path_set") {
         return ToolRisk::Control;
     }
 
-    if (method == "GET") return ToolRisk::Observe;
     return ToolRisk::Analyze;
 }
 
