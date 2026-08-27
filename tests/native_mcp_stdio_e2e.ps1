@@ -51,9 +51,11 @@ function Invoke-Mcp {
 
 Assert-True (Test-Path $HostPath) "cortex_host does not exist: $HostPath"
 Assert-True (Test-Path $TokenPath) "token file does not exist: $TokenPath"
+$resolvedHost = (Resolve-Path $HostPath).Path
+$resolvedToken = (Resolve-Path $TokenPath).Path
 
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$startInfo.FileName = (Resolve-Path $HostPath)
+$startInfo.FileName = $resolvedHost
 $startInfo.UseShellExecute = $false
 $startInfo.RedirectStandardInput = $true
 $startInfo.RedirectStandardOutput = $true
@@ -65,7 +67,7 @@ $startInfo.CreateNoWindow = $true
 [void]$startInfo.ArgumentList.Add("--tools")
 [void]$startInfo.ArgumentList.Add("compact")
 [void]$startInfo.ArgumentList.Add("--token-file")
-[void]$startInfo.ArgumentList.Add((Resolve-Path $TokenPath))
+[void]$startInfo.ArgumentList.Add($resolvedToken)
 
 $process = [System.Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
