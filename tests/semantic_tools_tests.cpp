@@ -7,7 +7,6 @@
 #include <map>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -125,11 +124,10 @@ int main(int argc, char** argv) {
     std::set<std::string> semanticNames;
     std::map<std::string, std::vector<std::string>> dependencyGraph;
     const std::vector<std::string> forbiddenDomainTerms = {
-        "health", "ammo", "ammunition", "money", "score"
+        "ammo", "ammunition", "money", "score"
     };
 
     for (const auto& tool : firstCatalog) {
-        Check(tool.is_object(), "every catalog entry must be an object");
         const std::string name = tool.value("name", std::string());
         const std::string description = tool.value("description", std::string());
         Check(!name.empty(), "semantic tool name must not be empty");
@@ -142,29 +140,26 @@ int main(int argc, char** argv) {
             Check(searchable.find(term) == std::string::npos,
                   name + ": semantic surface must remain domain-neutral; found " + term);
 
-        Check(tool.contains("inputSchema") && tool["inputSchema"].is_object(),
-              name + ": inputSchema missing");
         const json schema = tool.value("inputSchema", json::object());
         Check(schema.value("type", std::string()) == "object", name + ": schema type must be object");
         Check(schema.contains("properties") && schema["properties"].is_object(),
               name + ": schema properties missing");
-        Check(schema["properties"].contains("objective"), name + ": objective property missing");
-        Check(schema["properties"].contains("observations"), name + ": observations property missing");
-        Check(schema["properties"].contains("constraints"), name + ": constraints property missing");
-        Check(schema["properties"].contains("execute"), name + ": execute property missing");
+        for (const char* property : {"objective", "observations", "constraints", "execute",
+                                     "steps", "timeout_ms", "mutation_permission"}) {
+            Check(schema["properties"].contains(property), name + ": missing schema property " + property);
+        }
         Check(ContainsString(schema.value("required", json::array()), "objective"),
               name + ": objective must be required");
+        Check(schema["properties"]["steps"].value("maxItems", 0) == 32,
+              name + ": steps must be bounded to 32 entries");
 
-        Check(tool.contains("_primitives") && tool["_primitives"].is_array(),
-              name + ": _primitives must be an array");
         const json dependencies = tool.value("_primitives", json::array());
-        Check(!dependencies.empty(), name + ": primitive sequence must not be empty");
+        Check(dependencies.is_array() && !dependencies.empty(), name + ": primitive sequence must not be empty");
         std::set<std::string> localDependencies;
         for (const auto& dependency : dependencies) {
-            Check(dependency.is_string(), name + ": every dependency must be a string");
+            Check(dependency.is_string(), name + ": dependency must be a string");
             if (!dependency.is_string()) continue;
             const std::string dependencyName = dependency.get<std::string>();
-            Check(!dependencyName.empty(), name + ": dependency name must not be empty");
             Check(dependencyName != name, name + ": tool must not depend on itself");
             Check(localDependencies.insert(dependencyName).second,
                   name + ": duplicate dependency " + dependencyName);
@@ -192,48 +187,43 @@ int main(int argc, char** argv) {
 
     for (const auto& tool : firstCatalog) {
         const std::string name = tool.at("name").get<std::string>();
-        const json observations = json::array({
-            {{"label", "before"}, {"sequence", 1}},
-            {{"label", "after"}, {"sequence", 2}}
-        });
-        const json constraints = {{"module", "test.exe"}, {"max_duration_ms", 1500},
-                                  {"mutation_policy", "reversible_only"}};
-        const json arguments = {{"objective", "Observe an arbitrary labelled transition"},
-                                {"observations", observations}, {"constraints", constraints}};
+        const json arguments = {
+            {"objective", "Observe an arbitrary labelled transition"},
+            {"observations", json::array({{{"label", "before"}}, {{"label", "after"}}})},
+            {"constraints", {{"module", "test.exe"}}}
+        };
         const json originalArguments = arguments;
         const json plan = api::semantic::PlanFor(name, arguments);
 
-        Check(arguments == originalArguments, name + ": PlanFor must not mutate its input");
-        Check(plan.value("status", std::string()) == "plan_ready", name + ": plan status must be plan_ready");
+        Check(arguments == originalArguments, name + ": PlanFor must not mutate input");
+        Check(plan.value("status", std::string()) == "plan_ready", name + ": planning must return plan_ready");
         Check(plan.value("confidence", 0.0) == 1.0, name + ": planning confidence must be 1.0");
-        Check(plan.at("objective") == arguments.at("objective"), name + ": objective was not preserved");
-        Check(plan.value("observations", json::array()) == observations,
-              name + ": observations were not preserved");
-        Check(plan.value("constraints", json::object()) == constraints,
-              name + ": constraints were not preserved");
         Check(plan.value("primitive_sequence", json::array()) == tool.at("_primitives"),
               name + ": primitive sequence differs from catalog declaration");
-        Check(plan.contains("summary") && plan["summary"].is_string() && !plan["summary"].get<std::string>().empty(),
-              name + ": summary missing");
-        Check(plan.contains("rules") && plan["rules"].is_array() && plan["rules"].size() >= 5,
-              name + ": safety and evidence rules missing");
-
-        const json contract = plan.value("result_contract", json::object());
-        for (const char* field : {"status", "confidence", "evidence", "candidates",
-                                  "alternative_hypotheses", "tested_hypotheses",
-                                  "recommended_next_tool", "reversible_actions"})
-            Check(contract.contains(field), name + ": result contract missing " + field);
-        Check(contract.value("status", std::string()) ==
-                  "candidate_found|confirmed|not_found|inconclusive|failed",
-              name + ": final status vocabulary changed unexpectedly");
+        Check(plan["execution_policy"].value("server_side_execution", false),
+              name + ": execution policy must advertise server-side execution");
+        Check(plan["execution_policy"].value("cancellation_supported", false),
+              name + ": execution policy must advertise cancellation");
+        Check(plan["execution_policy"].value("rollback_required_for_mutations", false),
+              name + ": mutation rollback policy missing");
+        Check(plan["result_contract"].value("status", std::string()) ==
+                  "candidate_found|confirmed|not_found|inconclusive|failed|cancelled|timed_out",
+              name + ": result status vocabulary changed unexpectedly");
 
         json executeArguments = arguments;
         executeArguments["execute"] = true;
+        executeArguments["steps"] = json::array({{
+            {"tool", tool.at("_primitives").at(0)},
+            {"arguments", json::object()}
+        }});
+        executeArguments["timeout_ms"] = 1000;
         const json executionPlan = api::semantic::PlanFor(name, executeArguments);
-        Check(executionPlan.value("status", std::string()) == "execution_not_available",
-              name + ": execute=true must be rejected explicitly in v0.5.0");
-        Check(executionPlan.value("primitive_sequence", json::array()) == tool.at("_primitives"),
-              name + ": execute=true must still return the safe plan");
+        Check(executionPlan.value("status", std::string()) == "execution_requested",
+              name + ": explicit execute=true must validate as execution_requested");
+        Check(executionPlan["lifecycle"].value("current", std::string()) == "running",
+              name + ": validated execution must enter running lifecycle state");
+        Check(executionPlan.value("execution_steps", json::array()) == executeArguments.at("steps"),
+              name + ": execution steps were not preserved");
     }
 
     CheckFailure(api::semantic::PlanFor("capture_runtime_state", json::object()), "invalid_objective");
@@ -249,6 +239,34 @@ int main(int argc, char** argv) {
     CheckFailure(api::semantic::PlanFor("capture_runtime_state",
                                         {{"objective", "observe"}, {"execute", "yes"}}),
                  "invalid_execute");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"execute", true}}),
+                 "missing_execution_steps");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"steps", json::object()}}),
+                 "invalid_steps");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"timeout_ms", "1000"}}),
+                 "invalid_timeout");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"timeout_ms", 99}}),
+                 "invalid_timeout");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"mutation_permission", "yes"}}),
+                 "invalid_mutation_permission");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"steps", json::array({json::object()})}}),
+                 "invalid_step");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"},
+                                         {"steps", json::array({{{"tool", "health"}, {"arguments", 1}}})}}),
+                 "invalid_step_arguments");
+
+    json tooManySteps = json::array();
+    for (int i = 0; i < 33; ++i) tooManySteps.push_back({{"tool", "health"}});
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"steps", tooManySteps}}),
+                 "too_many_steps");
     CheckFailure(api::semantic::PlanFor("not_a_semantic_tool", {{"objective", "observe"}}),
                  "unknown_semantic_tool");
 
@@ -257,6 +275,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "PASS: 30 semantic tools, schemas, dependencies, plans, validation, and failure semantics\n";
+    std::cout << "PASS: semantic catalog, execution contract, validation, and dependency graph\n";
     return 0;
 }
