@@ -14,7 +14,7 @@ using json = nlohmann::json;
 inline constexpr const char* kModernProtocolVersion = "2026-07-28";
 inline constexpr const char* kLatestLegacyProtocolVersion = "2025-11-25";
 inline constexpr const char* kServerName = "cortex";
-inline constexpr const char* kServerVersion = "0.5.0";
+inline constexpr const char* kServerVersion = "0.6.0";
 inline constexpr long long kCatalogTtlMs = 30000;
 
 enum class ToolProfile {
