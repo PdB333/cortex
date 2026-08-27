@@ -6,22 +6,52 @@ on:
       - master
     paths:
       - CHANGELOG.md
+      - README.md
       - README_INSTALL.txt
+      - core/api/mcp_protocol.h
+      - core/api/mcp_contract.h
+      - core/api/mcp_pipe.cpp
+      - core/api/mcp_pipe.h
+      - core/api/mcp_pipe_protocol.h
+      - core/api/mcp_tools.cpp
+      - core/api/mcp_tools.h
+      - core/api/native_routes.cpp
+      - core/api/native_routes.h
       - core/api/routes_mcp.cpp
       - core/api/semantic_tools.h
       - agent/semantic-tools.md
+      - docs/mcp.md
+      - mcp_bridge/main.cpp
+      - tests/mcp_protocol_tests.cpp
+      - tests/mcp_pipe_protocol_tests.cpp
       - tests/semantic_tools_tests.cpp
       - tests/semantic_mcp_e2e.ps1
+      - tests/native_mcp_stdio_e2e.ps1
       - .github/workflows/publish-release.yml
   pull_request:
     paths:
       - CHANGELOG.md
+      - README.md
       - README_INSTALL.txt
+      - core/api/mcp_protocol.h
+      - core/api/mcp_contract.h
+      - core/api/mcp_pipe.cpp
+      - core/api/mcp_pipe.h
+      - core/api/mcp_pipe_protocol.h
+      - core/api/mcp_tools.cpp
+      - core/api/mcp_tools.h
+      - core/api/native_routes.cpp
+      - core/api/native_routes.h
       - core/api/routes_mcp.cpp
       - core/api/semantic_tools.h
       - agent/semantic-tools.md
+      - docs/mcp.md
+      - mcp_bridge/main.cpp
+      - tests/mcp_protocol_tests.cpp
+      - tests/mcp_pipe_protocol_tests.cpp
       - tests/semantic_tools_tests.cpp
       - tests/semantic_mcp_e2e.ps1
+      - tests/native_mcp_stdio_e2e.ps1
       - injector/**
       - .github/workflows/publish-release.yml
   workflow_dispatch:
@@ -30,15 +60,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.5.0-${{ github.ref }}
+  group: publish-v0.6.0-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.5.0
+  RELEASE_TAG: v0.6.0
 
 jobs:
   build:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.5.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.6.0')
     strategy:
       fail-fast: false
       matrix:
@@ -101,15 +131,17 @@ jobs:
           -o build/release-${{ matrix.arch }}/injector.exe
           -static -static-libgcc -static-libstdc++
 
-      - name: Inject Cortex and test all semantic MCP tools
+      - name: Inject Cortex and test HTTP + native MCP
         shell: pwsh
         run: |
           $root = Resolve-Path "build/release-${{ matrix.arch }}"
           $targetPath = Join-Path $root "${{ matrix.target_name }}"
           $injectorPath = Join-Path $root "injector.exe"
+          $hostPath = Join-Path $root "cortex_host.exe"
           $corePath = Join-Path $root "cortex_core.dll"
           $tokenPath = Join-Path $root "cortex.token"
-          $semanticTests = Resolve-Path "tests/semantic_mcp_e2e.ps1"
+          $semanticTests = (Resolve-Path "tests/semantic_mcp_e2e.ps1").Path
+          $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
@@ -132,6 +164,10 @@ jobs:
             if (-not (Test-Path $tokenPath)) { throw "Cortex token was not created at $tokenPath" }
 
             & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
+            if (-not $?) { throw "HTTP MCP semantic E2E failed" }
+
+            & $nativeTests -HostPath $hostPath -TokenPath $tokenPath
+            if (-not $?) { throw "Native stdio MCP E2E failed" }
           } finally {
             if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }
           }
@@ -166,7 +202,8 @@ jobs:
             "README.md",
             "LICENSE",
             "CHANGELOG.md",
-            "agent/semantic-tools.md"
+            "agent/semantic-tools.md",
+            "docs/mcp.md"
           )
           foreach ($file in $required) {
             $path = Join-Path $stage $file
@@ -190,7 +227,7 @@ jobs:
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.5.0')
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.6.0')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -208,7 +245,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.5.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.6.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Publish GitHub release
