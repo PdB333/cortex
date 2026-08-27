@@ -184,6 +184,29 @@ bool WaitForHttpRuntime(const std::string& host, int port) {
     return false;
 }
 
+bool HttpRoundTrip(const std::string& host,
+                   int port,
+                   const std::string& token,
+                   const std::string& toolProfile,
+                   const std::string& session,
+                   const json& message,
+                   std::string& response) {
+    httplib::Client client(host.c_str(), port);
+    client.set_connection_timeout(2, 0);
+    client.set_read_timeout(60, 0);
+    const httplib::Headers headers = {
+        {"X-Cortex-Token", token},
+        {"Host", host},
+        {"X-Cortex-MCP-Tools", toolProfile},
+        {"X-Cortex-MCP-Session", session}
+    };
+    const auto result = client.Post("/mcp", headers, message.dump(), "application/json");
+    if (!result) return false;
+    if (result->status == 202 || result->body.empty()) response.clear();
+    else response = result->body;
+    return true;
+}
+
 json BridgeError(const json& id, const std::string& code, const std::string& message) {
     return {
         {"jsonrpc", "2.0"},
@@ -201,17 +224,37 @@ bool IsCancellationNotification(const json& message) {
            message.value("method", std::string()) == "notifications/cancelled";
 }
 
-struct NativeRunState {
+struct RunState {
     std::mutex outputMutex;
     std::mutex activeMutex;
     std::condition_variable activeChanged;
     size_t active = 0;
 };
 
-void WriteOutput(const std::shared_ptr<NativeRunState>& state, const std::string& response) {
+void WriteOutput(const std::shared_ptr<RunState>& state, const std::string& response) {
     if (response.empty()) return;
     std::lock_guard<std::mutex> lock(state->outputMutex);
     std::cout << response << '\n';
+}
+
+bool ReserveWorker(const std::shared_ptr<RunState>& state, size_t limit) {
+    std::lock_guard<std::mutex> lock(state->activeMutex);
+    if (state->active >= limit) return false;
+    ++state->active;
+    return true;
+}
+
+void ReleaseWorker(const std::shared_ptr<RunState>& state) {
+    {
+        std::lock_guard<std::mutex> lock(state->activeMutex);
+        if (state->active > 0) --state->active;
+    }
+    state->activeChanged.notify_all();
+}
+
+void WaitForWorkers(const std::shared_ptr<RunState>& state) {
+    std::unique_lock<std::mutex> lock(state->activeMutex);
+    state->activeChanged.wait(lock, [&] { return state->active == 0; });
 }
 
 int RunNative(const std::string& token, const std::string& toolProfile) {
@@ -225,7 +268,7 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
     CloseHandle(ready);
 
     std::setvbuf(stdout, nullptr, _IONBF, 0);
-    auto state = std::make_shared<NativeRunState>();
+    auto state = std::make_shared<RunState>();
     constexpr size_t kMaxConcurrentRequests = 64;
 
     std::string line;
@@ -244,42 +287,38 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
             continue;
         }
 
-        // Cancellation bypasses the normal worker limit and is dispatched on
-        // the reader thread, so it can reach the runtime while a long tool
-        // call is still executing on another pipe instance.
+        // Cancellation bypasses the worker limit and is dispatched on the
+        // reader thread, so it can reach the runtime while another pipe is
+        // executing a long primitive.
         if (IsCancellationNotification(message)) {
             std::string ignored;
             NativeRoundTrip(pipeName, token, toolProfile, session, message, ignored);
             continue;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(state->activeMutex);
-            if (state->active >= kMaxConcurrentRequests) {
-                WriteOutput(state, BridgeError(MessageId(message), "too_many_requests",
-                                               "Cortex MCP bridge concurrency limit reached").dump());
-                continue;
-            }
-            ++state->active;
+        if (!ReserveWorker(state, kMaxConcurrentRequests)) {
+            WriteOutput(state, BridgeError(MessageId(message), "too_many_requests",
+                                           "Cortex MCP bridge concurrency limit reached").dump());
+            continue;
         }
 
-        std::thread([state, pipeName, token, toolProfile, session, message] {
-            std::string response;
-            if (!NativeRoundTrip(pipeName, token, toolProfile, session, message, response)) {
-                response = BridgeError(MessageId(message), "cortex_unreachable",
-                                       "Cortex native MCP transport is unreachable").dump();
-            }
-            WriteOutput(state, response);
-            {
-                std::lock_guard<std::mutex> lock(state->activeMutex);
-                --state->active;
-            }
-            state->activeChanged.notify_all();
-        }).detach();
+        try {
+            std::thread([state, pipeName, token, toolProfile, session, message] {
+                std::string response;
+                if (!NativeRoundTrip(pipeName, token, toolProfile, session, message, response)) {
+                    response = BridgeError(MessageId(message), "cortex_unreachable",
+                                           "Cortex native MCP transport is unreachable").dump();
+                }
+                WriteOutput(state, response);
+                ReleaseWorker(state);
+            }).detach();
+        } catch (const std::exception& error) {
+            ReleaseWorker(state);
+            WriteOutput(state, BridgeError(MessageId(message), "worker_start_failed", error.what()).dump());
+        }
     }
 
-    std::unique_lock<std::mutex> lock(state->activeMutex);
-    state->activeChanged.wait(lock, [&] { return state->active == 0; });
+    WaitForWorkers(state);
     return 0;
 }
 
@@ -294,28 +333,58 @@ int RunHttp(const std::string& host,
     }
 
     const std::string session = MakeSessionId();
-    httplib::Client client(host.c_str(), port);
-    client.set_read_timeout(60, 0);
-    httplib::Headers headers = {
-        {"X-Cortex-Token", token},
-        {"Host", host},
-        {"X-Cortex-MCP-Tools", toolProfile},
-        {"X-Cortex-MCP-Session", session}
-    };
-
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    auto state = std::make_shared<RunState>();
+    constexpr size_t kMaxConcurrentRequests = 64;
+
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
-        auto response = client.Post("/mcp", headers, line, "application/json");
-        if (!response) {
-            std::cout << BridgeError(nullptr, "cortex_unreachable",
-                                     "Cortex HTTP MCP transport is unreachable").dump() << '\n';
+
+        json message;
+        try {
+            message = json::parse(line);
+        } catch (const std::exception& error) {
+            WriteOutput(state, json({
+                {"jsonrpc", "2.0"},
+                {"id", nullptr},
+                {"error", {{"code", -32700}, {"message", error.what()}}}
+            }).dump());
             continue;
         }
-        if (response->status == 202 || response->body.empty()) continue;
-        std::cout << response->body << '\n';
+
+        // Use an independent connection for cancellation so the fallback
+        // transport preserves the same responsive cancellation semantics as
+        // native mode instead of blocking behind an active POST /mcp.
+        if (IsCancellationNotification(message)) {
+            std::string ignored;
+            HttpRoundTrip(host, port, token, toolProfile, session, message, ignored);
+            continue;
+        }
+
+        if (!ReserveWorker(state, kMaxConcurrentRequests)) {
+            WriteOutput(state, BridgeError(MessageId(message), "too_many_requests",
+                                           "Cortex MCP bridge concurrency limit reached").dump());
+            continue;
+        }
+
+        try {
+            std::thread([state, host, port, token, toolProfile, session, message] {
+                std::string response;
+                if (!HttpRoundTrip(host, port, token, toolProfile, session, message, response)) {
+                    response = BridgeError(MessageId(message), "cortex_unreachable",
+                                           "Cortex HTTP MCP transport is unreachable").dump();
+                }
+                WriteOutput(state, response);
+                ReleaseWorker(state);
+            }).detach();
+        } catch (const std::exception& error) {
+            ReleaseWorker(state);
+            WriteOutput(state, BridgeError(MessageId(message), "worker_start_failed", error.what()).dump());
+        }
     }
+
+    WaitForWorkers(state);
     return 0;
 }
 
