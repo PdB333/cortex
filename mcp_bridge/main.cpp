@@ -16,6 +16,7 @@
 // HTTP-only args: --port 6969, --host 127.0.0.1.
 
 #include "api/mcp_pipe_protocol.h"
+#include "policy.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -237,6 +238,11 @@ void WriteOutput(const std::shared_ptr<RunState>& state, const std::string& resp
     std::cout << response << '\n';
 }
 
+void WriteOversizeError(const std::shared_ptr<RunState>& state) {
+    WriteOutput(state, BridgeError(nullptr, "message_too_large",
+                                   "MCP stdio message exceeds the 4 MiB bridge limit").dump());
+}
+
 bool ReserveWorker(const std::shared_ptr<RunState>& state, size_t limit) {
     std::lock_guard<std::mutex> lock(state->activeMutex);
     if (state->active >= limit) return false;
@@ -274,6 +280,10 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
+        if (!mcp_bridge::policy::IsMessageSizeAllowed(line.size())) {
+            WriteOversizeError(state);
+            continue;
+        }
 
         json message;
         try {
@@ -340,6 +350,10 @@ int RunHttp(const std::string& host,
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
+        if (!mcp_bridge::policy::IsMessageSizeAllowed(line.size())) {
+            WriteOversizeError(state);
+            continue;
+        }
 
         json message;
         try {
@@ -423,6 +437,11 @@ int main(int argc, char** argv) {
     }
     if (transport != "native" && transport != "http") {
         std::cerr << "cortex_host mcp: --transport must be native or http\n";
+        return 2;
+    }
+    if (transport == "http" &&
+        (!mcp_bridge::policy::IsLoopbackHost(host) || !mcp_bridge::policy::IsValidPort(port))) {
+        std::cerr << "cortex_host mcp: HTTP transport must target a valid loopback host and port\n";
         return 2;
     }
 
