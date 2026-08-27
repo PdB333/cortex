@@ -258,6 +258,8 @@ add_library(core SHARED
     core/action/action.cpp
     core/events/events.cpp
     core/api/native_routes.cpp
+    core/api/mcp_tools.cpp
+    core/api/mcp_pipe.cpp
     core/api/server.cpp
     ${CORTEX_API_ROUTE_SOURCES}
     core/scripting/lua_engine.cpp
