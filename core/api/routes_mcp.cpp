@@ -21,7 +21,8 @@ void RegisterMcpRoutes(httplib::Server& server) {
             const auto result = mcp_tools::Handle(
                 json::parse(request.body),
                 profile,
-                request.get_header_value("MCP-Protocol-Version"));
+                request.get_header_value("MCP-Protocol-Version"),
+                request.get_header_value("X-Cortex-MCP-Session"));
 
             if (!result.hasResponse) {
                 response.status = 202;
