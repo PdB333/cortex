@@ -1,6 +1,6 @@
 # Cortex semantic tools
 
-Cortex v0.5 includes a semantic layer for AI agents. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
+Cortex v0.6 includes a semantic layer for AI agents with bounded server-side execution. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
 
 The semantic layer does not invent domain objects. Every conclusion must include evidence, confidence, alternatives, and a recommended next action. When evidence is insufficient, return `status: not_found` or `status: inconclusive` instead of guessing.
 
@@ -8,7 +8,7 @@ The semantic layer does not invent domain objects. Every conclusion must include
 
 ```json
 {
-  "status": "candidate_found | confirmed | not_found | inconclusive | failed",
+  "status": "candidate_found | confirmed | not_found | inconclusive | failed | cancelled | timed_out",
   "confidence": 0.0,
   "summary": "human-readable conclusion",
   "evidence": [],
@@ -22,6 +22,25 @@ The semantic layer does not invent domain objects. Every conclusion must include
 ```
 
 Confidence is not a substitute for validation. A value scan only identifies correlation. Use `test_candidate_causality` or another controlled experiment before persisting a finding.
+
+## Server-side execution
+
+Semantic calls are plan-only by default. Set `execute: true` with an explicit non-empty `steps` array to run a bounded primitive sequence inside Cortex.
+
+Execution rules:
+
+- at most 32 primitive steps per semantic request;
+- every step must belong to that semantic tool's `_primitives` allowlist;
+- nested semantic execution is rejected;
+- `timeout_ms` is a cooperative orchestration deadline from 100 ms to 120000 ms, defaulting to 30000 ms;
+- `mutation_permission: true` is required before control, mutation, or native-call operations can run;
+- active operations without a known rollback contract are rejected before execution;
+- supported mutations run inside an action transaction and roll back on failure, observed cancellation, or observed timeout;
+- `rollback_on_success: true` can be used for reversible causal experiments;
+- later steps can reference prior evidence with `{"$from_step": 0, "pointer": "/result/..."}`;
+- `notifications/cancelled` is scoped to the MCP session and observed between primitive calls.
+
+Cancellation and deadlines are cooperative between primitive calls. A blocking primitive still needs its own internal timeout/cancellation mechanism to be interrupted in the middle of that call.
 
 ## Observation and discovery
 
@@ -81,20 +100,19 @@ Confidence is not a substitute for validation. A value scan only identifies corr
 
 ## Validation battery
 
-Every pull request touching the semantic layer runs the following tests on Windows x86 and x64:
+Every pull request touching the semantic or MCP layer runs validation on Windows x86 and x64:
 
 - a standalone C++ catalog test locks the count and names of all 30 tools;
-- every schema must require a non-empty `objective` and expose correctly typed optional fields;
+- every schema must require a non-empty `objective` and expose the bounded execution fields;
 - every dependency must resolve to a live primitive or another semantic tool;
 - the semantic dependency graph must be acyclic and eventually reach a primitive tool;
-- every tool must generate a deterministic, side-effect-free plan with the common result contract;
 - malformed arguments and unknown tools must return stable machine-readable errors;
-- after real DLL injection, `initialize`, `tools/list`, and `tools/call` are tested over HTTP MCP;
-- all 30 tools are called individually and in a batch;
-- text and `structuredContent` responses must agree;
-- `execute=true` must remain side-effect free while server-side execution is unavailable;
-- the action journal is compared before and after the complete semantic run;
-- a primitive `health` call is executed through MCP to detect dispatch regressions;
-- the existing CTest suite and release packaging checks still run.
+- MCP protocol tests cover legacy negotiation, 2026-07-28 discovery/list behaviour, notifications, batching, and calls;
+- native pipe tests lock token-derived rendezvous names and frame-size limits;
+- real DLL injection validates HTTP MCP planning and server-side read-only execution;
+- the native stdio path validates `cortex_host mcp` -> authenticated Named Pipe -> semantic executor -> native route dispatcher;
+- mutation permission gates are checked before dangerous arguments reach a primitive;
+- the action journal is compared around plan-only and read-only execution;
+- CTest, unified-host checks, and release packaging still run.
 
-The v0.5.0 release workflow performs the same checks before creating either x86 or x64 archive. A failing semantic test prevents publication.
+The v0.6.0 release workflow performs the same release gate on both x86 and x64 and includes the native stdio MCP E2E before publication. A failing build, semantic test, native transport test, or packaging check prevents publication.
