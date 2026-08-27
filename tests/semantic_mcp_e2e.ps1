@@ -73,7 +73,8 @@ foreach ($tool in $semanticTools) {
     $name = [string]$tool.name
     $properties = Property-Names $tool.inputSchema.properties
     foreach ($requiredProperty in @(
-        "objective", "observations", "constraints", "execute", "steps", "timeout_ms", "mutation_permission"
+        "objective", "observations", "constraints", "execute", "steps", "timeout_ms",
+        "mutation_permission", "rollback_on_success"
     )) {
         Assert-True ($properties -contains $requiredProperty) "$name lacks schema property $requiredProperty"
     }
@@ -185,7 +186,8 @@ $invalidCases = @(
     [ordered]@{ expected = "invalid_execute"; arguments = @{ objective = "observe"; execute = "yes" } },
     [ordered]@{ expected = "missing_execution_steps"; arguments = @{ objective = "observe"; execute = $true } },
     [ordered]@{ expected = "invalid_timeout"; arguments = @{ objective = "observe"; timeout_ms = 99 } },
-    [ordered]@{ expected = "invalid_mutation_permission"; arguments = @{ objective = "observe"; mutation_permission = "yes" } }
+    [ordered]@{ expected = "invalid_mutation_permission"; arguments = @{ objective = "observe"; mutation_permission = "yes" } },
+    [ordered]@{ expected = "invalid_rollback_on_success"; arguments = @{ objective = "observe"; rollback_on_success = "yes" } }
 )
 foreach ($case in $invalidCases) {
     $response = Invoke-Mcp -Payload ([ordered]@{
