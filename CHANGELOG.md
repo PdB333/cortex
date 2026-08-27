@@ -2,6 +2,41 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.6.0] - 2026-08-28
+
+### Native MCP transport and shared executor
+
+- Made `cortex_host mcp` use stdio -> authenticated local Windows Named Pipe transport by default, while retaining `--transport http` as an explicit compatibility and debugging fallback.
+- Added a shared in-process MCP executor and native route registry so primitive and semantic MCP calls reuse the same business handlers without the previous MCP -> HTTP -> route loopback path.
+- Added one-command startup through `cortex_host mcp --process <name-or-pid>` / `--pid`, with optional `--dll`, `--token-file`, `--tools compact|all`, and transport selection.
+- Made the compact MCP profile the default and limited it to the 30 domain-neutral semantic tools; `--tools all` exposes the generated primitive surface when direct low-level access is required.
+- Added token-derived local pipe rendezvous, full-token authentication, constant-time token comparison, bounded framing, local-client restrictions where supported by Windows, and bounded bridge concurrency.
+
+### MCP protocol and semantic execution
+
+- Added support for the stateless MCP `2026-07-28` protocol while preserving legacy initialize-based compatibility with `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05` clients.
+- Added `server/discover`, modern tool-list TTL/cache hints, no-response notification handling, notification filtering in batches, and session-scoped cancellation delivery.
+- Enabled bounded server-side semantic `execute=true` orchestration with an explicit non-empty `steps` sequence limited to 32 primitive calls.
+- Added cooperative execution deadlines, per-step evidence capture, inter-step JSON-pointer references, lifecycle reporting, and stable validation errors.
+- Required `mutation_permission=true` before control, mutation, or native-call primitives can execute, and reject active operations that do not expose a known rollback contract.
+- Run supported mutations inside action transactions with rollback on failure, observed cancellation, or observed timeout; `rollback_on_success=true` is now part of the public semantic schema for reversible causal experiments.
+- Updated MCP server metadata to report version `0.6.0`.
+
+### Native transport reliability and compatibility
+
+- Fixed Win32 `GetLastError()` calls in the Named Pipe server being shadowed by Cortex's own string-returning `GetLastError()` helper, restoring x86/x64 compilation.
+- Fixed the stdio bridge consuming a one-shot Named Pipe connection only to probe readiness, which could make the first real `initialize` request fail with `cortex_unreachable`; the first real request now performs bounded connection retries instead.
+- Kept existing REST callers and HTTP `POST /mcp` callers supported while moving the recommended MCP path to the native transport.
+- Refreshed `cortex_host` help, the packaged French installation guide, README MCP examples, semantic-agent documentation, and release metadata for the native transport and execution model.
+
+### Validation and release gate
+
+- Added x86/x64 MCP protocol contract tests covering legacy negotiation, modern discovery/list behavior, notifications, batching, and tool calls.
+- Added native pipe rendezvous/framing tests, semantic execution contract tests, bridge-policy tests, and stronger schema validation including `rollback_on_success`.
+- Added real injected HTTP semantic MCP execution plus real `cortex_host mcp` stdio -> Named Pipe -> semantic executor -> native route dispatcher E2E coverage.
+- The v0.6.0 release gate builds both Windows architectures, runs CTest and semantic contracts, injects the real runtime, validates both HTTP and native MCP transports, verifies package contents, and only then publishes the x86/x64 archives.
+- Release archives continue to contain `cortex_host.exe`, `cortex_core.dll`, byte-identical `cortex.asi`, standalone `injector.exe`, the architecture-matched test target, documentation, SDK files, and agent documentation.
+
 ## [v0.5.0] - 2026-08-14
 
 ### Security, API reliability, and mutation safety
