@@ -191,7 +191,7 @@ void AcceptLoop(HANDLE firstPipe, const std::string& pipeName, const std::string
     while (g_running.load(std::memory_order_acquire)) {
         const BOOL connected = ConnectNamedPipe(pipe, nullptr)
             ? TRUE
-            : (GetLastError() == ERROR_PIPE_CONNECTED);
+            : (::GetLastError() == ERROR_PIPE_CONNECTED);
 
         if (!g_running.load(std::memory_order_acquire)) {
             if (connected) DisconnectNamedPipe(pipe);
@@ -216,7 +216,7 @@ void AcceptLoop(HANDLE firstPipe, const std::string& pipeName, const std::string
 
         pipe = CreatePipeInstance(pipeName);
         if (pipe == INVALID_HANDLE_VALUE) {
-            SetLastError("create_named_pipe_failed:" + std::to_string(GetLastError()));
+            SetLastError("create_named_pipe_failed:" + std::to_string(::GetLastError()));
             g_running.store(false, std::memory_order_release);
             break;
         }
@@ -236,7 +236,7 @@ bool Start(const std::string& token) {
     const std::string pipeName = mcp_pipe_protocol::PipeNameForToken(token);
     HANDLE firstPipe = CreatePipeInstance(pipeName);
     if (firstPipe == INVALID_HANDLE_VALUE) {
-        SetLastError("create_named_pipe_failed:" + std::to_string(GetLastError()));
+        SetLastError("create_named_pipe_failed:" + std::to_string(::GetLastError()));
         return false;
     }
 
