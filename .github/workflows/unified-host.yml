@@ -58,9 +58,11 @@ jobs:
           & $exe symbolize --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          "" | & $exe mcp --token ci-smoke-token --port 1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
+          # MCP now establishes its transport before consuming stdin. A real
+          # native MCP smoke test therefore belongs in Full Windows Build,
+          # where cortex_core.dll is injected and exposes the named pipe.
+          # Here we validate that the unified dispatcher advertises the command
+          # without requiring a live runtime.
           $help = & $exe help 2>&1 | Out-String
           foreach ($command in @("serve", "inject", "diagnose", "analyze", "symbolize", "mcp")) {
             if ($help -notmatch "\b$command\b") {

@@ -22,7 +22,23 @@ inline json Tool(const char* name, const char* description, json primitives) {
                 {"objective", {{"type", "string"}, {"description", "Observable runtime goal; do not assume a game-specific variable exists."}}},
                 {"observations", {{"type", "array"}, {"description", "Known observations, labelled events, values, screenshots, addresses, or prior evidence."}}},
                 {"constraints", {{"type", "object"}, {"description", "Optional module/range/type/time/safety constraints."}}},
-                {"execute", {{"type", "boolean"}, {"description", "Reserved for future server-side execution. v0.5 returns an orchestration plan."}}}
+                {"execute", {{"type", "boolean"}, {"description", "Execute an explicit bounded primitive sequence server-side. Defaults to false."}}},
+                {"steps", {
+                    {"type", "array"},
+                    {"maxItems", 32},
+                    {"description", "Explicit primitive calls to execute. Every tool must belong to this semantic tool's _primitives allowlist."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"tool", {{"type", "string"}}},
+                            {"arguments", {{"type", "object"}}}
+                        }},
+                        {"required", json::array({"tool"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"timeout_ms", {{"type", "integer"}, {"minimum", 100}, {"maximum", 120000}, {"description", "Cooperative orchestration deadline. Defaults to 30000 ms."}}},
+                {"mutation_permission", {{"type", "boolean"}, {"description", "Must be true before any control, mutation, or native-call primitive can execute."}}}
             }},
             {"required", json::array({"objective"})}
         }},
@@ -107,27 +123,59 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
             return Failure("invalid_constraints", "constraints must be a JSON object.");
         if (arguments.contains("execute") && !arguments["execute"].is_boolean())
             return Failure("invalid_execute", "execute must be a JSON boolean.");
+        if (arguments.contains("steps") && !arguments["steps"].is_array())
+            return Failure("invalid_steps", "steps must be a JSON array.");
+        if (arguments.contains("steps") && arguments["steps"].size() > 32)
+            return Failure("too_many_steps", "A semantic execution is limited to 32 primitive calls.");
+        if (arguments.contains("timeout_ms") && !arguments["timeout_ms"].is_number_integer())
+            return Failure("invalid_timeout", "timeout_ms must be an integer.");
+        if (arguments.contains("timeout_ms")) {
+            const auto timeout = arguments["timeout_ms"].get<int64_t>();
+            if (timeout < 100 || timeout > 120000)
+                return Failure("invalid_timeout", "timeout_ms must be between 100 and 120000.");
+        }
+        if (arguments.contains("mutation_permission") && !arguments["mutation_permission"].is_boolean())
+            return Failure("invalid_mutation_permission", "mutation_permission must be a JSON boolean.");
+
+        const bool execute = arguments.value("execute", false);
+        if (execute && (!arguments.contains("steps") || arguments["steps"].empty()))
+            return Failure("missing_execution_steps", "execute=true requires an explicit non-empty steps array; Cortex will not infer mutation arguments.");
+
+        if (arguments.contains("steps")) {
+            for (const auto& step : arguments["steps"]) {
+                if (!step.is_object() || !step.contains("tool") || !step["tool"].is_string())
+                    return Failure("invalid_step", "Every execution step requires a string tool name.");
+                if (step.contains("arguments") && !step["arguments"].is_object())
+                    return Failure("invalid_step_arguments", "Each step arguments value must be an object.");
+            }
+        }
 
         const json observations = arguments.value("observations", json::array());
         const json constraints = arguments.value("constraints", json::object());
         json result = {
-            {"status", "plan_ready"},
+            {"status", execute ? "execution_requested" : "plan_ready"},
             {"plan_id", StablePlanId(wanted, arguments)},
             {"confidence", 1.0},
             {"evidence_confidence", EvidenceConfidence(observations)},
-            {"summary", "Semantic orchestration plan generated. Execute the listed primitive tools, attach their outputs as evidence, and validate before persisting conclusions."},
+            {"summary", execute
+                ? "Validated semantic execution request. The server will execute only the explicit allowlisted primitive steps and will roll back transactional mutations on cancellation, timeout, or failure."
+                : "Semantic orchestration plan generated. Execute the listed primitive tools, attach their outputs as evidence, and validate before persisting conclusions."},
             {"objective", arguments.at("objective")},
             {"observations", observations},
             {"constraints", constraints},
             {"primitive_sequence", tool.at("_primitives")},
+            {"execution_steps", arguments.value("steps", json::array())},
             {"lifecycle", {
                 {"states", json::array({"planned", "running", "cancelled", "rolled_back", "completed", "failed"})},
-                {"current", "planned"}
+                {"current", execute ? "running" : "planned"}
             }},
             {"execution_policy", {
-                {"server_side_execution", false},
-                {"cancellation_required", true},
-                {"timeout_required", true},
+                {"server_side_execution", true},
+                {"explicit_steps_required", true},
+                {"max_steps", 32},
+                {"max_timeout_ms", 120000},
+                {"cancellation_supported", true},
+                {"mutation_permission_required", true},
                 {"rollback_required_for_mutations", true},
                 {"evidence_required_for_confirmation", true}
             }},
@@ -136,7 +184,7 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
                 {"confidence_source", "evidence_only"}
             }},
             {"result_contract", {
-                {"status", "candidate_found|confirmed|not_found|inconclusive|failed"},
+                {"status", "candidate_found|confirmed|not_found|inconclusive|failed|cancelled|timed_out"},
                 {"confidence", "0.0..1.0"},
                 {"evidence", "array"},
                 {"candidates", "array"},
@@ -153,10 +201,6 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
                 "Return not_found or inconclusive instead of inventing a result."
             })}
         };
-        if (arguments.value("execute", false)) {
-            result["status"] = "execution_not_available";
-            result["summary"] = "Server-side multi-step execution remains disabled until cancellation, timeout, permission, and rollback semantics are enforced end-to-end.";
-        }
         return result;
     }
     return Failure("unknown_semantic_tool", "The requested semantic tool is not registered.");

@@ -1,5 +1,6 @@
 #include "server.h"
 #include "routes.h"
+#include "mcp_pipe.h"
 #include "request_id.h"
 #include "request_limits.h"
 #include "response_contract.h"
@@ -74,9 +75,6 @@ namespace {
     }
 
     bool IsLocalAuthority(const std::string& authority) {
-        // IPv6 loopback authority: [::1] or [::1]:port. Match the bracketed
-        // form explicitly -- the naked "::1" case doesn't appear in HTTP Host
-        // headers (RFC 3986 requires the brackets for IPv6).
         if (!authority.empty() && authority.front() == '[') {
             const size_t rb = authority.find(']');
             if (rb == std::string::npos) return false;
@@ -118,9 +116,6 @@ namespace {
     }
 
     bool RequestDeclaresPayload(const httplib::Request& req) {
-        // cpp-httplib invokes the pre-routing handler before it has populated
-        // req.body. Inspect the transport headers instead so content-type
-        // enforcement cannot be bypassed by reaching the route parser first.
         const std::string transferEncoding = req.get_header_value("Transfer-Encoding");
         if (!transferEncoding.empty()) return true;
 
@@ -213,66 +208,72 @@ bool Start(int port, const std::string& configuredToken) {
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    // Keep the request identifier in the response header. Normal route bodies
-    // are intentionally left untouched here: cpp-httplib computes
-    // Content-Length before its post-routing hook, so mutating res.body in a
-    // post-routing handler can make the declared length stale and truncate the
-    // JSON seen by clients. Structured errors above may still include the same
-    // request ID because their body is created before response serialization.
-
-    RegisterStatusRoutes(*g_server);
-    RegisterModulesRoutes(*g_server);
-    RegisterMemoryRoutes(*g_server);
-    RegisterScanRoutes(*g_server);
-    RegisterDisasmRoutes(*g_server);
-    RegisterDebugRoutes(*g_server);
-    RegisterSymbolsRoutes(*g_server);
-    RegisterProjectRoutes(*g_server);
-    RegisterScreenshotRoutes(*g_server);
-    RegisterPromptRoutes(*g_server);
-    RegisterPatchRoutes(*g_server);
-    RegisterInputRoutes(*g_server);
-    RegisterFreezeRoutes(*g_server);
-    RegisterStructRoutes(*g_server);
-    RegisterCallRoutes(*g_server);
-    RegisterWatchRoutes(*g_server);
-    RegisterAnalysisRoutes(*g_server);
-    RegisterDissectRoutes(*g_server);
-    RegisterBatchRoutes(*g_server);
-    RegisterActionRoutes(*g_server);
-    RegisterEventRoutes(*g_server);
-    RegisterPointerMapRoutes(*g_server);
-    RegisterTraceRoutes(*g_server);
-    RegisterGhidraRoutes(*g_server);
-    RegisterTimelineRoutes(*g_server);
-    RegisterWindowRoutes(*g_server);
-    RegisterNetRoutes(*g_server);
-    RegisterSessionRoutes(*g_server);
-    RegisterMcpRoutes(*g_server);
-    RegisterLuaRoutes(*g_server);
-    RegisterOcrRoutes(*g_server);
+    // Register each business handler once into both transports: the actual
+    // loopback REST server and the in-process dispatcher consumed by MCP.
+    ClearNativeRoutes();
+    RouteRegistrar routes(*g_server);
+    RegisterStatusRoutes(routes);
+    RegisterModulesRoutes(routes);
+    RegisterMemoryRoutes(routes);
+    RegisterScanRoutes(routes);
+    RegisterDisasmRoutes(routes);
+    RegisterDebugRoutes(routes);
+    RegisterSymbolsRoutes(routes);
+    RegisterProjectRoutes(routes);
+    RegisterScreenshotRoutes(routes);
+    RegisterPromptRoutes(routes);
+    RegisterPatchRoutes(routes);
+    RegisterInputRoutes(routes);
+    RegisterFreezeRoutes(routes);
+    RegisterStructRoutes(routes);
+    RegisterCallRoutes(routes);
+    RegisterWatchRoutes(routes);
+    RegisterAnalysisRoutes(routes);
+    RegisterDissectRoutes(routes);
+    RegisterBatchRoutes(routes);
+    RegisterActionRoutes(routes);
+    RegisterEventRoutes(routes);
+    RegisterPointerMapRoutes(routes);
+    RegisterTraceRoutes(routes);
+    RegisterGhidraRoutes(routes);
+    RegisterTimelineRoutes(routes);
+    RegisterWindowRoutes(routes);
+    RegisterNetRoutes(routes);
+    RegisterSessionRoutes(routes);
+    RegisterMcpRoutes(routes);
+    RegisterLuaRoutes(routes);
+    RegisterOcrRoutes(routes);
 
     if (!g_server->bind_to_port("127.0.0.1", port)) {
         SetLastError("bind_failed");
+        ClearNativeRoutes();
+        g_server.reset();
+        return false;
+    }
+
+    if (!mcp_pipe::Start(g_token)) {
+        SetLastError("mcp_pipe_failed:" + mcp_pipe::GetLastError());
+        ClearNativeRoutes();
         g_server.reset();
         return false;
     }
 
     g_thread = std::thread([] {
-        // 127.0.0.1 only -- an AI-controllable memory read/write endpoint
-        // must never be reachable from the network.
         if (!g_server->listen_after_bind()) SetLastError("listen_failed");
     });
     dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    dbglog::Line("MCP native pipe: %s", mcp_pipe::GetPipeName().c_str());
     return true;
 }
 
 void Stop() {
     if (!g_server) return;
     events::WakeAll();
+    mcp_pipe::Stop();
     g_server->stop();
     if (g_thread.joinable()) g_thread.join();
     g_server.reset();
+    ClearNativeRoutes();
 }
 
 int GetPort() { return g_port; }

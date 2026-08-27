@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/unified-cortex-host
+      - refactor/native-mcp-tool-executor
   pull_request:
     paths:
       - "CMakeLists.txt"
@@ -101,15 +102,17 @@ jobs:
             }
           }
 
-      - name: Inject Cortex and test all semantic MCP tools
+      - name: Inject Cortex and test HTTP + native stdio MCP
         shell: pwsh
         run: |
           $root = Resolve-Path "build/full-${{ matrix.arch }}"
           $targetPath = Join-Path $root "${{ matrix.target_name }}"
           $injectorPath = Join-Path $root "injector.exe"
+          $hostPath = Join-Path $root "cortex_host.exe"
           $corePath = Join-Path $root "cortex_core.dll"
           $tokenPath = Join-Path $root "cortex.token"
-          $semanticTests = Resolve-Path "tests/semantic_mcp_e2e.ps1"
+          $semanticTests = (Resolve-Path "tests/semantic_mcp_e2e.ps1").Path
+          $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
@@ -132,6 +135,10 @@ jobs:
             if (-not (Test-Path $tokenPath)) { throw "Cortex token was not created at $tokenPath" }
 
             & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
+            if (-not $?) { throw "HTTP MCP semantic E2E failed" }
+
+            & $nativeTests -HostPath $hostPath -TokenPath $tokenPath
+            if (-not $?) { throw "Native stdio MCP E2E failed" }
           } finally {
             if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }
           }

@@ -1,5 +1,5 @@
 #pragma once
-#include <httplib.h>
+#include "native_routes.h"
 #include <nlohmann/json.hpp>
 
 namespace api {
@@ -8,36 +8,47 @@ namespace api {
 // and the MCP tools/list dispatch. Defined in routes_status.cpp.
 nlohmann::json BuildToolsManifest();
 
-void RegisterStatusRoutes(httplib::Server& svr);
-void RegisterModulesRoutes(httplib::Server& svr);
-void RegisterMemoryRoutes(httplib::Server& svr);
-void RegisterScanRoutes(httplib::Server& svr);
-void RegisterDisasmRoutes(httplib::Server& svr);
-void RegisterDebugRoutes(httplib::Server& svr);
-void RegisterSymbolsRoutes(httplib::Server& svr);
-void RegisterProjectRoutes(httplib::Server& svr);
-void RegisterScreenshotRoutes(httplib::Server& svr);
-void RegisterPromptRoutes(httplib::Server& svr);
-void RegisterPatchRoutes(httplib::Server& svr);
-void RegisterInputRoutes(httplib::Server& svr);
-void RegisterFreezeRoutes(httplib::Server& svr);
-void RegisterStructRoutes(httplib::Server& svr);
-void RegisterCallRoutes(httplib::Server& svr);
-void RegisterWatchRoutes(httplib::Server& svr);
-void RegisterAnalysisRoutes(httplib::Server& svr);
-void RegisterDissectRoutes(httplib::Server& svr);
-void RegisterBatchRoutes(httplib::Server& svr);
-void RegisterActionRoutes(httplib::Server& svr);
-void RegisterEventRoutes(httplib::Server& svr);
-void RegisterPointerMapRoutes(httplib::Server& svr);
-void RegisterTraceRoutes(httplib::Server& svr);
-void RegisterGhidraRoutes(httplib::Server& svr);
-void RegisterTimelineRoutes(httplib::Server& svr);
-void RegisterWindowRoutes(httplib::Server& svr);
-void RegisterNetRoutes(httplib::Server& svr);
-void RegisterSessionRoutes(httplib::Server& svr);
-void RegisterMcpRoutes(httplib::Server& svr);
-void RegisterLuaRoutes(httplib::Server& svr);
-void RegisterOcrRoutes(httplib::Server& svr);
+void RegisterStatusRoutes(RouteRegistrar& svr);
+void RegisterModulesRoutes(RouteRegistrar& svr);
+void RegisterMemoryRoutes(RouteRegistrar& svr);
+void RegisterScanRoutes(RouteRegistrar& svr);
+void RegisterDisasmRoutes(RouteRegistrar& svr);
+void RegisterDebugRoutes(RouteRegistrar& svr);
+void RegisterSymbolsRoutes(RouteRegistrar& svr);
+void RegisterProjectRoutes(RouteRegistrar& svr);
+void RegisterScreenshotRoutes(RouteRegistrar& svr);
+void RegisterPromptRoutes(RouteRegistrar& svr);
+void RegisterPatchRoutes(RouteRegistrar& svr);
+void RegisterInputRoutes(RouteRegistrar& svr);
+void RegisterFreezeRoutes(RouteRegistrar& svr);
+void RegisterStructRoutes(RouteRegistrar& svr);
+void RegisterCallRoutes(RouteRegistrar& svr);
+void RegisterWatchRoutes(RouteRegistrar& svr);
+void RegisterAnalysisRoutes(RouteRegistrar& svr);
+void RegisterDissectRoutes(RouteRegistrar& svr);
+void RegisterBatchRoutes(RouteRegistrar& svr);
+void RegisterActionRoutes(RouteRegistrar& svr);
+void RegisterEventRoutes(RouteRegistrar& svr);
+void RegisterPointerMapRoutes(RouteRegistrar& svr);
+void RegisterTraceRoutes(RouteRegistrar& svr);
+void RegisterGhidraRoutes(RouteRegistrar& svr);
+void RegisterTimelineRoutes(RouteRegistrar& svr);
+void RegisterWindowRoutes(RouteRegistrar& svr);
+void RegisterNetRoutes(RouteRegistrar& svr);
+void RegisterSessionRoutes(RouteRegistrar& svr);
+void RegisterMcpRoutes(RouteRegistrar& svr);
+void RegisterLuaRoutes(RouteRegistrar& svr);
+void RegisterOcrRoutes(RouteRegistrar& svr);
 
 } // namespace api
+
+// Every routes_*.cpp historically spells its registration parameter as
+// `httplib::Server&`. For those translation units only, CMake defines
+// CORTEX_ROUTE_REGISTRAR; this compatibility alias keeps all route bodies
+// untouched while making their `svr.Get/Post/...` calls hit RouteRegistrar.
+// server.cpp is compiled without the define and continues to use the real
+// httplib::Server for transport concerns.
+#ifdef CORTEX_ROUTE_REGISTRAR
+namespace httplib { using RouteRegistrar = ::api::RouteRegistrar; }
+#define Server RouteRegistrar
+#endif
