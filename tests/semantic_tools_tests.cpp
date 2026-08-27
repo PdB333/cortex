@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
         Check(schema.contains("properties") && schema["properties"].is_object(),
               name + ": schema properties missing");
         for (const char* property : {"objective", "observations", "constraints", "execute",
-                                     "steps", "timeout_ms", "mutation_permission"}) {
+                                     "steps", "timeout_ms", "mutation_permission", "rollback_on_success"}) {
             Check(schema["properties"].contains(property), name + ": missing schema property " + property);
         }
         Check(ContainsString(schema.value("required", json::array()), "objective"),
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     }
 
     Check(semanticNames == std::set<std::string>(expectedNames.begin(), expectedNames.end()),
-          "catalog names differ from the locked v0.5.0 list");
+          "catalog names differ from the locked v0.6.0 list");
 
     for (const auto& pair : dependencyGraph) {
         for (const auto& dependency : pair.second) {
@@ -217,6 +217,7 @@ int main(int argc, char** argv) {
             {"arguments", json::object()}
         }});
         executeArguments["timeout_ms"] = 1000;
+        executeArguments["rollback_on_success"] = false;
         const json executionPlan = api::semantic::PlanFor(name, executeArguments);
         Check(executionPlan.value("status", std::string()) == "execution_requested",
               name + ": explicit execute=true must validate as execution_requested");
@@ -254,6 +255,9 @@ int main(int argc, char** argv) {
     CheckFailure(api::semantic::PlanFor("capture_runtime_state",
                                         {{"objective", "observe"}, {"mutation_permission", "yes"}}),
                  "invalid_mutation_permission");
+    CheckFailure(api::semantic::PlanFor("capture_runtime_state",
+                                        {{"objective", "observe"}, {"rollback_on_success", "yes"}}),
+                 "invalid_rollback_on_success");
     CheckFailure(api::semantic::PlanFor("capture_runtime_state",
                                         {{"objective", "observe"}, {"steps", json::array({json::object()})}}),
                  "invalid_step");
