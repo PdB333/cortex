@@ -12,34 +12,34 @@ Cortex is a runtime analysis platform with an external host, an optional injecte
 
 **Current runtime support:** Windows x86 and x64.
 
-**Cross-platform model:** Cortex v0.5.0 introduces platform-neutral `Target`, `Node`, `Backend`, `Catalog`, architecture, and capability contracts for Windows, Linux, and PS4 targets. Linux and PS4 are represented by the common model, but they do **not** yet have production runtime backends.
+**Cross-platform model:** Cortex v0.5.0 introduced platform-neutral `Target`, `Node`, `Backend`, `Catalog`, architecture, and capability contracts for Windows, Linux, and PS4 targets. Linux and PS4 are represented by the common model, but they do **not** yet have production runtime backends.
 
-The local HTTP API is loopback-only; the default endpoint is `http://127.0.0.1:6969`. Protected routes require a generated 256-bit token.
+The local HTTP API is loopback-only; the default endpoint is `http://127.0.0.1:6969`. Protected routes require a generated 256-bit token. Cortex v0.6.0 also provides a local authenticated Windows Named Pipe transport for MCP so the normal stdio path no longer loops back through HTTP.
 
 > [!WARNING]
 > Use Cortex only with software and systems you own or are authorized to inspect.
 > Cortex is intended for debugging, software research, accessibility, testing, diagnostics, and controlled modding. Anti-cheat bypass, unauthorized access, and interference with online services are out of scope.
 
-## Latest release — v0.5.0
+## Latest release — v0.6.0
 
-[v0.5.0](https://github.com/PdB333/cortex/releases/tag/v0.5.0) is the current public release.
+[v0.6.0](https://github.com/PdB333/cortex/releases/tag/v0.6.0) is the current public release.
 
 Release archives:
 
-- `cortex-v0.5.0-windows-x64.zip`
-- `cortex-v0.5.0-windows-x86.zip`
+- `cortex-v0.6.0-windows-x64.zip`
+- `cortex-v0.6.0-windows-x86.zip`
 
 Both archives are built and validated by the release workflow before publication and contain `cortex_host.exe`, `cortex_core.dll`, `cortex.asi`, the standalone compatibility injector, the matching test target, documentation, SDK files, and agent documentation.
 
-Highlights in v0.5.0:
+Highlights in v0.6.0:
 
-- hardened request handling, stable response contracts, request IDs, bounded payloads, pagination helpers, and checked memory ranges;
-- nested action transactions, rollback guards, mutation journaling, and stronger Lua sandbox/resource limits;
-- typed MCP schemas, safe path/query encoding, explicit risk metadata, and stricter loopback bridge policy;
-- semantic plan IDs, lifecycle/evidence metadata, timeout/cancellation requirements, and rollback requirements for mutations;
-- a generic Target / Node / Backend / Capability architecture with Windows, Linux, PS4, x86, x64, and ARM64 identities;
-- a read-only `cortex_host probe` command and OpenGL runtime validation;
-- dedicated P1–P4 CI plus full Windows x86/x64 build, injection, E2E, MCP, and release validation.
+- native MCP stdio transport through an authenticated local Windows Named Pipe, with HTTP kept as an explicit compatibility/debug fallback;
+- a shared in-process MCP executor and native route registry, removing the old MCP → HTTP → route loopback path;
+- MCP 2026-07-28 support alongside legacy initialize-based versions, including discovery, stateless requests, notifications, batching, and modern tool-list cache hints;
+- a compact default MCP surface exposing the 30 semantic tools, with `--tools all` available for direct primitive access;
+- bounded server-side semantic execution with explicit steps, cooperative deadlines, scoped cancellation, evidence capture, inter-step references, mutation permissions, transaction checkpoints, and rollback;
+- one-command MCP startup with `cortex_host.exe mcp --process <name-or-pid>` plus explicit `--transport native|http` selection;
+- x86/x64 protocol, pipe, semantic, bridge-policy, HTTP MCP, and native stdio MCP validation in CI and the release gate.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
 
@@ -89,10 +89,10 @@ Today, the concrete runtime remains Windows-first. The cross-platform layer is t
 | Networking | ws2_32 recv/send/WSA* observation with bounded event storage |
 | Scripting | Embedded Lua 5.4 sandbox with `cortex.*` bindings and persisted script catalog |
 | Vision | OCR via Windows.Media.Ocr (Win10+, no bundled OCR engine) |
-| AI integration | Native MCP endpoint + stdio bridge + 30 domain-neutral semantic planning tools |
+| AI integration | Native stdio → authenticated Named Pipe MCP, 30 semantic tools, bounded server-side orchestration, HTTP fallback |
 | Addressing | Universal `module+RVA` addressing for ASLR-stable workflows |
 | Persistence | Named addresses, pointer paths, notes, freezes, structures, sessions |
-| Safety | Loopback-only API, token auth, Host/Origin checks, request limits, mutation journal + rollback |
+| Safety | Loopback-only HTTP API, token auth, local Named Pipe auth, request limits, mutation journal + rollback |
 
 Renderer hooks currently include D3D8 (x86), D3D9/10/11 (x86+x64), D3D12 (x64), and OpenGL. Vulkan is not hooked.
 
@@ -131,7 +131,7 @@ cortex_host.exe probe --pid ... read-only external process/runtime probe
 cortex_host.exe diagnose ...    monitor crashes, hangs, and heartbeats
 cortex_host.exe analyze ...     analyze a crash/hang artifact directory
 cortex_host.exe symbolize ...   resolve PDB or DWARF symbols
-cortex_host.exe mcp ...         local stdio MCP bridge
+cortex_host.exe mcp ...         local stdio MCP transport (native pipe by default)
 ```
 
 `probe` is intentionally non-destructive. It reports process liveness, window state, bitness/shared diagnostics information, and heartbeat age without requiring injection or modifying the target.
@@ -185,39 +185,41 @@ The host, injector path, and DLL bitness must match the target process for injec
 
 ## MCP and AI integration
 
-Cortex exposes MCP in two ways:
+Cortex exposes MCP through a shared protocol core and executor with two transports:
 
-- HTTP + JSON-RPC 2.0 on `POST /mcp`;
-- a local stdio bridge through `cortex_host.exe mcp`.
+- **native (recommended):** `cortex_host.exe mcp` reads JSON-RPC on stdio and forwards framed requests to the injected runtime through an authenticated local Windows Named Pipe;
+- **HTTP fallback:** JSON-RPC 2.0 on `POST /mcp`, or `cortex_host.exe mcp --transport http`, for compatibility and debugging.
 
-Example client configuration:
+The normal native path does **not** perform internal loopback HTTP calls. REST and MCP share the same registered business handlers through the in-process native route registry.
+
+Recommended one-command client configuration:
 
 ```json
 {
   "mcpServers": {
     "cortex": {
       "command": "C:/path/cortex_host.exe",
-      "args": ["mcp", "--token-file", "C:/path/cortex.token"]
+      "args": ["mcp", "--process", "app.exe"]
     }
   }
 }
 ```
 
-Primitive MCP tools are derived from the same `/tools` HTTP manifest. In v0.5.0 the MCP layer also provides:
+If Cortex is already injected, use `--token-file C:/path/cortex.token` instead of `--process`. The default `--tools compact` profile exposes exactly the 30 semantic tools; `--tools all` additionally exposes the generated primitive tools.
 
-- typed JSON Schemas instead of string-only argument descriptions;
-- percent-encoded path and query rendering;
-- validation of required query containers and unresolved path placeholders;
-- `_cortex` risk metadata for generated primitive tools;
-- local-only bridge host/port policy checks.
+Cortex v0.6.0 supports the stateless MCP `2026-07-28` protocol and legacy initialize-based clients (`2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`). Modern discovery is available through `server/discover`; legacy `initialize` remains supported for older clients.
+
+Primitive MCP tools are derived from the same `/tools` HTTP manifest and keep typed JSON Schemas, percent-encoded path/query rendering, required query validation, and `_cortex` risk metadata.
 
 ### Semantic tools
 
-Cortex exposes 30 domain-neutral semantic planning tools for observation, search, tracing, structure inference, hypothesis testing, and reversible experiments.
+Cortex exposes 30 domain-neutral semantic tools for observation, search, tracing, structure inference, hypothesis testing, and reversible experiments.
 
-Semantic plans include a deterministic `plan_id`, lifecycle states, evidence confidence, evidence-state vocabulary, declared primitive steps, and explicit execution requirements. Server-side multi-step execution remains disabled until cancellation, timeout, permission, and rollback semantics are enforced end to end.
+Calls are plan-only by default. With `execute: true`, Cortex can execute an explicit allowlisted `steps` sequence server-side. Execution is bounded to 32 steps, uses a cooperative deadline, scopes cancellation by MCP session/request, records evidence for each primitive call, and supports references to earlier step outputs.
 
-See [`agent/semantic-tools.md`](agent/semantic-tools.md) and [`agent/agents.md`](agent/agents.md).
+Control, mutation, and native-call primitives require `mutation_permission: true`. Supported mutations execute inside an action transaction and roll back on failure, observed cancellation, or observed timeout; operations without a known rollback contract are rejected before execution. `rollback_on_success: true` supports reversible causal experiments.
+
+See [`docs/mcp.md`](docs/mcp.md), [`agent/semantic-tools.md`](agent/semantic-tools.md), and [`agent/agents.md`](agent/agents.md).
 
 ## Crash, hang, and runtime diagnostics
 
@@ -244,7 +246,7 @@ See [`docs/external-diagnostics.md`](docs/external-diagnostics.md), [`docs/symbo
 
 ## Lua scripting
 
-`POST /lua/exec` executes Lua 5.4 code in a fresh sandbox. v0.5.0 tightens the sandbox and adds bounded script size, output, read sizes, timeout handling, and mutation journaling for Cortex-backed writes.
+`POST /lua/exec` executes Lua 5.4 code in a fresh sandbox. v0.5.0 tightened the sandbox and added bounded script size, output, read sizes, timeout handling, and mutation journaling for Cortex-backed writes.
 
 ```lua
 local v = cortex.memory.read("engine.dll+0x1234", "u32")
@@ -287,7 +289,7 @@ api_token =           # empty = load/create cortex.token
 | Networking | `/network/{capture,events}` |
 | Persistence | `/project`, `/project/{address,pointer_path,resolve,note}` |
 | Orchestration | `/batch/run`, `/events`, `/actions[/rollback]`, `/session/export` |
-| MCP | `POST /mcp` (JSON-RPC 2.0) |
+| MCP | native stdio/Named Pipe via `cortex_host mcp`; HTTP compatibility on `POST /mcp` |
 
 `GET /tools` remains the source of truth for live route bodies, query parameters, descriptions, and generated MCP primitive contracts.
 
@@ -328,38 +330,41 @@ Hit logs are paginated and traces can be started automatically from breakpoint t
 
 ## Security and API reliability
 
-- Local API access is loopback-only.
-- Protected routes require `X-Cortex-Token` with constant-time token comparison.
-- Host/Origin validation rejects non-local origins.
+- Local HTTP API access is loopback-only.
+- Protected HTTP routes require `X-Cortex-Token` with constant-time token comparison.
+- Host/Origin validation rejects non-local HTTP origins.
 - JSON-modifying routes require the expected content type.
 - Request bodies are bounded and malformed/oversized request metadata is rejected early.
 - Successful HTTP responses expose correlation IDs through `X-Cortex-Request-Id`; structured errors can include the same ID in JSON.
 - Memory operations use checked address-range arithmetic before low-level access.
-- The MCP stdio bridge accepts only local loopback endpoints.
+- Native MCP uses a token-derived local pipe rendezvous plus full-token authentication; remote pipe clients are rejected where supported by Windows.
+- MCP stdio lines and native frames have explicit size limits, and HTTP fallback remains loopback-only.
 - Dependency revisions used by the main and lightweight host builds are pinned.
 
-Public routes include `/status`, `/health`, `/tools`, and `/openapi.json`.
+Public HTTP routes include `/status`, `/health`, `/tools`, and `/openapi.json`.
 
 ## Validation
 
-Cortex v0.5.0 is validated by multiple independent CI layers rather than a single compile check:
+Cortex v0.6.0 is validated by multiple independent CI layers rather than a single compile check:
 
 - Windows x86 and x64 full builds;
 - CTest on both Windows architectures;
 - action transaction and rollback-guard tests;
 - request ID, response contract, pagination, and request-limit tests;
 - Lua sandbox/resource-limit tests;
-- MCP schema, query-container, URI rendering, and bridge-policy tests;
-- semantic plan lifecycle and contract tests;
+- MCP protocol tests for legacy and 2026-07-28 request/notification/batch behaviour;
+- native Named Pipe rendezvous/framing tests and bridge-policy tests;
+- semantic plan lifecycle, execution, permission, timeout, rollback, and dependency-contract tests;
 - read-only `cortex_host probe` build validation;
 - OpenGL/WGL runtime fixture validation;
 - generic Target/Node/Backend/Catalog model tests on Windows x86/x64;
 - portable C++17 target-model tests on Linux;
-- real Windows DLL injection and semantic MCP calls;
+- real Windows DLL injection and HTTP semantic MCP calls;
+- real `cortex_host mcp` native stdio → Named Pipe → semantic executor E2E;
 - deterministic Windows E2E scenarios covering API, memory, Lua, MCP, diagnostics, render capture, crash, and hang workflows;
 - release packaging validation for both Windows architectures.
 
-The release workflow refuses publication if its build, CTest, live injection/MCP, or packaging stages fail.
+The release workflow refuses publication if its build, CTest, HTTP MCP, native stdio MCP, or packaging stages fail.
 
 ## Current scope and roadmap
 
@@ -391,7 +396,8 @@ See [`docs/p2-dependency-revisions.md`](docs/p2-dependency-revisions.md) for the
 ## Documentation
 
 - [`agent/agents.md`](agent/agents.md) — AI-agent connection and workflow conventions
-- [`agent/semantic-tools.md`](agent/semantic-tools.md) — semantic tool catalog and evidence rules
+- [`agent/semantic-tools.md`](agent/semantic-tools.md) — semantic tool catalog, execution contract, and evidence rules
+- [`docs/mcp.md`](docs/mcp.md) — MCP transports, protocol compatibility, tool profiles, and semantic execution
 - [`docs/p2-mcp-contracts.md`](docs/p2-mcp-contracts.md) — MCP contract hardening
 - [`docs/p3-runtime-validation.md`](docs/p3-runtime-validation.md) — runtime validation work
 - [`docs/p4-target-model.md`](docs/p4-target-model.md) — generic target architecture
