@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace api::mcp_pipe {
@@ -153,7 +154,8 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
             const auto result = mcp_tools::Handle(
                 envelope["message"],
                 profile,
-                envelope.value("protocolVersion", std::string()));
+                envelope.value("protocolVersion", std::string()),
+                envelope.value("session", std::string()));
             if (result.hasResponse) responsePayload = result.response.dump();
         }
     } catch (const json::parse_error& error) {
