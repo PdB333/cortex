@@ -181,6 +181,45 @@ if(CORTEX_ENABLE_D3D8)
         core/overlay/overlay_d3d8.cpp core/capture/capture_d3d8.cpp)
 endif()
 
+# Route translation units are compiled through api::RouteRegistrar. The
+# registrar forwards every handler to cpp-httplib and mirrors it into the
+# native in-process registry, so REST and MCP execute one shared handler.
+set(CORTEX_API_ROUTE_SOURCES
+    core/api/routes_status.cpp
+    core/api/routes_modules.cpp
+    core/api/routes_memory.cpp
+    core/api/routes_scan.cpp
+    core/api/routes_disasm.cpp
+    core/api/routes_debug.cpp
+    core/api/routes_symbols.cpp
+    core/api/routes_project.cpp
+    core/api/routes_screenshot.cpp
+    core/api/routes_prompt.cpp
+    core/api/routes_patch.cpp
+    core/api/routes_input.cpp
+    core/api/routes_freeze.cpp
+    core/api/routes_struct.cpp
+    core/api/routes_call.cpp
+    core/api/routes_watch.cpp
+    core/api/routes_analysis.cpp
+    core/api/routes_dissect.cpp
+    core/api/routes_batch.cpp
+    core/api/routes_actions.cpp
+    core/api/routes_events.cpp
+    core/api/routes_pointermap.cpp
+    core/api/routes_trace.cpp
+    core/api/routes_ghidra.cpp
+    core/api/routes_timeline.cpp
+    core/api/routes_window.cpp
+    core/api/routes_net.cpp
+    core/api/routes_session.cpp
+    core/api/routes_mcp.cpp
+    core/api/routes_lua.cpp
+    core/api/routes_ocr.cpp
+)
+set_source_files_properties(${CORTEX_API_ROUTE_SOURCES} PROPERTIES
+    COMPILE_DEFINITIONS "CORTEX_ROUTE_REGISTRAR")
+
 add_library(core SHARED
     core/dllmain.cpp
     core/config.cpp
@@ -218,40 +257,11 @@ add_library(core SHARED
     core/dissect/dissect.cpp
     core/action/action.cpp
     core/events/events.cpp
+    core/api/native_routes.cpp
     core/api/server.cpp
-    core/api/routes_status.cpp
-    core/api/routes_modules.cpp
-    core/api/routes_memory.cpp
-    core/api/routes_scan.cpp
-    core/api/routes_disasm.cpp
-    core/api/routes_debug.cpp
-    core/api/routes_symbols.cpp
-    core/api/routes_project.cpp
-    core/api/routes_screenshot.cpp
-    core/api/routes_prompt.cpp
-    core/api/routes_patch.cpp
-    core/api/routes_input.cpp
-    core/api/routes_freeze.cpp
-    core/api/routes_struct.cpp
-    core/api/routes_call.cpp
-    core/api/routes_watch.cpp
-    core/api/routes_analysis.cpp
-    core/api/routes_dissect.cpp
-    core/api/routes_batch.cpp
-    core/api/routes_actions.cpp
-    core/api/routes_events.cpp
-    core/api/routes_pointermap.cpp
-    core/api/routes_trace.cpp
-    core/api/routes_ghidra.cpp
-    core/api/routes_timeline.cpp
-    core/api/routes_window.cpp
-    core/api/routes_net.cpp
-    core/api/routes_session.cpp
-    core/api/routes_mcp.cpp
+    ${CORTEX_API_ROUTE_SOURCES}
     core/scripting/lua_engine.cpp
-    core/api/routes_lua.cpp
     core/ocr/ocr.cpp
-    core/api/routes_ocr.cpp
 )
 
 target_include_directories(core PRIVATE core)
