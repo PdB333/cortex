@@ -49,6 +49,19 @@ function Invoke-Mcp {
     return Read-McpLine -Process $Process
 }
 
+function Get-McpResult {
+    param(
+        [Parameter(Mandatory = $true)]$Response,
+        [Parameter(Mandatory = $true)][string]$Phase
+    )
+    $propertyNames = @($Response.PSObject.Properties.Name)
+    if (-not ($propertyNames -contains "result")) {
+        $raw = ConvertTo-Json -InputObject $Response -Depth 60 -Compress
+        throw "MCP $Phase returned no result. Raw response: $raw"
+    }
+    return $Response.result
+}
+
 Assert-True (Test-Path $HostPath) "cortex_host does not exist: $HostPath"
 Assert-True (Test-Path $TokenPath) "token file does not exist: $TokenPath"
 $resolvedHost = (Resolve-Path $HostPath).Path
@@ -80,8 +93,9 @@ try {
         method = "initialize"
         params = @{ protocolVersion = "2025-11-25" }
     })
+    $initializeResult = Get-McpResult -Response $initialize -Phase "initialize"
     Assert-True ($initialize.id -eq 1) "initialize response id mismatch"
-    Assert-True ($initialize.result.serverInfo.name -eq "cortex") "wrong MCP server name"
+    Assert-True ($initializeResult.serverInfo.name -eq "cortex") "wrong MCP server name"
 
     $list = Invoke-Mcp -Process $process -Payload ([ordered]@{
         jsonrpc = "2.0"
@@ -89,7 +103,8 @@ try {
         method = "tools/list"
         params = @{}
     })
-    $tools = @($list.result.tools)
+    $listResult = Get-McpResult -Response $list -Phase "tools/list"
+    $tools = @($listResult.tools)
     Assert-True ($tools.Count -eq 30) "compact native stdio profile must expose exactly 30 semantic tools"
     Assert-True (-not (@($tools.name) -contains "health")) "compact native stdio profile leaked primitive tools"
 
@@ -110,6 +125,7 @@ try {
         method = "ping"
     })
     $ping = Read-McpLine -Process $process
+    [void](Get-McpResult -Response $ping -Phase "ping")
     Assert-True ($ping.id -eq 3) "notification emitted an unexpected stdio response"
 
     $execute = Invoke-Mcp -Process $process -Payload ([ordered]@{
@@ -129,8 +145,9 @@ try {
             }
         }
     })
-    Assert-True (-not [bool]$execute.result.isError) "read-only semantic execution returned isError"
-    $structured = $execute.result.structuredContent
+    $executeResult = Get-McpResult -Response $execute -Phase "read-only tools/call"
+    Assert-True (-not [bool]$executeResult.isError) "read-only semantic execution returned isError"
+    $structured = $executeResult.structuredContent
     Assert-True ($structured.status -eq "completed") "native semantic execution did not complete"
     Assert-True ($structured.lifecycle.current -eq "completed") "execution lifecycle did not complete"
     Assert-True (@($structured.evidence).Count -eq 2) "execution did not capture both primitive outputs as evidence"
@@ -155,8 +172,9 @@ try {
             }
         }
     })
-    Assert-True ([bool]$permissionGate.result.isError) "mutation without permission was not rejected"
-    Assert-True ($permissionGate.result.structuredContent.error -eq "mutation_permission_required") `
+    $permissionResult = Get-McpResult -Response $permissionGate -Phase "mutation permission tools/call"
+    Assert-True ([bool]$permissionResult.isError) "mutation without permission was not rejected"
+    Assert-True ($permissionResult.structuredContent.error -eq "mutation_permission_required") `
         "mutation permission gate returned wrong error"
 
     $missingSteps = Invoke-Mcp -Process $process -Payload ([ordered]@{
@@ -168,8 +186,9 @@ try {
             arguments = @{ objective = "validate execution contract"; execute = $true }
         }
     })
-    Assert-True ([bool]$missingSteps.result.isError) "execute=true without steps was not rejected"
-    Assert-True ($missingSteps.result.structuredContent.error -eq "missing_execution_steps") `
+    $missingStepsResult = Get-McpResult -Response $missingSteps -Phase "missing steps tools/call"
+    Assert-True ([bool]$missingStepsResult.isError) "execute=true without steps was not rejected"
+    Assert-True ($missingStepsResult.structuredContent.error -eq "missing_execution_steps") `
         "missing execution steps returned wrong error"
 
     Write-Host "PASS: native MCP stdio -> named pipe -> semantic executor -> native route dispatcher"
