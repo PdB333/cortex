@@ -38,7 +38,8 @@ inline json Tool(const char* name, const char* description, json primitives) {
                     }}
                 }},
                 {"timeout_ms", {{"type", "integer"}, {"minimum", 100}, {"maximum", 120000}, {"description", "Cooperative orchestration deadline. Defaults to 30000 ms."}}},
-                {"mutation_permission", {{"type", "boolean"}, {"description", "Must be true before any control, mutation, or native-call primitive can execute."}}}
+                {"mutation_permission", {{"type", "boolean"}, {"description", "Must be true before any control, mutation, or native-call primitive can execute."}}},
+                {"rollback_on_success", {{"type", "boolean"}, {"description", "Roll back supported transactional mutations even when execution completes successfully."}}}
             }},
             {"required", json::array({"objective"})}
         }},
@@ -136,6 +137,8 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
         }
         if (arguments.contains("mutation_permission") && !arguments["mutation_permission"].is_boolean())
             return Failure("invalid_mutation_permission", "mutation_permission must be a JSON boolean.");
+        if (arguments.contains("rollback_on_success") && !arguments["rollback_on_success"].is_boolean())
+            return Failure("invalid_rollback_on_success", "rollback_on_success must be a JSON boolean.");
 
         const bool execute = arguments.value("execute", false);
         if (execute && (!arguments.contains("steps") || arguments["steps"].empty()))
