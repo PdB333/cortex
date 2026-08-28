@@ -50,21 +50,79 @@ jobs:
       - name: Create portable preview directory
         shell: msys2 {0}
         run: |
+          set -euo pipefail
           rm -rf dist/CortexPreview
           mkdir -p dist/CortexPreview
           cp build/ui/cortex.exe dist/CortexPreview/cortex.exe
+
           if command -v windeployqt6 >/dev/null 2>&1; then
             DEPLOY=windeployqt6
           else
             DEPLOY=windeployqt
           fi
           "$DEPLOY" --release --qmldir app/qml --no-translations dist/CortexPreview/cortex.exe
+
+          # windeployqt deploys Qt modules/plugins but does not guarantee that
+          # every MinGW/MSYS2 runtime dependency of those DLLs is copied. Walk
+          # every PE file recursively and vendor dependencies resolved from
+          # /mingw64/bin. This includes libstdc++, libgcc, freetype, harfbuzz,
+          # md4c, pcre2, zlib and any future transitive Qt dependency.
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "dist/CortexPreview/$base" ]; then
+                  cp "$dep" "dist/CortexPreview/$base"
+                  echo "Bundled runtime dependency: $base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find dist/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
           printf '%s\n' \
             'Cortex unified application preview' \
             'Branch: next/unified-cortex-ui' \
             'This is a test artifact, not a public release.' \
             'Run cortex.exe and select a local target to inspect the new UI shell.' \
             > dist/CortexPreview/TESTING.txt
+
+      - name: Verify portable runtime dependencies
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find dist/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
+
+      - name: Portable smoke test with clean PATH
+        shell: pwsh
+        run: |
+          $preview = (Resolve-Path "dist/CortexPreview").Path
+          $oldPath = $env:PATH
+          try {
+            # Deliberately remove MSYS2/MinGW from PATH. If a required runtime
+            # DLL was forgotten, this now fails exactly like a clean user PC.
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $env:QT_QPA_PLATFORM = "offscreen"
+            & (Join-Path $preview "cortex.exe") --smoke-test
+            if ($LASTEXITCODE -ne 0) {
+              throw "Portable Cortex smoke test failed with exit code $LASTEXITCODE"
+            }
+          } finally {
+            $env:PATH = $oldPath
+            Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          }
 
       - name: Upload testable application
         uses: actions/upload-artifact@v4
