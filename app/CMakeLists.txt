@@ -17,6 +17,12 @@ qt_add_executable(cortex WIN32
     app_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
+    ../core/target/session_manager.cpp
+    ../core/target/session_manager.h
+    ../core/services/memory_service.cpp
+    ../core/services/memory_service.h
+    ../core/services/scan_service.cpp
+    ../core/services/scan_service.h
 )
 
 qt_add_qml_module(cortex

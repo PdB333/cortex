@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cwchar>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -13,7 +14,9 @@
 #include <tlhelp32.h>
 #elif defined(__linux__)
 #include <dirent.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 #include <unistd.h>
 #endif
 
@@ -121,6 +124,126 @@ std::string ComputerName() {
     return "Windows local node";
 }
 
+bool RegionReadable(DWORD protect) {
+    if ((protect & PAGE_GUARD) != 0 || (protect & 0xff) == PAGE_NOACCESS) return false;
+    switch (protect & 0xff) {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool RegionWritable(DWORD protect) {
+    switch (protect & 0xff) {
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool RegionExecutable(DWORD protect) {
+    switch (protect & 0xff) {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+class WindowsProcessSession final : public Session {
+public:
+    WindowsProcessSession(TargetDescriptor target, HANDLE process, bool writable)
+        : target_(std::move(target)), process_(process), writable_(writable) {
+        capabilities_ = target_.capabilities;
+        capabilities_.Add(Capability::MemoryRead).Add(Capability::MemoryScan);
+        if (writable_) capabilities_.Add(Capability::MemoryWrite);
+        target_.capabilities = capabilities_;
+    }
+
+    ~WindowsProcessSession() override {
+        if (process_) CloseHandle(process_);
+    }
+
+    const TargetDescriptor& Target() const override { return target_; }
+    const CapabilitySet& Capabilities() const override { return capabilities_; }
+
+    bool Alive() const override {
+        if (!process_) return false;
+        DWORD code = 0;
+        return GetExitCodeProcess(process_, &code) && code == STILL_ACTIVE;
+    }
+
+    bool ReadMemory(uint64_t address, void* buffer, size_t size, size_t* bytesRead) const override {
+        if (bytesRead) *bytesRead = 0;
+        if (!process_ || !buffer || size == 0) return false;
+        SIZE_T read = 0;
+        const BOOL ok = ReadProcessMemory(process_, reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(address)), buffer, size, &read);
+        if (bytesRead) *bytesRead = static_cast<size_t>(read);
+        return ok != FALSE && read == size;
+    }
+
+    bool WriteMemory(uint64_t address, const void* buffer, size_t size, size_t* bytesWritten) override {
+        if (bytesWritten) *bytesWritten = 0;
+        if (!writable_ || !process_ || !buffer || size == 0) return false;
+        SIZE_T written = 0;
+        const BOOL ok = WriteProcessMemory(process_, reinterpret_cast<LPVOID>(static_cast<uintptr_t>(address)), buffer, size, &written);
+        if (ok && written > 0) FlushInstructionCache(process_, reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(address)), written);
+        if (bytesWritten) *bytesWritten = static_cast<size_t>(written);
+        return ok != FALSE && written == size;
+    }
+
+    std::vector<MemoryRegion> MemoryRegions() const override {
+        std::vector<MemoryRegion> regions;
+        if (!process_) return regions;
+
+        SYSTEM_INFO systemInfo{};
+        GetSystemInfo(&systemInfo);
+        uintptr_t address = reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+        const uintptr_t maximum = reinterpret_cast<uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+
+        while (address < maximum) {
+            MEMORY_BASIC_INFORMATION info{};
+            const SIZE_T queried = VirtualQueryEx(process_, reinterpret_cast<LPCVOID>(address), &info, sizeof(info));
+            if (queried == 0) break;
+
+            const auto base = reinterpret_cast<uintptr_t>(info.BaseAddress);
+            if (info.State == MEM_COMMIT && info.RegionSize > 0) {
+                MemoryRegion region;
+                region.base = static_cast<uint64_t>(base);
+                region.size = static_cast<uint64_t>(info.RegionSize);
+                region.readable = RegionReadable(info.Protect);
+                region.writable = region.readable && RegionWritable(info.Protect);
+                region.executable = region.readable && RegionExecutable(info.Protect);
+                regions.push_back(region);
+            }
+
+            const uintptr_t next = base + info.RegionSize;
+            if (next <= address) break;
+            address = next;
+        }
+        return regions;
+    }
+
+private:
+    TargetDescriptor target_;
+    CapabilitySet capabilities_;
+    HANDLE process_ = nullptr;
+    bool writable_ = false;
+};
+
 #elif defined(__linux__)
 
 Architecture NativeArchitecture() {
@@ -140,6 +263,75 @@ std::string HostName() {
     if (gethostname(buffer, sizeof(buffer) - 1) == 0 && buffer[0] != '\0') return buffer;
     return "Linux local node";
 }
+
+class LinuxProcessSession final : public Session {
+public:
+    LinuxProcessSession(TargetDescriptor target, int fd, bool writable)
+        : target_(std::move(target)), fd_(fd), writable_(writable) {
+        capabilities_ = target_.capabilities;
+        capabilities_.Add(Capability::MemoryRead).Add(Capability::MemoryScan);
+        if (writable_) capabilities_.Add(Capability::MemoryWrite);
+        target_.capabilities = capabilities_;
+    }
+
+    ~LinuxProcessSession() override {
+        if (fd_ >= 0) close(fd_);
+    }
+
+    const TargetDescriptor& Target() const override { return target_; }
+    const CapabilitySet& Capabilities() const override { return capabilities_; }
+    bool Alive() const override { return target_.processId > 0 && (kill(static_cast<pid_t>(target_.processId), 0) == 0 || errno == EPERM); }
+
+    bool ReadMemory(uint64_t address, void* buffer, size_t size, size_t* bytesRead) const override {
+        if (bytesRead) *bytesRead = 0;
+        if (fd_ < 0 || !buffer || size == 0) return false;
+        const ssize_t result = pread(fd_, buffer, size, static_cast<off_t>(address));
+        if (bytesRead && result > 0) *bytesRead = static_cast<size_t>(result);
+        return result == static_cast<ssize_t>(size);
+    }
+
+    bool WriteMemory(uint64_t address, const void* buffer, size_t size, size_t* bytesWritten) override {
+        if (bytesWritten) *bytesWritten = 0;
+        if (!writable_ || fd_ < 0 || !buffer || size == 0) return false;
+        const ssize_t result = pwrite(fd_, buffer, size, static_cast<off_t>(address));
+        if (bytesWritten && result > 0) *bytesWritten = static_cast<size_t>(result);
+        return result == static_cast<ssize_t>(size);
+    }
+
+    std::vector<MemoryRegion> MemoryRegions() const override {
+        std::vector<MemoryRegion> regions;
+        std::ifstream maps("/proc/" + std::to_string(target_.processId) + "/maps");
+        std::string line;
+        while (std::getline(maps, line)) {
+            std::istringstream stream(line);
+            std::string range;
+            std::string permissions;
+            if (!(stream >> range >> permissions)) continue;
+            const auto dash = range.find('-');
+            if (dash == std::string::npos) continue;
+            try {
+                const uint64_t begin = std::stoull(range.substr(0, dash), nullptr, 16);
+                const uint64_t end = std::stoull(range.substr(dash + 1), nullptr, 16);
+                if (end <= begin) continue;
+                MemoryRegion region;
+                region.base = begin;
+                region.size = end - begin;
+                region.readable = permissions.size() > 0 && permissions[0] == 'r';
+                region.writable = permissions.size() > 1 && permissions[1] == 'w';
+                region.executable = permissions.size() > 2 && permissions[2] == 'x';
+                regions.push_back(region);
+            } catch (...) {
+            }
+        }
+        return regions;
+    }
+
+private:
+    TargetDescriptor target_;
+    CapabilitySet capabilities_;
+    int fd_ = -1;
+    bool writable_ = false;
+};
 
 #endif
 
@@ -237,6 +429,41 @@ std::vector<TargetDescriptor> LocalBackend::ListTargets() {
     });
 
     return result;
+}
+
+SessionPtr LocalBackend::Attach(const TargetDescriptor& target, std::string* error) {
+    if (error) error->clear();
+    if (target.nodeId != node_.id || target.kind != TargetKind::Process || target.processId == 0) {
+        if (error) *error = "invalid_target";
+        return {};
+    }
+
+#if defined(_WIN32)
+    const DWORD fullAccess = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION;
+    HANDLE process = OpenProcess(fullAccess, FALSE, static_cast<DWORD>(target.processId));
+    bool writable = process != nullptr;
+    if (!process) {
+        process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, static_cast<DWORD>(target.processId));
+    }
+    if (!process) {
+        if (error) *error = "process_open_failed:" + std::to_string(GetLastError());
+        return {};
+    }
+    return std::make_shared<WindowsProcessSession>(target, process, writable);
+#elif defined(__linux__)
+    const std::string path = "/proc/" + std::to_string(target.processId) + "/mem";
+    int fd = open(path.c_str(), O_RDWR);
+    bool writable = fd >= 0;
+    if (fd < 0) fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        if (error) *error = "process_open_failed";
+        return {};
+    }
+    return std::make_shared<LinuxProcessSession>(target, fd, writable);
+#else
+    if (error) *error = "attach_not_supported";
+    return {};
+#endif
 }
 
 } // namespace cortex::target

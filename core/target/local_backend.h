@@ -10,6 +10,7 @@ public:
 
     NodeDescriptor Node() const override;
     std::vector<TargetDescriptor> ListTargets() override;
+    SessionPtr Attach(const TargetDescriptor& target, std::string* error = nullptr) override;
 
 private:
     NodeDescriptor node_;
