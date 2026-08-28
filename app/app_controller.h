@@ -1,7 +1,11 @@
 #pragma once
 
+#include "target/catalog.h"
+
 #include <QObject>
 #include <QVariantList>
+
+#include <vector>
 
 class AppController final : public QObject {
     Q_OBJECT
@@ -19,7 +23,7 @@ public:
     explicit AppController(QObject* parent = nullptr);
 
     const QVariantList& targets() const { return targets_; }
-    int targetCount() const { return targets_.size(); }
+    int targetCount() const { return static_cast<int>(targetDescriptors_.size()); }
     int currentTargetIndex() const { return currentTargetIndex_; }
     QString currentTargetName() const;
     QString currentTargetMeta() const;
@@ -42,6 +46,8 @@ signals:
     void mutationPermissionChanged();
 
 private:
+    cortex::target::Catalog targetCatalog_;
+    std::vector<cortex::target::TargetDescriptor> targetDescriptors_;
     QVariantList targets_;
     int currentTargetIndex_ = -1;
     QString selectedSection_ = QStringLiteral("Overview");

@@ -15,6 +15,8 @@ qt_add_executable(cortex WIN32
     main.cpp
     app_controller.cpp
     app_controller.h
+    ../core/target/local_backend.cpp
+    ../core/target/local_backend.h
 )
 
 qt_add_qml_module(cortex
@@ -42,6 +44,7 @@ target_link_libraries(cortex PRIVATE
 
 if(WIN32)
     target_compile_definitions(cortex PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(cortex PRIVATE user32)
 endif()
 
 set_target_properties(cortex PROPERTIES

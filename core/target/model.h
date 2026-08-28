@@ -161,6 +161,8 @@ struct TargetDescriptor {
     std::string id;
     std::string nodeId = "local";
     std::string name;
+    std::string executablePath;
+    std::string windowTitle;
     Platform platform = Platform::Unknown;
     Architecture architecture = Architecture::Unknown;
     TargetKind kind = TargetKind::Unknown;
