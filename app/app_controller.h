@@ -65,6 +65,7 @@ public:
     const QVariantList& modules() const { return modules_; }
     bool scanBusy() const { return scanBusy_; }
     QString scanStatus() const { return scanStatus_; }
+    cortex::target::SessionManager& sessionManager() { return sessionManager_; }
 
     Q_INVOKABLE void refreshTargets();
     Q_INVOKABLE void selectTarget(int index);
