@@ -1,71 +1,94 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import Cortex 1.0
 
 Rectangle {
     id: root
-    color: Theme.panel
+    color: Theme.titleBar
 
+    property var appWindow
     signal openCommandPalette()
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        onPressed: {
+            if (Qt.platform.os === "windows" && root.appWindow)
+                root.appWindow.startSystemMove()
+        }
+        onDoubleClicked: {
+            if (Qt.platform.os !== "windows" || !root.appWindow) return
+            if (root.appWindow.visibility === Window.Maximized)
+                root.appWindow.showNormal()
+            else
+                root.appWindow.showMaximized()
+        }
+    }
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 10
-        anchors.rightMargin: 8
+        anchors.leftMargin: 11
         spacing: 8
 
-        Label {
+        Text {
             text: "Cortex"
             color: Theme.textBright
             font.family: Theme.uiFont
-            font.pixelSize: 13
+            font.pixelSize: 14
             font.bold: true
         }
 
         Rectangle {
             Layout.preferredWidth: 1
-            Layout.preferredHeight: 16
+            Layout.preferredHeight: 22
             color: Theme.borderStrong
         }
 
-        ComboBox {
-            id: targetPicker
-            Layout.preferredWidth: 300
-            Layout.preferredHeight: 26
-            model: CortexApp.targets
-            textRole: "name"
-            currentIndex: CortexApp.currentTargetIndex
-            displayText: currentIndex >= 0 ? currentText : "Select target"
-            onActivated: CortexApp.selectTarget(currentIndex)
+        ToolButton {
+            id: targetButton
+            Layout.preferredWidth: 350
+            Layout.preferredHeight: 32
+            onClicked: processPicker.open()
 
-            indicator: null
-            background: Rectangle {
-                color: targetPicker.activeFocus ? "#20252a" : Theme.background
-                border.color: targetPicker.activeFocus ? Theme.accent : Theme.borderStrong
-                radius: Theme.radius
+            contentItem: RowLayout {
+                spacing: 6
+                Text {
+                    Layout.fillWidth: true
+                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "Select target..."
+                    color: CortexApp.currentTargetIndex >= 0 ? Theme.textBright : Theme.textMuted
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: Theme.uiFont
+                    font.pixelSize: 12
+                }
+                Text {
+                    text: "⌄"
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                }
             }
-            contentItem: Text {
-                leftPadding: 8
-                rightPadding: 8
-                text: targetPicker.displayText
-                color: Theme.text
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-                font.family: Theme.uiFont
-                font.pixelSize: 11
+
+            background: Rectangle {
+                color: targetButton.hovered || processPicker.opened ? Theme.surfaceRaised : Theme.input
+                border.color: processPicker.opened ? Theme.accent : Theme.borderStrong
+                border.width: 1
+                radius: Theme.radius
             }
         }
 
         ToolButton {
-            Layout.preferredHeight: 26
+            id: refreshButton
             text: "Refresh"
+            Layout.preferredHeight: 32
             onClicked: CortexApp.refreshTargets()
             contentItem: Text {
                 text: parent.text
                 color: parent.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
+                font.family: Theme.uiFont
                 font.pixelSize: 11
             }
             background: Rectangle {
@@ -74,9 +97,9 @@ Rectangle {
             }
         }
 
-        Label {
-            Layout.maximumWidth: 340
-            text: CortexApp.currentTargetMeta
+        Text {
+            Layout.maximumWidth: 430
+            text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetMeta : ""
             color: Theme.textDisabled
             elide: Text.ElideRight
             font.family: Theme.uiFont
@@ -86,26 +109,27 @@ Rectangle {
         Item { Layout.fillWidth: true }
 
         ToolButton {
-            Layout.preferredHeight: 26
+            id: mutationButton
+            Layout.preferredHeight: 32
             text: CortexApp.mutationPermission ? "Mutation: on" : "Mutation: off"
             onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
             contentItem: Text {
                 text: parent.text
-                color: CortexApp.mutationPermission ? "#d7b36a" : Theme.textMuted
+                color: CortexApp.mutationPermission ? Theme.mutation : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 10
+                font.family: Theme.uiFont
+                font.pixelSize: 11
             }
             background: Rectangle {
                 color: parent.hovered ? Theme.hover : "transparent"
                 radius: Theme.radius
             }
-            ToolTip.visible: hovered
-            ToolTip.text: CortexApp.mutationPermission ? "Disable mutation permission" : "Enable mutation permission"
         }
 
         ToolButton {
-            Layout.preferredHeight: 26
+            id: commandButton
+            Layout.preferredHeight: 32
             text: "Command"
             onClicked: root.openCommandPalette()
             contentItem: Text {
@@ -113,6 +137,7 @@ Rectangle {
                 color: parent.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
+                font.family: Theme.uiFont
                 font.pixelSize: 11
             }
             background: Rectangle {
@@ -120,7 +145,63 @@ Rectangle {
                 radius: Theme.radius
             }
             ToolTip.visible: hovered
-            ToolTip.text: "Command Palette (Ctrl+Shift+P / Ctrl+K)"
+            ToolTip.text: "Command Palette (Ctrl+Shift+P)"
+        }
+
+        RowLayout {
+            visible: Qt.platform.os === "windows"
+            Layout.preferredHeight: parent.height
+            spacing: 0
+
+            ToolButton {
+                Layout.preferredWidth: 44
+                Layout.fillHeight: true
+                text: "—"
+                onClicked: root.appWindow.showMinimized()
+                contentItem: Text {
+                    text: parent.text
+                    color: Theme.textMuted
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 12
+                }
+                background: Rectangle { color: parent.hovered ? Theme.hover : "transparent" }
+            }
+
+            ToolButton {
+                Layout.preferredWidth: 44
+                Layout.fillHeight: true
+                text: root.appWindow && root.appWindow.visibility === Window.Maximized ? "❐" : "□"
+                onClicked: {
+                    if (root.appWindow.visibility === Window.Maximized)
+                        root.appWindow.showNormal()
+                    else
+                        root.appWindow.showMaximized()
+                }
+                contentItem: Text {
+                    text: parent.text
+                    color: Theme.textMuted
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 11
+                }
+                background: Rectangle { color: parent.hovered ? Theme.hover : "transparent" }
+            }
+
+            ToolButton {
+                Layout.preferredWidth: 48
+                Layout.fillHeight: true
+                text: "×"
+                onClicked: root.appWindow.close()
+                contentItem: Text {
+                    text: parent.text
+                    color: parent.hovered ? "white" : Theme.textMuted
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 17
+                }
+                background: Rectangle { color: parent.hovered ? "#c42b1c" : "transparent" }
+            }
         }
     }
 
@@ -130,5 +211,11 @@ Rectangle {
         anchors.bottom: parent.bottom
         height: 1
         color: Theme.border
+    }
+
+    ProcessPicker {
+        id: processPicker
+        anchorX: 68
+        anchorY: Theme.topBarHeight - 1
     }
 }

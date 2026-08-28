@@ -6,6 +6,7 @@ import Cortex 1.0
 Rectangle {
     id: root
     color: Theme.background
+    border.color: Theme.border
 
     property int activeTab: 0
     property var tabs: ["Events", "Console", "Breakpoints", "Watches", "MCP Calls", "Diagnostics"]
@@ -16,12 +17,12 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 30
+            Layout.preferredHeight: 34
             color: Theme.panel
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 8
+                anchors.leftMargin: 10
                 spacing: 1
 
                 Repeater {
@@ -29,27 +30,28 @@ Rectangle {
                     ToolButton {
                         required property string modelData
                         required property int index
-                        Layout.preferredHeight: 30
                         text: modelData
                         checked: root.activeTab === index
                         onClicked: root.activeTab = index
+                        Layout.preferredHeight: 33
 
                         contentItem: Text {
                             text: parent.text
                             color: parent.checked ? Theme.textBright : Theme.textMuted
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: 10
+                            font.family: Theme.uiFont
+                            font.pixelSize: 11
                         }
+
                         background: Rectangle {
                             color: parent.hovered ? Theme.hover : "transparent"
-
                             Rectangle {
                                 visible: parent.parent.checked
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.bottom: parent.bottom
-                                height: 1
+                                height: 2
                                 color: Theme.accent
                             }
                         }
@@ -57,46 +59,41 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
             }
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: Theme.border
-            }
         }
 
-        Item {
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            color: Theme.border
+        }
+
+        Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            color: Theme.background
 
             Column {
                 anchors.left: parent.left
                 anchors.top: parent.top
-                anchors.leftMargin: 10
-                anchors.topMargin: 9
-                spacing: 4
+                anchors.margins: 12
+                spacing: 7
 
                 Text {
                     text: root.tabs[root.activeTab]
                     color: Theme.text
-                    font.pixelSize: 10
+                    font.family: Theme.uiFont
+                    font.pixelSize: 11
+                    font.bold: true
                 }
                 Text {
-                    text: root.activeTab === 4 ? "No MCP calls in this session." : "No entries."
+                    text: root.activeTab === 4
+                          ? "No MCP calls in this session."
+                          : "No entries."
                     color: Theme.textDisabled
-                    font.pixelSize: 10
+                    font.family: Theme.uiFont
+                    font.pixelSize: 11
                 }
             }
         }
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: 1
-        color: Theme.border
     }
 }

@@ -5,10 +5,13 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QHash>
 #include <QSysInfo>
 #include <QVariantMap>
 
 #include <algorithm>
+#include <string>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -34,12 +37,18 @@ QString LocalArchitectureName() {
     return arch.isEmpty() ? QStringLiteral("unknown") : arch;
 }
 
-QVariantMap MakeTarget(qint64 pid, const QString& name) {
+QVariantMap MakeTarget(qint64 pid,
+                       const QString& name,
+                       const QString& architecture,
+                       const QString& path = {},
+                       const QString& windowTitle = {}) {
     QVariantMap result;
     result.insert(QStringLiteral("name"), name);
     result.insert(QStringLiteral("pid"), pid);
     result.insert(QStringLiteral("platform"), LocalPlatformName());
-    result.insert(QStringLiteral("architecture"), LocalArchitectureName());
+    result.insert(QStringLiteral("architecture"), architecture.isEmpty() ? LocalArchitectureName() : architecture);
+    result.insert(QStringLiteral("path"), path);
+    result.insert(QStringLiteral("windowTitle"), windowTitle);
     result.insert(QStringLiteral("kind"), QStringLiteral("process"));
     result.insert(QStringLiteral("id"), QStringLiteral("local:%1:process:%2")
         .arg(LocalPlatformName().toLower(), QString::number(pid)));
@@ -49,18 +58,98 @@ QVariantMap MakeTarget(qint64 pid, const QString& name) {
     return result;
 }
 
+#ifdef Q_OS_WIN
+
+QString ArchitectureForProcess(HANDLE process) {
+    if (!process) return LocalArchitectureName();
+
+    using IsWow64Process2Fn = BOOL (WINAPI*)(HANDLE, USHORT*, USHORT*);
+    static const auto isWow64Process2 = reinterpret_cast<IsWow64Process2Fn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "IsWow64Process2"));
+
+    if (isWow64Process2) {
+        USHORT processMachine = IMAGE_FILE_MACHINE_UNKNOWN;
+        USHORT nativeMachine = IMAGE_FILE_MACHINE_UNKNOWN;
+        if (isWow64Process2(process, &processMachine, &nativeMachine)) {
+            const USHORT machine = processMachine == IMAGE_FILE_MACHINE_UNKNOWN ? nativeMachine : processMachine;
+            switch (machine) {
+            case IMAGE_FILE_MACHINE_I386:
+                return QStringLiteral("x86");
+            case IMAGE_FILE_MACHINE_AMD64:
+                return QStringLiteral("x86_64");
+#ifdef IMAGE_FILE_MACHINE_ARM64
+            case IMAGE_FILE_MACHINE_ARM64:
+                return QStringLiteral("arm64");
+#endif
+            default:
+                break;
+            }
+        }
+    }
+
+    BOOL wow64 = FALSE;
+    if (IsWow64Process(process, &wow64) && wow64)
+        return QStringLiteral("x86");
+    return LocalArchitectureName();
+}
+
+QString PathForProcess(HANDLE process) {
+    if (!process) return {};
+    std::wstring buffer(32768, L'\0');
+    DWORD size = static_cast<DWORD>(buffer.size());
+    if (!QueryFullProcessImageNameW(process, 0, buffer.data(), &size))
+        return {};
+    return QString::fromWCharArray(buffer.c_str(), static_cast<int>(size));
+}
+
+BOOL CALLBACK CollectVisibleWindowTitles(HWND hwnd, LPARAM param) {
+    if (!IsWindowVisible(hwnd)) return TRUE;
+
+    const int length = GetWindowTextLengthW(hwnd);
+    if (length <= 0) return TRUE;
+
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0) return TRUE;
+
+    auto* titles = reinterpret_cast<QHash<qint64, QString>*>(param);
+    if (!titles || titles->contains(static_cast<qint64>(pid))) return TRUE;
+
+    std::wstring title(static_cast<size_t>(length) + 1, L'\0');
+    const int copied = GetWindowTextW(hwnd, title.data(), length + 1);
+    if (copied > 0)
+        titles->insert(static_cast<qint64>(pid), QString::fromWCharArray(title.c_str(), copied));
+    return TRUE;
+}
+
+#endif
+
 QVariantList EnumerateLocalProcesses() {
     QVariantList result;
 
 #ifdef Q_OS_WIN
+    QHash<qint64, QString> windowTitles;
+    EnumWindows(CollectVisibleWindowTitles, reinterpret_cast<LPARAM>(&windowTitles));
+
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot != INVALID_HANDLE_VALUE) {
         PROCESSENTRY32W entry{};
         entry.dwSize = sizeof(entry);
         if (Process32FirstW(snapshot, &entry)) {
             do {
+                const qint64 pid = static_cast<qint64>(entry.th32ProcessID);
                 const QString name = QString::fromWCharArray(entry.szExeFile);
-                result.push_back(MakeTarget(static_cast<qint64>(entry.th32ProcessID), name));
+
+                QString architecture = LocalArchitectureName();
+                QString path;
+                HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+                if (process) {
+                    architecture = ArchitectureForProcess(process);
+                    path = PathForProcess(process);
+                    CloseHandle(process);
+                }
+
+                result.push_back(MakeTarget(pid, name, architecture, path, windowTitles.value(pid)));
             } while (Process32NextW(snapshot, &entry));
         }
         CloseHandle(snapshot);
@@ -79,10 +168,15 @@ QVariantList EnumerateLocalProcesses() {
             const QString readName = QString::fromUtf8(comm.readAll()).trimmed();
             if (!readName.isEmpty()) name = readName;
         }
-        result.push_back(MakeTarget(pid, name));
+
+        const QString path = QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget();
+        result.push_back(MakeTarget(pid, name, LocalArchitectureName(), path));
     }
 #else
-    result.push_back(MakeTarget(QCoreApplication::applicationPid(), QCoreApplication::applicationName()));
+    result.push_back(MakeTarget(QCoreApplication::applicationPid(),
+                                QCoreApplication::applicationName(),
+                                LocalArchitectureName(),
+                                QCoreApplication::applicationFilePath()));
 #endif
 
     std::sort(result.begin(), result.end(), [](const QVariant& a, const QVariant& b) {
