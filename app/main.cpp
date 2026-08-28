@@ -1,11 +1,12 @@
 #include "app_controller.h"
 #include "startup_diagnostics.h"
 
+#include <QColor>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QQuickStyle>
 #include <QScreen>
 #include <QTimer>
 #include <QWindow>
@@ -14,16 +15,25 @@ int main(int argc, char* argv[]) {
     const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
     if (smokeTest) cortex::appdiag::Enable();
 
-    // Keep Qt Quick Controls visually deterministic across platforms. Cortex
-    // provides its own palette and chrome; using a native control style here
-    // can otherwise reintroduce light Windows buttons/scrollbars into the
-    // dark workspace.
-    QQuickStyle::setStyle("Basic");
-
     QGuiApplication app(argc, argv);
     app.setApplicationName("Cortex");
     app.setOrganizationName("Cortex");
     app.setApplicationVersion("0.7.0-dev");
+
+    QPalette palette = app.palette();
+    palette.setColor(QPalette::Window, QColor("#1e1e1e"));
+    palette.setColor(QPalette::WindowText, QColor("#cccccc"));
+    palette.setColor(QPalette::Base, QColor("#1f1f1f"));
+    palette.setColor(QPalette::AlternateBase, QColor("#181818"));
+    palette.setColor(QPalette::Text, QColor("#cccccc"));
+    palette.setColor(QPalette::Button, QColor("#252526"));
+    palette.setColor(QPalette::ButtonText, QColor("#cccccc"));
+    palette.setColor(QPalette::Highlight, QColor("#37373d"));
+    palette.setColor(QPalette::HighlightedText, QColor("#f0f0f0"));
+    palette.setColor(QPalette::Disabled, QPalette::Button, QColor("#202020"));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#666666"));
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#666666"));
+    app.setPalette(palette);
 
     AppController controller;
 
@@ -39,9 +49,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Center the normal desktop launch without making QML depend on Screen
-    // attached properties. The CI smoke backend is intentionally headless and
-    // is left alone.
+    // Center the normal desktop launch. The CI smoke backend is headless and
+    // intentionally skips monitor geometry handling.
     if (!smokeTest) {
         if (auto* window = qobject_cast<QWindow*>(engine.rootObjects().constFirst())) {
             if (QScreen* screen = window->screen() ? window->screen() : QGuiApplication::primaryScreen()) {
