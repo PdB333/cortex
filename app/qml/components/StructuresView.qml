@@ -8,13 +8,20 @@ ColumnLayout {
     anchors.fill: parent
     spacing: 0
 
+    function parseJson(text, fallback) {
+        try { return JSON.parse(text) } catch (e) { return fallback }
+    }
+
     function defineStruct() {
-        try {
-            const fields = JSON.parse(fieldsEdit.text)
-            CortexRuntime.callToolJson("struct_define", JSON.stringify({"name": nameField.text, "fields": fields}))
-        } catch (e) {
-            fieldsEdit.forceActiveFocus()
-        }
+        const fields = parseJson(fieldsEdit.text, null)
+        if (fields === null) { fieldsEdit.forceActiveFocus(); return }
+        CortexRuntime.callToolJson("struct_define", JSON.stringify({"name": nameField.text, "fields": fields}))
+    }
+
+    function writeStruct() {
+        const values = parseJson(valuesField.text, null)
+        if (values === null) { valuesField.forceActiveFocus(); return }
+        CortexRuntime.callToolJson("struct_write", JSON.stringify({"name": nameField.text, "address": addressField.text, "values": values}))
     }
 
     Rectangle {
@@ -27,8 +34,8 @@ ColumnLayout {
             anchors.rightMargin: 10
             spacing: 5
             Button { text: "List"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("struct_list", "{}") }
-            TextField { id: nameField; Layout.preferredWidth: 180; placeholderText: "Structure name" }
-            TextField { id: addressField; Layout.preferredWidth: 190; placeholderText: "Instance address" }
+            TextField { id: nameField; Layout.preferredWidth: 170; placeholderText: "Structure name" }
+            TextField { id: addressField; Layout.preferredWidth: 180; placeholderText: "Instance address" }
             Button {
                 text: "Read"
                 enabled: CortexApp.sessionActive && nameField.text.length > 0 && addressField.text.length > 0
@@ -36,10 +43,42 @@ ColumnLayout {
             }
             Button {
                 text: "Define"
-                enabled: CortexApp.sessionActive && nameField.text.length > 0
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission && nameField.text.length > 0
                 onClicked: root.defineStruct()
             }
             Item { Layout.fillWidth: true }
+            Label {
+                text: CortexApp.mutationPermission ? "Mutation enabled" : "Define/Write require Mutation"
+                color: CortexApp.mutationPermission ? Theme.mutation : Theme.textDisabled
+                font.pixelSize: 9
+            }
+        }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 44
+        color: Theme.panel
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 6
+            Label { text: "Values"; color: Theme.textMuted; font.pixelSize: 10 }
+            TextField {
+                id: valuesField
+                Layout.fillWidth: true
+                placeholderText: "{\"health\": 100, \"ammo\": 30}"
+                font.family: Theme.monoFont
+                font.pixelSize: 10
+            }
+            Button {
+                text: "Write fields"
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission &&
+                         nameField.text.length > 0 && addressField.text.length > 0 && valuesField.text.length > 0
+                onClicked: root.writeStruct()
+            }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
@@ -122,7 +161,7 @@ ColumnLayout {
                             readOnly: true
                             selectByMouse: true
                             wrapMode: TextEdit.WrapAnywhere
-                            text: CortexRuntime.lastResult.length > 0 ? CortexRuntime.lastResult : "List, define, or read a structure."
+                            text: CortexRuntime.lastResult.length > 0 ? CortexRuntime.lastResult : "List, define, read, or write a structure."
                             color: CortexRuntime.lastResult.length > 0 ? Theme.text : Theme.textDisabled
                             selectionColor: Theme.accentDark
                             selectedTextColor: Theme.textBright

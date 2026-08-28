@@ -113,11 +113,12 @@ ColumnLayout {
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Rectangle {
+                id: resultRow
                 required property var modelData
                 required property int index
                 width: ListView.view.width
                 height: 28
-                color: index % 2 ? Theme.background : Theme.surface
+                color: resultMouse.containsMouse ? Theme.hover : (index % 2 ? Theme.background : Theme.surface)
 
                 RowLayout {
                     anchors.fill: parent
@@ -127,6 +128,16 @@ ColumnLayout {
                     Text { Layout.preferredWidth: 190; text: modelData.address; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                     Text { Layout.preferredWidth: 180; text: modelData.value; color: Theme.text; font.pixelSize: 11; elide: Text.ElideRight }
                     Text { Layout.fillWidth: true; text: modelData.bytes; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight }
+                }
+
+                MouseArea {
+                    id: resultMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onDoubleClicked: {
+                        if (CortexApp.readMemory(resultRow.modelData.address, 256))
+                            CortexApp.selectSection("Memory")
+                    }
                 }
             }
         }

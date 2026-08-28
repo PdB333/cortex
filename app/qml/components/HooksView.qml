@@ -20,12 +20,12 @@ ColumnLayout {
             spacing: 5
             Button { text: "Hook health"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("health", "{}") }
             Button {
-                text: CortexFeatures.networkCaptureEnabled ? "Network hook On" : "Network hook Off"
+                text: CortexFeatures.networkCaptureEnabled ? "Network On" : "Network Off"
                 enabled: CortexApp.sessionActive && CortexApp.mutationPermission
                 onClicked: CortexFeatures.setNetworkCapture(!CortexFeatures.networkCaptureEnabled)
             }
             Button {
-                text: root.allocationsEnabled ? "Allocation watch On" : "Allocation watch Off"
+                text: root.allocationsEnabled ? "Alloc watch On" : "Alloc watch Off"
                 enabled: CortexApp.sessionActive && CortexApp.mutationPermission
                 onClicked: {
                     const next = !root.allocationsEnabled
@@ -33,6 +33,10 @@ ColumnLayout {
                         root.allocationsEnabled = next
                 }
             }
+            Rectangle { Layout.preferredWidth: 1; Layout.preferredHeight: 18; color: Theme.borderStrong }
+            Button { text: "Freezes"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("freeze_list", "{}") }
+            Button { text: "Watches"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_list", "{}") }
+            Button { text: "Watch events"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_events", "{}") }
             Item { Layout.fillWidth: true }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -47,16 +51,16 @@ ColumnLayout {
             anchors.leftMargin: 10
             anchors.rightMargin: 10
             spacing: 5
-            TextField { id: addressField; Layout.preferredWidth: 190; placeholderText: "Page watch address" }
-            TextField { id: sizeField; Layout.preferredWidth: 100; text: "4"; placeholderText: "Size" }
+            TextField { id: addressField; Layout.preferredWidth: 180; placeholderText: "Page watch address" }
+            TextField { id: sizeField; Layout.preferredWidth: 80; text: "4"; placeholderText: "Size" }
             Button {
                 text: "Watch page"
                 enabled: CortexApp.sessionActive && CortexApp.mutationPermission && addressField.text.length > 0
                 onClicked: CortexRuntime.callToolJson("watch_page_access", JSON.stringify({"address": addressField.text, "size": parseInt(sizeField.text), "label": "Cortex UI"}))
             }
-            Button { text: "List page watches"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_page_access_list", "{}") }
-            Button { text: "Access events"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_page_access_events", "{}") }
-            Button { text: "Allocation events"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_allocations_events", "{}") }
+            Button { text: "Page watches"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_page_access_list", "{}") }
+            Button { text: "Page events"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_page_access_events", "{}") }
+            Button { text: "Alloc events"; enabled: CortexApp.sessionActive; onClicked: CortexRuntime.callToolJson("watch_allocations_events", "{}") }
             Item { Layout.fillWidth: true }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -70,7 +74,7 @@ ColumnLayout {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            Label { text: "INSTRUMENTATION STATE / EVENTS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+            Label { text: "INSTRUMENTATION / FREEZES / WATCHES"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
             Item { Layout.fillWidth: true }
             Label { text: CortexRuntime.lastError; visible: text.length > 0; color: Theme.error; font.pixelSize: 10 }
         }
@@ -95,7 +99,7 @@ ColumnLayout {
                 readOnly: true
                 selectByMouse: true
                 wrapMode: TextEdit.WrapAnywhere
-                text: CortexRuntime.lastResult.length > 0 ? CortexRuntime.lastResult : "Renderer, network, allocation and page-access instrumentation can be inspected here."
+                text: CortexRuntime.lastResult.length > 0 ? CortexRuntime.lastResult : "Renderer, network, allocation, page-access, freeze and watch state can be inspected here."
                 color: CortexRuntime.lastResult.length > 0 ? Theme.text : Theme.textDisabled
                 selectionColor: Theme.accentDark
                 selectedTextColor: Theme.textBright

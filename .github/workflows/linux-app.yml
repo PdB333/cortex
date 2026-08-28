@@ -1,0 +1,56 @@
+name: Unified Cortex Linux App
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - "app/**"
+      - "core/target/**"
+      - "core/services/**"
+      - ".github/workflows/linux-app.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: unified-cortex-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6 and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-tools-dev \
+            qt6-tools-dev-tools \
+            libgl1-mesa-dev
+
+      - name: Configure Cortex application
+        run: cmake -S app -B build/linux-ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build cortex
+        run: cmake --build build/linux-ui --parallel 2
+
+      - name: QML smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build/linux-ui/cortex --smoke-test
+
+      - name: Verify one application binary
+        run: |
+          test -x build/linux-ui/cortex
+          if find build/linux-ui -maxdepth 1 -type f \( -name 'cortex_host*' -o -name 'injector*' -o -name 'cortex_mcp_bridge*' \) | grep -q .; then
+            echo "legacy executable leaked into Linux app build"
+            exit 1
+          fi

@@ -22,6 +22,7 @@ ColumnLayout {
                 enabled: CortexApp.sessionActive
                 onClicked: CortexApp.refreshModules()
             }
+            Label { text: "Double-click a module to disassemble from its base"; color: Theme.textDisabled; font.pixelSize: 9 }
             Item { Layout.fillWidth: true }
             Label {
                 text: CortexApp.modules.length + " modules"
@@ -61,11 +62,12 @@ ColumnLayout {
             boundsBehavior: Flickable.StopAtBounds
 
             delegate: Rectangle {
+                id: moduleRow
                 required property var modelData
                 required property int index
                 width: ListView.view.width
                 height: 30
-                color: index % 2 ? Theme.background : Theme.surface
+                color: moduleMouse.containsMouse ? Theme.hover : (index % 2 ? Theme.background : Theme.surface)
 
                 RowLayout {
                     anchors.fill: parent
@@ -76,6 +78,17 @@ ColumnLayout {
                     Text { Layout.preferredWidth: 190; text: modelData.base; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                     Text { Layout.preferredWidth: 100; text: modelData.size; color: Theme.textMuted; font.pixelSize: 11 }
                     Text { Layout.fillWidth: true; text: modelData.path; color: Theme.textDisabled; font.pixelSize: 10; elide: Text.ElideMiddle }
+                }
+
+                MouseArea {
+                    id: moduleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton
+                    onDoubleClicked: {
+                        if (CortexDisasm.disassemble(moduleRow.modelData.base, 192))
+                            CortexApp.selectSection("Disassembly")
+                    }
                 }
             }
         }

@@ -49,6 +49,53 @@ ColumnLayout {
 
     Rectangle {
         Layout.fillWidth: true
+        Layout.preferredHeight: 44
+        color: Theme.panel
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 7
+
+            Label { text: "Write"; color: Theme.mutation; font.pixelSize: 10; font.bold: true }
+            TextField {
+                id: writeAddress
+                Layout.preferredWidth: 220
+                placeholderText: "Address (uses current if empty)"
+                font.family: Theme.monoFont
+                font.pixelSize: 10
+            }
+            TextField {
+                id: writeBytes
+                Layout.fillWidth: true
+                placeholderText: "Hex bytes, e.g. 90 90 90 90"
+                font.family: Theme.monoFont
+                font.pixelSize: 10
+            }
+            Button {
+                text: "Write bytes"
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission &&
+                         writeBytes.text.length > 0 && (writeAddress.text.length > 0 || addressField.text.length > 0)
+                onClicked: {
+                    const destination = writeAddress.text.length > 0 ? writeAddress.text : addressField.text
+                    if (CortexApp.writeMemoryHex(destination, writeBytes.text)) {
+                        addressField.text = destination
+                        CortexApp.readMemory(destination, 256)
+                    }
+                }
+            }
+            Label {
+                text: CortexApp.mutationPermission ? "Mutation enabled" : "Mutation required"
+                color: CortexApp.mutationPermission ? Theme.mutation : Theme.textDisabled
+                font.pixelSize: 9
+            }
+        }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
         Layout.preferredHeight: 32
         color: Theme.panel
         RowLayout {
