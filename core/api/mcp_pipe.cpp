@@ -164,7 +164,12 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
         responsePayload = mcp_protocol::Error(nullptr, -32603, error.what()).dump();
     }
 
-    WriteFrame(worker->pipe, responsePayload);
+    if (WriteFrame(worker->pipe, responsePayload)) {
+        // For a named-pipe server, DisconnectNamedPipe can discard buffered
+        // data the client has not consumed yet. Wait until the response frame
+        // has been read before disconnecting this one-request connection.
+        FlushFileBuffers(worker->pipe);
+    }
     CloseWorkerPipe(worker);
 }
 
