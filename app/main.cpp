@@ -1,4 +1,5 @@
 #include "app_controller.h"
+#include "debugger_controller.h"
 #include "disassembly_controller.h"
 #include "startup_diagnostics.h"
 
@@ -38,24 +39,24 @@ int main(int argc, char* argv[]) {
 
     AppController controller;
     DisassemblyController disassembly(controller.sessionManager());
-    QObject::connect(&controller, &AppController::sessionChanged,
-                     &disassembly, &DisassemblyController::clear);
+    DebuggerController debugger(controller.sessionManager());
+    QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
+    QObject::connect(&controller, &AppController::sessionChanged, &debugger, [&controller, &debugger]() {
+        if (controller.sessionActive()) debugger.refreshThreads();
+        else debugger.clear();
+    });
 
     QQmlApplicationEngine engine;
-    // windeployqt places runtime QML modules under <app>/qml. Qt's default
-    // import path still points at the build/install prefix, which is absent on
-    // a clean machine, so make the portable module root explicit.
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);
+    engine.rootContext()->setContextProperty("CortexDebugger", &debugger);
     engine.loadFromModule("Cortex", "Main");
     if (engine.rootObjects().isEmpty()) {
         cortex::appdiag::RecordFatal("Cortex QML root object was not created.");
         return 1;
     }
 
-    // Center the normal desktop launch. The CI smoke backend is headless and
-    // intentionally skips monitor geometry handling.
     if (!smokeTest) {
         if (auto* window = qobject_cast<QWindow*>(engine.rootObjects().constFirst())) {
             if (QScreen* screen = window->screen() ? window->screen() : QGuiApplication::primaryScreen()) {
@@ -66,9 +67,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (smokeTest) {
-        QTimer::singleShot(750, &app, &QCoreApplication::quit);
-    }
-
+    if (smokeTest) QTimer::singleShot(750, &app, &QCoreApplication::quit);
     return app.exec();
 }
