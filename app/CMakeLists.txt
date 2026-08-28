@@ -50,6 +50,8 @@ qt_add_executable(cortex WIN32
     debugger_controller.h
     disassembly_controller.cpp
     disassembly_controller.h
+    payload_controller.cpp
+    payload_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
     ../core/target/module_provider.cpp

@@ -4,8 +4,14 @@ import QtQuick.Layouts
 import Cortex 1.0
 
 ColumnLayout {
+    id: root
     anchors.fill: parent
     spacing: 0
+
+    function reloadInstructionPointer() {
+        if (CortexDebugger.instructionPointer.length > 0)
+            CortexDisasm.disassemble(CortexDebugger.instructionPointer, 64)
+    }
 
     Rectangle {
         Layout.fillWidth: true
@@ -16,18 +22,66 @@ ColumnLayout {
             anchors.leftMargin: 10
             anchors.rightMargin: 10
             spacing: 4
-            Button { text: "Refresh"; font.pixelSize: 11; enabled: CortexApp.sessionActive; onClicked: CortexDebugger.refreshThreads() }
-            Button { text: "Continue"; font.pixelSize: 11; enabled: false }
+
+            Button {
+                text: CortexPayload.ready ? "Runtime On" : "Enable Runtime"
+                font.pixelSize: 11
+                enabled: CortexApp.sessionActive && !CortexPayload.ready
+                onClicked: {
+                    if (CortexDebugger.enableRuntime()) {
+                        CortexDebugger.refreshThreads()
+                        root.reloadInstructionPointer()
+                    }
+                }
+            }
+            Button {
+                text: "Refresh"
+                font.pixelSize: 11
+                enabled: CortexApp.sessionActive
+                onClicked: {
+                    CortexDebugger.refreshThreads()
+                    if (CortexPayload.ready) CortexDebugger.refreshRuntime()
+                    root.reloadInstructionPointer()
+                }
+            }
+            Button {
+                text: "Continue"
+                font.pixelSize: 11
+                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                onClicked: {
+                    CortexDebugger.continueCurrent()
+                    root.reloadInstructionPointer()
+                }
+            }
             Button { text: "Pause"; font.pixelSize: 11; enabled: false }
-            Button { text: "Step Into"; font.pixelSize: 11; enabled: false }
+            Button {
+                text: "Step Into"
+                font.pixelSize: 11
+                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                onClicked: {
+                    if (CortexDebugger.stepCurrent(2000)) root.reloadInstructionPointer()
+                }
+            }
             Button { text: "Step Over"; font.pixelSize: 11; enabled: false }
+            Button {
+                text: "Breakpoint @ IP"
+                font.pixelSize: 11
+                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.instructionPointer.length > 0
+                onClicked: CortexDebugger.addBreakpoint(CortexDebugger.instructionPointer, "software", "pause")
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: CortexDebugger.lastError.length > 0
                     ? CortexDebugger.lastError
-                    : (CortexApp.sessionActive ? "Inspect mode" : "No active session")
+                    : (CortexPayload.ready
+                       ? (CortexDebugger.pausedThreads.length > 0
+                          ? CortexDebugger.pausedThreads.length + " paused"
+                          : "Runtime connected")
+                       : (CortexApp.sessionActive ? "Inspect mode" : "No active session"))
                 color: CortexDebugger.lastError.length > 0 ? Theme.mutation : Theme.textMuted
                 font.pixelSize: 11
+                elide: Text.ElideRight
+                Layout.maximumWidth: 260
             }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -87,6 +141,14 @@ ColumnLayout {
                             Text { Layout.preferredWidth: 185; text: modelData.bytes; color: Theme.textDisabled; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight }
                             Text { Layout.fillWidth: true; text: modelData.text; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight }
                         }
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onDoubleClicked: {
+                                if (CortexPayload.ready && CortexApp.mutationPermission)
+                                    CortexDebugger.addBreakpoint(modelData.address, "software", "pause")
+                            }
+                        }
                     }
                 }
 
@@ -103,8 +165,8 @@ ColumnLayout {
         }
 
         Rectangle {
-            SplitView.preferredWidth: 350
-            SplitView.minimumWidth: 280
+            SplitView.preferredWidth: 360
+            SplitView.minimumWidth: 290
             color: Theme.surface
             ColumnLayout {
                 anchors.fill: parent
@@ -128,7 +190,7 @@ ColumnLayout {
                 ListView {
                     id: threadList
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 150
+                    Layout.preferredHeight: 135
                     clip: true
                     model: CortexDebugger.threads
                     boundsBehavior: Flickable.StopAtBounds
@@ -150,8 +212,61 @@ ColumnLayout {
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                if (CortexDebugger.selectThread(modelData.id) && CortexDebugger.instructionPointer.length > 0)
-                                    CortexDisasm.disassemble(CortexDebugger.instructionPointer, 64)
+                                if (CortexDebugger.selectThread(modelData.id)) root.reloadInstructionPointer()
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 32
+                    color: Theme.panel
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 8
+                        Text { text: "BREAKPOINTS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+                        Item { Layout.fillWidth: true }
+                        Text { text: String(CortexDebugger.breakpoints.length); color: Theme.textDisabled; font.pixelSize: 10 }
+                    }
+                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+                }
+
+                ListView {
+                    id: breakpointList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: CortexPayload.ready ? 118 : 42
+                    clip: true
+                    model: CortexDebugger.breakpoints
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: breakpointList.width
+                        height: 26
+                        color: index % 2 ? Theme.surface : Theme.background
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 8
+                            spacing: 6
+                            Text { Layout.preferredWidth: 106; text: modelData.address; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight }
+                            Text { Layout.fillWidth: true; text: modelData.kind + " · " + modelData.hitCount; color: Theme.textDisabled; font.pixelSize: 10; elide: Text.ElideRight }
+                            Text {
+                                text: "×"
+                                visible: CortexApp.mutationPermission
+                                color: removeArea.containsMouse ? Theme.textBright : Theme.textMuted
+                                font.pixelSize: 14
+                                MouseArea {
+                                    id: removeArea
+                                    anchors.fill: parent
+                                    anchors.margins: -6
+                                    hoverEnabled: true
+                                    onClicked: CortexDebugger.removeBreakpoint(modelData.id)
+                                }
                             }
                         }
                     }

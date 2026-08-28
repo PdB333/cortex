@@ -6,8 +6,8 @@ on:
       - next/unified-cortex-ui
     paths:
       - "app/**"
-      - "core/target/**"
-      - "core/services/**"
+      - "core/**"
+      - "CMakeLists.txt"
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 
@@ -21,7 +21,7 @@ permissions:
 jobs:
   windows-x64-preview:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +48,17 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/ui --parallel 2
 
+      - name: Configure x64 target payload
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x64 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x64 target payload
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x64 --target core --parallel 2
+
       - name: QML smoke test
         shell: msys2 {0}
         run: QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
@@ -59,6 +70,7 @@ jobs:
           rm -rf dist/CortexPreview
           mkdir -p dist/CortexPreview
           cp build/ui/cortex.exe dist/CortexPreview/cortex.exe
+          cp build/runtime-x64/cortex_core.dll dist/CortexPreview/cortex_core.dll
 
           if command -v windeployqt6 >/dev/null 2>&1; then
             DEPLOY=windeployqt6
@@ -87,13 +99,16 @@ jobs:
             'Cortex unified application preview' \
             'Branch: next/unified-cortex-ui' \
             'This is a test artifact, not a public release.' \
-            'Run cortex.exe and select a local target to inspect the unified runtime.' \
+            'cortex.exe contains the UI/services and loads cortex_core.dll internally only for in-process capabilities.' \
+            'The bundled payload currently supports x64 targets; x86 bootstrap is added separately.' \
             > dist/CortexPreview/TESTING.txt
 
       - name: Verify portable runtime dependencies
         shell: msys2 {0}
         run: |
           set -euo pipefail
+          test -f dist/CortexPreview/cortex.exe
+          test -f dist/CortexPreview/cortex_core.dll
           missing=0
           while IFS= read -r -d '' pe; do
             unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
