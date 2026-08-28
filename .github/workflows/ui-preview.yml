@@ -1,0 +1,75 @@
+name: Unified Cortex UI Preview
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - "app/**"
+      - "core/target/**"
+      - ".github/workflows/ui-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64-preview:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW + Qt 6
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-tools
+
+      - name: Configure Cortex application preview
+        shell: msys2 {0}
+        run: cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build cortex.exe
+        shell: msys2 {0}
+        run: cmake --build build/ui --parallel 2
+
+      - name: QML smoke test
+        shell: msys2 {0}
+        run: QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
+
+      - name: Create portable preview directory
+        shell: msys2 {0}
+        run: |
+          rm -rf dist/CortexPreview
+          mkdir -p dist/CortexPreview
+          cp build/ui/cortex.exe dist/CortexPreview/cortex.exe
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            DEPLOY=windeployqt6
+          else
+            DEPLOY=windeployqt
+          fi
+          "$DEPLOY" --release --qmldir app/qml --no-translations dist/CortexPreview/cortex.exe
+          printf '%s\n' \
+            'Cortex unified application preview' \
+            'Branch: next/unified-cortex-ui' \
+            'This is a test artifact, not a public release.' \
+            'Run cortex.exe and select a local target to inspect the new UI shell.' \
+            > dist/CortexPreview/TESTING.txt
+
+      - name: Upload testable application
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-unified-ui-preview-windows-x64
+          path: dist/CortexPreview
+          if-no-files-found: error
+          retention-days: 14
