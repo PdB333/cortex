@@ -1,6 +1,7 @@
 #pragma once
 
 #include "services/memory_service.h"
+#include "services/module_service.h"
 #include "services/scan_service.h"
 #include "target/catalog.h"
 #include "target/session_manager.h"
@@ -39,6 +40,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QVariantList memoryRows READ memoryRows NOTIFY memoryRowsChanged)
     Q_PROPERTY(QVariantList scanResults READ scanResults NOTIFY scanResultsChanged)
+    Q_PROPERTY(QVariantList modules READ modules NOTIFY modulesChanged)
     Q_PROPERTY(bool scanBusy READ scanBusy NOTIFY scanStateChanged)
     Q_PROPERTY(QString scanStatus READ scanStatus NOTIFY scanStateChanged)
 
@@ -60,6 +62,7 @@ public:
     QString lastError() const { return lastError_; }
     const QVariantList& memoryRows() const { return memoryRows_; }
     const QVariantList& scanResults() const { return scanResults_; }
+    const QVariantList& modules() const { return modules_; }
     bool scanBusy() const { return scanBusy_; }
     QString scanStatus() const { return scanStatus_; }
 
@@ -70,6 +73,7 @@ public:
     Q_INVOKABLE QString capabilitySummary() const;
     Q_INVOKABLE bool readMemory(const QString& address, int size = 256);
     Q_INVOKABLE bool writeMemoryHex(const QString& address, const QString& hexBytes);
+    Q_INVOKABLE void refreshModules();
     Q_INVOKABLE bool startScan(const QString& value, const QString& type,
                                const QString& comparison, bool refine);
     Q_INVOKABLE void cancelScan();
@@ -86,6 +90,7 @@ signals:
     void lastErrorChanged();
     void memoryRowsChanged();
     void scanResultsChanged();
+    void modulesChanged();
     void scanStateChanged();
 
 private:
@@ -96,10 +101,12 @@ private:
     cortex::target::Catalog targetCatalog_;
     cortex::target::SessionManager sessionManager_;
     cortex::services::MemoryService memoryService_;
+    cortex::services::ModuleService moduleService_;
     std::vector<cortex::target::TargetDescriptor> targetDescriptors_;
     QVariantList targets_;
     QVariantList memoryRows_;
     QVariantList scanResults_;
+    QVariantList modules_;
     std::vector<cortex::services::ScanResult> scanState_;
     QString scanType_;
     QFutureWatcher<ScanTaskResult> scanWatcher_;

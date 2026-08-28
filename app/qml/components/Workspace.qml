@@ -59,6 +59,7 @@ Rectangle {
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
                            : CortexApp.selectedSection === "Scanner" ? scannerComponent
+                           : CortexApp.selectedSection === "Modules" ? modulesComponent
                            : CortexApp.selectedSection === "Debugger" ? debuggerComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
                            : genericComponent
@@ -68,6 +69,7 @@ Rectangle {
     Component { id: overviewComponent; OverviewView {} }
     Component { id: memoryComponent; MemoryView {} }
     Component { id: scannerComponent; ScannerView {} }
+    Component { id: modulesComponent; ModulesView {} }
     Component { id: debuggerComponent; DebuggerView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }
     Component { id: genericComponent; GenericToolView {} }

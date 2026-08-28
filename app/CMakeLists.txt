@@ -17,10 +17,14 @@ qt_add_executable(cortex WIN32
     app_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
+    ../core/target/module_provider.cpp
+    ../core/target/module_provider.h
     ../core/target/session_manager.cpp
     ../core/target/session_manager.h
     ../core/services/memory_service.cpp
     ../core/services/memory_service.h
+    ../core/services/module_service.cpp
+    ../core/services/module_service.h
     ../core/services/scan_service.cpp
     ../core/services/scan_service.h
 )
@@ -41,6 +45,7 @@ qt_add_qml_module(cortex
         qml/components/OverviewView.qml
         qml/components/MemoryView.qml
         qml/components/ScannerView.qml
+        qml/components/ModulesView.qml
         qml/components/DebuggerView.qml
         qml/components/DisassemblyView.qml
         qml/components/GenericToolView.qml

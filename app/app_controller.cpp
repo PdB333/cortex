@@ -37,6 +37,16 @@ QString HexAddress(uint64_t address) {
     return QStringLiteral("0x%1").arg(static_cast<qulonglong>(address), 16, 16, QLatin1Char('0')).toUpper();
 }
 
+QString SizeLabel(uint64_t size) {
+    if (size >= 1024ull * 1024ull * 1024ull)
+        return QStringLiteral("%1 GiB").arg(static_cast<double>(size) / (1024.0 * 1024.0 * 1024.0), 0, 'f', 2);
+    if (size >= 1024ull * 1024ull)
+        return QStringLiteral("%1 MiB").arg(static_cast<double>(size) / (1024.0 * 1024.0), 0, 'f', 2);
+    if (size >= 1024ull)
+        return QStringLiteral("%1 KiB").arg(static_cast<double>(size) / 1024.0, 0, 'f', 1);
+    return QStringLiteral("%1 B").arg(static_cast<qulonglong>(size));
+}
+
 bool ParseAddress(const QString& text, uint64_t& address) {
     QString value = text.trimmed();
     if (value.isEmpty()) return false;
@@ -154,7 +164,8 @@ QVariantMap TargetToVariant(const cortex::target::TargetDescriptor& target) {
 AppController::AppController(QObject* parent)
     : QObject(parent),
       sessionManager_(targetCatalog_),
-      memoryService_(sessionManager_) {
+      memoryService_(sessionManager_),
+      moduleService_(sessionManager_) {
     targetCatalog_.AddBackend(std::make_shared<cortex::target::LocalBackend>());
     connect(&scanWatcher_, &QFutureWatcher<ScanTaskResult>::finished, this, &AppController::finishScan);
     refreshTargets();
@@ -232,9 +243,11 @@ void AppController::refreshTargets() {
             ++sessionGeneration_;
             sessionManager_.Detach();
             mutationPermission_ = false;
+            modules_.clear();
             resetScanState();
             emit sessionChanged();
             emit mutationPermissionChanged();
+            emit modulesChanged();
         }
     }
 
@@ -256,6 +269,7 @@ void AppController::selectTarget(int index) {
     currentTargetIndex_ = index;
     mutationPermission_ = false;
     memoryRows_.clear();
+    modules_.clear();
     resetScanState();
 
     std::string error;
@@ -266,6 +280,7 @@ void AppController::selectTarget(int index) {
             targets_[index] = TargetToVariant(session->Target());
         }
         setLastError(QString());
+        refreshModules();
     } else {
         setLastError(FromUtf8(error.empty() ? std::string("attach_failed") : error));
     }
@@ -275,6 +290,7 @@ void AppController::selectTarget(int index) {
     emit mutationPermissionChanged();
     emit sessionChanged();
     emit memoryRowsChanged();
+    emit modulesChanged();
 }
 
 void AppController::detachTarget() {
@@ -285,17 +301,20 @@ void AppController::detachTarget() {
     currentTargetIndex_ = -1;
     mutationPermission_ = false;
     memoryRows_.clear();
+    modules_.clear();
     resetScanState();
     setLastError(QString());
     emit currentTargetChanged();
     emit mutationPermissionChanged();
     emit sessionChanged();
     emit memoryRowsChanged();
+    emit modulesChanged();
 }
 
 void AppController::selectSection(const QString& section) {
     if (section.isEmpty() || section == selectedSection_) return;
     selectedSection_ = section;
+    if (section == QStringLiteral("Modules") && sessionActive()) refreshModules();
     emit selectedSectionChanged();
 }
 
@@ -363,6 +382,25 @@ bool AppController::writeMemoryHex(const QString& addressText, const QString& he
     }
     setLastError(QString());
     return true;
+}
+
+void AppController::refreshModules() {
+    modules_.clear();
+    std::string error;
+    const auto modules = moduleService_.List(&error);
+    for (const auto& module : modules) {
+        QVariantMap row;
+        row.insert(QStringLiteral("name"), FromUtf8(module.name));
+        row.insert(QStringLiteral("path"), FromUtf8(module.path));
+        row.insert(QStringLiteral("base"), HexAddress(module.base));
+        row.insert(QStringLiteral("size"), SizeLabel(module.size));
+        row.insert(QStringLiteral("rawBase"), static_cast<qulonglong>(module.base));
+        row.insert(QStringLiteral("rawSize"), static_cast<qulonglong>(module.size));
+        modules_.push_back(row);
+    }
+    if (!error.empty()) setLastError(FromUtf8(error));
+    else if (sessionActive()) setLastError(QString());
+    emit modulesChanged();
 }
 
 bool AppController::startScan(const QString& value, const QString& type,
@@ -488,7 +526,7 @@ void AppController::finishScan() {
         row.insert(QStringLiteral("bytes"), BytesToHex(result.value.data(), result.value.size()));
         scanResults_.push_back(row);
     }
-    scanStatus_ = QStringLiteral("%1 results").arg(scanResults_.size());
+    scanStatus_ = QStringLiteral("%1 results").arg(static_cast<qlonglong>(scanResults_.size()));
     setLastError(QString());
     emit scanResultsChanged();
     emit scanStateChanged();
