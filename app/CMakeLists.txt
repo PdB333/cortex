@@ -38,6 +38,12 @@ qt_add_qml_module(cortex
         qml/components/ProcessPicker.qml
         qml/components/Sidebar.qml
         qml/components/Workspace.qml
+        qml/components/OverviewView.qml
+        qml/components/MemoryView.qml
+        qml/components/ScannerView.qml
+        qml/components/DebuggerView.qml
+        qml/components/DisassemblyView.qml
+        qml/components/GenericToolView.qml
         qml/components/BottomPanel.qml
         qml/components/CommandPalette.qml
 )
