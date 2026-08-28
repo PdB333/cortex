@@ -1,8 +1,8 @@
 import QtQuick
-import QtQuick.Templates as T
+import QtQuick.Controls as C
 import Cortex 1.0
 
-T.TextField {
+C.TextField {
     id: control
 
     implicitWidth: 180
