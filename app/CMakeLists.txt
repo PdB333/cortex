@@ -14,6 +14,14 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 set(CMAKE_DISABLE_FIND_PACKAGE_Doxygen TRUE CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
+)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(json)
+
+FetchContent_Declare(
     zycore
     GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
     GIT_TAG        74620eefd233bec20daeb66e78e744ff06e273b7
@@ -58,6 +66,8 @@ qt_add_executable(cortex WIN32
     ../core/services/memory_service.h
     ../core/services/module_service.cpp
     ../core/services/module_service.h
+    ../core/services/payload_client.cpp
+    ../core/services/payload_client.h
     ../core/services/scan_service.cpp
     ../core/services/scan_service.h
 )
@@ -94,6 +104,7 @@ target_link_libraries(cortex PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Concurrent
+    nlohmann_json::nlohmann_json
     Zydis
 )
 
