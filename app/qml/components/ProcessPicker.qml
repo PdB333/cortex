@@ -55,7 +55,7 @@ Popup {
                 placeholderText: "Search processes by name, PID or path"
                 selectByMouse: true
                 color: Theme.textBright
-                placeholderTextColor: Theme.textMuted
+                placeholderTextColor: Theme.textPlaceholder
                 font.family: Theme.uiFont
                 font.pixelSize: 13
 
