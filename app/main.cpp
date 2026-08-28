@@ -1,12 +1,15 @@
 #include "app_controller.h"
+#include "startup_diagnostics.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTimer>
-#include <QStringList>
 
 int main(int argc, char* argv[]) {
+    const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
+    if (smokeTest) cortex::appdiag::Enable();
+
     QGuiApplication app(argc, argv);
     app.setApplicationName("Cortex");
     app.setOrganizationName("Cortex");
@@ -17,10 +20,12 @@ int main(int argc, char* argv[]) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.loadFromModule("Cortex", "Main");
-    if (engine.rootObjects().isEmpty()) return 1;
+    if (engine.rootObjects().isEmpty()) {
+        cortex::appdiag::RecordFatal("Cortex QML root object was not created.");
+        return 1;
+    }
 
-    const QStringList args = app.arguments();
-    if (args.contains("--smoke-test")) {
+    if (smokeTest) {
         QTimer::singleShot(750, &app, &QCoreApplication::quit);
     }
 
