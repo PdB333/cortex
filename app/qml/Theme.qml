@@ -14,6 +14,7 @@ QtObject {
     readonly property color text: "#cccccc"
     readonly property color textBright: "#f0f0f0"
     readonly property color textMuted: "#9a9a9a"
+    readonly property color textPlaceholder: "#b8b8b8"
     readonly property color textDisabled: "#666666"
     readonly property color accent: "#3794ff"
     readonly property color accentDark: "#094771"
