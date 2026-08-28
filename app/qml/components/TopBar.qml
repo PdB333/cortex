@@ -6,66 +6,67 @@ import Cortex 1.0
 Rectangle {
     id: root
     color: Theme.panel
-    border.color: Theme.border
-    border.width: 0
 
     signal openCommandPalette()
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 12
-        anchors.rightMargin: 10
-        spacing: 10
+        anchors.leftMargin: 10
+        anchors.rightMargin: 8
+        spacing: 8
 
         Label {
             text: "Cortex"
             color: Theme.textBright
             font.family: Theme.uiFont
-            font.pixelSize: 15
+            font.pixelSize: 13
             font.bold: true
         }
 
         Rectangle {
             Layout.preferredWidth: 1
-            Layout.preferredHeight: 20
+            Layout.preferredHeight: 16
             color: Theme.borderStrong
         }
 
         ComboBox {
             id: targetPicker
-            Layout.preferredWidth: 330
+            Layout.preferredWidth: 300
+            Layout.preferredHeight: 26
             model: CortexApp.targets
             textRole: "name"
             currentIndex: CortexApp.currentTargetIndex
-            displayText: currentIndex >= 0 ? currentText : "Select target..."
-
+            displayText: currentIndex >= 0 ? currentText : "Select target"
             onActivated: CortexApp.selectTarget(currentIndex)
 
+            indicator: null
             background: Rectangle {
-                color: targetPicker.hovered ? Theme.hover : Theme.background
+                color: targetPicker.activeFocus ? "#20252a" : Theme.background
                 border.color: targetPicker.activeFocus ? Theme.accent : Theme.borderStrong
                 radius: Theme.radius
             }
             contentItem: Text {
-                leftPadding: 9
+                leftPadding: 8
+                rightPadding: 8
                 text: targetPicker.displayText
                 color: Theme.text
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 font.family: Theme.uiFont
-                font.pixelSize: 12
+                font.pixelSize: 11
             }
         }
 
         ToolButton {
+            Layout.preferredHeight: 26
             text: "Refresh"
             onClicked: CortexApp.refreshTargets()
             contentItem: Text {
                 text: parent.text
-                color: Theme.text
+                color: parent.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 12
+                font.pixelSize: 11
             }
             background: Rectangle {
                 color: parent.hovered ? Theme.hover : "transparent"
@@ -74,48 +75,45 @@ Rectangle {
         }
 
         Label {
-            Layout.maximumWidth: 380
+            Layout.maximumWidth: 340
             text: CortexApp.currentTargetMeta
-            color: Theme.textMuted
+            color: Theme.textDisabled
             elide: Text.ElideRight
             font.family: Theme.uiFont
-            font.pixelSize: 12
+            font.pixelSize: 10
         }
 
         Item { Layout.fillWidth: true }
 
-        Rectangle {
-            implicitWidth: mutationText.implicitWidth + 18
-            implicitHeight: 26
-            color: CortexApp.mutationPermission ? "#3a2e20" : Theme.background
-            border.color: CortexApp.mutationPermission ? Theme.warning : Theme.borderStrong
-            radius: Theme.radius
-
-            Text {
-                id: mutationText
-                anchors.centerIn: parent
-                text: CortexApp.mutationPermission ? "Mutation enabled" : "Safe mode"
-                color: CortexApp.mutationPermission ? "#ffd580" : Theme.textMuted
-                font.pixelSize: 11
-                font.bold: CortexApp.mutationPermission
+        ToolButton {
+            Layout.preferredHeight: 26
+            text: CortexApp.mutationPermission ? "Mutation: on" : "Mutation: off"
+            onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
+            contentItem: Text {
+                text: parent.text
+                color: CortexApp.mutationPermission ? "#d7b36a" : Theme.textMuted
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: 10
             }
-
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
+            background: Rectangle {
+                color: parent.hovered ? Theme.hover : "transparent"
+                radius: Theme.radius
             }
+            ToolTip.visible: hovered
+            ToolTip.text: CortexApp.mutationPermission ? "Disable mutation permission" : "Enable mutation permission"
         }
 
         ToolButton {
+            Layout.preferredHeight: 26
             text: "Command"
             onClicked: root.openCommandPalette()
             contentItem: Text {
                 text: parent.text
-                color: Theme.text
+                color: parent.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                font.pixelSize: 12
+                font.pixelSize: 11
             }
             background: Rectangle {
                 color: parent.hovered ? Theme.hover : "transparent"
