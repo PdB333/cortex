@@ -9,18 +9,45 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Concurrent)
 qt_standard_project_setup(REQUIRES 6.5)
 
+include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_Doxygen TRUE CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    zycore
+    GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
+    GIT_TAG        74620eefd233bec20daeb66e78e744ff06e273b7
+)
+FetchContent_MakeAvailable(zycore)
+
+FetchContent_Declare(
+    zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG        569320ad3c4856da13b9dbf1f0d9e20bda63870e
+)
+set(ZYDIS_BUILD_TOOLS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_TESTS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_DOXYGEN OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_MAN OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(zydis)
+
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_executable(cortex WIN32
     main.cpp
     app_controller.cpp
     app_controller.h
+    disassembly_controller.cpp
+    disassembly_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
     ../core/target/module_provider.cpp
     ../core/target/module_provider.h
     ../core/target/session_manager.cpp
     ../core/target/session_manager.h
+    ../core/services/disassembly_service.cpp
+    ../core/services/disassembly_service.h
     ../core/services/memory_service.cpp
     ../core/services/memory_service.h
     ../core/services/module_service.cpp
@@ -61,6 +88,7 @@ target_link_libraries(cortex PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Concurrent
+    Zydis
 )
 
 if(WIN32)
