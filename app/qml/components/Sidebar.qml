@@ -30,11 +30,28 @@ Rectangle {
         ListElement { group: "AI"; label: "Sessions" }
     }
 
+    Text {
+        id: heading
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 12
+        anchors.topMargin: 8
+        text: "CORTEX"
+        color: Theme.textMuted
+        font.family: Theme.uiFont
+        font.pixelSize: 10
+        font.bold: true
+        font.letterSpacing: 0.6
+    }
+
     ListView {
         id: list
-        anchors.fill: parent
-        anchors.topMargin: 6
-        anchors.bottomMargin: 6
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: heading.bottom
+        anchors.bottom: parent.bottom
+        anchors.topMargin: 5
+        anchors.bottomMargin: 4
         clip: true
         model: navigation
         section.property: "group"
@@ -42,27 +59,26 @@ Rectangle {
 
         section.delegate: Rectangle {
             width: list.width
-            height: 30
+            height: 21
             color: Theme.sidebar
 
             Text {
                 anchors.left: parent.left
-                anchors.leftMargin: 13
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 5
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
                 text: section
                 color: Theme.textDisabled
                 font.family: Theme.uiFont
-                font.pixelSize: 10
+                font.pixelSize: 9
                 font.bold: true
-                font.letterSpacing: 0.8
+                font.letterSpacing: 0.4
             }
         }
 
         delegate: Rectangle {
             required property string label
             width: list.width
-            height: 29
+            height: 25
             color: CortexApp.selectedSection === label ? Theme.selection : (mouse.containsMouse ? Theme.hover : "transparent")
 
             Rectangle {
@@ -76,12 +92,12 @@ Rectangle {
 
             Text {
                 anchors.left: parent.left
-                anchors.leftMargin: 15
+                anchors.leftMargin: 13
                 anchors.verticalCenter: parent.verticalCenter
                 text: label
                 color: CortexApp.selectedSection === label ? Theme.textBright : Theme.text
                 font.family: Theme.uiFont
-                font.pixelSize: 12
+                font.pixelSize: 11
             }
 
             MouseArea {
