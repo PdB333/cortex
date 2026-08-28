@@ -113,18 +113,23 @@ jobs:
           $stdout = Join-Path $env:RUNNER_TEMP "cortex-portable-stdout.txt"
           $stderr = Join-Path $env:RUNNER_TEMP "cortex-portable-stderr.txt"
           try {
-            # Deliberately remove MSYS2/MinGW from PATH. If a required runtime
-            # DLL was forgotten, this now fails exactly like a clean user PC.
+            # Deliberately remove MSYS2/MinGW from PATH. The executable must
+            # load only the DLLs shipped beside it and normal Windows system
+            # libraries, exactly as it would on a user's machine.
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-            $env:QT_QPA_PLATFORM = "offscreen"
+            Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
             $process = Start-Process `
               -FilePath (Join-Path $preview "cortex.exe") `
               -ArgumentList "--smoke-test" `
               -WorkingDirectory $preview `
               -RedirectStandardOutput $stdout `
               -RedirectStandardError $stderr `
-              -Wait `
               -PassThru
+
+            if (-not $process.WaitForExit(15000)) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Portable Cortex smoke test timed out"
+            }
             if (Test-Path $stdout) { Get-Content $stdout }
             if (Test-Path $stderr) { Get-Content $stderr }
             if ($process.ExitCode -ne 0) {
@@ -132,7 +137,6 @@ jobs:
             }
           } finally {
             $env:PATH = $oldPath
-            Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
           }
 
       - name: Upload testable application
