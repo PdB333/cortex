@@ -110,14 +110,25 @@ jobs:
         run: |
           $preview = (Resolve-Path "dist/CortexPreview").Path
           $oldPath = $env:PATH
+          $stdout = Join-Path $env:RUNNER_TEMP "cortex-portable-stdout.txt"
+          $stderr = Join-Path $env:RUNNER_TEMP "cortex-portable-stderr.txt"
           try {
             # Deliberately remove MSYS2/MinGW from PATH. If a required runtime
             # DLL was forgotten, this now fails exactly like a clean user PC.
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
             $env:QT_QPA_PLATFORM = "offscreen"
-            & (Join-Path $preview "cortex.exe") --smoke-test
-            if ($LASTEXITCODE -ne 0) {
-              throw "Portable Cortex smoke test failed with exit code $LASTEXITCODE"
+            $process = Start-Process `
+              -FilePath (Join-Path $preview "cortex.exe") `
+              -ArgumentList "--smoke-test" `
+              -WorkingDirectory $preview `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr `
+              -Wait `
+              -PassThru
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            if ($process.ExitCode -ne 0) {
+              throw "Portable Cortex smoke test failed with exit code $($process.ExitCode)"
             }
           } finally {
             $env:PATH = $oldPath
