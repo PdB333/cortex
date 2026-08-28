@@ -11,6 +11,10 @@ on:
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 
+concurrency:
+  group: unified-cortex-ui-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
