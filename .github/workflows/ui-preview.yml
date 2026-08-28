@@ -62,11 +62,6 @@ jobs:
           fi
           "$DEPLOY" --release --qmldir app/qml --no-translations dist/CortexPreview/cortex.exe
 
-          # windeployqt deploys Qt modules/plugins but does not guarantee that
-          # every MinGW/MSYS2 runtime dependency of those DLLs is copied. Walk
-          # every PE file recursively and vendor dependencies resolved from
-          # /mingw64/bin. This includes libstdc++, libgcc, freetype, harfbuzz,
-          # md4c, pcre2, zlib and any future transitive Qt dependency.
           for pass in 1 2 3 4 5 6 7 8; do
             copied=0
             while IFS= read -r -d '' pe; do
@@ -113,9 +108,6 @@ jobs:
           $stdout = Join-Path $env:RUNNER_TEMP "cortex-portable-stdout.txt"
           $stderr = Join-Path $env:RUNNER_TEMP "cortex-portable-stderr.txt"
           try {
-            # Deliberately remove MSYS2/MinGW from PATH. The executable must
-            # load only the DLLs shipped beside it and normal Windows system
-            # libraries, exactly as it would on a user's machine.
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
             Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
             $process = Start-Process `
@@ -132,6 +124,8 @@ jobs:
             }
             if (Test-Path $stdout) { Get-Content $stdout }
             if (Test-Path $stderr) { Get-Content $stderr }
+            $startupLog = Join-Path $preview "cortex-smoke.log"
+            if (Test-Path $startupLog) { Get-Content $startupLog }
             if ($process.ExitCode -ne 0) {
               throw "Portable Cortex smoke test failed with exit code $($process.ExitCode)"
             }
