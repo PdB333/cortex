@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -54,6 +55,27 @@ std::string ExtractToolError(const json& value) {
         if (nested.contains("error") && nested["error"].is_string()) return nested["error"].get<std::string>();
     }
     return "payload_tool_failed";
+}
+
+const char* ArchitectureAssetName(target::Architecture architecture) {
+    switch (architecture) {
+        case target::Architecture::X86: return "x86";
+        case target::Architecture::X64: return "x64";
+        case target::Architecture::Arm64: return "arm64";
+        default: return nullptr;
+    }
+}
+
+std::filesystem::path RuntimeAssetDirectory(const std::string& runtimeDirectory,
+                                            target::Architecture architecture) {
+    const auto root = std::filesystem::u8path(runtimeDirectory);
+    const char* architectureName = ArchitectureAssetName(architecture);
+    if (!architectureName) return root;
+
+    const auto candidate = root / "runtime" / architectureName;
+    std::error_code error;
+    if (std::filesystem::is_directory(candidate, error)) return candidate;
+    return root; // compatibility with early unified previews and v0.6 layouts
 }
 
 #if defined(_WIN32)
@@ -195,14 +217,54 @@ bool InjectLibrary(DWORD pid, const std::filesystem::path& path, std::string* er
     const DWORD wait = WaitForSingleObject(thread, 10000);
     DWORD exitCode = 0;
     const bool finished = wait == WAIT_OBJECT_0 && GetExitCodeThread(thread, &exitCode) && exitCode != 0;
-    if (!finished) {
+    if (!finished)
         SetError(error, wait == WAIT_TIMEOUT ? "payload_load_timeout" : "payload_load_failed");
-    }
 
     CloseHandle(thread);
     VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
     CloseHandle(process);
     return finished;
+}
+
+bool RunBootstrapHelper(DWORD pid,
+                        const std::filesystem::path& helperPath,
+                        const std::filesystem::path& payloadPath,
+                        std::string* error) {
+    if (!std::filesystem::exists(helperPath)) {
+        SetError(error, "payload_cross_bitness_helper_missing");
+        return false;
+    }
+
+    std::wstring command = L"\"" + helperPath.wstring() + L"\" --pid " +
+                           std::to_wstring(static_cast<unsigned long long>(pid)) +
+                           L" --dll \"" + payloadPath.wstring() + L"\"";
+    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
+    mutableCommand.push_back(L'\0');
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    const std::wstring workingDirectory = helperPath.parent_path().wstring();
+    if (!CreateProcessW(helperPath.wstring().c_str(), mutableCommand.data(),
+                        nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                        workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
+                        &startup, &process)) {
+        SetError(error, "payload_helper_start_failed:" + std::to_string(GetLastError()));
+        return false;
+    }
+
+    const DWORD wait = WaitForSingleObject(process.hProcess, 20000);
+    DWORD exitCode = 0xffffffffu;
+    if (wait == WAIT_TIMEOUT) {
+        TerminateProcess(process.hProcess, 124);
+        SetError(error, "payload_helper_timeout");
+    } else if (wait != WAIT_OBJECT_0 || !GetExitCodeProcess(process.hProcess, &exitCode) || exitCode != 0) {
+        SetError(error, "payload_helper_failed:" + std::to_string(exitCode));
+    }
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return wait == WAIT_OBJECT_0 && exitCode == 0;
 }
 
 #endif
@@ -254,7 +316,8 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
         return false;
     }
 
-    const std::string token = ReadTokenFile(std::filesystem::u8path(runtimeDirectory) / "cortex.token");
+    const auto assetDirectory = RuntimeAssetDirectory(runtimeDirectory, target.architecture);
+    const std::string token = ReadTokenFile(assetDirectory / "cortex.token");
     if (token.empty()) {
         SetError(error, "payload_token_unavailable");
         return false;
@@ -325,23 +388,33 @@ bool PayloadClient::InjectPayload(const target::TargetDescriptor& target, std::s
         SetError(error, "payload_injection_not_supported_on_target");
         return false;
     }
-    if (!HostMatchesTargetArchitecture(target.architecture)) {
-        SetError(error, "payload_cross_bitness_helper_required");
-        return false;
-    }
 
     std::string runtimeDirectory;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         runtimeDirectory = runtimeDirectory_;
     }
-    const auto payloadPath = std::filesystem::u8path(runtimeDirectory) / "cortex_core.dll";
+    const auto assetDirectory = RuntimeAssetDirectory(runtimeDirectory, target.architecture);
+    const auto payloadPath = assetDirectory / "cortex_core.dll";
     if (!std::filesystem::exists(payloadPath)) {
         SetError(error, "payload_binary_missing");
         return false;
     }
 
-    return InjectLibrary(static_cast<DWORD>(target.processId), payloadPath, error);
+    if (HostMatchesTargetArchitecture(target.architecture))
+        return InjectLibrary(static_cast<DWORD>(target.processId), payloadPath, error);
+
+#if defined(_WIN64)
+    if (target.architecture == target::Architecture::X86) {
+        return RunBootstrapHelper(static_cast<DWORD>(target.processId),
+                                  assetDirectory / "cortex_runtime_helper.exe",
+                                  payloadPath,
+                                  error);
+    }
+#endif
+
+    SetError(error, "payload_cross_bitness_helper_required");
+    return false;
 #endif
 }
 

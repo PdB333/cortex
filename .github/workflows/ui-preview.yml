@@ -7,6 +7,7 @@ on:
     paths:
       - "app/**"
       - "core/**"
+      - "runtime_helper/**"
       - "CMakeLists.txt"
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
@@ -19,14 +20,13 @@ permissions:
   contents: read
 
 jobs:
-  windows-x64-preview:
+  windows-x64-stage:
     runs-on: windows-latest
     timeout-minutes: 35
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install MinGW + Qt 6
+      - name: Install x64 MinGW + Qt 6
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -40,7 +40,7 @@ jobs:
             mingw-w64-x86_64-qt6-declarative
             mingw-w64-x86_64-qt6-tools
 
-      - name: Configure Cortex application preview
+      - name: Configure Cortex application
         shell: msys2 {0}
         run: cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
 
@@ -48,14 +48,14 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/ui --parallel 2
 
-      - name: Configure x64 target payload
+      - name: Configure x64 target runtime
         shell: msys2 {0}
         run: >-
           cmake -S . -B build/runtime-x64 -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=OFF
 
-      - name: Build x64 target payload and E2E target
+      - name: Build x64 payload and E2E target
         shell: msys2 {0}
         run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
 
@@ -63,21 +63,22 @@ jobs:
         shell: msys2 {0}
         run: QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
 
-      - name: Create portable preview directory
+      - name: Stage x64 portable application
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          rm -rf dist/CortexPreview
-          mkdir -p dist/CortexPreview
-          cp build/ui/cortex.exe dist/CortexPreview/cortex.exe
-          cp build/runtime-x64/cortex_core.dll dist/CortexPreview/cortex_core.dll
+          rm -rf stage/x64
+          mkdir -p stage/x64/CortexPreview/runtime/x64 stage/x64/e2e
+          cp build/ui/cortex.exe stage/x64/CortexPreview/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/x64/CortexPreview/runtime/x64/cortex_core.dll
+          cp build/runtime-x64/cortex_test_target_x64.exe stage/x64/e2e/cortex_test_target_x64.exe
 
           if command -v windeployqt6 >/dev/null 2>&1; then
             DEPLOY=windeployqt6
           else
             DEPLOY=windeployqt
           fi
-          "$DEPLOY" --release --qmldir app/qml --no-translations dist/CortexPreview/cortex.exe
+          "$DEPLOY" --release --qmldir app/qml --no-translations stage/x64/CortexPreview/cortex.exe
 
           for pass in 1 2 3 4 5 6 7 8; do
             copied=0
@@ -85,31 +86,23 @@ jobs:
               while IFS= read -r dep; do
                 [ -n "$dep" ] || continue
                 base="$(basename "$dep")"
-                if [ ! -f "dist/CortexPreview/$base" ]; then
-                  cp "$dep" "dist/CortexPreview/$base"
-                  echo "Bundled runtime dependency: $base"
+                if [ ! -f "stage/x64/CortexPreview/$base" ]; then
+                  cp "$dep" "stage/x64/CortexPreview/$base"
+                  echo "Bundled x64 runtime dependency: $base"
                   copied=1
                 fi
               done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
-            done < <(find dist/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            done < <(find stage/x64/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
             [ "$copied" -eq 1 ] || break
           done
 
-          printf '%s\n' \
-            'Cortex unified application preview' \
-            'Branch: next/unified-cortex-ui' \
-            'This is a test artifact, not a public release.' \
-            'cortex.exe contains the UI/services and loads cortex_core.dll internally only for in-process capabilities.' \
-            'Native MCP is integrated: cortex.exe mcp --pid <pid> or --process <name>.' \
-            'The bundled payload currently supports x64 targets; x86 bootstrap is added separately.' \
-            > dist/CortexPreview/TESTING.txt
-
-      - name: Verify portable runtime dependencies
+      - name: Verify x64 dependency closure
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          test -f dist/CortexPreview/cortex.exe
-          test -f dist/CortexPreview/cortex_core.dll
+          test -f stage/x64/CortexPreview/cortex.exe
+          test -f stage/x64/CortexPreview/runtime/x64/cortex_core.dll
+          test -f stage/x64/e2e/cortex_test_target_x64.exe
           missing=0
           while IFS= read -r -d '' pe; do
             unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
@@ -118,93 +111,226 @@ jobs:
               echo "$unresolved"
               missing=1
             fi
-          done < <(find dist/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          done < <(find stage/x64/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
           [ "$missing" -eq 0 ]
 
-      - name: Integrated Cortex MCP stdio E2E
+      - name: Upload x64 staging bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-unified-x64-stage
+          path: stage/x64
+          if-no-files-found: error
+          retention-days: 1
+
+  windows-x86-stage:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Configure x86 target runtime
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x86 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x86 payload and E2E target
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x86 --target core cortex_test_target --parallel 2
+
+      - name: Build private x86 bootstrap helper
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/runtime-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Stage and verify x86 runtime assets
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x86
+          mkdir -p stage/x86/runtime/x86 stage/x86/e2e
+          cp build/runtime-x86/cortex_core.dll stage/x86/runtime/x86/cortex_core.dll
+          cp build/runtime-x86/cortex_runtime_helper.exe stage/x86/runtime/x86/cortex_runtime_helper.exe
+          cp build/runtime-x86/cortex_test_target_x86.exe stage/x86/e2e/cortex_test_target_x86.exe
+
+          test -f stage/x86/runtime/x86/cortex_core.dll
+          test -f stage/x86/runtime/x86/cortex_runtime_helper.exe
+          test -f stage/x86/e2e/cortex_test_target_x86.exe
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved x86 dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find stage/x86/runtime/x86 -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
+
+      - name: Upload x86 staging bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-unified-x86-stage
+          path: stage/x86
+          if-no-files-found: error
+          retention-days: 1
+
+  windows-portable-preview:
+    needs: [windows-x64-stage, windows-x86-stage]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download x64 staging bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-unified-x64-stage
+          path: staging/x64
+
+      - name: Download x86 staging bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-unified-x86-stage
+          path: staging/x86
+
+      - name: Assemble one Cortex application bundle
         shell: pwsh
         run: |
-          $preview = (Resolve-Path "dist/CortexPreview").Path
-          $targetPath = (Resolve-Path "build/runtime-x64/cortex_test_target_x64.exe").Path
+          $preview = (Resolve-Path "staging/x64/CortexPreview").Path
+          $x86Runtime = (Resolve-Path "staging/x86/runtime/x86").Path
+          $destination = Join-Path $preview "runtime\x86"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Copy-Item (Join-Path $x86Runtime "*") $destination -Force
+
+          @(
+            "Cortex unified application preview",
+            "Branch: next/unified-cortex-ui",
+            "This is a test artifact, not a public release.",
+            "Run cortex.exe for the desktop application.",
+            "Run cortex.exe mcp --pid <pid> or --process <name> for native MCP stdio.",
+            "x64 and x86 target instrumentation are selected automatically.",
+            "Files under runtime/ are private implementation assets, not separate Cortex products."
+          ) | Set-Content -Encoding UTF8 (Join-Path $preview "TESTING.txt")
+
+          foreach ($required in @(
+            "cortex.exe",
+            "runtime\x64\cortex_core.dll",
+            "runtime\x86\cortex_core.dll",
+            "runtime\x86\cortex_runtime_helper.exe"
+          )) {
+            if (-not (Test-Path (Join-Path $preview $required))) {
+              throw "missing preview asset: $required"
+            }
+          }
+          foreach ($notPublic in @("cortex_host.exe", "injector.exe", "cortex_mcp_bridge.exe", "cortex_runtime_helper.exe", "cortex_core.dll")) {
+            if (Test-Path (Join-Path $preview $notPublic)) {
+              throw "internal/legacy executable leaked into public bundle root: $notPublic"
+            }
+          }
+
+      - name: Integrated MCP E2E on x64 and x86 targets
+        shell: pwsh
+        run: |
+          $preview = (Resolve-Path "staging/x64/CortexPreview").Path
+          $x64Target = (Resolve-Path "staging/x64/e2e/cortex_test_target_x64.exe").Path
+          $x86Target = (Resolve-Path "staging/x86/e2e/cortex_test_target_x86.exe").Path
           $oldPath = $env:PATH
-          $target = $null
-          $mcp = $null
 
           function Read-McpLine([System.IO.StreamReader]$reader, [int]$timeoutMs = 15000) {
             $task = $reader.ReadLineAsync()
-            if (-not $task.Wait($timeoutMs)) {
-              throw "Timed out waiting for Cortex MCP stdout"
-            }
-            if ($null -eq $task.Result) {
-              throw "Cortex MCP stdout closed unexpectedly"
-            }
+            if (-not $task.Wait($timeoutMs)) { throw "Timed out waiting for Cortex MCP stdout" }
+            if ($null -eq $task.Result) { throw "Cortex MCP stdout closed unexpectedly" }
             return $task.Result
+          }
+
+          function Test-CortexMcp([string]$targetPath, [string]$assetDirectory, [string]$label) {
+            $target = $null
+            $mcp = $null
+            $mcpStarted = $false
+            try {
+              Remove-Item (Join-Path $assetDirectory "cortex.token") -Force -ErrorAction SilentlyContinue
+              $target = Start-Process -FilePath $targetPath -PassThru
+              Start-Sleep -Milliseconds 500
+
+              $start = [System.Diagnostics.ProcessStartInfo]::new()
+              $start.FileName = Join-Path $preview "cortex.exe"
+              $start.Arguments = "mcp --pid $($target.Id) --tools all"
+              $start.WorkingDirectory = $preview
+              $start.UseShellExecute = $false
+              $start.RedirectStandardInput = $true
+              $start.RedirectStandardOutput = $true
+              $start.RedirectStandardError = $true
+              $start.CreateNoWindow = $true
+
+              $mcp = [System.Diagnostics.Process]::new()
+              $mcp.StartInfo = $start
+              if (-not $mcp.Start()) { throw "Failed to start Cortex MCP for $label" }
+              $mcpStarted = $true
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"preview-ci","version":"1"}}}')
+              $mcp.StandardInput.Flush()
+              $init = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($init.id -ne 1 -or $init.result.protocolVersion -ne "2025-11-25") {
+                throw "$label legacy MCP negotiation failed"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
+              $mcp.StandardInput.Flush()
+              $tools = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($tools.id -ne 2 -or -not ($tools.result.tools.name -contains "debug_breakpoint_add")) {
+                throw "$label full MCP catalog is incomplete"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $status = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $reportedPid = [int64]$status.result.structuredContent.result.pid
+              if ($status.id -ne 3 -or $reportedPid -ne [int64]$target.Id) {
+                throw "$label status resolved the wrong target"
+              }
+
+              $mcp.StandardInput.Close()
+              if (-not $mcp.WaitForExit(15000)) {
+                $mcp.Kill($true)
+                throw "$label MCP process did not exit after stdin closed"
+              }
+              if ($mcp.ExitCode -ne 0) {
+                throw "$label MCP exited with $($mcp.ExitCode): $($mcp.StandardError.ReadToEnd())"
+              }
+              Write-Host "$label integrated MCP E2E passed"
+            } finally {
+              if ($mcpStarted -and $mcp -and -not $mcp.HasExited) { $mcp.Kill($true) }
+              if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+              Start-Sleep -Milliseconds 250
+            }
           }
 
           try {
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-            Remove-Item (Join-Path $preview "cortex.token") -Force -ErrorAction SilentlyContinue
-
-            $target = Start-Process -FilePath $targetPath -PassThru
-            Start-Sleep -Milliseconds 500
-
-            $start = [System.Diagnostics.ProcessStartInfo]::new()
-            $start.FileName = Join-Path $preview "cortex.exe"
-            $start.Arguments = "mcp --pid $($target.Id) --tools all"
-            $start.WorkingDirectory = $preview
-            $start.UseShellExecute = $false
-            $start.RedirectStandardInput = $true
-            $start.RedirectStandardOutput = $true
-            $start.RedirectStandardError = $true
-            $start.CreateNoWindow = $true
-
-            $mcp = [System.Diagnostics.Process]::new()
-            $mcp.StartInfo = $start
-            if (-not $mcp.Start()) { throw "Failed to start integrated Cortex MCP mode" }
-
-            $initialize = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"preview-ci","version":"1"}}}'
-            $mcp.StandardInput.WriteLine($initialize)
-            $mcp.StandardInput.Flush()
-            $initResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
-            if ($initResponse.id -ne 1 -or $initResponse.result.protocolVersion -ne "2025-11-25") {
-              throw "Integrated MCP legacy protocol negotiation failed"
-            }
-
-            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
-            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
-            $mcp.StandardInput.Flush()
-            $toolsResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
-            if ($toolsResponse.id -ne 2 -or -not ($toolsResponse.result.tools.name -contains "debug_breakpoint_add")) {
-              throw "Integrated MCP --tools all catalog is incomplete"
-            }
-
-            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}')
-            $mcp.StandardInput.Flush()
-            $statusResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
-            $reportedPid = [int64]$statusResponse.result.structuredContent.result.pid
-            if ($statusResponse.id -ne 3 -or $reportedPid -ne [int64]$target.Id) {
-              throw "Integrated MCP status did not resolve the selected target PID"
-            }
-
-            $mcp.StandardInput.Close()
-            if (-not $mcp.WaitForExit(15000)) {
-              $mcp.Kill($true)
-              throw "Integrated Cortex MCP mode did not exit after stdin closed"
-            }
-            if ($mcp.ExitCode -ne 0) {
-              $stderr = $mcp.StandardError.ReadToEnd()
-              throw "Integrated Cortex MCP exited with $($mcp.ExitCode): $stderr"
-            }
+            Test-CortexMcp $x64Target (Join-Path $preview "runtime\x64") "x64 target"
+            Test-CortexMcp $x86Target (Join-Path $preview "runtime\x86") "x86 target"
           } finally {
-            if ($mcp -and -not $mcp.HasExited) { $mcp.Kill($true) }
-            if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
             $env:PATH = $oldPath
           }
 
-      - name: Portable smoke test with clean PATH
+      - name: Portable GUI smoke test with clean PATH
         shell: pwsh
         run: |
-          $preview = (Resolve-Path "dist/CortexPreview").Path
+          $preview = (Resolve-Path "staging/x64/CortexPreview").Path
           $oldPath = $env:PATH
           $stdout = Join-Path $env:RUNNER_TEMP "cortex-portable-stdout.txt"
           $stderr = Join-Path $env:RUNNER_TEMP "cortex-portable-stderr.txt"
@@ -221,14 +347,14 @@ jobs:
 
             if (-not $process.WaitForExit(15000)) {
               Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-              throw "Portable Cortex smoke test timed out"
+              throw "Portable Cortex GUI smoke test timed out"
             }
             if (Test-Path $stdout) { Get-Content $stdout }
             if (Test-Path $stderr) { Get-Content $stderr }
             $startupLog = Join-Path $preview "cortex-smoke.log"
             if (Test-Path $startupLog) { Get-Content $startupLog }
             if ($process.ExitCode -ne 0) {
-              throw "Portable Cortex smoke test failed with exit code $($process.ExitCode)"
+              throw "Portable Cortex GUI smoke test failed with exit code $($process.ExitCode)"
             }
           } finally {
             $env:PATH = $oldPath
@@ -237,7 +363,7 @@ jobs:
       - name: Upload testable application
         uses: actions/upload-artifact@v4
         with:
-          name: cortex-unified-ui-preview-windows-x64
-          path: dist/CortexPreview
+          name: cortex-unified-ui-preview-windows
+          path: staging/x64/CortexPreview
           if-no-files-found: error
           retention-days: 14
