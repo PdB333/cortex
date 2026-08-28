@@ -5,11 +5,18 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 #include <QTimer>
 
 int main(int argc, char* argv[]) {
     const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
     if (smokeTest) cortex::appdiag::Enable();
+
+    // Keep Qt Quick Controls visually deterministic across platforms. Cortex
+    // provides its own palette and chrome; using a native control style here
+    // can otherwise reintroduce light Windows buttons/scrollbars into the
+    // dark workspace.
+    QQuickStyle::setStyle("Basic");
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("Cortex");

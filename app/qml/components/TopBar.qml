@@ -48,7 +48,7 @@ Rectangle {
 
         ToolButton {
             id: targetButton
-            Layout.preferredWidth: 350
+            Layout.preferredWidth: 330
             Layout.preferredHeight: 32
             onClicked: processPicker.open()
 
@@ -84,21 +84,21 @@ Rectangle {
             Layout.preferredHeight: 32
             onClicked: CortexApp.refreshTargets()
             contentItem: Text {
-                text: parent.text
-                color: parent.hovered ? Theme.textBright : Theme.textMuted
+                text: refreshButton.text
+                color: refreshButton.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 font.family: Theme.uiFont
                 font.pixelSize: 11
             }
             background: Rectangle {
-                color: parent.hovered ? Theme.hover : "transparent"
+                color: refreshButton.hovered ? Theme.hover : "transparent"
                 radius: Theme.radius
             }
         }
 
         Text {
-            Layout.maximumWidth: 430
+            Layout.maximumWidth: 330
             text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetMeta : ""
             color: Theme.textDisabled
             elide: Text.ElideRight
@@ -114,7 +114,7 @@ Rectangle {
             text: CortexApp.mutationPermission ? "Mutation: on" : "Mutation: off"
             onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
             contentItem: Text {
-                text: parent.text
+                text: mutationButton.text
                 color: CortexApp.mutationPermission ? Theme.mutation : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
@@ -122,7 +122,7 @@ Rectangle {
                 font.pixelSize: 11
             }
             background: Rectangle {
-                color: parent.hovered ? Theme.hover : "transparent"
+                color: mutationButton.hovered ? Theme.hover : "transparent"
                 radius: Theme.radius
             }
         }
@@ -133,15 +133,15 @@ Rectangle {
             text: "Command"
             onClicked: root.openCommandPalette()
             contentItem: Text {
-                text: parent.text
-                color: parent.hovered ? Theme.textBright : Theme.textMuted
+                text: commandButton.text
+                color: commandButton.hovered ? Theme.textBright : Theme.textMuted
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 font.family: Theme.uiFont
                 font.pixelSize: 11
             }
             background: Rectangle {
-                color: parent.hovered ? Theme.hover : "transparent"
+                color: commandButton.hovered ? Theme.hover : "transparent"
                 radius: Theme.radius
             }
             ToolTip.visible: hovered
@@ -154,53 +154,96 @@ Rectangle {
             spacing: 0
 
             ToolButton {
+                id: minimizeButton
                 Layout.preferredWidth: 44
                 Layout.fillHeight: true
-                text: "—"
                 onClicked: root.appWindow.showMinimized()
-                contentItem: Text {
-                    text: parent.text
-                    color: Theme.textMuted
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 12
+                contentItem: Item {
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 10
+                        height: 1
+                        color: minimizeButton.hovered ? Theme.textBright : Theme.textMuted
+                    }
                 }
-                background: Rectangle { color: parent.hovered ? Theme.hover : "transparent" }
+                background: Rectangle { color: minimizeButton.hovered ? Theme.hover : "transparent" }
             }
 
             ToolButton {
+                id: maximizeButton
                 Layout.preferredWidth: 44
                 Layout.fillHeight: true
-                text: root.appWindow && root.appWindow.visibility === Window.Maximized ? "❐" : "□"
                 onClicked: {
                     if (root.appWindow.visibility === Window.Maximized)
                         root.appWindow.showNormal()
                     else
                         root.appWindow.showMaximized()
                 }
-                contentItem: Text {
-                    text: parent.text
-                    color: Theme.textMuted
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 11
+                contentItem: Item {
+                    Item {
+                        anchors.centerIn: parent
+                        width: 11
+                        height: 11
+
+                        Rectangle {
+                            visible: !root.appWindow || root.appWindow.visibility !== Window.Maximized
+                            anchors.centerIn: parent
+                            width: 9
+                            height: 9
+                            color: "transparent"
+                            border.width: 1
+                            border.color: maximizeButton.hovered ? Theme.textBright : Theme.textMuted
+                        }
+
+                        Rectangle {
+                            visible: root.appWindow && root.appWindow.visibility === Window.Maximized
+                            x: 2
+                            y: 0
+                            width: 8
+                            height: 8
+                            color: Theme.titleBar
+                            border.width: 1
+                            border.color: maximizeButton.hovered ? Theme.textBright : Theme.textMuted
+                        }
+                        Rectangle {
+                            visible: root.appWindow && root.appWindow.visibility === Window.Maximized
+                            x: 0
+                            y: 3
+                            width: 8
+                            height: 8
+                            color: Theme.titleBar
+                            border.width: 1
+                            border.color: maximizeButton.hovered ? Theme.textBright : Theme.textMuted
+                        }
+                    }
                 }
-                background: Rectangle { color: parent.hovered ? Theme.hover : "transparent" }
+                background: Rectangle { color: maximizeButton.hovered ? Theme.hover : "transparent" }
             }
 
             ToolButton {
+                id: closeButton
                 Layout.preferredWidth: 48
                 Layout.fillHeight: true
-                text: "×"
                 onClicked: root.appWindow.close()
-                contentItem: Text {
-                    text: parent.text
-                    color: parent.hovered ? "white" : Theme.textMuted
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 17
+                contentItem: Item {
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 12
+                        height: 1
+                        rotation: 45
+                        color: closeButton.hovered ? "white" : Theme.textMuted
+                        antialiasing: true
+                    }
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 12
+                        height: 1
+                        rotation: -45
+                        color: closeButton.hovered ? "white" : Theme.textMuted
+                        antialiasing: true
+                    }
                 }
-                background: Rectangle { color: parent.hovered ? "#c42b1c" : "transparent" }
+                background: Rectangle { color: closeButton.hovered ? "#c42b1c" : "transparent" }
             }
         }
     }
@@ -215,7 +258,7 @@ Rectangle {
 
     ProcessPicker {
         id: processPicker
-        anchorX: 68
+        anchorX: 74
         anchorY: Theme.topBarHeight - 1
     }
 }

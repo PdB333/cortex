@@ -6,10 +6,10 @@ import Cortex 1.0
 
 ApplicationWindow {
     id: root
-    width: 1480
-    height: 920
-    minimumWidth: 1100
-    minimumHeight: 700
+    width: 1180
+    height: 720
+    minimumWidth: 920
+    minimumHeight: 580
     visible: true
     title: "Cortex"
     color: Theme.background
@@ -30,6 +30,13 @@ ApplicationWindow {
     palette.highlightedText: Theme.textBright
     palette.toolTipBase: Theme.surfaceRaised
     palette.toolTipText: Theme.text
+
+    Component.onCompleted: {
+        // Start as a comfortable workspace rather than occupying almost the
+        // whole desktop. The user can still maximize or resize immediately.
+        x = Math.round(Screen.virtualX + Math.max(0, (Screen.width - width) / 2))
+        y = Math.round(Screen.virtualY + Math.max(0, (Screen.height - height) / 2))
+    }
 
     Shortcut {
         sequences: ["Ctrl+Shift+P", "Ctrl+K"]

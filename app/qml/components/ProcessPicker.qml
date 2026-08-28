@@ -6,13 +6,13 @@ import Cortex 1.0
 Popup {
     id: root
 
-    property int anchorX: 70
+    property int anchorX: 74
     property int anchorY: Theme.topBarHeight - 1
 
-    x: anchorX
+    width: Math.min(720, parent ? parent.width - 32 : 720)
+    x: parent ? Math.max(8, Math.min(anchorX, parent.width - width - 8)) : anchorX
     y: anchorY
-    width: Math.min(640, parent ? parent.width - 40 : 640)
-    height: 470
+    height: 510
     padding: 0
     modal: false
     dim: false
@@ -43,7 +43,7 @@ Popup {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 48
+            Layout.preferredHeight: 50
             color: Theme.surfaceRaised
 
             TextField {
@@ -84,7 +84,19 @@ Popup {
             model: CortexApp.targets
             boundsBehavior: Flickable.StopAtBounds
 
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            ScrollBar.vertical: ScrollBar {
+                id: processScroll
+                policy: ScrollBar.AsNeeded
+                width: 10
+                padding: 2
+                contentItem: Rectangle {
+                    implicitWidth: 6
+                    radius: 3
+                    color: processScroll.pressed ? Theme.textMuted : Theme.borderStrong
+                    opacity: processScroll.active ? 0.95 : 0.65
+                }
+                background: Item {}
+            }
 
             delegate: Rectangle {
                 required property int index
@@ -93,8 +105,8 @@ Popup {
                 property bool accepted: root.matches(modelData)
                 property bool selected: CortexApp.currentTargetIndex === index
 
-                width: ListView.view.width
-                height: accepted ? 60 : 0
+                width: Math.max(0, ListView.view.width - 10)
+                height: accepted ? 64 : 0
                 visible: accepted
                 color: selected ? Theme.selection : (rowMouse.containsMouse ? Theme.hover : "transparent")
 
@@ -111,13 +123,13 @@ Popup {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
                     anchors.right: parent.right
-                    anchors.rightMargin: 14
+                    anchors.rightMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 3
+                    spacing: 4
 
                     RowLayout {
                         width: parent.width
-                        spacing: 8
+                        spacing: 10
 
                         Text {
                             Layout.fillWidth: true
@@ -130,8 +142,12 @@ Popup {
                         }
 
                         Text {
+                            Layout.preferredWidth: 168
+                            Layout.minimumWidth: 168
+                            horizontalAlignment: Text.AlignRight
                             text: "PID " + modelData.pid + "  ·  " + modelData.architecture
                             color: Theme.textMuted
+                            elide: Text.ElideLeft
                             font.family: Theme.monoFont
                             font.pixelSize: 10
                         }
@@ -173,7 +189,7 @@ Popup {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 30
+            Layout.preferredHeight: 31
             color: Theme.panel
 
             RowLayout {
@@ -189,7 +205,7 @@ Popup {
                 }
                 Item { Layout.fillWidth: true }
                 Text {
-                    text: "Enter to attach  ·  Esc to close"
+                    text: "Click a process to attach  ·  Esc to close"
                     color: Theme.textDisabled
                     font.family: Theme.uiFont
                     font.pixelSize: 10

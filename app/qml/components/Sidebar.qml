@@ -41,10 +41,22 @@ Rectangle {
         section.property: "group"
         section.criteria: ViewSection.FullString
 
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar {
+            id: navScroll
+            policy: ScrollBar.AsNeeded
+            width: 9
+            padding: 2
+            contentItem: Rectangle {
+                implicitWidth: 5
+                radius: 3
+                color: navScroll.pressed ? Theme.textMuted : Theme.borderStrong
+                opacity: navScroll.active ? 0.9 : 0.55
+            }
+            background: Item {}
+        }
 
         section.delegate: Rectangle {
-            width: list.width
+            width: list.width - 9
             height: 31
             color: Theme.sidebar
 
@@ -64,7 +76,7 @@ Rectangle {
 
         delegate: Rectangle {
             required property string label
-            width: list.width
+            width: list.width - 9
             height: Theme.navRowHeight
             color: CortexApp.selectedSection === label ? Theme.selection : (mouse.containsMouse ? Theme.hover : "transparent")
 
