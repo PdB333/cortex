@@ -1,6 +1,7 @@
 #include "app_controller.h"
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
+#include "mcp_mode.h"
 #include "payload_controller.h"
 #include "runtime_controller.h"
 #include "startup_diagnostics.h"
@@ -15,14 +16,33 @@
 #include <QTimer>
 #include <QWindow>
 
+#include <string>
+
+namespace {
+
+void ConfigureApplicationIdentity() {
+    QCoreApplication::setApplicationName("Cortex");
+    QCoreApplication::setOrganizationName("Cortex");
+    QCoreApplication::setApplicationVersion("0.7.0-dev");
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
+    // Headless MCP is a first-class mode of the same Cortex application. Do
+    // not initialize Qt Quick or a display backend: stdout belongs exclusively
+    // to JSON-RPC for the lifetime of this process.
+    if (argc > 1 && argv[1] && std::string(argv[1]) == "mcp") {
+        QCoreApplication app(argc, argv);
+        ConfigureApplicationIdentity();
+        return RunMcpMode(argc, argv, QCoreApplication::applicationDirPath().toStdString());
+    }
+
     const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
     if (smokeTest) cortex::appdiag::Enable();
 
     QGuiApplication app(argc, argv);
-    app.setApplicationName("Cortex");
-    app.setOrganizationName("Cortex");
-    app.setApplicationVersion("0.7.0-dev");
+    ConfigureApplicationIdentity();
 
     QPalette palette = app.palette();
     palette.setColor(QPalette::Window, QColor("#1e1e1e"));

@@ -55,9 +55,9 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=OFF
 
-      - name: Build x64 target payload
+      - name: Build x64 target payload and E2E target
         shell: msys2 {0}
-        run: cmake --build build/runtime-x64 --target core --parallel 2
+        run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
 
       - name: QML smoke test
         shell: msys2 {0}
@@ -100,6 +100,7 @@ jobs:
             'Branch: next/unified-cortex-ui' \
             'This is a test artifact, not a public release.' \
             'cortex.exe contains the UI/services and loads cortex_core.dll internally only for in-process capabilities.' \
+            'Native MCP is integrated: cortex.exe mcp --pid <pid> or --process <name>.' \
             'The bundled payload currently supports x64 targets; x86 bootstrap is added separately.' \
             > dist/CortexPreview/TESTING.txt
 
@@ -119,6 +120,86 @@ jobs:
             fi
           done < <(find dist/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
           [ "$missing" -eq 0 ]
+
+      - name: Integrated Cortex MCP stdio E2E
+        shell: pwsh
+        run: |
+          $preview = (Resolve-Path "dist/CortexPreview").Path
+          $targetPath = (Resolve-Path "build/runtime-x64/cortex_test_target_x64.exe").Path
+          $oldPath = $env:PATH
+          $target = $null
+          $mcp = $null
+
+          function Read-McpLine([System.IO.StreamReader]$reader, [int]$timeoutMs = 15000) {
+            $task = $reader.ReadLineAsync()
+            if (-not $task.Wait($timeoutMs)) {
+              throw "Timed out waiting for Cortex MCP stdout"
+            }
+            if ($null -eq $task.Result) {
+              throw "Cortex MCP stdout closed unexpectedly"
+            }
+            return $task.Result
+          }
+
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            Remove-Item (Join-Path $preview "cortex.token") -Force -ErrorAction SilentlyContinue
+
+            $target = Start-Process -FilePath $targetPath -PassThru
+            Start-Sleep -Milliseconds 500
+
+            $start = [System.Diagnostics.ProcessStartInfo]::new()
+            $start.FileName = Join-Path $preview "cortex.exe"
+            $start.Arguments = "mcp --pid $($target.Id) --tools all"
+            $start.WorkingDirectory = $preview
+            $start.UseShellExecute = $false
+            $start.RedirectStandardInput = $true
+            $start.RedirectStandardOutput = $true
+            $start.RedirectStandardError = $true
+            $start.CreateNoWindow = $true
+
+            $mcp = [System.Diagnostics.Process]::new()
+            $mcp.StartInfo = $start
+            if (-not $mcp.Start()) { throw "Failed to start integrated Cortex MCP mode" }
+
+            $initialize = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"preview-ci","version":"1"}}}'
+            $mcp.StandardInput.WriteLine($initialize)
+            $mcp.StandardInput.Flush()
+            $initResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+            if ($initResponse.id -ne 1 -or $initResponse.result.protocolVersion -ne "2025-11-25") {
+              throw "Integrated MCP legacy protocol negotiation failed"
+            }
+
+            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
+            $mcp.StandardInput.Flush()
+            $toolsResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+            if ($toolsResponse.id -ne 2 -or -not ($toolsResponse.result.tools.name -contains "debug_breakpoint_add")) {
+              throw "Integrated MCP --tools all catalog is incomplete"
+            }
+
+            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}')
+            $mcp.StandardInput.Flush()
+            $statusResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+            $reportedPid = [int64]$statusResponse.result.structuredContent.result.pid
+            if ($statusResponse.id -ne 3 -or $reportedPid -ne [int64]$target.Id) {
+              throw "Integrated MCP status did not resolve the selected target PID"
+            }
+
+            $mcp.StandardInput.Close()
+            if (-not $mcp.WaitForExit(15000)) {
+              $mcp.Kill($true)
+              throw "Integrated Cortex MCP mode did not exit after stdin closed"
+            }
+            if ($mcp.ExitCode -ne 0) {
+              $stderr = $mcp.StandardError.ReadToEnd()
+              throw "Integrated Cortex MCP exited with $($mcp.ExitCode): $stderr"
+            }
+          } finally {
+            if ($mcp -and -not $mcp.HasExited) { $mcp.Kill($true) }
+            if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+            $env:PATH = $oldPath
+          }
 
       - name: Portable smoke test with clean PATH
         shell: pwsh

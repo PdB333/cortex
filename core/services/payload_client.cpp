@@ -284,7 +284,7 @@ bool PayloadClient::VerifyTarget(const target::TargetDescriptor& target, std::st
         {"method", "tools/call"},
         {"params", {{"name", "status"}, {"arguments", json::object()}}}
     };
-    if (!RoundTrip(message, response, error, 4)) return false;
+    if (!RoundTrip(message, response, error, 4, "all", "2026-07-28", false)) return false;
     if (!response.is_object() || response.contains("error") || !response.contains("result")) {
         SetError(error, "payload_status_invalid_response");
         return false;
@@ -354,15 +354,6 @@ bool PayloadClient::EnsureReady(std::string* error) {
     }
     const auto target = session->Target();
 
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (verifiedProcessId_ == target.processId && !token_.empty() && !pipeName_.empty()) {
-            // Do not trust stale cached readiness across a target crash/reload;
-            // VerifyTarget below is cheap and also protects against same-token
-            // legacy payloads in another process.
-        }
-    }
-
     if (ConnectExisting(target, nullptr)) return true;
     Reset();
 
@@ -380,11 +371,19 @@ bool PayloadClient::EnsureReady(std::string* error) {
 bool PayloadClient::RoundTrip(const json& message,
                               json& response,
                               std::string* error,
-                              int attempts) const {
+                              int attempts,
+                              const std::string& toolProfile,
+                              const std::string& transportProtocolVersion,
+                              bool allowEmptyResponse,
+                              bool* hasResponse) const {
     response = json();
+    if (hasResponse) *hasResponse = false;
 #if !defined(_WIN32)
     (void)message;
     (void)attempts;
+    (void)toolProfile;
+    (void)transportProtocolVersion;
+    (void)allowEmptyResponse;
     SetError(error, "payload_transport_not_supported_on_platform");
     return false;
 #else
@@ -408,13 +407,15 @@ bool PayloadClient::RoundTrip(const json& message,
         return false;
     }
 
-    const json envelope = {
+    json envelope = {
         {"token", token},
-        {"tools", "all"},
+        {"tools", toolProfile},
         {"session", sessionId},
-        {"protocolVersion", "2026-07-28"},
         {"message", message}
     };
+    if (!transportProtocolVersion.empty())
+        envelope["protocolVersion"] = transportProtocolVersion;
+
     const std::string payload = envelope.dump();
     std::string rawResponse;
     const bool ioOk = WriteFrame(pipe, payload) && ReadFrame(pipe, rawResponse);
@@ -424,11 +425,13 @@ bool PayloadClient::RoundTrip(const json& message,
         return false;
     }
     if (rawResponse.empty()) {
+        if (allowEmptyResponse) return true;
         SetError(error, "payload_empty_response");
         return false;
     }
     try {
         response = json::parse(rawResponse);
+        if (hasResponse) *hasResponse = true;
         return true;
     } catch (const std::exception& exception) {
         SetError(error, std::string("payload_invalid_json:") + exception.what());
@@ -458,7 +461,7 @@ bool PayloadClient::CallTool(const std::string& name,
     };
 
     json response;
-    if (!RoundTrip(message, response, error, 100)) {
+    if (!RoundTrip(message, response, error, 100, "all", "2026-07-28", false)) {
         Reset();
         return false;
     }
@@ -480,6 +483,27 @@ bool PayloadClient::CallTool(const std::string& name,
     output = mcpResult.value("structuredContent", json::object());
     if (mcpResult.value("isError", false)) {
         SetError(error, ExtractToolError(output));
+        return false;
+    }
+    return true;
+}
+
+bool PayloadClient::ForwardMcp(const json& message,
+                               const std::string& toolProfile,
+                               json& response,
+                               bool& hasResponse,
+                               std::string* error) {
+    response = json();
+    hasResponse = false;
+    if (error) error->clear();
+    if (toolProfile != "compact" && toolProfile != "all") {
+        SetError(error, "invalid_mcp_tool_profile");
+        return false;
+    }
+    if (!Ready() && !EnsureReady(error)) return false;
+
+    if (!RoundTrip(message, response, error, 100, toolProfile, std::string(), true, &hasResponse)) {
+        Reset();
         return false;
     }
     return true;

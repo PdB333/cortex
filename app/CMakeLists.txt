@@ -44,6 +44,8 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_executable(cortex WIN32
     main.cpp
+    mcp_mode.cpp
+    mcp_mode.h
     app_controller.cpp
     app_controller.h
     debugger_controller.cpp
