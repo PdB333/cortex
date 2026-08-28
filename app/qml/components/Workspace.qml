@@ -13,31 +13,30 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 38
+            Layout.preferredHeight: 34
             color: Theme.panel
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 12
+                anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                spacing: 10
+                spacing: 8
 
                 Label {
                     text: CortexApp.selectedSection
-                    color: Theme.textBright
+                    color: Theme.text
                     font.family: Theme.uiFont
-                    font.pixelSize: 13
-                    font.bold: true
+                    font.pixelSize: 11
                 }
                 Rectangle {
                     Layout.preferredWidth: 1
-                    Layout.preferredHeight: 18
+                    Layout.preferredHeight: 14
                     color: Theme.borderStrong
                 }
                 Label {
                     text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "No active target"
                     color: Theme.textMuted
-                    font.pixelSize: 11
+                    font.pixelSize: 10
                     elide: Text.ElideRight
                 }
                 Item { Layout.fillWidth: true }
@@ -45,7 +44,7 @@ Rectangle {
                     visible: CortexApp.currentTargetIndex >= 0
                     text: CortexApp.capabilitySummary()
                     color: Theme.textDisabled
-                    font.pixelSize: 10
+                    font.pixelSize: 9
                 }
             }
 
@@ -79,105 +78,126 @@ Rectangle {
 
             ColumnLayout {
                 id: overviewColumn
-                width: Math.min(parent.width - 48, 980)
-                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(parent.width - 48, 760)
+                anchors.left: parent.left
+                anchors.leftMargin: 28
                 anchors.top: parent.top
-                anchors.topMargin: 28
-                spacing: 16
+                anchors.topMargin: 24
+                spacing: 0
 
                 Label {
-                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "Select a target"
+                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "No target selected"
                     color: Theme.textBright
-                    font.pixelSize: 24
+                    font.pixelSize: 20
                     font.bold: true
                 }
+
                 Label {
-                    text: CortexApp.currentTargetMeta
+                    Layout.topMargin: 5
+                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetMeta : "Choose a process from the target picker to begin."
                     color: Theme.textMuted
-                    font.pixelSize: 13
+                    font.pixelSize: 11
                 }
 
-                RowLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: 10
+                    Layout.topMargin: 20
+                    Layout.bottomMargin: 16
+                    Layout.preferredHeight: 1
+                    color: Theme.border
+                }
 
-                    Repeater {
-                        model: [
-                            { title: "PLATFORM", value: CortexApp.currentPlatform },
-                            { title: "ARCHITECTURE", value: CortexApp.currentArchitecture },
-                            { title: "TARGETS FOUND", value: String(CortexApp.targetCount) },
-                            { title: "MUTATIONS", value: CortexApp.mutationPermission ? "ENABLED" : "OFF" }
-                        ]
+                Label {
+                    text: "TARGET"
+                    color: Theme.textDisabled
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.letterSpacing: 0.5
+                }
 
-                        Rectangle {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 82
-                            color: Theme.panel
-                            border.color: Theme.border
-                            radius: Theme.radius
+                ColumnLayout {
+                    Layout.topMargin: 10
+                    Layout.fillWidth: true
+                    spacing: 7
 
-                            Column {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 12
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 7
-                                Text {
-                                    text: modelData.title
-                                    color: Theme.textDisabled
-                                    font.pixelSize: 10
-                                    font.bold: true
-                                    font.letterSpacing: 0.5
-                                }
-                                Text {
-                                    text: modelData.value
-                                    color: modelData.title === "MUTATIONS" && CortexApp.mutationPermission ? "#ffd580" : Theme.textBright
-                                    font.pixelSize: 15
-                                    font.family: modelData.title === "ARCHITECTURE" ? Theme.monoFont : Theme.uiFont
-                                }
-                            }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { Layout.preferredWidth: 120; text: "Platform"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Label { text: CortexApp.currentPlatform; color: Theme.text; font.pixelSize: 11 }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { Layout.preferredWidth: 120; text: "Architecture"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Label { text: CortexApp.currentArchitecture; color: Theme.text; font.pixelSize: 11; font.family: Theme.monoFont }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { Layout.preferredWidth: 120; text: "Processes"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Label { text: String(CortexApp.targetCount); color: Theme.text; font.pixelSize: 11 }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { Layout.preferredWidth: 120; text: "Mutation"; color: Theme.textMuted; font.pixelSize: 11 }
+                        Label {
+                            text: CortexApp.mutationPermission ? "Enabled" : "Disabled"
+                            color: CortexApp.mutationPermission ? "#d7b36a" : Theme.text
+                            font.pixelSize: 11
                         }
                     }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 190
-                    color: Theme.panel
-                    border.color: Theme.border
-                    radius: Theme.radius
+                    Layout.topMargin: 20
+                    Layout.bottomMargin: 16
+                    Layout.preferredHeight: 1
+                    color: Theme.border
+                }
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        spacing: 8
+                Label {
+                    text: "ACTIONS"
+                    color: Theme.textDisabled
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.letterSpacing: 0.5
+                }
 
-                        Label {
-                            text: "Unified Cortex application"
-                            color: Theme.textBright
-                            font.pixelSize: 14
-                            font.bold: true
+                RowLayout {
+                    Layout.topMargin: 8
+                    spacing: 4
+
+                    ToolButton {
+                        text: "Refresh targets"
+                        onClicked: CortexApp.refreshTargets()
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.hovered ? Theme.textBright : Theme.text
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 11
                         }
-                        Label {
-                            Layout.fillWidth: true
-                            text: "This branch moves the human interface out of the injected runtime. Qt/QML becomes the application UI; MCP, CLI and the UI will converge on the same target/capability services. The current preview only selects targets and exercises the new shell -- no mutation or attachment is performed from this screen yet."
-                            color: Theme.textMuted
-                            wrapMode: Text.WordWrap
-                            lineHeight: 1.25
-                            font.pixelSize: 12
+                        background: Rectangle {
+                            color: parent.hovered ? Theme.hover : "transparent"
+                            border.color: parent.hovered ? Theme.borderStrong : Theme.border
+                            radius: Theme.radius
                         }
-                        Item { Layout.fillHeight: true }
-                        RowLayout {
-                            spacing: 8
-                            Button {
-                                text: "Refresh targets"
-                                onClicked: CortexApp.refreshTargets()
-                            }
-                            Button {
-                                text: CortexApp.mutationPermission ? "Disable mutation permission" : "Enable mutation permission"
-                                enabled: CortexApp.currentTargetIndex >= 0
-                                onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
-                            }
+                    }
+
+                    ToolButton {
+                        text: CortexApp.mutationPermission ? "Disable mutation" : "Enable mutation"
+                        enabled: CortexApp.currentTargetIndex >= 0
+                        onClicked: CortexApp.mutationPermission = !CortexApp.mutationPermission
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.enabled ? (parent.hovered ? Theme.textBright : Theme.text) : Theme.textDisabled
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 11
+                        }
+                        background: Rectangle {
+                            color: parent.hovered ? Theme.hover : "transparent"
+                            border.color: parent.hovered ? Theme.borderStrong : Theme.border
+                            radius: Theme.radius
                         }
                     }
                 }
@@ -190,58 +210,79 @@ Rectangle {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
-            spacing: 10
+            spacing: 0
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 38
-                color: Theme.panel
-                border.color: Theme.border
-                radius: Theme.radius
+                Layout.preferredHeight: 32
+                color: Theme.background
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    spacing: 8
-                    Button { text: "New"; enabled: CortexApp.currentTargetIndex >= 0 }
-                    Button { text: "Refresh"; onClicked: CortexApp.refreshTargets() }
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 3
+
+                    ToolButton {
+                        text: "New"
+                        enabled: CortexApp.currentTargetIndex >= 0
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.enabled ? Theme.text : Theme.textDisabled
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 10
+                        }
+                        background: Rectangle { color: parent.hovered ? Theme.hover : "transparent"; radius: Theme.radius }
+                    }
+                    ToolButton {
+                        text: "Refresh"
+                        onClicked: CortexApp.refreshTargets()
+                        contentItem: Text {
+                            text: parent.text
+                            color: Theme.text
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 10
+                        }
+                        background: Rectangle { color: parent.hovered ? Theme.hover : "transparent"; radius: Theme.radius }
+                    }
                     Item { Layout.fillWidth: true }
                     Label {
-                        text: CortexApp.currentTargetIndex >= 0 ? "Target selected; backend wiring pending" : "Select a target first"
-                        color: Theme.textMuted
-                        font.pixelSize: 11
+                        text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "No target"
+                        color: Theme.textDisabled
+                        font.pixelSize: 9
                     }
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 1
+                    color: Theme.border
                 }
             }
 
-            Rectangle {
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: Theme.panel
-                border.color: Theme.border
-                radius: Theme.radius
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: 9
-                    width: Math.min(parent.width - 80, 620)
+                    spacing: 5
 
                     Label {
                         anchors.horizontalCenter: parent.horizontalCenter
                         text: CortexApp.selectedSection
-                        color: Theme.textBright
-                        font.pixelSize: 20
-                        font.bold: true
+                        color: Theme.text
+                        font.pixelSize: 14
                     }
                     Label {
-                        width: parent.width
-                        horizontalAlignment: Text.AlignHCenter
-                        text: "The workspace is ready. This panel will be connected to the existing Cortex service during the migration, before the corresponding ImGui control is removed."
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: CortexApp.currentTargetIndex >= 0 ? "No data to display." : "Select a target to continue."
                         color: Theme.textMuted
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: 12
+                        font.pixelSize: 11
                     }
                 }
             }
