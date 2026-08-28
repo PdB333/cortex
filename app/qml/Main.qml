@@ -74,7 +74,7 @@ ApplicationWindow {
 
                 BottomPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: root.bottomPanelVisible ? 188 : 0
+                    Layout.preferredHeight: root.bottomPanelVisible ? 168 : 0
                     visible: root.bottomPanelVisible
                 }
             }
@@ -83,43 +83,49 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: Theme.bottomBarHeight
-            color: Theme.accentDark
+            color: Theme.panel
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 1
+                color: Theme.border
+            }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
-                spacing: 16
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 12
 
                 Label {
-                    text: CortexApp.currentTargetIndex >= 0 ? "Target selected" : "No target"
-                    color: "white"
-                    font.pixelSize: 12
+                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "No target"
+                    color: Theme.textMuted
+                    font.pixelSize: 9
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 260
                 }
                 Label {
                     text: CortexApp.currentPlatform + " / " + CortexApp.currentArchitecture
-                    color: "white"
-                    opacity: 0.9
-                    font.pixelSize: 12
+                    color: Theme.textDisabled
+                    font.pixelSize: 9
                 }
                 Item { Layout.fillWidth: true }
                 Label {
-                    text: CortexApp.mutationPermission ? "MUTATION ENABLED" : "Mutation permission: OFF"
-                    color: CortexApp.mutationPermission ? "#ffd580" : "white"
-                    font.bold: CortexApp.mutationPermission
-                    font.pixelSize: 12
+                    text: CortexApp.mutationPermission ? "Mutation on" : "Mutation off"
+                    color: CortexApp.mutationPermission ? "#d7b36a" : Theme.textDisabled
+                    font.pixelSize: 9
                 }
                 Label {
-                    text: "MCP: preview"
-                    color: "white"
-                    opacity: 0.9
-                    font.pixelSize: 12
+                    text: "MCP preview"
+                    color: Theme.textDisabled
+                    font.pixelSize: 9
                 }
                 Label {
                     text: "0.7.0-dev"
-                    color: "white"
-                    opacity: 0.8
-                    font.pixelSize: 12
+                    color: Theme.textDisabled
+                    font.pixelSize: 9
                 }
             }
         }
