@@ -38,6 +38,8 @@ qt_add_executable(cortex WIN32
     main.cpp
     app_controller.cpp
     app_controller.h
+    debugger_controller.cpp
+    debugger_controller.h
     disassembly_controller.cpp
     disassembly_controller.h
     ../core/target/local_backend.cpp
@@ -46,6 +48,10 @@ qt_add_executable(cortex WIN32
     ../core/target/module_provider.h
     ../core/target/session_manager.cpp
     ../core/target/session_manager.h
+    ../core/target/thread_provider.cpp
+    ../core/target/thread_provider.h
+    ../core/services/debugger_service.cpp
+    ../core/services/debugger_service.h
     ../core/services/disassembly_service.cpp
     ../core/services/disassembly_service.h
     ../core/services/memory_service.cpp
