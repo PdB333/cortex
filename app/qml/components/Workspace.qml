@@ -62,6 +62,12 @@ Rectangle {
                            : CortexApp.selectedSection === "Modules" ? modulesComponent
                            : CortexApp.selectedSection === "Debugger" ? debuggerComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
+                           : CortexApp.selectedSection === "Actions" ? actionsComponent
+                           : CortexApp.selectedSection === "Network" ? networkComponent
+                           : CortexApp.selectedSection === "Input" ? inputComponent
+                           : CortexApp.selectedSection === "Screenshots" ? screenshotsComponent
+                           : CortexApp.selectedSection === "Traces" ? tracesComponent
+                           : CortexApp.selectedSection === "Sessions" ? sessionsComponent
                            : CortexApp.selectedSection === "MCP" ? mcpComponent
                            : CortexApp.selectedSection === "Semantic" ? semanticComponent
                            : genericComponent
@@ -74,6 +80,12 @@ Rectangle {
     Component { id: modulesComponent; ModulesView {} }
     Component { id: debuggerComponent; DebuggerView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }
+    Component { id: actionsComponent; ActionsView {} }
+    Component { id: networkComponent; NetworkView {} }
+    Component { id: inputComponent; InputView {} }
+    Component { id: screenshotsComponent; ScreenshotsView {} }
+    Component { id: tracesComponent; TracesView {} }
+    Component { id: sessionsComponent; SessionsView {} }
     Component { id: mcpComponent; McpView { semanticOnly: false } }
     Component { id: semanticComponent; McpView { semanticOnly: true } }
     Component { id: genericComponent; GenericToolView {} }
