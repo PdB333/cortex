@@ -2,6 +2,7 @@
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
 #include "payload_controller.h"
+#include "runtime_controller.h"
 #include "startup_diagnostics.h"
 
 #include <QColor>
@@ -40,11 +41,13 @@ int main(int argc, char* argv[]) {
 
     AppController controller;
     PayloadController payload(controller.sessionManager(), QCoreApplication::applicationDirPath());
+    RuntimeController runtime(payload, [&controller] { return controller.mutationPermission(); });
     DisassemblyController disassembly(controller.sessionManager());
     DebuggerController debugger(controller.sessionManager(), payload,
                                 [&controller] { return controller.mutationPermission(); });
 
     QObject::connect(&controller, &AppController::sessionChanged, &payload, &PayloadController::reset);
+    QObject::connect(&controller, &AppController::sessionChanged, &runtime, &RuntimeController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
     QObject::connect(&controller, &AppController::sessionChanged, &debugger, [&controller, &debugger]() {
         if (controller.sessionActive()) debugger.refreshThreads();
@@ -55,6 +58,7 @@ int main(int argc, char* argv[]) {
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.rootContext()->setContextProperty("CortexPayload", &payload);
+    engine.rootContext()->setContextProperty("CortexRuntime", &runtime);
     engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);
     engine.rootContext()->setContextProperty("CortexDebugger", &debugger);
     engine.loadFromModule("Cortex", "Main");

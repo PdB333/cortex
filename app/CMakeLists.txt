@@ -52,6 +52,8 @@ qt_add_executable(cortex WIN32
     disassembly_controller.h
     payload_controller.cpp
     payload_controller.h
+    runtime_controller.cpp
+    runtime_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
     ../core/target/module_provider.cpp
@@ -93,6 +95,7 @@ qt_add_qml_module(cortex
         qml/components/ModulesView.qml
         qml/components/DebuggerView.qml
         qml/components/DisassemblyView.qml
+        qml/components/McpView.qml
         qml/components/GenericToolView.qml
         qml/components/BottomPanel.qml
         qml/components/CommandPalette.qml

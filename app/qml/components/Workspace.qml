@@ -62,6 +62,8 @@ Rectangle {
                            : CortexApp.selectedSection === "Modules" ? modulesComponent
                            : CortexApp.selectedSection === "Debugger" ? debuggerComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
+                           : CortexApp.selectedSection === "MCP" ? mcpComponent
+                           : CortexApp.selectedSection === "Semantic" ? semanticComponent
                            : genericComponent
         }
     }
@@ -72,5 +74,7 @@ Rectangle {
     Component { id: modulesComponent; ModulesView {} }
     Component { id: debuggerComponent; DebuggerView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }
+    Component { id: mcpComponent; McpView { semanticOnly: false } }
+    Component { id: semanticComponent; McpView { semanticOnly: true } }
     Component { id: genericComponent; GenericToolView {} }
 }
