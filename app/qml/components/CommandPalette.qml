@@ -46,7 +46,7 @@ Popup {
             Layout.preferredHeight: 44
             placeholderText: "Type a Cortex command..."
             color: Theme.textBright
-            placeholderTextColor: Theme.textDisabled
+            placeholderTextColor: Theme.textPlaceholder
             font.pixelSize: 13
             leftPadding: 12
             rightPadding: 12
