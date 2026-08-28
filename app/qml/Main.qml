@@ -31,13 +31,6 @@ ApplicationWindow {
     palette.toolTipBase: Theme.surfaceRaised
     palette.toolTipText: Theme.text
 
-    Component.onCompleted: {
-        // Start as a comfortable workspace rather than occupying almost the
-        // whole desktop. The user can still maximize or resize immediately.
-        x = Math.round(Screen.virtualX + Math.max(0, (Screen.width - width) / 2))
-        y = Math.round(Screen.virtualY + Math.max(0, (Screen.height - height) / 2))
-    }
-
     Shortcut {
         sequences: ["Ctrl+Shift+P", "Ctrl+K"]
         onActivated: commandPalette.open()
