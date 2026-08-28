@@ -25,6 +25,7 @@ qt_add_qml_module(cortex
     QML_FILES
         qml/Main.qml
         qml/Theme.qml
+        qml/components/Button.qml
         qml/components/TopBar.qml
         qml/components/ProcessPicker.qml
         qml/components/Sidebar.qml
