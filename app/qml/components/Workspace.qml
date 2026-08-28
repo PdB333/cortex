@@ -59,17 +59,23 @@ Rectangle {
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
                            : CortexApp.selectedSection === "Scanner" ? scannerComponent
-                           : CortexApp.selectedSection === "Modules" ? modulesComponent
-                           : CortexApp.selectedSection === "Debugger" ? debuggerComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
-                           : CortexApp.selectedSection === "Actions" ? actionsComponent
-                           : CortexApp.selectedSection === "Network" ? networkComponent
-                           : CortexApp.selectedSection === "Input" ? inputComponent
-                           : CortexApp.selectedSection === "Screenshots" ? screenshotsComponent
+                           : CortexApp.selectedSection === "Structures" ? structuresComponent
+                           : CortexApp.selectedSection === "Modules" ? modulesComponent
+                           : CortexApp.selectedSection === "Symbols" ? symbolsComponent
+                           : CortexApp.selectedSection === "Debugger" ? debuggerComponent
+                           : CortexApp.selectedSection === "Breakpoints" ? breakpointsComponent
                            : CortexApp.selectedSection === "Traces" ? tracesComponent
-                           : CortexApp.selectedSection === "Sessions" ? sessionsComponent
+                           : CortexApp.selectedSection === "Hooks" ? hooksComponent
+                           : CortexApp.selectedSection === "Network" ? networkComponent
+                           : CortexApp.selectedSection === "Screenshots" ? screenshotsComponent
+                           : CortexApp.selectedSection === "Diagnostics" ? diagnosticsComponent
+                           : CortexApp.selectedSection === "Scripts" ? scriptsComponent
+                           : CortexApp.selectedSection === "Input" ? inputComponent
+                           : CortexApp.selectedSection === "Actions" ? actionsComponent
                            : CortexApp.selectedSection === "MCP" ? mcpComponent
                            : CortexApp.selectedSection === "Semantic" ? semanticComponent
+                           : CortexApp.selectedSection === "Sessions" ? sessionsComponent
                            : genericComponent
         }
     }
@@ -77,16 +83,22 @@ Rectangle {
     Component { id: overviewComponent; OverviewView {} }
     Component { id: memoryComponent; MemoryView {} }
     Component { id: scannerComponent; ScannerView {} }
-    Component { id: modulesComponent; ModulesView {} }
-    Component { id: debuggerComponent; DebuggerView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }
-    Component { id: actionsComponent; ActionsView {} }
-    Component { id: networkComponent; NetworkView {} }
-    Component { id: inputComponent; InputView {} }
-    Component { id: screenshotsComponent; ScreenshotsView {} }
+    Component { id: structuresComponent; StructuresView {} }
+    Component { id: modulesComponent; ModulesView {} }
+    Component { id: symbolsComponent; SymbolsView {} }
+    Component { id: debuggerComponent; DebuggerView {} }
+    Component { id: breakpointsComponent; BreakpointsView {} }
     Component { id: tracesComponent; TracesView {} }
-    Component { id: sessionsComponent; SessionsView {} }
+    Component { id: hooksComponent; HooksView {} }
+    Component { id: networkComponent; NetworkView {} }
+    Component { id: screenshotsComponent; ScreenshotsView {} }
+    Component { id: diagnosticsComponent; DiagnosticsView {} }
+    Component { id: scriptsComponent; ScriptsView {} }
+    Component { id: inputComponent; InputView {} }
+    Component { id: actionsComponent; ActionsView {} }
     Component { id: mcpComponent; McpView { semanticOnly: false } }
     Component { id: semanticComponent; McpView { semanticOnly: true } }
+    Component { id: sessionsComponent; SessionsView {} }
     Component { id: genericComponent; GenericToolView {} }
 }

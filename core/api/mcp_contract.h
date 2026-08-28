@@ -43,24 +43,30 @@ inline bool StartsWith(const std::string& value, const std::string& prefix) {
 inline ToolRisk ClassifyTool(const std::string& name,
                              const std::string& method,
                              const std::string& path) {
-    // A GET route is observational even if its tool name shares a prefix with
-    // the mutating half of a subsystem (patch_list, freeze_list,
-    // watch_events, debug_breakpoint_log, ...).
+    // GET routes are observational even when their names share a subsystem
+    // prefix with the mutating/control half of that subsystem.
     if (method == "GET") return ToolRisk::Observe;
 
     if (name == "call_function" || path == "/call/function") return ToolRisk::NativeCall;
 
+    // POST is sometimes used for structured analysis requests. Keep those
+    // callable in inspect mode unless their arguments can change runtime or
+    // persisted Cortex state.
+    if (name == "struct_read" || name == "trace_compare") return ToolRisk::Analyze;
+
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||
         StartsWith(name, "input_") || StartsWith(name, "lua_") ||
-        name == "snapshot_rewind" || name == "actions_rollback" ||
-        name == "session_import") {
+        name == "struct_write" || name == "snapshot_rewind" ||
+        name == "actions_rollback" || name == "session_import") {
         return ToolRisk::Mutate;
     }
 
-    if (StartsWith(name, "debug_") || name == "trace_start" ||
-        name == "actions_clear" || StartsWith(name, "watch_") ||
-        name == "project_note_add" || name == "project_pointer_path_set") {
+    if (StartsWith(name, "debug_") || StartsWith(name, "trace_") ||
+        StartsWith(name, "watch_") || StartsWith(name, "window_") ||
+        StartsWith(name, "project_") || StartsWith(name, "struct_") ||
+        StartsWith(name, "pointermap_") || name == "network_capture" ||
+        name == "actions_clear" || name == "ghidra_import") {
         return ToolRisk::Control;
     }
 

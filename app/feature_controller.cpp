@@ -93,7 +93,7 @@ bool FeatureController::clearActions() {
 
 bool FeatureController::setNetworkCapture(bool enabled) {
     json output;
-    if (!callTool("network_capture", {{"enabled", enabled}}, output, false)) return false;
+    if (!callTool("network_capture", {{"enabled", enabled}}, output, true)) return false;
     const json result = RouteResult(output);
     networkCaptureEnabled_ = result.value("enabled", enabled);
     emit networkChanged();

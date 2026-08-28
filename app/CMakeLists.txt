@@ -99,11 +99,17 @@ qt_add_qml_module(cortex
         qml/components/ModulesView.qml
         qml/components/DebuggerView.qml
         qml/components/DisassemblyView.qml
-        qml/components/ActionsView.qml
-        qml/components/NetworkView.qml
-        qml/components/InputView.qml
-        qml/components/ScreenshotsView.qml
+        qml/components/BreakpointsView.qml
         qml/components/TracesView.qml
+        qml/components/StructuresView.qml
+        qml/components/SymbolsView.qml
+        qml/components/HooksView.qml
+        qml/components/NetworkView.qml
+        qml/components/ScreenshotsView.qml
+        qml/components/DiagnosticsView.qml
+        qml/components/ScriptsView.qml
+        qml/components/InputView.qml
+        qml/components/ActionsView.qml
         qml/components/SessionsView.qml
         qml/components/McpView.qml
         qml/components/GenericToolView.qml

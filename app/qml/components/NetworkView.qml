@@ -20,7 +20,7 @@ ColumnLayout {
             spacing: 5
             Button {
                 text: CortexFeatures.networkCaptureEnabled ? "Stop capture" : "Start capture"
-                enabled: CortexApp.sessionActive
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission
                 onClicked: {
                     if (CortexFeatures.setNetworkCapture(!CortexFeatures.networkCaptureEnabled))
                         CortexFeatures.refreshNetwork()
