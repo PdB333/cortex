@@ -1,40 +1,99 @@
 #include "scan_service.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <type_traits>
 
 namespace cortex::services {
+namespace {
 
-bool ScanService::Exact(const std::vector<uint8_t>& needle,
+bool IsCancelled(const std::atomic_bool* cancelled) {
+    return cancelled && cancelled->load(std::memory_order_relaxed);
+}
+
+template <typename T>
+bool CompareTyped(const std::vector<uint8_t>& current,
+                  const std::vector<uint8_t>& previous,
+                  ScanComparison comparison) {
+    if (current.size() != sizeof(T) || previous.size() != sizeof(T)) return false;
+    T now{};
+    T before{};
+    std::memcpy(&now, current.data(), sizeof(T));
+    std::memcpy(&before, previous.data(), sizeof(T));
+    if constexpr (std::is_floating_point_v<T>) {
+        if (!std::isfinite(now) || !std::isfinite(before)) return false;
+    }
+    switch (comparison) {
+        case ScanComparison::Increased: return now > before;
+        case ScanComparison::Decreased: return now < before;
+        default: return now != before;
+    }
+}
+
+bool MatchesRefinement(const std::vector<uint8_t>& current,
+                       const std::vector<uint8_t>& previous,
+                       ScanValueKind kind,
+                       ScanComparison comparison) {
+    if (comparison == ScanComparison::Changed)
+        return current != previous;
+
+    switch (kind) {
+        case ScanValueKind::I32: return CompareTyped<int32_t>(current, previous, comparison);
+        case ScanValueKind::I64: return CompareTyped<int64_t>(current, previous, comparison);
+        case ScanValueKind::F32: return CompareTyped<float>(current, previous, comparison);
+        case ScanValueKind::F64: return CompareTyped<double>(current, previous, comparison);
+        default: return false;
+    }
+}
+
+} // namespace
+
+bool ScanService::Exact(const target::SessionPtr& session,
+                        const std::vector<uint8_t>& needle,
                         std::vector<ScanResult>& results,
                         size_t maxResults,
-                        std::string* error) const {
+                        std::string* error,
+                        const std::atomic_bool* cancelled) {
     if (error) error->clear();
     results.clear();
+    if (!session || !session->Alive()) {
+        if (error) *error = "no_active_session";
+        return false;
+    }
+    if (!session->Capabilities().Has(target::Capability::MemoryScan) ||
+        !session->Capabilities().Has(target::Capability::MemoryRead)) {
+        if (error) *error = "memory_scan_not_supported";
+        return false;
+    }
     if (needle.empty() || needle.size() > 4096 || maxResults == 0) {
         if (error) *error = "invalid_scan_pattern";
         return false;
     }
 
-    std::string regionError;
-    const auto regions = memory_.Regions(&regionError);
-    if (!regionError.empty()) {
-        if (error) *error = regionError;
-        return false;
-    }
-
+    const auto regions = session->MemoryRegions();
     constexpr size_t kChunkSize = 1024 * 1024;
     std::vector<uint8_t> carry;
 
     for (const auto& region : regions) {
+        if (IsCancelled(cancelled)) {
+            if (error) *error = "scan_cancelled";
+            return false;
+        }
         if (!region.readable || region.size == 0) continue;
         carry.clear();
 
         uint64_t offset = 0;
         while (offset < region.size) {
+            if (IsCancelled(cancelled)) {
+                if (error) *error = "scan_cancelled";
+                return false;
+            }
+
             const size_t request = static_cast<size_t>(std::min<uint64_t>(kChunkSize, region.size - offset));
-            std::vector<uint8_t> chunk;
-            std::string readError;
-            if (!memory_.Read(region.base + offset, request, chunk, &readError)) {
+            std::vector<uint8_t> chunk(request);
+            size_t read = 0;
+            if (!session->ReadMemory(region.base + offset, chunk.data(), chunk.size(), &read) || read != chunk.size()) {
                 carry.clear();
                 offset += request;
                 continue;
@@ -46,7 +105,8 @@ bool ScanService::Exact(const std::vector<uint8_t>& needle,
             window.insert(window.end(), chunk.begin(), chunk.end());
 
             auto it = window.begin();
-            while (window.size() >= needle.size() && it <= window.end() - static_cast<std::ptrdiff_t>(needle.size())) {
+            while (window.size() >= needle.size() &&
+                   it <= window.end() - static_cast<std::ptrdiff_t>(needle.size())) {
                 it = std::search(it, window.end(), needle.begin(), needle.end());
                 if (it == window.end()) break;
                 const size_t index = static_cast<size_t>(std::distance(window.begin(), it));
@@ -62,6 +122,52 @@ bool ScanService::Exact(const std::vector<uint8_t>& needle,
         }
     }
 
+    return true;
+}
+
+bool ScanService::Refine(const target::SessionPtr& session,
+                         const std::vector<ScanResult>& previous,
+                         ScanValueKind kind,
+                         ScanComparison comparison,
+                         std::vector<ScanResult>& results,
+                         std::string* error,
+                         const std::atomic_bool* cancelled) {
+    if (error) error->clear();
+    results.clear();
+    if (!session || !session->Alive()) {
+        if (error) *error = "no_active_session";
+        return false;
+    }
+    if (!session->Capabilities().Has(target::Capability::MemoryRead)) {
+        if (error) *error = "memory_read_not_supported";
+        return false;
+    }
+    if (previous.empty()) {
+        if (error) *error = "no_previous_scan";
+        return false;
+    }
+    if ((comparison == ScanComparison::Increased || comparison == ScanComparison::Decreased) &&
+        (kind == ScanValueKind::Bytes || kind == ScanValueKind::String)) {
+        if (error) *error = "comparison_not_supported_for_type";
+        return false;
+    }
+
+    results.reserve(previous.size());
+    for (const auto& old : previous) {
+        if (IsCancelled(cancelled)) {
+            if (error) *error = "scan_cancelled";
+            return false;
+        }
+        if (old.value.empty()) continue;
+
+        std::vector<uint8_t> current(old.value.size());
+        size_t read = 0;
+        if (!session->ReadMemory(old.address, current.data(), current.size(), &read) || read != current.size())
+            continue;
+
+        if (MatchesRefinement(current, old.value, kind, comparison))
+            results.push_back({old.address, std::move(current)});
+    }
     return true;
 }
 

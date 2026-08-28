@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2 Concurrent)
 qt_standard_project_setup(REQUIRES 6.5)
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -55,6 +55,7 @@ target_include_directories(cortex PRIVATE
 target_link_libraries(cortex PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::Concurrent
 )
 
 if(WIN32)

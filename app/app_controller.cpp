@@ -2,6 +2,7 @@
 
 #include "target/local_backend.h"
 
+#include <QtConcurrent/QtConcurrentRun>
 #include <QVariantMap>
 
 #include <algorithm>
@@ -110,6 +111,27 @@ bool EncodeScanValue(const QString& value, const QString& type, std::vector<uint
     return ok && !bytes.empty();
 }
 
+bool ScanKindFromText(const QString& text, cortex::services::ScanValueKind& kind) {
+    const auto normalized = text.trimmed().toLower();
+    if (normalized == QStringLiteral("i32")) kind = cortex::services::ScanValueKind::I32;
+    else if (normalized == QStringLiteral("i64")) kind = cortex::services::ScanValueKind::I64;
+    else if (normalized == QStringLiteral("f32") || normalized == QStringLiteral("float")) kind = cortex::services::ScanValueKind::F32;
+    else if (normalized == QStringLiteral("f64") || normalized == QStringLiteral("double")) kind = cortex::services::ScanValueKind::F64;
+    else if (normalized == QStringLiteral("string")) kind = cortex::services::ScanValueKind::String;
+    else if (normalized == QStringLiteral("bytes")) kind = cortex::services::ScanValueKind::Bytes;
+    else return false;
+    return true;
+}
+
+bool ScanComparisonFromText(const QString& text, cortex::services::ScanComparison& comparison) {
+    const auto normalized = text.trimmed().toLower();
+    if (normalized == QStringLiteral("changed")) comparison = cortex::services::ScanComparison::Changed;
+    else if (normalized == QStringLiteral("increased")) comparison = cortex::services::ScanComparison::Increased;
+    else if (normalized == QStringLiteral("decreased")) comparison = cortex::services::ScanComparison::Decreased;
+    else return false;
+    return true;
+}
+
 QVariantMap TargetToVariant(const cortex::target::TargetDescriptor& target) {
     QVariantMap result;
     result.insert(QStringLiteral("id"), FromUtf8(target.id));
@@ -132,10 +154,15 @@ QVariantMap TargetToVariant(const cortex::target::TargetDescriptor& target) {
 AppController::AppController(QObject* parent)
     : QObject(parent),
       sessionManager_(targetCatalog_),
-      memoryService_(sessionManager_),
-      scanService_(memoryService_) {
+      memoryService_(sessionManager_) {
     targetCatalog_.AddBackend(std::make_shared<cortex::target::LocalBackend>());
+    connect(&scanWatcher_, &QFutureWatcher<ScanTaskResult>::finished, this, &AppController::finishScan);
     refreshTargets();
+}
+
+AppController::~AppController() {
+    cancelScan();
+    scanWatcher_.waitForFinished();
 }
 
 QString AppController::currentTargetName() const {
@@ -180,7 +207,7 @@ QString AppController::sessionStatus() const {
 
 void AppController::refreshTargets() {
     std::string previousId;
-    if (const auto* activeTarget = sessionManager_.ActiveTarget()) previousId = activeTarget->id;
+    if (auto active = sessionManager_.Active()) previousId = active->Target().id;
     else if (currentTargetIndex_ >= 0 && currentTargetIndex_ < static_cast<int>(targetDescriptors_.size()))
         previousId = targetDescriptors_[static_cast<size_t>(currentTargetIndex_)].id;
 
@@ -201,8 +228,11 @@ void AppController::refreshTargets() {
                 targets_[currentTargetIndex_] = TargetToVariant(active->Target());
             }
         } else if (sessionManager_.HasActiveSession()) {
+            cancelScan();
+            ++sessionGeneration_;
             sessionManager_.Detach();
             mutationPermission_ = false;
+            resetScanState();
             emit sessionChanged();
             emit mutationPermissionChanged();
         }
@@ -220,11 +250,13 @@ void AppController::selectTarget(int index) {
     }
     if (index == currentTargetIndex_ && sessionManager_.HasActiveSession()) return;
 
+    cancelScan();
+    ++sessionGeneration_;
     sessionManager_.Detach();
     currentTargetIndex_ = index;
     mutationPermission_ = false;
     memoryRows_.clear();
-    scanResults_.clear();
+    resetScanState();
 
     std::string error;
     if (sessionManager_.Attach(targetDescriptors_[static_cast<size_t>(index)], &error)) {
@@ -243,22 +275,22 @@ void AppController::selectTarget(int index) {
     emit mutationPermissionChanged();
     emit sessionChanged();
     emit memoryRowsChanged();
-    emit scanResultsChanged();
 }
 
 void AppController::detachTarget() {
     if (!sessionManager_.HasActiveSession() && currentTargetIndex_ < 0) return;
+    cancelScan();
+    ++sessionGeneration_;
     sessionManager_.Detach();
     currentTargetIndex_ = -1;
     mutationPermission_ = false;
     memoryRows_.clear();
-    scanResults_.clear();
+    resetScanState();
     setLastError(QString());
     emit currentTargetChanged();
     emit mutationPermissionChanged();
     emit sessionChanged();
     emit memoryRowsChanged();
-    emit scanResultsChanged();
 }
 
 void AppController::selectSection(const QString& section) {
@@ -268,13 +300,13 @@ void AppController::selectSection(const QString& section) {
 }
 
 QString AppController::capabilitySummary() const {
-    const cortex::target::CapabilitySet* capabilitySet = sessionManager_.ActiveCapabilities();
-    if (!capabilitySet) {
-        if (currentTargetIndex_ < 0 || currentTargetIndex_ >= static_cast<int>(targetDescriptors_.size()))
-            return QStringLiteral("No active target capabilities");
+    auto active = sessionManager_.Active();
+    const cortex::target::CapabilitySet* capabilitySet = nullptr;
+    if (active) capabilitySet = &active->Capabilities();
+    else if (currentTargetIndex_ >= 0 && currentTargetIndex_ < static_cast<int>(targetDescriptors_.size()))
         capabilitySet = &targetDescriptors_[static_cast<size_t>(currentTargetIndex_)].capabilities;
-    }
 
+    if (!capabilitySet) return QStringLiteral("No active target capabilities");
     QStringList capabilities;
     for (const auto& name : capabilitySet->Names()) capabilities.push_back(FromUtf8(name));
     return capabilities.isEmpty() ? QStringLiteral("No advertised capabilities") : capabilities.join(QStringLiteral(", "));
@@ -333,39 +365,142 @@ bool AppController::writeMemoryHex(const QString& addressText, const QString& he
     return true;
 }
 
-bool AppController::scanExact(const QString& value, const QString& type) {
+bool AppController::startScan(const QString& value, const QString& type,
+                              const QString& comparisonText, bool refine) {
+    if (scanBusy_) {
+        setLastError(QStringLiteral("scan_in_progress"));
+        return false;
+    }
+
+    auto session = sessionManager_.Active();
+    if (!session || !session->Alive()) {
+        setLastError(QStringLiteral("no_active_session"));
+        return false;
+    }
+
+    cortex::services::ScanValueKind kind{};
+    if (!ScanKindFromText(type, kind)) {
+        setLastError(QStringLiteral("invalid_scan_type"));
+        return false;
+    }
+
     std::vector<uint8_t> pattern;
-    if (!EncodeScanValue(value, type, pattern)) {
+    cortex::services::ScanComparison comparison{};
+    if (refine) {
+        if (scanState_.empty()) {
+            setLastError(QStringLiteral("no_previous_scan"));
+            return false;
+        }
+        if (scanType_.compare(type, Qt::CaseInsensitive) != 0) {
+            setLastError(QStringLiteral("scan_type_changed"));
+            return false;
+        }
+        if (!ScanComparisonFromText(comparisonText, comparison)) {
+            setLastError(QStringLiteral("invalid_scan_comparison"));
+            return false;
+        }
+    } else if (!EncodeScanValue(value, type, pattern)) {
         setLastError(QStringLiteral("invalid_scan_value"));
         return false;
     }
 
-    std::vector<cortex::services::ScanResult> results;
-    std::string error;
-    if (!scanService_.Exact(pattern, results, 5000, &error)) {
-        setLastError(FromUtf8(error));
-        return false;
-    }
+    const uint64_t generation = sessionGeneration_;
+    const auto previous = scanState_;
+    const QString displayValue = value;
+    const QString scanType = type;
+    scanCancel_ = std::make_shared<std::atomic_bool>(false);
+    const auto cancelToken = scanCancel_;
 
-    scanResults_.clear();
-    scanResults_.reserve(static_cast<qsizetype>(results.size()));
-    const QString encodedValue = BytesToHex(pattern.data(), pattern.size());
-    for (const auto& result : results) {
-        QVariantMap row;
-        row.insert(QStringLiteral("address"), HexAddress(result.address));
-        row.insert(QStringLiteral("value"), value);
-        row.insert(QStringLiteral("bytes"), encodedValue);
-        scanResults_.push_back(row);
-    }
+    scanBusy_ = true;
+    scanStatus_ = refine ? QStringLiteral("Refining scan...") : QStringLiteral("Scanning...");
     setLastError(QString());
-    emit scanResultsChanged();
+    emit scanStateChanged();
+
+    auto future = QtConcurrent::run([session, pattern = std::move(pattern), previous,
+                                     kind, comparison, refine, cancelToken,
+                                     generation, displayValue, scanType]() mutable {
+        ScanTaskResult task;
+        task.generation = generation;
+        task.displayValue = displayValue;
+        task.type = scanType;
+        std::string error;
+        if (refine) {
+            task.ok = cortex::services::ScanService::Refine(
+                session, previous, kind, comparison, task.results, &error, cancelToken.get());
+        } else {
+            task.ok = cortex::services::ScanService::Exact(
+                session, pattern, task.results, 5000, &error, cancelToken.get());
+        }
+        task.error = FromUtf8(error);
+        return task;
+    });
+    scanWatcher_.setFuture(future);
     return true;
 }
 
+void AppController::cancelScan() {
+    if (scanCancel_) scanCancel_->store(true, std::memory_order_relaxed);
+    if (scanBusy_) {
+        scanStatus_ = QStringLiteral("Cancelling...");
+        emit scanStateChanged();
+    }
+}
+
 void AppController::clearScanResults() {
-    if (scanResults_.isEmpty()) return;
+    if (scanBusy_) cancelScan();
+    resetScanState();
+    setLastError(QString());
+}
+
+void AppController::finishScan() {
+    const auto task = scanWatcher_.result();
+    scanBusy_ = false;
+    scanCancel_.reset();
+
+    if (task.generation != sessionGeneration_) {
+        scanStatus_.clear();
+        emit scanStateChanged();
+        return;
+    }
+
+    if (!task.ok) {
+        if (task.error == QStringLiteral("scan_cancelled")) {
+            scanStatus_ = QStringLiteral("Cancelled");
+            setLastError(QString());
+        } else {
+            scanStatus_ = QStringLiteral("Scan failed");
+            setLastError(task.error.isEmpty() ? QStringLiteral("scan_failed") : task.error);
+        }
+        emit scanStateChanged();
+        return;
+    }
+
+    scanState_ = task.results;
+    scanType_ = task.type;
     scanResults_.clear();
+    scanResults_.reserve(static_cast<qsizetype>(scanState_.size()));
+    for (const auto& result : scanState_) {
+        QVariantMap row;
+        row.insert(QStringLiteral("address"), HexAddress(result.address));
+        row.insert(QStringLiteral("value"), task.displayValue.isEmpty()
+                   ? BytesToHex(result.value.data(), result.value.size())
+                   : task.displayValue);
+        row.insert(QStringLiteral("bytes"), BytesToHex(result.value.data(), result.value.size()));
+        scanResults_.push_back(row);
+    }
+    scanStatus_ = QStringLiteral("%1 results").arg(scanResults_.size());
+    setLastError(QString());
     emit scanResultsChanged();
+    emit scanStateChanged();
+}
+
+void AppController::resetScanState() {
+    scanState_.clear();
+    scanResults_.clear();
+    scanType_.clear();
+    if (!scanBusy_) scanStatus_.clear();
+    emit scanResultsChanged();
+    emit scanStateChanged();
 }
 
 void AppController::setMutationPermission(bool enabled) {

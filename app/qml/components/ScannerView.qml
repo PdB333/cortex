@@ -22,10 +22,13 @@ ColumnLayout {
                 id: valueField
                 Layout.preferredWidth: 220
                 Layout.preferredHeight: 30
-                placeholderText: "Value"
+                placeholderText: scanMode.currentIndex === 0 ? "Value" : "Previous scan values"
                 font.pixelSize: 12
-                enabled: CortexApp.sessionActive
-                Keys.onReturnPressed: if (scanMode.currentIndex === 0) CortexApp.scanExact(text, valueType.currentText)
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy && scanMode.currentIndex === 0
+                Keys.onReturnPressed: {
+                    if (scanMode.currentIndex === 0 && text.length)
+                        CortexApp.startScan(text, valueType.currentText, "Exact value", false)
+                }
             }
             ComboBox {
                 id: valueType
@@ -33,7 +36,7 @@ ColumnLayout {
                 Layout.preferredHeight: 30
                 model: ["i32", "i64", "f32", "f64", "string", "bytes"]
                 font.pixelSize: 11
-                enabled: CortexApp.sessionActive
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy && CortexApp.scanResults.length === 0
             }
             ComboBox {
                 id: scanMode
@@ -41,26 +44,42 @@ ColumnLayout {
                 Layout.preferredHeight: 30
                 model: ["Exact value", "Changed", "Increased", "Decreased"]
                 font.pixelSize: 11
-                enabled: CortexApp.sessionActive
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy
+                onCurrentIndexChanged: {
+                    if ((currentIndex === 2 || currentIndex === 3) &&
+                        (valueType.currentText === "string" || valueType.currentText === "bytes"))
+                        currentIndex = 1
+                }
             }
             Button {
-                text: "New Scan"
+                text: CortexApp.scanBusy ? "Scanning..." : "New Scan"
                 font.pixelSize: 11
-                enabled: CortexApp.sessionActive && valueField.text.length > 0 && scanMode.currentIndex === 0
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy && valueField.text.length > 0
                 onClicked: {
                     CortexApp.clearScanResults()
-                    CortexApp.scanExact(valueField.text, valueType.currentText)
+                    scanMode.currentIndex = 0
+                    CortexApp.startScan(valueField.text, valueType.currentText, "Exact value", false)
                 }
             }
             Button {
                 text: "Next Scan"
                 font.pixelSize: 11
-                enabled: false
-                ToolTip.visible: hovered
-                ToolTip.text: "Refinement scans will be enabled after the first exact-scan backend is validated."
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy &&
+                         CortexApp.scanResults.length > 0 && scanMode.currentIndex > 0
+                onClicked: CortexApp.startScan("", valueType.currentText, scanMode.currentText, true)
+            }
+            Button {
+                text: "Cancel"
+                visible: CortexApp.scanBusy
+                font.pixelSize: 11
+                onClicked: CortexApp.cancelScan()
             }
             Item { Layout.fillWidth: true }
-            Label { text: CortexApp.scanResults.length + " results"; color: Theme.textMuted; font.pixelSize: 11 }
+            Label {
+                text: CortexApp.scanBusy ? CortexApp.scanStatus : CortexApp.scanResults.length + " results"
+                color: CortexApp.scanBusy ? Theme.accent : Theme.textMuted
+                font.pixelSize: 11
+            }
         }
 
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -95,6 +114,7 @@ ColumnLayout {
 
             delegate: Rectangle {
                 required property var modelData
+                required property int index
                 width: ListView.view.width
                 height: 28
                 color: index % 2 ? Theme.background : Theme.surface
@@ -112,7 +132,7 @@ ColumnLayout {
         }
 
         Text {
-            visible: CortexApp.scanResults.length === 0
+            visible: CortexApp.scanResults.length === 0 && !CortexApp.scanBusy
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.leftMargin: 12

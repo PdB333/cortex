@@ -5,10 +5,23 @@
 #include "target/catalog.h"
 #include "target/session_manager.h"
 
+#include <QFutureWatcher>
 #include <QObject>
 #include <QVariantList>
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
 #include <vector>
+
+struct ScanTaskResult {
+    bool ok = false;
+    QString error;
+    QString displayValue;
+    QString type;
+    uint64_t generation = 0;
+    std::vector<cortex::services::ScanResult> results;
+};
 
 class AppController final : public QObject {
     Q_OBJECT
@@ -26,9 +39,12 @@ class AppController final : public QObject {
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QVariantList memoryRows READ memoryRows NOTIFY memoryRowsChanged)
     Q_PROPERTY(QVariantList scanResults READ scanResults NOTIFY scanResultsChanged)
+    Q_PROPERTY(bool scanBusy READ scanBusy NOTIFY scanStateChanged)
+    Q_PROPERTY(QString scanStatus READ scanStatus NOTIFY scanStateChanged)
 
 public:
     explicit AppController(QObject* parent = nullptr);
+    ~AppController() override;
 
     const QVariantList& targets() const { return targets_; }
     int targetCount() const { return static_cast<int>(targetDescriptors_.size()); }
@@ -44,6 +60,8 @@ public:
     QString lastError() const { return lastError_; }
     const QVariantList& memoryRows() const { return memoryRows_; }
     const QVariantList& scanResults() const { return scanResults_; }
+    bool scanBusy() const { return scanBusy_; }
+    QString scanStatus() const { return scanStatus_; }
 
     Q_INVOKABLE void refreshTargets();
     Q_INVOKABLE void selectTarget(int index);
@@ -52,7 +70,9 @@ public:
     Q_INVOKABLE QString capabilitySummary() const;
     Q_INVOKABLE bool readMemory(const QString& address, int size = 256);
     Q_INVOKABLE bool writeMemoryHex(const QString& address, const QString& hexBytes);
-    Q_INVOKABLE bool scanExact(const QString& value, const QString& type);
+    Q_INVOKABLE bool startScan(const QString& value, const QString& type,
+                               const QString& comparison, bool refine);
+    Q_INVOKABLE void cancelScan();
     Q_INVOKABLE void clearScanResults();
 
     void setMutationPermission(bool enabled);
@@ -66,20 +86,29 @@ signals:
     void lastErrorChanged();
     void memoryRowsChanged();
     void scanResultsChanged();
+    void scanStateChanged();
 
 private:
     void setLastError(const QString& error);
+    void finishScan();
+    void resetScanState();
 
     cortex::target::Catalog targetCatalog_;
     cortex::target::SessionManager sessionManager_;
     cortex::services::MemoryService memoryService_;
-    cortex::services::ScanService scanService_;
     std::vector<cortex::target::TargetDescriptor> targetDescriptors_;
     QVariantList targets_;
     QVariantList memoryRows_;
     QVariantList scanResults_;
+    std::vector<cortex::services::ScanResult> scanState_;
+    QString scanType_;
+    QFutureWatcher<ScanTaskResult> scanWatcher_;
+    std::shared_ptr<std::atomic_bool> scanCancel_;
+    uint64_t sessionGeneration_ = 0;
     int currentTargetIndex_ = -1;
     QString selectedSection_ = QStringLiteral("Overview");
     QString lastError_;
+    QString scanStatus_;
     bool mutationPermission_ = false;
+    bool scanBusy_ = false;
 };
