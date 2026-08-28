@@ -1,6 +1,7 @@
 #include "app_controller.h"
 #include "startup_diagnostics.h"
 
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -18,6 +19,10 @@ int main(int argc, char* argv[]) {
     AppController controller;
 
     QQmlApplicationEngine engine;
+    // windeployqt places runtime QML modules under <app>/qml. Qt's default
+    // import path still points at the build/install prefix, which is absent on
+    // a clean machine, so make the portable module root explicit.
+    engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.loadFromModule("Cortex", "Main");
     if (engine.rootObjects().isEmpty()) {
