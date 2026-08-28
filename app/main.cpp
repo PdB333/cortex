@@ -1,4 +1,5 @@
 #include "app_controller.h"
+#include "disassembly_controller.h"
 #include "startup_diagnostics.h"
 
 #include <QColor>
@@ -36,6 +37,9 @@ int main(int argc, char* argv[]) {
     app.setPalette(palette);
 
     AppController controller;
+    DisassemblyController disassembly(controller.sessionManager());
+    QObject::connect(&controller, &AppController::sessionChanged,
+                     &disassembly, &DisassemblyController::clear);
 
     QQmlApplicationEngine engine;
     // windeployqt places runtime QML modules under <app>/qml. Qt's default
@@ -43,6 +47,7 @@ int main(int argc, char* argv[]) {
     // a clean machine, so make the portable module root explicit.
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
+    engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);
     engine.loadFromModule("Cortex", "Main");
     if (engine.rootObjects().isEmpty()) {
         cortex::appdiag::RecordFatal("Cortex QML root object was not created.");
