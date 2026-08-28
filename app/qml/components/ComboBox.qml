@@ -1,8 +1,8 @@
 import QtQuick
-import QtQuick.Templates as T
+import QtQuick.Controls as C
 import Cortex 1.0
 
-T.ComboBox {
+C.ComboBox {
     id: control
 
     implicitWidth: 120
@@ -57,7 +57,7 @@ T.ComboBox {
     background: Rectangle {
         color: control.enabled ? Theme.input : Theme.surface
         border.width: 1
-        border.color: control.activeFocus || control.down
+        border.color: control.activeFocus || control.popup.visible
                       ? Theme.accent
                       : control.hovered
                         ? Theme.borderStrong
@@ -66,7 +66,7 @@ T.ComboBox {
         opacity: control.enabled ? 1.0 : 0.72
     }
 
-    delegate: T.ItemDelegate {
+    delegate: C.ItemDelegate {
         id: itemDelegate
         required property int index
         required property var modelData
@@ -94,10 +94,11 @@ T.ComboBox {
         }
     }
 
-    popup: T.Popup {
+    popup: C.Popup {
         y: control.height + 2
         width: control.width
         padding: 1
+        closePolicy: C.Popup.CloseOnEscape | C.Popup.CloseOnPressOutsideParent
 
         contentItem: ListView {
             clip: true
