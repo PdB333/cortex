@@ -16,7 +16,10 @@ public:
 
     virtual NodeDescriptor Node() const = 0;
     virtual std::vector<TargetDescriptor> ListTargets() = 0;
-    virtual SessionPtr Attach(const TargetDescriptor& target, std::string* error = nullptr) = 0;
+    virtual SessionPtr Attach(const TargetDescriptor&, std::string* error = nullptr) {
+        if (error) *error = "attach_not_supported";
+        return {};
+    }
 };
 
 } // namespace cortex::target
