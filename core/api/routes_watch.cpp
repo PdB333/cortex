@@ -114,6 +114,12 @@ void RegisterWatchRoutes(httplib::Server& svr) {
         }
     });
 
+    svr.Get("/watch/allocations/status", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(json{{"ok", true},
+                             {"enabled", watch::AllocationWatchEnabled()},
+                             {"min_size", watch::AllocationWatchMinSize()}}.dump(),
+                        "application/json");
+    });
     svr.Get("/watch/allocations/events", [](const httplib::Request&, httplib::Response& res) {
         json arr = json::array();
         for (const auto& ev : watch::DrainAllocEvents()) {
@@ -127,6 +133,17 @@ void RegisterWatchRoutes(httplib::Server& svr) {
         overlay::LogApiCall("GET /watch/allocations/events (" + std::to_string(arr.size()) + ")");
     });
 
+    svr.Get("/watch/allocations/events_snapshot", [](const httplib::Request&, httplib::Response& res) {
+        json arr = json::array();
+        for (const auto& ev : watch::SnapshotAllocEvents()) {
+            arr.push_back({{"timestamp_ms", ev.timestamp_ms},
+                           {"api", ev.api},
+                           {"address", HexAddr(ev.address)},
+                           {"size", ev.size},
+                           {"protect_or_flags", ev.protect_or_flags}});
+        }
+        res.set_content(json{{"ok", true}, {"events", arr}}.dump(), "application/json");
+    });
     svr.Post("/watch/page_access", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto mutation = action::LockMutations();
@@ -186,6 +203,26 @@ void RegisterWatchRoutes(httplib::Server& svr) {
         }
         res.set_content(json{{"ok", true}, {"events", arr}}.dump(), "application/json");
         overlay::LogApiCall("GET /watch/page_access/events (" + std::to_string(arr.size()) + ")");
+    });
+    svr.Get("/watch/page_access/events_snapshot", [](const httplib::Request&, httplib::Response& res) {
+        json arr = json::array();
+        for (const auto& ev : watch::SnapshotPageAccessEvents()) {
+            json stack = json::array();
+            for (uintptr_t frame : ev.stack) stack.push_back(HexAddr(frame));
+            arr.push_back({{"timestamp_ms", ev.timestamp_ms},
+                           {"watch_id", ev.watch_id},
+                           {"address", HexAddr(ev.address)},
+                           {"access", ev.access},
+                           {"label", ev.label},
+                           {"thread_id", ev.thread_id},
+                           {"instruction", HexAddr(ev.instruction)},
+                           {"access_size", ev.access_size},
+                           {"before", BytesHex(ev.before)},
+                           {"after", BytesHex(ev.after)},
+                           {"registers", RegistersToJson(ev.registers)},
+                           {"stack", stack}});
+        }
+        res.set_content(json{{"ok", true}, {"events", arr}}.dump(), "application/json");
     });
 }
 

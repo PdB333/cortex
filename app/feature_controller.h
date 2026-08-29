@@ -40,6 +40,11 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString snapshotResult READ snapshotResult NOTIFY snapshotsChanged)
     Q_PROPERTY(QVariantList freezes READ freezes NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList watches READ watches NOTIFY watchesChanged)
+    Q_PROPERTY(bool allocationWatchEnabled READ allocationWatchEnabled NOTIFY instrumentationChanged)
+    Q_PROPERTY(qulonglong allocationWatchMinSize READ allocationWatchMinSize NOTIFY instrumentationChanged)
+    Q_PROPERTY(QVariantList pageAccessWatches READ pageAccessWatches NOTIFY instrumentationChanged)
+    Q_PROPERTY(QVariantList allocationEvents READ allocationEvents NOTIFY instrumentationChanged)
+    Q_PROPERTY(QVariantList pageAccessEvents READ pageAccessEvents NOTIFY instrumentationChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
     Q_PROPERTY(int selectedTraceId READ selectedTraceId NOTIFY tracesChanged)
     Q_PROPERTY(QString sessionExportPath READ sessionExportPath NOTIFY sessionChanged)
@@ -80,6 +85,11 @@ public:
     QString snapshotResult() const { return snapshotResult_; }
     const QVariantList& freezes() const { return freezes_; }
     const QVariantList& watches() const { return watches_; }
+    bool allocationWatchEnabled() const { return allocationWatchEnabled_; }
+    qulonglong allocationWatchMinSize() const { return allocationWatchMinSize_; }
+    const QVariantList& pageAccessWatches() const { return pageAccessWatches_; }
+    const QVariantList& allocationEvents() const { return allocationEvents_; }
+    const QVariantList& pageAccessEvents() const { return pageAccessEvents_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
     int selectedTraceId() const { return selectedTraceId_; }
     QString sessionExportPath() const { return sessionExportPath_; }
@@ -132,6 +142,12 @@ public:
     Q_INVOKABLE bool addWatch(const QString& address, const QString& type, const QString& label = QString());
     Q_INVOKABLE bool deleteWatch(int id);
 
+    Q_INVOKABLE bool refreshInstrumentationState();
+    Q_INVOKABLE bool refreshInstrumentationEvents();
+    Q_INVOKABLE bool setAllocationWatch(bool enabled, qulonglong minSize = 0);
+    Q_INVOKABLE bool addPageAccessWatch(const QString& address, int size, const QString& label = QString());
+    Q_INVOKABLE bool deletePageAccessWatch(int id);
+
     Q_INVOKABLE bool refreshPatches();
     Q_INVOKABLE bool revertPatch(int patchId);
 
@@ -171,6 +187,7 @@ signals:
     void snapshotsChanged();
     void pointerMapsChanged();
     void watchesChanged();
+    void instrumentationChanged();
     void sessionChanged();
     void errorChanged();
 
@@ -215,6 +232,11 @@ private:
     QString snapshotResult_;
     QVariantList freezes_;
     QVariantList watches_;
+    bool allocationWatchEnabled_ = false;
+    qulonglong allocationWatchMinSize_ = 0;
+    QVariantList pageAccessWatches_;
+    QVariantList allocationEvents_;
+    QVariantList pageAccessEvents_;
     QVariantList traceEvents_;
     int selectedTraceId_ = -1;
     QString sessionExportPath_;

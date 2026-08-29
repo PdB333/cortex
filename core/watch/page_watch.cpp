@@ -244,6 +244,10 @@ std::vector<PageWatchInfo> ListPageWatches() {
     return out;
 }
 
+std::vector<PageAccessEvent> SnapshotPageAccessEvents() {
+    std::lock_guard<std::mutex> lock(g_eventsMutex);
+    return std::vector<PageAccessEvent>(g_events.begin(), g_events.end());
+}
 std::vector<PageAccessEvent> DrainPageAccessEvents() {
     std::lock_guard<std::mutex> lock(g_eventsMutex);
     std::vector<PageAccessEvent> out(g_events.begin(), g_events.end());

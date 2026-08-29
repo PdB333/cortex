@@ -521,6 +521,43 @@ jobs:
               if ($cancelStatus -ne "cancelled") {
                 throw "$label input sequence cancellation did not become visible"
               }
+              $disableAllocationWatch = @{
+                jsonrpc = "2.0"
+                id = 140
+                method = "tools/call"
+                params = @{
+                  name = "watch_allocations"
+                  arguments = @{ enabled = $false; min_size = 4096; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($disableAllocationWatch)
+              $mcp.StandardInput.Flush()
+              $disableAllocationResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($disableAllocationResponse.id -ne 140 -or -not $disableAllocationResponse.result.structuredContent.result.ok) {
+                throw "$label failed to configure the allocation watch safely"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":141,"method":"tools/call","params":{"name":"watch_allocations_status","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $allocationStatusResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $allocationStatus = $allocationStatusResponse.result.structuredContent.result
+              if ($allocationStatusResponse.id -ne 141 -or $allocationStatus.enabled -or [int64]$allocationStatus.min_size -ne 4096) {
+                throw "$label allocation watch status did not roundtrip"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":142,"method":"tools/call","params":{"name":"watch_allocations_events_snapshot","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $allocationSnapshotResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($allocationSnapshotResponse.id -ne 142 -or $allocationSnapshotResponse.result.isError) {
+                throw "$label non-destructive allocation snapshot failed"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":143,"method":"tools/call","params":{"name":"watch_page_access_events_snapshot","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $pageSnapshotResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($pageSnapshotResponse.id -ne 143 -or $pageSnapshotResponse.result.isError) {
+                throw "$label non-destructive page-access snapshot failed"
+              }
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {
                 throw "$label trace lifecycle tools are missing from the MCP catalog"

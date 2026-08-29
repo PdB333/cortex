@@ -752,6 +752,11 @@ bool FeatureController::refreshWatches() {
     }
 
     watches_.clear();
+    allocationWatchEnabled_ = false;
+    allocationWatchMinSize_ = 0;
+    pageAccessWatches_.clear();
+    allocationEvents_.clear();
+    pageAccessEvents_.clear();
     const json watchResult = RouteResult(watchOutput);
     const json watchEntries = watchResult.value("watches", json::array());
     if (watchEntries.is_array()) {
@@ -826,6 +831,136 @@ bool FeatureController::deleteWatch(int id) {
     json output;
     if (!callTool("watch_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
     return refreshWatches();
+}
+bool FeatureController::refreshInstrumentationState() {
+    json allocationOutput;
+    if (!callTool("watch_allocations_status", json::object(), allocationOutput, false)) return false;
+    const json allocationResult = RouteResult(allocationOutput);
+    if (!allocationResult.is_object()) {
+        setError(QStringLiteral("allocation_watch_status_invalid"));
+        return false;
+    }
+
+    json pageOutput;
+    if (!callTool("watch_page_access_list", json::object(), pageOutput, false)) return false;
+    const json pageResult = RouteResult(pageOutput);
+    if (!pageResult.is_object()) {
+        setError(QStringLiteral("page_watch_list_invalid"));
+        return false;
+    }
+
+    allocationWatchEnabled_ = allocationResult.value("enabled", false);
+    allocationWatchMinSize_ = static_cast<qulonglong>(allocationResult.value("min_size", uint64_t{0}));
+    pageAccessWatches_.clear();
+    const json watches = pageResult.value("watches", json::array());
+    if (watches.is_array()) {
+        pageAccessWatches_.reserve(static_cast<qsizetype>(watches.size()));
+        for (const auto& watch : watches) {
+            if (!watch.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("id"), watch.value("id", -1));
+            row.insert(QStringLiteral("address"), FromUtf8(watch.value("address", std::string())));
+            row.insert(QStringLiteral("size"), static_cast<qulonglong>(watch.value("size", uint64_t{0})));
+            row.insert(QStringLiteral("label"), FromUtf8(watch.value("label", std::string())));
+            pageAccessWatches_.push_back(row);
+        }
+    }
+
+    setError(QString());
+    emit instrumentationChanged();
+    return true;
+}
+
+bool FeatureController::refreshInstrumentationEvents() {
+    json allocationOutput;
+    if (!callTool("watch_allocations_events_snapshot", json::object(), allocationOutput, false)) return false;
+    const json allocationResult = RouteResult(allocationOutput);
+    if (!allocationResult.is_object()) {
+        setError(QStringLiteral("allocation_events_snapshot_invalid"));
+        return false;
+    }
+
+    json pageOutput;
+    if (!callTool("watch_page_access_events_snapshot", json::object(), pageOutput, false)) return false;
+    const json pageResult = RouteResult(pageOutput);
+    if (!pageResult.is_object()) {
+        setError(QStringLiteral("page_access_events_snapshot_invalid"));
+        return false;
+    }
+
+    allocationEvents_.clear();
+    const json allocationEntries = allocationResult.value("events", json::array());
+    if (allocationEntries.is_array()) {
+        allocationEvents_.reserve(static_cast<qsizetype>(allocationEntries.size()));
+        for (const auto& event : allocationEntries) {
+            if (!event.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("timestamp"), static_cast<qlonglong>(event.value("timestamp_ms", int64_t{0})));
+            row.insert(QStringLiteral("api"), FromUtf8(event.value("api", std::string())));
+            row.insert(QStringLiteral("address"), FromUtf8(event.value("address", std::string())));
+            row.insert(QStringLiteral("size"), static_cast<qulonglong>(event.value("size", uint64_t{0})));
+            row.insert(QStringLiteral("flags"), static_cast<qulonglong>(event.value("protect_or_flags", uint64_t{0})));
+            allocationEvents_.push_back(row);
+        }
+    }
+
+    pageAccessEvents_.clear();
+    const json pageEntries = pageResult.value("events", json::array());
+    if (pageEntries.is_array()) {
+        pageAccessEvents_.reserve(static_cast<qsizetype>(pageEntries.size()));
+        for (const auto& event : pageEntries) {
+            if (!event.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("timestamp"), static_cast<qlonglong>(event.value("timestamp_ms", int64_t{0})));
+            row.insert(QStringLiteral("watchId"), event.value("watch_id", -1));
+            row.insert(QStringLiteral("address"), FromUtf8(event.value("address", std::string())));
+            row.insert(QStringLiteral("access"), FromUtf8(event.value("access", std::string())));
+            row.insert(QStringLiteral("label"), FromUtf8(event.value("label", std::string())));
+            row.insert(QStringLiteral("threadId"), static_cast<qulonglong>(event.value("thread_id", uint64_t{0})));
+            row.insert(QStringLiteral("instruction"), FromUtf8(event.value("instruction", std::string())));
+            row.insert(QStringLiteral("size"), static_cast<qulonglong>(event.value("access_size", uint64_t{0})));
+            row.insert(QStringLiteral("before"), FromUtf8(event.value("before", std::string())));
+            row.insert(QStringLiteral("after"), FromUtf8(event.value("after", std::string())));
+            row.insert(QStringLiteral("registers"), event.contains("registers") ? JsonInline(event.at("registers")) : QStringLiteral("{}"));
+            row.insert(QStringLiteral("stack"), event.contains("stack") ? JsonInline(event.at("stack")) : QStringLiteral("[]"));
+            pageAccessEvents_.push_back(row);
+        }
+    }
+
+    setError(QString());
+    emit instrumentationChanged();
+    return true;
+}
+
+bool FeatureController::setAllocationWatch(bool enabled, qulonglong minSize) {
+    json output;
+    if (!callTool("watch_allocations",
+                  {{"enabled", enabled}, {"min_size", static_cast<uint64_t>(minSize)}},
+                  output,
+                  true)) return false;
+    return refreshInstrumentationState();
+}
+
+bool FeatureController::addPageAccessWatch(const QString& address, int size, const QString& label) {
+    if (address.trimmed().isEmpty() || size <= 0 || size > 64 * 1024 * 1024) {
+        setError(QStringLiteral("invalid_page_watch_configuration"));
+        return false;
+    }
+    json arguments = {{"address", address.trimmed().toUtf8().toStdString()}, {"size", size}};
+    if (!label.trimmed().isEmpty()) arguments["label"] = label.trimmed().toUtf8().toStdString();
+    json output;
+    if (!callTool("watch_page_access", arguments, output, true)) return false;
+    return refreshInstrumentationState();
+}
+
+bool FeatureController::deletePageAccessWatch(int id) {
+    if (id < 0) {
+        setError(QStringLiteral("invalid_page_watch_id"));
+        return false;
+    }
+    json output;
+    if (!callTool("watch_page_access_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
+    return refreshInstrumentationState();
 }
 bool FeatureController::refreshPatches() {
     json output;
@@ -1184,6 +1319,11 @@ void FeatureController::reset() {
     scriptOutput_.clear();
     freezes_.clear();
     watches_.clear();
+    allocationWatchEnabled_ = false;
+    allocationWatchMinSize_ = 0;
+    pageAccessWatches_.clear();
+    allocationEvents_.clear();
+    pageAccessEvents_.clear();
     traces_.clear();
     patches_.clear();
     snapshots_.clear();
@@ -1203,6 +1343,7 @@ void FeatureController::reset() {
     emit screenshotChanged();
     emit scriptsChanged();
     emit watchesChanged();
+    emit instrumentationChanged();
     emit tracesChanged();
     emit patchesChanged();
     emit snapshotsChanged();

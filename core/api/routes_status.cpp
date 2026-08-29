@@ -459,6 +459,11 @@ json BuildToolsManifest() {
         j.push_back({{"name", "watch_allocations_events"}, {"method", "GET"}, {"path", "/watch/allocations/events"},
                       {"description", "Returns all allocations recorded since the last call (api VirtualAlloc/HeapAlloc, address, size, protection/flags), then clears the queue."}});
 
+        j.push_back({{"name", "watch_allocations_status"}, {"method", "GET"}, {"path", "/watch/allocations/status"},
+                      {"description", "Returns allocation-watch enabled state and minimum recorded allocation size."}});
+
+        j.push_back({{"name", "watch_allocations_events_snapshot"}, {"method", "GET"}, {"path", "/watch/allocations/events_snapshot"},
+                      {"description", "Returns a non-destructive snapshot of the bounded allocation-event ring."}});
         j.push_back({{"name", "watch_page_access"}, {"method", "POST"}, {"path", "/watch/page_access"},
                       {"description", "Sets a memory breakpoint via page-guard (like x64dbg/Cheat Engine) on [address, address+size): marks the covered pages PAGE_GUARD, and a dedicated vectored exception handler records every access (read/write/execute) then rearms the guard (single-use by nature) before resuming. Does not affect other guard pages in the process (e.g. the stack) -- passes through if the exception does not concern a region registered here."},
                       {"body", {{"address", "required"}, {"size", "required"}, {"label", "optional"}}}});
@@ -472,6 +477,8 @@ json BuildToolsManifest() {
         j.push_back({{"name", "watch_page_access_events"}, {"method", "GET"}, {"path", "/watch/page_access/events"},
                       {"description", "Returns all accesses recorded since the last call (watch_id, exact address, access type read/write/execute), then clears the queue."}});
 
+        j.push_back({{"name", "watch_page_access_events_snapshot"}, {"method", "GET"}, {"path", "/watch/page_access/events_snapshot"},
+                      {"description", "Returns a non-destructive snapshot of page-access events, including instruction, registers, stack and before/after bytes."}});
         j.push_back({{"name", "analysis_functions"}, {"method", "POST"}, {"path", "/analysis/functions"},
                       {"description", "Heuristic function detection for a module (Ghidra/IDA-style on a binary without symbols): marks as a function start the byte after a ret+padding (0xCC/0x90) and any target of a direct call. Possible false negatives (a function reached only via a vtable, with no padding before it), rare false positives. 'size' = distance to the next detected function (0 for the last one)."},
                       {"body", {{"module", "required: module name (e.g. HitmanContracts.exe)"}}}});

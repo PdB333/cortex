@@ -66,6 +66,24 @@ int main() {
     const auto pointerMapDeleteRisk = api::mcp_contract::ClassifyTool("pointermap_delete", "DELETE", "/pointermap/{name}");
     check(pointerMapDeleteRisk == api::mcp_contract::ToolRisk::Control,
           "pointermap_delete is a control operation");
+    const auto allocationSnapshotRisk = api::mcp_contract::ClassifyTool(
+        "watch_allocations_events_snapshot", "GET", "/watch/allocations/events_snapshot");
+    check(allocationSnapshotRisk == api::mcp_contract::ToolRisk::Observe,
+          "allocation snapshot remains observational");
+    check(!api::mcp_contract::RequiresMutationPermission(allocationSnapshotRisk),
+          "allocation snapshot does not require mutation permission");
+    const auto pageSnapshotRisk = api::mcp_contract::ClassifyTool(
+        "watch_page_access_events_snapshot", "GET", "/watch/page_access/events_snapshot");
+    check(pageSnapshotRisk == api::mcp_contract::ToolRisk::Observe,
+          "page-access snapshot remains observational");
+    check(!api::mcp_contract::RequiresMutationPermission(pageSnapshotRisk),
+          "page-access snapshot does not require mutation permission");
+    const auto allocationControlRisk = api::mcp_contract::ClassifyTool(
+        "watch_allocations", "POST", "/watch/allocations");
+    check(allocationControlRisk == api::mcp_contract::ToolRisk::Control,
+          "allocation watch toggle remains a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(allocationControlRisk),
+          "allocation watch toggle requires mutation permission");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;
