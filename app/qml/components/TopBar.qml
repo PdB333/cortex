@@ -109,6 +109,31 @@ Rectangle {
         Item { Layout.fillWidth: true }
 
         ToolButton {
+            id: pausedButton
+            visible: CortexDebugger.pausedThreads.length > 0
+            Layout.preferredHeight: 32
+            text: "Paused: " + CortexDebugger.pausedThreads.length
+            onClicked: CortexApp.selectSection("Debugger")
+            contentItem: Text {
+                text: pausedButton.text
+                color: Theme.mutation
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.family: Theme.uiFont
+                font.pixelSize: 11
+                font.bold: true
+            }
+            background: Rectangle {
+                color: pausedButton.hovered ? Theme.hover : Theme.surfaceRaised
+                border.width: 1
+                border.color: Theme.mutation
+                radius: Theme.radius
+            }
+            ToolTip.visible: hovered
+            ToolTip.text: "Execution paused — open Debugger"
+        }
+
+        ToolButton {
             id: mutationButton
             Layout.preferredHeight: 32
             text: CortexApp.mutationPermission ? "Mutation: on" : "Mutation: off"
