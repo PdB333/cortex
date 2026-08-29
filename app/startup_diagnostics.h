@@ -4,6 +4,7 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <cstdio>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -18,16 +19,29 @@ inline bool HasArgument(int argc, char* argv[], const char* wanted) {
     return false;
 }
 
+inline const char* LevelName(QtMsgType type) {
+    if (type == QtInfoMsg) return "info";
+    if (type == QtWarningMsg) return "warning";
+    if (type == QtCriticalMsg) return "critical";
+    if (type == QtFatalMsg) return "fatal";
+    return "debug";
+}
+
 inline void MessageHandler(QtMsgType type,
                            const QMessageLogContext& context,
                            const QString& message) {
-    if (!logFile || !logFile->is_open()) return;
-    const char* level = "debug";
-    if (type == QtInfoMsg) level = "info";
-    else if (type == QtWarningMsg) level = "warning";
-    else if (type == QtCriticalMsg) level = "critical";
-    else if (type == QtFatalMsg) level = "fatal";
+    const char* level = LevelName(type);
+    const QByteArray utf8 = message.toUtf8();
 
+    // Keep diagnostics visible in CI even for the Windows GUI subsystem
+    // executable. The file remains the durable copy used by portable smoke
+    // tests, while stderr makes root-QML failures immediately actionable.
+    std::fprintf(stderr, "[%s] %s", level, utf8.constData());
+    if (context.file) std::fprintf(stderr, " (%s:%d)", context.file, context.line);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+
+    if (!logFile || !logFile->is_open()) return;
     *logFile << '[' << level << "] " << message.toStdString();
     if (context.file) *logFile << " (" << context.file << ':' << context.line << ')';
     *logFile << std::endl;
@@ -40,6 +54,8 @@ inline void Enable() {
 }
 
 inline void RecordFatal(const char* message) {
+    std::fprintf(stderr, "[fatal] %s\n", message ? message : "unknown fatal startup error");
+    std::fflush(stderr);
     if (logFile && logFile->is_open()) *logFile << "[fatal] " << message << std::endl;
 }
 } // namespace cortex::appdiag

@@ -15,6 +15,7 @@
 #include <QQmlContext>
 #include <QScreen>
 #include <QTimer>
+#include <QUrl>
 #include <QWindow>
 
 #include <string>
@@ -25,6 +26,17 @@ void ConfigureApplicationIdentity() {
     QCoreApplication::setApplicationName("Cortex");
     QCoreApplication::setOrganizationName("Cortex");
     QCoreApplication::setApplicationVersion("0.7.0-dev");
+}
+
+void LoadMainQml(QQmlApplicationEngine& engine) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    engine.loadFromModule("Cortex", "Main");
+#else
+    // loadFromModule was introduced in Qt 6.5. The module resource path is
+    // stable across Qt 6.4+, so older supported distributions can launch the
+    // same application without a separate frontend or build definition.
+    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/Cortex/Main.qml")));
+#endif
 }
 
 } // namespace
@@ -85,7 +97,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty("CortexFeatures", &features);
     engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);
     engine.rootContext()->setContextProperty("CortexDebugger", &debugger);
-    engine.loadFromModule("Cortex", "Main");
+    LoadMainQml(engine);
     if (engine.rootObjects().isEmpty()) {
         cortex::appdiag::RecordFatal("Cortex QML root object was not created.");
         return 1;
