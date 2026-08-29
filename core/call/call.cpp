@@ -88,10 +88,17 @@ bool IsExecutableAddress(uintptr_t address) {
         }                                                                                                        \
     }
 
+#ifdef _WIN64
+// Windows x64 has one native calling convention.  Avoid declaring x86-only
+// thiscall/fastcall function-pointer types because MinGW rejects/ignores them
+// inconsistently depending on architecture/toolchain.
+CORTEX_DEFINE_DISPATCH(, Native)
+#else
 CORTEX_DEFINE_DISPATCH(__cdecl, Cdecl)
 CORTEX_DEFINE_DISPATCH(__stdcall, Stdcall)
 CORTEX_DEFINE_DISPATCH(__thiscall, Thiscall)
 CORTEX_DEFINE_DISPATCH(__fastcall, Fastcall)
+#endif
 
 #undef CORTEX_DEFINE_DISPATCH
 
@@ -215,12 +222,17 @@ void* addr = reinterpret_cast<void*>(address);
     g_inCall = true;
     if (setjmp(g_jmpBuf) == 0) {
         uintptr_t ret = 0;
+#ifdef _WIN64
+        (void)conv;
+        ret = Dispatch_Native(addr, args);
+#else
         switch (conv) {
             case Convention::Stdcall: ret = Dispatch_Stdcall(addr, args); break;
             case Convention::Thiscall: ret = Dispatch_Thiscall(addr, args); break;
             case Convention::Fastcall: ret = Dispatch_Fastcall(addr, args); break;
             default: ret = Dispatch_Cdecl(addr, args); break;
         }
+#endif
         g_inCall = false;
         result.ok = true;
         result.returnValue = static_cast<uint64_t>(ret);
@@ -339,4 +351,5 @@ size_t PendingGameThreadCalls() {
 }
 
 } // namespace remotecall
+
 
