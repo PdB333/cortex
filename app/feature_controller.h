@@ -177,6 +177,7 @@ public:
 
     Q_INVOKABLE bool resolveSymbol(const QString& address);
     Q_INVOKABLE bool lookupSymbol(const QString& name);
+    Q_INVOKABLE void clearSymbolResult();
 
     Q_INVOKABLE bool refreshStructures();
     Q_INVOKABLE bool selectStructure(const QString& name);
