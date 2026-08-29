@@ -303,6 +303,68 @@ jobs:
                 throw "$label status resolved the wrong target"
               }
 
+              if (-not ($tools.result.tools.name -contains "trace_stop") -or
+                  -not ($tools.result.tools.name -contains "trace_delete")) {
+                throw "$label trace lifecycle tools are missing from the MCP catalog"
+              }
+
+              $createPrompt = @{
+                jsonrpc = "2.0"
+                id = 4
+                method = "tools/call"
+                params = @{
+                  name = "prompt_value_change"
+                  arguments = @{
+                    label = "Qt prompt E2E"
+                    current_value = "before"
+                    target_value = "after"
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($createPrompt)
+              $mcp.StandardInput.Flush()
+              $created = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $promptId = [int]$created.result.structuredContent.result.id
+              if ($created.id -ne 4 -or $promptId -le 0) {
+                throw "$label failed to create the Qt prompt E2E request"
+              }
+
+              $promptStdout = Join-Path $env:RUNNER_TEMP "cortex-prompt-$label-stdout.txt"
+              $promptStderr = Join-Path $env:RUNNER_TEMP "cortex-prompt-$label-stderr.txt"
+              $promptProcess = Start-Process `
+                -FilePath (Join-Path $preview "cortex.exe") `
+                -ArgumentList @("--prompt-channel-smoke", "--pid", $target.Id, "--answer", "qt-e2e") `
+                -WorkingDirectory $preview `
+                -RedirectStandardOutput $promptStdout `
+                -RedirectStandardError $promptStderr `
+                -PassThru
+              if (-not $promptProcess.WaitForExit(15000)) {
+                Stop-Process -Id $promptProcess.Id -Force -ErrorAction SilentlyContinue
+                throw "$label Qt prompt channel smoke timed out"
+              }
+              if (Test-Path $promptStdout) { Get-Content $promptStdout }
+              if (Test-Path $promptStderr) { Get-Content $promptStderr }
+              if ($promptProcess.ExitCode -ne 0) {
+                throw "$label Qt prompt channel smoke failed with $($promptProcess.ExitCode)"
+              }
+
+              $promptStatusRequest = @{
+                jsonrpc = "2.0"
+                id = 5
+                method = "tools/call"
+                params = @{
+                  name = "prompt_status"
+                  arguments = @{ _path = @{ id = $promptId } }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($promptStatusRequest)
+              $mcp.StandardInput.Flush()
+              $promptStatus = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $promptResult = $promptStatus.result.structuredContent.result
+              if ($promptStatus.id -ne 5 -or $promptResult.status -ne "answered" -or $promptResult.response -ne "qt-e2e") {
+                throw "$label Qt prompt channel did not persist the desktop answer"
+              }
+
               $mcp.StandardInput.Close()
               if (-not $mcp.WaitForExit(15000)) {
                 $mcp.Kill($true)

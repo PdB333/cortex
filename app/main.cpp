@@ -18,6 +18,7 @@
 #include <QQmlContext>
 #include <QScreen>
 #include <QTimer>
+#include <QThread>
 #include <QUrl>
 #include <QWindow>
 
@@ -31,6 +32,69 @@ void ConfigureApplicationIdentity() {
     QCoreApplication::setApplicationVersion("0.7.0-dev");
 }
 
+int RunPromptChannelSmoke(int argc, char* argv[], const QString& runtimeDirectory) {
+    qulonglong pid = 0;
+    QString answer = QStringLiteral("qt-prompt-e2e");
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("--pid") && i + 1 < argc) {
+            bool ok = false;
+            pid = QString::fromLocal8Bit(argv[++i]).toULongLong(&ok);
+            if (!ok) pid = 0;
+        } else if (arg == QStringLiteral("--answer") && i + 1 < argc) {
+            answer = QString::fromLocal8Bit(argv[++i]);
+        }
+    }
+    if (pid == 0) {
+        qCritical("--prompt-channel-smoke requires --pid <target pid>");
+        return 2;
+    }
+
+    AppController controller;
+    int targetIndex = -1;
+    for (int attempt = 0; attempt < 30 && targetIndex < 0; ++attempt) {
+        controller.refreshTargets();
+        const auto& targets = controller.targets();
+        for (qsizetype i = 0; i < targets.size(); ++i) {
+            if (targets.at(i).toMap().value(QStringLiteral("pid")).toULongLong() == pid) {
+                targetIndex = static_cast<int>(i);
+                break;
+            }
+        }
+        if (targetIndex < 0) QThread::msleep(100);
+    }
+    if (targetIndex < 0) {
+        qCritical("prompt smoke target was not found");
+        return 3;
+    }
+
+    controller.selectTarget(targetIndex);
+    if (!controller.sessionActive()) {
+        qCritical().noquote() << "prompt smoke attach failed:" << controller.lastError();
+        return 4;
+    }
+
+    PayloadController payload(controller.sessionManager(), runtimeDirectory);
+    PromptController prompt(payload);
+    for (int attempt = 0; attempt < 50 && !prompt.active(); ++attempt) {
+        prompt.refresh();
+        QCoreApplication::processEvents();
+        if (!prompt.active()) QThread::msleep(100);
+    }
+    if (!prompt.active()) {
+        qCritical().noquote() << "prompt smoke did not observe an active prompt:" << prompt.lastError();
+        return 5;
+    }
+
+    const int promptId = prompt.promptId();
+    if (!prompt.answer(answer)) {
+        qCritical().noquote() << "prompt smoke answer failed:" << prompt.lastError();
+        return 6;
+    }
+
+    qInfo().noquote() << "PASS: Qt prompt channel answered prompt" << promptId;
+    return 0;
+}
 void LoadMainQml(QQmlApplicationEngine& engine) {
     // Always load the application root from the QML resource embedded in
     // cortex.exe. loadFromModule("Cortex", "Main") works from the build tree,
@@ -63,6 +127,11 @@ void LoadMainQml(QQmlApplicationEngine& engine) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc > 1 && argv[1] && std::string(argv[1]) == "--prompt-channel-smoke") {
+        QCoreApplication app(argc, argv);
+        ConfigureApplicationIdentity();
+        return RunPromptChannelSmoke(argc, argv, QCoreApplication::applicationDirPath());
+    }
     // Headless MCP is a first-class mode of the same Cortex application. Do
     // not initialize Qt Quick or a display backend: stdout belongs exclusively
     // to JSON-RPC for the lifetime of this process.

@@ -547,6 +547,10 @@ json BuildToolsManifest() {
                      {"description","Intersects several sessions and scores the stable paths."},{"body",{{"names","at least two names"}}}});
         j.push_back({{"name","trace_start"},{"method","POST"},{"path","/trace/start"},
                      {"description","Starts a bounded single-step trace with thread/range filters and coverage."}});
+        j.push_back({{"name","trace_stop"},{"method","POST"},{"path","/trace/{id}/stop"},
+                     {"description","Stops an active trace while preserving its captured events and coverage."}});
+        j.push_back({{"name","trace_delete"},{"method","DELETE"},{"path","/trace/{id}"},
+                     {"description","Deletes a trace and its captured execution data."}});
         j.push_back({{"name","trace_list"},{"method","GET"},{"path","/trace/list"},{"description","Lists traces and their state."}});
         j.push_back({{"name","trace_events"},{"method","GET"},{"path","/trace/{id}/events"},{"description","Returns captured instructions, bytes, and register deltas."}});
         j.push_back({{"name","trace_coverage"},{"method","GET"},{"path","/trace/{id}/coverage"},{"description","Heatmap of executed addresses."}});
