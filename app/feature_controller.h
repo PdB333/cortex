@@ -24,6 +24,7 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString screenshotSource READ screenshotSource NOTIFY screenshotChanged)
     Q_PROPERTY(QString screenshotMeta READ screenshotMeta NOTIFY screenshotChanged)
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
+    Q_PROPERTY(QVariantList patches READ patches NOTIFY patchesChanged)
     Q_PROPERTY(QVariantList freezes READ freezes NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList watches READ watches NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
@@ -50,6 +51,7 @@ public:
     QString screenshotSource() const { return screenshotSource_; }
     QString screenshotMeta() const { return screenshotMeta_; }
     const QVariantList& traces() const { return traces_; }
+    const QVariantList& patches() const { return patches_; }
     const QVariantList& freezes() const { return freezes_; }
     const QVariantList& watches() const { return watches_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
@@ -92,6 +94,9 @@ public:
     Q_INVOKABLE bool addWatch(const QString& address, const QString& type, const QString& label = QString());
     Q_INVOKABLE bool deleteWatch(int id);
 
+    Q_INVOKABLE bool refreshPatches();
+    Q_INVOKABLE bool revertPatch(int patchId);
+
     Q_INVOKABLE bool refreshTraces();
     Q_INVOKABLE bool startTrace(qulonglong threadId, int maxSteps = 10000);
     Q_INVOKABLE bool stopTrace(int traceId);
@@ -111,6 +116,7 @@ signals:
     void inputChanged();
     void screenshotChanged();
     void tracesChanged();
+    void patchesChanged();
     void watchesChanged();
     void sessionChanged();
     void errorChanged();
@@ -140,6 +146,7 @@ private:
     QString screenshotSource_;
     QString screenshotMeta_;
     QVariantList traces_;
+    QVariantList patches_;
     QVariantList freezes_;
     QVariantList watches_;
     QVariantList traceEvents_;

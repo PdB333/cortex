@@ -262,8 +262,16 @@ jobs:
             $mcpStarted = $false
             try {
               Remove-Item (Join-Path $assetDirectory "cortex.token") -Force -ErrorAction SilentlyContinue
-              $target = Start-Process -FilePath $targetPath -PassThru
-              Start-Sleep -Milliseconds 500
+              $safeLabel = $label -replace '[^a-zA-Z0-9_-]', '-'
+              $manifestPath = Join-Path $env:RUNNER_TEMP "cortex-fixture-$safeLabel.json"
+              Remove-Item $manifestPath -Force -ErrorAction SilentlyContinue
+              $target = Start-Process -FilePath $targetPath -ArgumentList @("--e2e-manifest", $manifestPath) -PassThru
+              for ($attempt = 0; $attempt -lt 50 -and -not (Test-Path $manifestPath); $attempt++) {
+                Start-Sleep -Milliseconds 100
+              }
+              if (-not (Test-Path $manifestPath)) { throw "$label fixture manifest was not created" }
+              $fixture = Get-Content $manifestPath -Raw | ConvertFrom-Json
+              Start-Sleep -Milliseconds 250
 
               $start = [System.Diagnostics.ProcessStartInfo]::new()
               $start.FileName = Join-Path $preview "cortex.exe"
@@ -524,6 +532,74 @@ jobs:
               $deleteNoteResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               if ($deleteNoteResponse.id -ne 13 -or -not $deleteNoteResponse.result.structuredContent.result.ok) {
                 throw "$label failed to clean the project note"
+              }
+              $patchWrite = @{
+                jsonrpc = "2.0"
+                id = 14
+                method = "tools/call"
+                params = @{
+                  name = "patch_write"
+                  arguments = @{
+                    address = [string]$fixture.u32
+                    bytes = "78563412"
+                    label = "portable patch e2e"
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($patchWrite)
+              $mcp.StandardInput.Flush()
+              $patchWriteResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $patchId = [int]$patchWriteResponse.result.structuredContent.result.id
+              if ($patchWriteResponse.id -ne 14 -or $patchId -le 0) {
+                throw "$label patch_write did not create a tracked patch"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"patch_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $patchListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $activePatch = @($patchListResponse.result.structuredContent.result.patches | Where-Object { [int]$_.id -eq $patchId })
+              if ($patchListResponse.id -ne 15 -or $activePatch.Count -ne 1 -or $activePatch[0].new_bytes -ne "78563412") {
+                throw "$label patch_list did not expose the tracked patch"
+              }
+
+              $patchedRead = @{
+                jsonrpc = "2.0"
+                id = 16
+                method = "tools/call"
+                params = @{ name = "memory_read"; arguments = @{ address = [string]$fixture.u32; type = "u32" } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($patchedRead)
+              $mcp.StandardInput.Flush()
+              $patchedReadResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($patchedReadResponse.id -ne 16 -or [uint64]$patchedReadResponse.result.structuredContent.result.value -ne [uint64]305419896) {
+                throw "$label patch bytes were not visible through memory_read"
+              }
+
+              $patchRevert = @{
+                jsonrpc = "2.0"
+                id = 17
+                method = "tools/call"
+                params = @{ name = "patch_revert"; arguments = @{ _path = @{ id = $patchId }; mutation_permission = $true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($patchRevert)
+              $mcp.StandardInput.Flush()
+              $patchRevertResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($patchRevertResponse.id -ne 17 -or -not $patchRevertResponse.result.structuredContent.result.ok) {
+                throw "$label failed to revert the tracked patch"
+              }
+
+              $restoredRead = @{
+                jsonrpc = "2.0"
+                id = 18
+                method = "tools/call"
+                params = @{ name = "memory_read"; arguments = @{ address = [string]$fixture.u32; type = "u32" } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($restoredRead)
+              $mcp.StandardInput.Flush()
+              $restoredReadResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($restoredReadResponse.id -ne 18 -or [uint64]$restoredReadResponse.result.structuredContent.result.value -ne [uint64]3735928559) {
+                throw "$label patch revert did not restore the original bytes"
               }
               $mcp.StandardInput.Close()
               if (-not $mcp.WaitForExit(15000)) {

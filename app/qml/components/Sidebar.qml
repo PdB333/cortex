@@ -19,6 +19,7 @@ Rectangle {
         ListElement { group: "DEBUG"; label: "Debugger" }
         ListElement { group: "DEBUG"; label: "Breakpoints" }
         ListElement { group: "DEBUG"; label: "Traces" }
+        ListElement { group: "DEBUG"; label: "Patches" }
         ListElement { group: "DEBUG"; label: "Watches" }
         ListElement { group: "DEBUG"; label: "Hooks" }
         ListElement { group: "OBSERVE"; label: "Network" }

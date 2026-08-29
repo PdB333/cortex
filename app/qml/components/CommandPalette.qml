@@ -29,6 +29,7 @@ Popup {
         { label: "View: Debugger", section: "Debugger", action: "view" },
         { label: "View: Breakpoints", section: "Breakpoints", action: "view" },
         { label: "View: Traces", section: "Traces", action: "view" },
+        { label: "View: Patches", section: "Patches", action: "view" },
         { label: "View: Watches", section: "Watches", action: "view" },
         { label: "View: Hooks", section: "Hooks", action: "view" },
         { label: "View: Network", section: "Network", action: "view" },
