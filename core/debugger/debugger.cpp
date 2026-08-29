@@ -101,6 +101,14 @@ struct ThreadCtl {
 std::mutex g_mutex;
 int g_nextBpId = 1;
 std::map<int, SwEntry> g_swBps;
+// Removed software breakpoints remain as address/original-byte tombstones so
+// an INT3 exception that was already in flight at removal time is still
+// recognized and resumed on the original instruction without being re-armed.
+struct RetiredSwEntry {
+    uint8_t origByte = 0;
+    ULONGLONG expiresAt = 0;
+};
+std::map<uintptr_t, RetiredSwEntry> g_retiredSwBps;
 std::map<int, HwEntry> g_hwBps;
 bool g_hwSlotUsed[4] = {false, false, false, false};
 std::map<DWORD, ThreadCtl> g_threadCtl;
@@ -109,6 +117,19 @@ PVOID g_vehHandle = nullptr;
 std::atomic<bool> g_hwMonitorRunning{false};
 std::thread g_hwMonitorThread;
 std::set<DWORD> g_hwConfiguredThreads;
+
+void PruneRetiredSoftwareBreakpoints() {
+    const ULONGLONG now = GetTickCount64();
+    for (auto it = g_retiredSwBps.begin(); it != g_retiredSwBps.end();) {
+        if (it->second.expiresAt <= now) it = g_retiredSwBps.erase(it);
+        else ++it;
+    }
+}
+
+void RetireSoftwareBreakpoint(uintptr_t address, uint8_t origByte) {
+    PruneRetiredSoftwareBreakpoints();
+    g_retiredSwBps[address] = RetiredSwEntry{origByte, GetTickCount64() + 2000};
+}
 
 // Trigger -> auto-trace dispatcher.
 struct TriggerReq { DWORD tid; TraceConfig cfg; };
@@ -589,22 +610,61 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
     PCONTEXT ctx = info->ContextRecord;
 
     if (code == EXCEPTION_BREAKPOINT) {
-        // INT3 is a trap: EIP/ExceptionAddress already point one byte past
-        // the 0xCC that fired.
-        uintptr_t addr = reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress) - 1;
+        // Windows exposes the exception address and CPU context separately.
+        // Depending on architecture/runtime details, the context IP can point
+        // at or just past the INT3. Match only addresses Cortex actually owns
+        // instead of blindly subtracting one and potentially leaking our trap.
+        const uintptr_t exceptionAddress = reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);
+        const uintptr_t contextIp = GetCtxIp(ctx);
+        const uintptr_t candidates[] = {
+            exceptionAddress,
+            contextIp > 0 ? contextIp - 1 : 0,
+            contextIp,
+            exceptionAddress > 0 ? exceptionAddress - 1 : 0
+        };
 
+        uintptr_t addr = 0;
         int foundId = -1;
+        bool retired = false;
         SwEntry entry{};
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            for (auto& [id, e] : g_swBps) {
-                if (e.address == addr) { foundId = id; entry = e; break; }
+            PruneRetiredSoftwareBreakpoints();
+            for (uintptr_t candidate : candidates) {
+                if (candidate == 0) continue;
+                for (const auto& [id, e] : g_swBps) {
+                    if (e.address == candidate) {
+                        addr = candidate;
+                        foundId = id;
+                        entry = e;
+                        break;
+                    }
+                }
+                if (foundId >= 0) break;
+                const auto old = g_retiredSwBps.find(candidate);
+                if (old != g_retiredSwBps.end()) {
+                    addr = candidate;
+                    entry.address = candidate;
+                    entry.origByte = old->second.origByte;
+                    retired = true;
+                    break;
+                }
             }
         }
-        if (foundId < 0) return EXCEPTION_CONTINUE_SEARCH;
+        if (foundId < 0 && !retired) return EXCEPTION_CONTINUE_SEARCH;
 
+        // A removed breakpoint may still have an exception already dispatched
+        // on another thread. Its original byte has already been restored; just
+        // rewind that thread to execute it and never re-arm the trap.
+        if (retired) {
+            SetCtxIp(ctx, addr);
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+
+        // Restore before rewinding IP. If restoration fails, leave the context
+        // untouched and let another debugger/handler decide how to recover.
+        if (!memory::WriteBytes(addr, {entry.origByte})) return EXCEPTION_CONTINUE_SEARCH;
         SetCtxIp(ctx, addr);
-        memory::WriteBytes(addr, {entry.origByte});
 
         // The condition check happens after the byte restore above: that part
         // must always run so the CPU can step past the 0xCC regardless of
@@ -680,7 +740,27 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
             }
         }
         if (hasPending) {
-            memory::WriteBytes(pendingAddr, {0xCC});
+            // A user may remove the breakpoint while this thread is stepping
+            // the original instruction. Never resurrect a deleted breakpoint.
+            int activeId = -1;
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                for (const auto& [id, e] : g_swBps) {
+                    if (e.address == pendingAddr) { activeId = id; break; }
+                }
+            }
+            if (activeId >= 0 && !memory::WriteBytes(pendingAddr, {0xCC})) {
+                // The original byte is already back in memory, so failure to
+                // re-arm is safe: disable the logical breakpoint instead of
+                // pretending a trap is still installed.
+                std::lock_guard<std::mutex> lock(g_mutex);
+                const auto failed = g_swBps.find(activeId);
+                if (failed != g_swBps.end()) {
+                    RetireSoftwareBreakpoint(failed->second.address, failed->second.origByte);
+                    g_swBps.erase(failed);
+                }
+                g_bpLogs.erase(activeId);
+            }
             if (traceActive) ctx->EFlags |= kTF; else ctx->EFlags &= ~kTF;
             return EXCEPTION_CONTINUE_EXECUTION;
         }
@@ -853,6 +933,7 @@ bool Shutdown() {
         memory::WriteBytes(e.address, {e.origByte});
     }
     g_swBps.clear();
+    g_retiredSwBps.clear();
     for (auto& [id, e] : g_hwBps) {
         ClearHwSlotOnAllThreads(e.slot);
     }
@@ -879,20 +960,29 @@ int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
     std::vector<BpCapture> caps = captures ? *captures : std::vector<BpCapture>{};
 
     if (kind == BpKind::Software) {
-        // INT3 only makes sense on executable code -- writing it into a data
-        // address corrupts that data and can never trigger (nothing ever
-        // executes there), so refuse rather than silently vandalizing memory.
+        // A software breakpoint without our VEH would turn into an unhandled
+        // process breakpoint. Never patch the target unless the handler exists.
+        if (!g_vehHandle || address == 0) return -1;
+
         MEMORY_BASIC_INFORMATION mbi = {};
-        if (VirtualQueryEx(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0) {
-            return -1;
-        }
+        if (VirtualQueryEx(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0) return -1;
         constexpr DWORD kExecMask = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-        if ((mbi.Protect & kExecMask) == 0) return -1;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & kExecMask) == 0 ||
+            (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) return -1;
+
+        // Serialize validation, patching and registration so there is no window
+        // where an INT3 exists without a matching Cortex breakpoint record.
+        std::lock_guard<std::mutex> lock(g_mutex);
+        for (const auto& [id, existing] : g_swBps)
+            if (existing.address == address) return -1;
 
         std::vector<uint8_t> orig;
-        if (!memory::ReadBytes(address, 1, orig)) return -1;
+        if (!memory::ReadBytes(address, 1, orig) || orig.empty()) return -1;
+        // Do not claim a pre-existing INT3: it may belong to the game or an
+        // attached debugger and cannot be safely restored by Cortex.
+        if (orig[0] == 0xCC) return -1;
+        g_retiredSwBps.erase(address);
         if (!memory::WriteBytes(address, {0xCC})) return -1;
-        std::lock_guard<std::mutex> lock(g_mutex);
         int id = g_nextBpId++;
         g_swBps[id] = SwEntry{address, orig[0], action, 0, cond, caps};
         return id;
@@ -955,7 +1045,8 @@ bool RemoveBreakpoint(int id) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto sw = g_swBps.find(id);
     if (sw != g_swBps.end()) {
-        memory::WriteBytes(sw->second.address, {sw->second.origByte});
+        if (!memory::WriteBytes(sw->second.address, {sw->second.origByte})) return false;
+        RetireSoftwareBreakpoint(sw->second.address, sw->second.origByte);
         g_swBps.erase(sw);
         g_bpLogs.erase(id);
         return true;

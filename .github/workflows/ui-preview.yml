@@ -320,6 +320,81 @@ jobs:
                 throw "$label status resolved the wrong target"
               }
 
+              # Exercise a hot software breakpoint repeatedly. The target function runs every
+              # frame, covering INT3 restore/single-step/re-arm, duplicate rejection and
+              # removal while hits may already be in flight. The target must remain alive.
+              for ($bpRound = 0; $bpRound -lt 3; $bpRound++) {
+                $bpRequestId = 10 + ($bpRound * 3)
+                $addBreakpoint = @{
+                  jsonrpc = "2.0"
+                  id = $bpRequestId
+                  method = "tools/call"
+                  params = @{
+                    name = "debug_breakpoint_add"
+                    arguments = @{ address = [string]$fixture.breakpoint_anchor; kind = "software"; action = "log"; mutation_permission = $true }
+                  }
+                } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($addBreakpoint)
+                $mcp.StandardInput.Flush()
+                $addBreakpointResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $breakpointResult = $addBreakpointResponse.result.structuredContent.result
+                $breakpointId = [int]$breakpointResult.id
+                if ($addBreakpointResponse.id -ne $bpRequestId -or -not $breakpointResult.ok -or $breakpointId -le 0) {
+                  throw "$label failed to install software breakpoint survival regression"
+                }
+
+                if ($bpRound -eq 0) {
+                  $duplicateBreakpoint = @{
+                    jsonrpc = "2.0"
+                    id = $bpRequestId + 1
+                    method = "tools/call"
+                    params = @{
+                      name = "debug_breakpoint_add"
+                      arguments = @{ address = [string]$fixture.breakpoint_anchor; kind = "software"; action = "log"; mutation_permission = $true }
+                    }
+                  } | ConvertTo-Json -Depth 8 -Compress
+                  $mcp.StandardInput.WriteLine($duplicateBreakpoint)
+                  $mcp.StandardInput.Flush()
+                  $duplicateResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                  if ($duplicateResponse.result.structuredContent.result.ok) {
+                    throw "$label duplicate software breakpoint was accepted"
+                  }
+                }
+
+                Start-Sleep -Milliseconds 220
+                $listBreakpointRequest = @{
+                  jsonrpc = "2.0"
+                  id = 30 + $bpRound
+                  method = "tools/call"
+                  params = @{ name = "debug_breakpoint_list"; arguments = @{} }
+                } | ConvertTo-Json -Depth 6 -Compress
+                $mcp.StandardInput.WriteLine($listBreakpointRequest)
+                $mcp.StandardInput.Flush()
+                $breakpointListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $listedBreakpoint = @($breakpointListResponse.result.structuredContent.result.breakpoints | Where-Object { [int]$_.id -eq $breakpointId })
+                if ($listedBreakpoint.Count -ne 1 -or [uint64]$listedBreakpoint[0].hit_count -lt 1) {
+                  throw "$label software breakpoint did not record a hit"
+                }
+
+                $deleteBreakpoint = @{
+                  jsonrpc = "2.0"
+                  id = $bpRequestId + 2
+                  method = "tools/call"
+                  params = @{ name = "debug_breakpoint_delete"; arguments = @{ _path = @{ id = $breakpointId }; mutation_permission = $true } }
+                } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($deleteBreakpoint)
+                $mcp.StandardInput.Flush()
+                $deleteBreakpointResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                if (-not $deleteBreakpointResponse.result.structuredContent.result.ok) {
+                  throw "$label failed to remove software breakpoint"
+                }
+                Start-Sleep -Milliseconds 80
+                $target.Refresh()
+                if ($target.HasExited) {
+                  throw "$label target crashed after software breakpoint hit/removal"
+                }
+              }
+
               $deniedMutation = @{
                 jsonrpc = "2.0"
                 id = 39

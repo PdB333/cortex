@@ -44,7 +44,9 @@ bool WriteBytes(uintptr_t address, const std::vector<uint8_t>& data) {
         VirtualProtect(reinterpret_cast<LPVOID>(address), data.size(), oldProtect, &tmp);
     }
 
-    return ok && bytesWritten == data.size();
+    const bool complete = ok && bytesWritten == data.size();
+    if (complete) FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), data.size());
+    return complete;
 }
 
 std::optional<std::string> ReadString(uintptr_t address, size_t max_len) {

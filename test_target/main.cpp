@@ -20,6 +20,11 @@ extern "C" __declspec(dllexport) char     g_cortex_str[32] = "cortex-canary";
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_breakpoint_canary = 0;
+
+extern "C" __declspec(dllexport) __declspec(noinline) void CortexBreakpointCanary() {
+    ++g_cortex_breakpoint_canary;
+}
 
 namespace {
 
@@ -156,6 +161,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"frame\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_frame) << "\",\n"
          << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
+         << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
          << std::dec
          << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
          << "  \"hang_event\": \"" << EscapeJson(control.hangEventName) << "\",\n"
@@ -248,6 +254,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         }
 
         ++g_cortex_frame;
+        CortexBreakpointCanary();
         if (GetAsyncKeyState('W') & 0x8000) ++g_cortex_wpress;
         if (e2e.enabled && (g_cortex_frame % 15) == 0) ++g_cortex_health;
         InvalidateRect(window, nullptr, FALSE);
