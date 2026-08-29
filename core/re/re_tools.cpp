@@ -1,8 +1,9 @@
-﻿#include "re_tools.h"
+#include "re_tools.h"
 #include "../debugger/debugger.h"
 #include "../memory/memory.h"
 #include "../process/address.h"
 #include "../project/project.h"
+#include "../struct/structs.h"
 #include "../watch/watch.h"
 #include <windows.h>
 #include <algorithm>
@@ -23,7 +24,7 @@ constexpr size_t kMaxTrackSize = 4096;
 constexpr size_t kMaxTrackEvents = 256;
 constexpr size_t kInspectPrefix = 512;
 struct Track {
-    int id = 0; std::string name; json addressSpec; std::string pointerPath;
+    int id = 0; std::string name; json addressSpec; std::string pointerPath; std::string structName;
     size_t size = 256; bool persist = true; uintptr_t currentAddress = 0; bool alive = false;
     std::vector<uint8_t> bytes; json snapshot = json::object(); std::deque<json> events;
 };
@@ -86,17 +87,19 @@ json BuildPointers(const std::vector<uint8_t>& bytes) {
 json AllocationFor(uintptr_t address) {
     json best=nullptr; for(const auto& ev:watch::SnapshotAllocEvents()){if(!ev.address||!ev.size)continue;if(address>=ev.address&&address-ev.address<ev.size)best={{"base",HexAddr(ev.address)},{"size",ev.size},{"api",ev.api},{"timestamp_ms",ev.timestamp_ms}};} return best;
 }
-json BuildSnapshot(uintptr_t address,size_t size,std::vector<uint8_t>* raw=nullptr) {
+json BuildSnapshot(uintptr_t address,size_t size,std::vector<uint8_t>* raw=nullptr,const std::string& structName={}) {
     std::vector<uint8_t>bytes; if(!address||!memory::ReadBytes(address,size,bytes))return{{"alive",false},{"address",HexAddr(address)}}; if(raw)*raw=bytes;
     json snapshot{{"alive",true},{"address",HexAddr(address)},{"address_named",process::DescribeAddress(address)},{"size",bytes.size()},{"hex",HexBytes(bytes)},{"pointers",BuildPointers(bytes)},{"subobjects",DetectCppSubobjects(address,size).value("subobjects",json::array())}};
-    json alloc=AllocationFor(address); if(!alloc.is_null())snapshot["allocation"]=alloc; return snapshot;
+    json alloc=AllocationFor(address); if(!alloc.is_null())snapshot["allocation"]=alloc;
+    if(!structName.empty()){json fields=json::object(),errors=json::object();snapshot["struct_name"]=structName;if(structs::Read(structName,address,fields,errors)){snapshot["fields"]=std::move(fields);if(!errors.empty())snapshot["field_errors"]=std::move(errors);}else snapshot["struct_error"]="unknown_struct";}
+    return snapshot;
 }
 void PersistTracks() {
-    json tracks=json::array(); {std::lock_guard<std::mutex> lock(g_mutex);for(const auto&[id,t]:g_tracks)if(t.persist)tracks.push_back({{"name",t.name},{"address",t.addressSpec},{"pointer_path",t.pointerPath},{"size",t.size}});} project::SetObjectTracks(tracks);
+    json tracks=json::array(); {std::lock_guard<std::mutex> lock(g_mutex);for(const auto&[id,t]:g_tracks)if(t.persist)tracks.push_back({{"name",t.name},{"address",t.addressSpec},{"pointer_path",t.pointerPath},{"struct_name",t.structName},{"size",t.size}});} project::SetObjectTracks(tracks);
 }
 void SampleTrack(int id) {
     Track source; {std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return;source=it->second;}
-    uintptr_t address=ResolveTrackAddress(source); std::vector<uint8_t>bytes; json snapshot=BuildSnapshot(address,source.size,&bytes); bool alive=snapshot.value("alive",false);
+    uintptr_t address=ResolveTrackAddress(source); std::vector<uint8_t>bytes; json snapshot=BuildSnapshot(address,source.size,&bytes,source.structName); bool alive=snapshot.value("alive",false);
     std::lock_guard<std::mutex> lock(g_mutex); auto it=g_tracks.find(id);if(it==g_tracks.end())return;Track& track=it->second;
     if(track.currentAddress&&address&&track.currentAddress!=address)PushTrackEvent(track,{{"type","address_changed"},{"from",HexAddr(track.currentAddress)},{"to",HexAddr(address)}});
     if(track.alive&&!alive)PushTrackEvent(track,{{"type","destroyed"},{"address",HexAddr(track.currentAddress)}});
@@ -125,13 +128,13 @@ void Init(){
             bool duplicate=false;for(const auto& [id,t]:g_tracks)if(t.name==name){duplicate=true;break;}
             if(duplicate)continue;
             Track t;t.id=g_nextTrackId++;t.name=name;t.addressSpec=item.value("address",json("0"));
-            t.pointerPath=item.value("pointer_path",std::string());t.size=size;t.persist=true;g_tracks[t.id]=std::move(t);
+            t.pointerPath=item.value("pointer_path",std::string());t.structName=item.value("struct_name",std::string());t.size=size;t.persist=true;g_tracks[t.id]=std::move(t);
         }
     }
     g_thread=std::thread(TrackLoop);
 }
 void Shutdown(){if(!g_running.exchange(false))return;if(g_thread.joinable())g_thread.join();}
-int TrackObject(const std::string& name,const json& addressSpec,const std::string& pointerPath,size_t size,bool persist,std::string& error){
+int TrackObject(const std::string& name,const json& addressSpec,const std::string& pointerPath,size_t size,bool persist,std::string& error,const std::string& structName){
     if(name.empty()){error="name_required";return-1;}
     if(size<1||size>kMaxTrackSize){error="size_out_of_range_1_4096";return-1;}
     if(pointerPath.empty()){std::string e;if(!process::ResolveAddress(addressSpec,&e)){error=e.empty()?"invalid_address":e;return-1;}}
@@ -139,16 +142,16 @@ int TrackObject(const std::string& name,const json& addressSpec,const std::strin
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         for(const auto&[id,t]:g_tracks)if(t.name==name){error="track_name_exists";return-1;}
-        createdId=g_nextTrackId++;Track t;t.id=createdId;t.name=name;t.addressSpec=addressSpec;t.pointerPath=pointerPath;t.size=size;t.persist=persist;g_tracks[createdId]=std::move(t);
+        createdId=g_nextTrackId++;Track t;t.id=createdId;t.name=name;t.addressSpec=addressSpec;t.pointerPath=pointerPath;t.structName=structName;t.size=size;t.persist=persist;g_tracks[createdId]=std::move(t);
     }
     if(persist)PersistTracks();
     return createdId;
 }
 bool RemoveTrack(int id){bool persist=false;{std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return false;persist=it->second.persist;g_tracks.erase(it);}if(persist)PersistTracks();return true;}
-json ListTracks(){json out=json::array();std::lock_guard<std::mutex> lock(g_mutex);for(const auto&[id,t]:g_tracks)out.push_back({{"id",id},{"name",t.name},{"address",HexAddr(t.currentAddress)},{"alive",t.alive},{"size",t.size},{"pointer_path",t.pointerPath},{"persist",t.persist}});return{{"ok",true},{"tracks",out}};}
-json GetTrack(int id){std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return{{"ok",false},{"error","track_not_found"}};json out=it->second.snapshot;out["ok"]=true;out["id"]=id;out["name"]=it->second.name;return out;}
+json ListTracks(){json out=json::array();std::lock_guard<std::mutex> lock(g_mutex);for(const auto&[id,t]:g_tracks)out.push_back({{"id",id},{"name",t.name},{"address",HexAddr(t.currentAddress)},{"alive",t.alive},{"size",t.size},{"pointer_path",t.pointerPath},{"struct_name",t.structName},{"persist",t.persist}});return{{"ok",true},{"tracks",out}};}
+json GetTrack(int id){std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return{{"ok",false},{"error","track_not_found"}};json out=it->second.snapshot;out["ok"]=true;out["id"]=id;out["name"]=it->second.name;out["struct_name"]=it->second.structName;return out;}
 json GetTrackEvents(int id){std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return{{"ok",false},{"error","track_not_found"}};json events=json::array();for(const auto&e:it->second.events)events.push_back(e);return{{"ok",true},{"id",id},{"events",events}};}
-json CompareTracks(int a,int b){json A=GetTrack(a),B=GetTrack(b);if(!A.value("ok",false)||!B.value("ok",false))return{{"ok",false},{"error","track_not_found"}};std::string ah=A.value("hex",std::string()),bh=B.value("hex",std::string());json diffs=json::array();size_t n=std::min(ah.size(),bh.size())/2;for(size_t i=0;i<n&&diffs.size()<256;++i){auto x=ah.substr(i*2,2),y=bh.substr(i*2,2);if(x!=y)diffs.push_back({{"offset",i},{"a",x},{"b",y}});}return{{"ok",true},{"a",a},{"b",b},{"byte_differences",diffs},{"subobjects_a",A.value("subobjects",json::array())},{"subobjects_b",B.value("subobjects",json::array())}};}
+json CompareTracks(int a,int b){json A=GetTrack(a),B=GetTrack(b);if(!A.value("ok",false)||!B.value("ok",false))return{{"ok",false},{"error","track_not_found"}};std::string ah=A.value("hex",std::string()),bh=B.value("hex",std::string());json diffs=json::array();size_t n=std::min(ah.size(),bh.size())/2;for(size_t i=0;i<n&&diffs.size()<256;++i){auto x=ah.substr(i*2,2),y=bh.substr(i*2,2);if(x!=y)diffs.push_back({{"offset",i},{"a",x},{"b",y}});}json fieldDiffs=json::object();const json fa=A.value("fields",json::object()),fb=B.value("fields",json::object());std::set<std::string> fieldNames;for(auto it=fa.begin();it!=fa.end();++it)fieldNames.insert(it.key());for(auto it=fb.begin();it!=fb.end();++it)fieldNames.insert(it.key());for(const auto&name:fieldNames){const json va=fa.contains(name)?fa[name]:json();const json vb=fb.contains(name)?fb[name]:json();if(va!=vb)fieldDiffs[name]={{"a",va},{"b",vb}};}return{{"ok",true},{"a",a},{"b",b},{"byte_differences",diffs},{"fields_a",fa},{"fields_b",fb},{"field_differences",fieldDiffs},{"subobjects_a",A.value("subobjects",json::array())},{"subobjects_b",B.value("subobjects",json::array())}};}
 
 json DetectCppSubobjects(uintptr_t address,size_t size){
     if(!address||size<sizeof(uintptr_t))return{{"ok",false},{"error","invalid_object_range"}};

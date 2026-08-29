@@ -1,4 +1,4 @@
-﻿name: Unified Cortex UI Preview
+name: Unified Cortex UI Preview
 
 on:
   push:
@@ -411,6 +411,24 @@ jobs:
               $mcp.StandardInput.WriteLine($hwDelete); $mcp.StandardInput.Flush()
               [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
               $hwEvent.Dispose()
+              $trackedStructName = "PreviewFakeObject-$safeLabel"
+              $stateOffset = [int]$fixture.pointer_size * 2
+              $modeOffset = $stateOffset + 4
+              $defineTrackedStruct = @{ jsonrpc="2.0"; id=399; method="tools/call"; params=@{ name="struct_define"; arguments=@{
+                name=$trackedStructName
+                fields=@(
+                  @{ name="primaryVtable"; offset=0; type="vtable" },
+                  @{ name="secondaryVtable"; offset=[int]$fixture.pointer_size; type="vtable" },
+                  @{ name="state"; offset=$stateOffset; type="u32" },
+                  @{ name="mode"; offset=$modeOffset; type="u32" }
+                )
+                mutation_permission=$true
+              } } } | ConvertTo-Json -Depth 12 -Compress
+              $mcp.StandardInput.WriteLine($defineTrackedStruct); $mcp.StandardInput.Flush()
+              $defineTrackedStructResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($defineTrackedStructResponse.id -ne 399 -or -not $defineTrackedStructResponse.result.structuredContent.result.ok) {
+                throw "$label could not define the tracked-object struct"
+              }
               # C++ subobject detection on a deterministic object containing two
               # valid vtable pointers.
               $subobjectsCall = @{ jsonrpc="2.0"; id=400; method="tools/call"; params=@{ name="re_cpp_subobjects"; arguments=@{ address=[string]$fixture.fake_object; size=[int]$fixture.fake_object_size } } } | ConvertTo-Json -Depth 8 -Compress
@@ -426,7 +444,7 @@ jobs:
                 jsonrpc="2.0"; id=401; method="tools/call"
                 params=@{ name="re_track_object"; arguments=@{
                   name=$trackName; address=[string]$fixture.fake_object; size=[int]$fixture.fake_object_size
-                  persist=$false; mutation_permission=$true
+                  struct_name=$trackedStructName; persist=$false; mutation_permission=$true
                 } }
               } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($trackCall); $mcp.StandardInput.Flush()
@@ -470,11 +488,15 @@ jobs:
               if ($sessionDiffResponse.id -ne 406 -or -not $sessionDiffResult.ok -or $trackedDiff.Count -ne 1) {
                 throw "$label cross-run tracked-object diff failed"
               }
+              $stateFieldDiff = $trackedDiff[0].field_differences.PSObject.Properties["state"]
+              if ($null -eq $stateFieldDiff) { throw "$label cross-run typed field diff did not report state" }
 
               $restoreTracked = @{ jsonrpc="2.0"; id=407; method="tools/call"; params=@{ name="memory_write"; arguments=@{ address=[string]$fixture.fake_state; type="u32"; value=7; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($restoreTracked); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
               $deleteTrack = @{ jsonrpc="2.0"; id=408; method="tools/call"; params=@{ name="re_object_delete"; arguments=@{ _path=@{ id=$trackId }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($deleteTrack); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              $deleteTrackedStruct = @{ jsonrpc="2.0"; id=409; method="tools/call"; params=@{ name="struct_delete"; arguments=@{ _path=@{ name=$trackedStructName }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deleteTrackedStruct); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
               # High-level who-wrote-this. Trigger a fresh worker, then let the
               # blocking tool install its temporary process-global HW watch.
               $lastWriterEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
@@ -544,6 +566,35 @@ jobs:
                 throw "$label experiment rollback did not restore target memory"
               }
 
+              # Explicit RE checkpoint combines the Actions journal with raw memory
+              # ranges so aggressive experiments can be rolled back later in one call.
+              $checkpointCreate = @{ jsonrpc="2.0"; id=418; method="tools/call"; params=@{ name="re_checkpoint_create"; arguments=@{
+                label="portable-explicit-checkpoint"; ranges=@(@{ address=[string]$fixture.fake_state; size=4 }); mutation_permission=$true
+              } } } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($checkpointCreate); $mcp.StandardInput.Flush()
+              $checkpointCreateResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $reCheckpointId = [int]$checkpointCreateResponse.result.structuredContent.result.id
+              if ($checkpointCreateResponse.id -ne 418 -or $reCheckpointId -le 0) { throw "$label explicit RE checkpoint creation failed" }
+
+              $checkpointMutation = @{ jsonrpc="2.0"; id=419; method="tools/call"; params=@{ name="memory_write"; arguments=@{
+                address=[string]$fixture.fake_state; type="u32"; value=222; mutation_permission=$true
+              } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($checkpointMutation); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+
+              $checkpointRollback = @{ jsonrpc="2.0"; id=420; method="tools/call"; params=@{ name="re_checkpoint_rollback"; arguments=@{
+                _path=@{ id=$reCheckpointId }; keep=$false; mutation_permission=$true
+              } } } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($checkpointRollback); $mcp.StandardInput.Flush()
+              $checkpointRollbackResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($checkpointRollbackResponse.id -ne 420 -or -not $checkpointRollbackResponse.result.structuredContent.result.ok) {
+                throw "$label explicit RE checkpoint rollback failed"
+              }
+              $checkpointVerify = @{ jsonrpc="2.0"; id=421; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=[string]$fixture.fake_state; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($checkpointVerify); $mcp.StandardInput.Flush()
+              $checkpointVerifyResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ([uint64]$checkpointVerifyResponse.result.structuredContent.result.value -ne 7) {
+                throw "$label explicit RE checkpoint did not restore target memory"
+              }
               # Persistent RE evidence and Ghidra -> Cortex symbol import.
               $factKey = "preview.$safeLabel.fake_state"
               $factSet = @{ jsonrpc="2.0"; id=415; method="tools/call"; params=@{ name="re_session_fact_set"; arguments=@{ key=$factKey; value=@{ address=[string]$fixture.fake_state; meaning="fixture-state" }; mutation_permission=$true } } } | ConvertTo-Json -Depth 10 -Compress

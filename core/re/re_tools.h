@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -8,7 +8,7 @@ using json = nlohmann::json;
 void Init();
 void Shutdown();
 int TrackObject(const std::string& name, const json& addressSpec, const std::string& pointerPath,
-                size_t size, bool persist, std::string& error);
+                size_t size, bool persist, std::string& error, const std::string& structName = {});
 bool RemoveTrack(int id);
 json ListTracks();
 json GetTrack(int id);

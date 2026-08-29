@@ -1,4 +1,4 @@
-﻿#include "routes.h"
+#include "routes.h"
 #include "../re/re_tools.h"
 #include "../process/address.h"
 #include "../overlay/overlay.h"
@@ -12,6 +12,8 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <mutex>
+#include <map>
 
 using json = nlohmann::json;
 
@@ -30,6 +32,7 @@ void Reply(httplib::Response& res,const json& out,int missingStatus=404) {
         else res.status=400;
     }
     res.set_content(out.dump(),"application/json");
+}
 int ParseVirtualKey(const json& step) {
     if (step.contains("vk")) return step.at("vk").get<int>();
     if (!step.contains("key") || !step.at("key").is_string()) throw std::runtime_error("press_requires_key_or_vk");
@@ -69,6 +72,83 @@ std::vector<SavedRange> SaveRollbackRanges(const json& ranges) {
     size_t total=0;for(const auto& r:ranges){size_t size=r.at("size").get<size_t>();if(size==0||size>16*1024*1024||total+size>32*1024*1024)throw std::runtime_error("rollback_range_limit_exceeded");SavedRange saved; saved.address=ParseAddress(r.at("address"));if(!memory::ReadBytes(saved.address,size,saved.bytes))throw std::runtime_error("rollback_range_read_failed");total+=size;out.push_back(std::move(saved));}return out;
 }
 json RestoreRanges(const std::vector<SavedRange>& ranges){json out=json::array();for(const auto&r:ranges)out.push_back({{"address",r.address},{"size",r.bytes.size()},{"ok",memory::WriteBytes(r.address,r.bytes)}});return out;}
+struct ReCheckpoint {
+    int id = 0;
+    uint64_t createdMs = 0;
+    uint64_t actionCheckpoint = 0;
+    std::string label;
+    std::vector<SavedRange> ranges;
+};
+std::mutex g_checkpointMutex;
+std::map<int, ReCheckpoint> g_checkpoints;
+int g_nextCheckpointId = 1;
+
+json CheckpointSummary(const ReCheckpoint& checkpoint) {
+    json ranges = json::array();
+    for (const auto& range : checkpoint.ranges) {
+        ranges.push_back({{"address", static_cast<uint64_t>(range.address)},
+                          {"address_named", process::DescribeAddress(range.address)},
+                          {"size", range.bytes.size()}});
+    }
+    return {{"id", checkpoint.id}, {"created_ms", checkpoint.createdMs},
+            {"label", checkpoint.label}, {"action_checkpoint", checkpoint.actionCheckpoint},
+            {"ranges", ranges}};
+}
+
+json CreateReCheckpoint(const json& body) {
+    ReCheckpoint checkpoint;
+    checkpoint.createdMs = static_cast<uint64_t>(GetTickCount64());
+    checkpoint.actionCheckpoint = action::Checkpoint();
+    checkpoint.label = body.value("label", std::string());
+    checkpoint.ranges = SaveRollbackRanges(body.value("ranges", json::array()));
+    {
+        std::lock_guard<std::mutex> lock(g_checkpointMutex);
+        checkpoint.id = g_nextCheckpointId++;
+        if (checkpoint.label.empty()) checkpoint.label = "checkpoint-" + std::to_string(checkpoint.id);
+        g_checkpoints[checkpoint.id] = checkpoint;
+        while (g_checkpoints.size() > 32) g_checkpoints.erase(g_checkpoints.begin());
+    }
+    json out = CheckpointSummary(checkpoint);
+    out["ok"] = true;
+    return out;
+}
+
+json ListReCheckpoints() {
+    json rows = json::array();
+    std::lock_guard<std::mutex> lock(g_checkpointMutex);
+    for (const auto& [id, checkpoint] : g_checkpoints) rows.push_back(CheckpointSummary(checkpoint));
+    return {{"ok", true}, {"checkpoints", rows}};
+}
+
+json RollbackReCheckpoint(int id, bool keep) {
+    ReCheckpoint checkpoint;
+    {
+        std::lock_guard<std::mutex> lock(g_checkpointMutex);
+        auto it = g_checkpoints.find(id);
+        if (it == g_checkpoints.end()) return {{"ok", false}, {"error", "checkpoint_not_found"}};
+        checkpoint = it->second;
+    }
+    const auto actionResults = action::RollbackTo(checkpoint.actionCheckpoint);
+    json actions = json::array();
+    bool ok = true;
+    for (const auto& result : actionResults) {
+        actions.push_back({{"id", result.id}, {"ok", result.ok}});
+        ok = ok && result.ok;
+    }
+    json ranges = RestoreRanges(checkpoint.ranges);
+    for (const auto& row : ranges) ok = ok && row.value("ok", false);
+    if (ok && !keep) {
+        std::lock_guard<std::mutex> lock(g_checkpointMutex);
+        g_checkpoints.erase(id);
+    }
+    return {{"ok", ok}, {"id", id}, {"label", checkpoint.label},
+            {"actions", actions}, {"ranges", ranges}, {"kept", keep || !ok}};
+}
+
+bool DeleteReCheckpoint(int id) {
+    std::lock_guard<std::mutex> lock(g_checkpointMutex);
+    return g_checkpoints.erase(id) != 0;
+}
 
 json RunReTest(const json& body) {
     if(!body.contains("steps")||!body["steps"].is_array())throw std::runtime_error("steps_array_required");
@@ -93,14 +173,13 @@ json RunReTest(const json& body) {
     return{{"ok",passed},{"status",passed?"PASS":"FAIL"},{"failure",failure},{"checkpoint",checkpoint},{"committed",commit},{"steps",results},{"rollback",rollback}};
 }
 }
-}
 
 void RegisterReRoutes(RouteRegistrar& svr) {
     svr.Post("/re/object/track",[](const httplib::Request& req,httplib::Response& res){
         try{auto mutation=action::LockMutations();json body=json::parse(req.body.empty()?"{}":req.body);
-            const std::string name=body.value("name",std::string());const std::string pointerPath=body.value("pointer_path",std::string());
+            const std::string name=body.value("name",std::string());const std::string pointerPath=body.value("pointer_path",std::string());const std::string structName=body.value("struct_name",std::string());
             json address=body.contains("address")?body["address"]:json("0");size_t size=body.value("size",256u);bool persist=body.value("persist",true);std::string error;
-            int id=retools::TrackObject(name,address,pointerPath,size,persist,error);if(id<0){Reply(res,{{"ok",false},{"error",error}});return;}
+            int id=retools::TrackObject(name,address,pointerPath,size,persist,error,structName);if(id<0){Reply(res,{{"ok",false},{"error",error}});return;}
             action::Record("re/object/track "+name,[id]{return retools::RemoveTrack(id);});
             Reply(res,{{"ok",true},{"id",id},{"name",name}});overlay::LogApiCall("POST /re/object/track "+name);
         }catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
@@ -161,6 +240,16 @@ void RegisterReRoutes(RouteRegistrar& svr) {
             Reply(res,{{"ok",applied==templates.size()||!stopOnError},{"applied",applied},{"total",templates.size()},{"results",results}});
         }catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
     });
+    svr.Post("/re/checkpoint",[](const httplib::Request& req,httplib::Response& res){
+        try{auto mutation=action::LockMutations();json body=json::parse(req.body.empty()?"{}":req.body);Reply(res,CreateReCheckpoint(body));overlay::LogApiCall("POST /re/checkpoint");}
+        catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
+    });
+    svr.Get("/re/checkpoints",[](const httplib::Request&,httplib::Response& res){Reply(res,ListReCheckpoints());});
+    svr.Post(R"(/re/checkpoint/(\d+)/rollback)",[](const httplib::Request& req,httplib::Response& res){
+        try{auto mutation=action::LockMutations();json body=json::parse(req.body.empty()?"{}":req.body);Reply(res,RollbackReCheckpoint(std::stoi(req.matches[1]),body.value("keep",false)));overlay::LogApiCall("POST /re/checkpoint/rollback");}
+        catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
+    });
+    svr.Delete(R"(/re/checkpoint/(\d+))",[](const httplib::Request& req,httplib::Response& res){auto mutation=action::LockMutations();const bool ok=DeleteReCheckpoint(std::stoi(req.matches[1]));Reply(res,{{"ok",ok},{"error",ok?"":"checkpoint_not_found"}});});
     svr.Post("/re/cpp/subobjects",[](const httplib::Request& req,httplib::Response& res){try{json b=json::parse(req.body);Reply(res,retools::DetectCppSubobjects(ParseAddress(b.at("address")),b.value("size",256u)));}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
     svr.Post("/re/last-writer",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body);Reply(res,retools::FindLastWriter(ParseAddress(b.at("address")),b.value("size",1),b.value("timeout_ms",5000u)));overlay::LogApiCall("POST /re/last-writer");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
     svr.Post("/re/transition/trace",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body.empty()?"{}":req.body);Reply(res,retools::TraceTransition(b));overlay::LogApiCall("POST /re/transition/trace");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});

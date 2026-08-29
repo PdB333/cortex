@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <nlohmann/json.hpp>
 
@@ -53,7 +53,8 @@ inline ToolRisk ClassifyTool(const std::string& name,
     // callable in inspect mode unless their arguments can change runtime or
     // persisted Cortex state.
     if (name == "struct_read" || name == "struct_infer" || name == "trace_compare" ||
-        name == "pointermap_intersect") return ToolRisk::Analyze;
+        name == "pointermap_intersect" || name == "re_object_compare" ||
+        name == "re_cpp_subobjects") return ToolRisk::Analyze;
 
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||
@@ -66,7 +67,7 @@ inline ToolRisk ClassifyTool(const std::string& name,
     if (StartsWith(name, "debug_") || StartsWith(name, "trace_") ||
         StartsWith(name, "watch_") || StartsWith(name, "window_") ||
         StartsWith(name, "project_") || StartsWith(name, "struct_") ||
-        StartsWith(name, "pointermap_") || name == "network_capture" ||
+        StartsWith(name, "pointermap_") || StartsWith(name, "re_") || name == "network_capture" ||
         name == "actions_clear" || name == "ghidra_import" || name == "ghidra_import_symbols" || name == "snapshot_delete" ||
         name == "re_track_object" || name == "re_find_last_writer" || name == "re_trace_transition" ||
         name == "re_session_fact_set" || name == "re_session_fact_delete" || name == "re_session_breakpoints" ||

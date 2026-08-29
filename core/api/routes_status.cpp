@@ -1,4 +1,4 @@
-﻿#include "routes.h"
+#include "routes.h"
 #include "server.h"
 #include "mcp_contract.h"
 #include "../overlay/overlay.h"
@@ -197,7 +197,7 @@ json BuildToolsManifest() {
                           {"condition", {{"oneOf",json::array({{{"type","string"}},{{"type","object"}}})},{"description","Condition expression string or legacy structured condition object."}}},
                           {"auto_capture", {{"type","boolean"},{"description","Automatically capture this-object, vtable and stack arguments for logged hits."}}},
                           {"capture", {{"type","array"},{"items",{{"type","object"}}},{"description","Additional captures: {name,expression,size,type}."}}}
-                      }}}});
+                      }}});
         j.push_back({{"name", "debug_breakpoint_delete"}, {"method", "DELETE"}, {"path", "/debug/breakpoint/{id}"},
                       {"description", "Removes a breakpoint and restores the original state."}});
 
@@ -411,9 +411,9 @@ json BuildToolsManifest() {
                       {"body", {{"enabled", "required: bool"}}}});
 
         j.push_back({{"name", "network_events"}, {"method", "GET"}, {"path", "/network/events"},
-                      {"description", "Ring buffer snapshot of the most recent captured recv/send calls "
-                                      "with size + first 64 bytes as hex."},
-                      {"query", {{"limit", "optional int, default 200"}}}});
+                      {"description", "Ring buffer snapshot of captured recv/send calls with payload preview, game-side callstack, generated_by/caller, and the nearest debugger hit on the same thread when available."},
+                      {"query", {{"limit", {{"type","integer"},{"description","Events to return, default 200, max 512."}}},
+                                 {"correlation_window_ms", {{"type","integer"},{"description","Maximum absolute time distance to correlate a breakpoint log hit on the same TID; default 100 ms, 0 disables, max 2000."}}}}}});
 
         j.push_back({{"name", "window_move"}, {"method", "POST"}, {"path", "/window/move"},
                       {"description", "Moves (and optionally resizes) the game window. Fires "
@@ -623,6 +623,7 @@ json BuildToolsManifest() {
                      {"description","Persistently tracks an object across address changes and records changed byte ranges, pointed objects, vtables/subobjects, destruction/reappearance, and related allocation metadata."},
                      {"body",{{"name",{{"type","string"},{"required",true},{"description","Stable track name."}}},
                               {"address",reAddress},{"pointer_path",{{"type","string"},{"description","Optional persisted project pointer-path name; when set it is re-resolved on every sample."}}},
+                              {"struct_name",{{"type","string"},{"description","Optional persisted Cortex struct definition. Typed fields are sampled and diffed alongside raw bytes."}}},
                               {"size",{{"type","integer"},{"minimum",1},{"maximum",4096},{"description","Bytes to observe, default 256."}}},
                               {"persist",{{"type","boolean"},{"description","Persist into the RE session project, default true."}}}}}});
         j.push_back({{"name","re_object_tracks"},{"method","GET"},{"path","/re/object/tracks"},{"description","Lists tracked objects and their current address/alive state."}});
@@ -630,7 +631,7 @@ json BuildToolsManifest() {
         j.push_back({{"name","re_object_events"},{"method","GET"},{"path","/re/object/{id}/events"},{"description","Returns non-destructive tracked-object events: relocation, destruction/reappearance and changed byte ranges."}});
         j.push_back({{"name","re_object_delete"},{"method","DELETE"},{"path","/re/object/{id}"},{"description","Stops and removes an object track."}});
         j.push_back({{"name","re_object_compare"},{"method","POST"},{"path","/re/object/compare"},
-                     {"description","Compares two tracked object snapshots byte-by-byte and compares detected C++ subobjects/vtables."},
+                     {"description","Compares two tracked object snapshots byte-by-byte, by typed struct field when configured, and by detected C++ subobjects/vtables."},
                      {"body",{{"a",{{"type","integer"},{"required",true}}},{"b",{{"type","integer"},{"required",true}}}}}});
         j.push_back({{"name","re_session"},{"method","GET"},{"path","/re/session"},
                      {"description","Returns persistent reverse-engineering facts, persisted object-track locators and suggested breakpoint templates for the current target project."}});
@@ -656,6 +657,17 @@ json BuildToolsManifest() {
         j.push_back({{"name","re_session_apply_breakpoints"},{"method","POST"},{"path","/re/session/apply-breakpoints"},
                      {"description","Explicitly arms the breakpoint templates persisted for this RE target. Nothing is auto-armed at startup; this opt-in action keeps restored sessions safe."},
                      {"body",{{"stop_on_error",{{"type","boolean"},{"description","Stop at first failed template, default true."}}}}}});
+        j.push_back({{"name","re_checkpoint_create"},{"method","POST"},{"path","/re/checkpoint"},
+                     {"description","Creates a bounded RE checkpoint combining the current Actions journal position with optional memory ranges. Later rollback restores both."},
+                     {"body",{{"label",{{"type","string"},{"description","Optional checkpoint label."}}},
+                              {"ranges",{{"type","array"},{"items",{{"type","object"}}},{"description","Optional [{address,size}] ranges, max 32 MiB total."}}}}}});
+        j.push_back({{"name","re_checkpoint_list"},{"method","GET"},{"path","/re/checkpoints"},
+                     {"description","Lists the bounded in-memory RE checkpoints for this runtime."}});
+        j.push_back({{"name","re_checkpoint_rollback"},{"method","POST"},{"path","/re/checkpoint/{id}/rollback"},
+                     {"description","Rolls Actions back to the saved checkpoint and restores all explicitly captured memory ranges."},
+                     {"body",{{"keep",{{"type","boolean"},{"description","Keep checkpoint after a successful rollback; default false."}}}}}});
+        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},
+                     {"description","Deletes a saved RE checkpoint without modifying the target."}});
         j.push_back({{"name","re_cpp_subobjects"},{"method","POST"},{"path","/re/cpp/subobjects"},
                      {"description","Detects multiple vtables/C++ subobjects and common this-adjustment thunks inside an object."},
                      {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});

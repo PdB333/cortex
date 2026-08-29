@@ -211,7 +211,13 @@ void RegisterMemoryRoutes(httplib::Server& svr) {
             res.set_content(json{{"ok", false}, {"error", "missing_address"}}.dump(), "application/json");
             return;
         }
-        uintptr_t address = static_cast<uintptr_t>(std::stoull(req.get_param_value("address"), nullptr, 0));
+        std::string addressError;
+        uintptr_t address = process::ResolveAddress(json(req.get_param_value("address")), &addressError);
+        if (!address) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", addressError.empty() ? "invalid_address" : addressError}}.dump(), "application/json");
+            return;
+        }
         int size = req.has_param("size") ? std::stoi(req.get_param_value("size")) : 32;
         if (size < 1) size = 1;
         if (size > 4096) size = 4096;

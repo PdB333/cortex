@@ -1,4 +1,4 @@
-﻿#include "routes.h"
+#include "routes.h"
 #include "../capture/capture.h"
 #include "../config.h"
 #include "../debugger/debugger.h"
@@ -6,6 +6,9 @@
 #include "../process/address.h"
 #include "../process/modules.h"
 #include "../project/project.h"
+#include "../re/re_tools.h"
+#include "../hook/net_hook.h"
+#include "../watch/watch.h"
 
 #include <nlohmann/json.hpp>
 #include <windows.h>
@@ -13,6 +16,10 @@
 #include <sstream>
 #include <iomanip>
 #include <ctime>
+#include <algorithm>
+#include <cctype>
+#include <map>
+#include <set>
 
 using json = nlohmann::json;
 
@@ -142,9 +149,13 @@ json DiffSessions(const json& a, const json& b) {
         if(ia==objectsA.end()){objectDiffs.push_back({{"name",name},{"state","only_b"}});continue;}
         if(ib==objectsB.end()){objectDiffs.push_back({{"name",name},{"state","only_a"}});continue;}
         const json& oa=ia->second; const json& ob=ib->second;
-        if(oa.value("hex",std::string())!=ob.value("hex",std::string()) || oa.value("address",std::string())!=ob.value("address",std::string()) || oa.value("alive",false)!=ob.value("alive",false))
+        const json fieldsA=oa.value("fields",json::object()),fieldsB=ob.value("fields",json::object());
+        json fieldDiffs=json::object();std::set<std::string> fieldNames;for(auto it=fieldsA.begin();it!=fieldsA.end();++it)fieldNames.insert(it.key());for(auto it=fieldsB.begin();it!=fieldsB.end();++it)fieldNames.insert(it.key());
+        for(const auto& field:fieldNames){const json va=fieldsA.contains(field)?fieldsA[field]:json();const json vb=fieldsB.contains(field)?fieldsB[field]:json();if(va!=vb)fieldDiffs[field]={{"a",va},{"b",vb}};}
+        if(oa.value("hex",std::string())!=ob.value("hex",std::string()) || oa.value("address",std::string())!=ob.value("address",std::string()) || oa.value("alive",false)!=ob.value("alive",false) || !fieldDiffs.empty())
             objectDiffs.push_back({{"name",name},{"state","changed"},{"address_a",oa.value("address",std::string())},{"address_b",ob.value("address",std::string())},
-                                   {"alive_a",oa.value("alive",false)},{"alive_b",ob.value("alive",false)},
+                                   {"alive_a",oa.value("alive",false)},{"alive_b",ob.value("alive",false)},{"struct_name_a",oa.value("struct_name",std::string())},{"struct_name_b",ob.value("struct_name",std::string())},
+                                   {"fields_a",fieldsA},{"fields_b",fieldsB},{"field_differences",fieldDiffs},
                                    {"subobjects_a",oa.value("subobjects",json::array())},{"subobjects_b",ob.value("subobjects",json::array())}});
     }
     result["objects"] = std::move(objectDiffs);

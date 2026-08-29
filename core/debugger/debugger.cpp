@@ -1,4 +1,4 @@
-﻿#include "debugger.h"
+#include "debugger.h"
 #include "../memory/memory.h"
 
 #include <tlhelp32.h>
@@ -567,8 +567,15 @@ private:
     int64_t ParseAdd(){int64_t v=ParseUnary();for(;;){if(Take("+"))v+=ParseUnary();else if(Take("-"))v-=ParseUnary();else return v;}}
     int64_t ParseUnary(){if(Take("!"))return !ParseUnary();if(Take("-"))return-ParseUnary();return ParsePrimary();}
     int64_t ParsePrimary(){
-        Skip();if(Take("(")){int64_t v=ParseOr();if(!Take(")"))throw std::runtime_error("missing )");return v;}
-        if(Take("[")){uintptr_t address=static_cast<uintptr_t>(ParseOr());if(!Take("]"))throw std::runtime_error("missing ]");std::vector<uint8_t>b;if(!memory::ReadBytes(address,1,b)||b.empty())return 0;return b[0];}
+        Skip();
+        if(Take("[")){
+            const uintptr_t address=static_cast<uintptr_t>(ParseOr());
+            if(!Take("]"))throw std::runtime_error("missing ]");
+            std::vector<uint8_t> b;
+            if(!memory::ReadBytes(address,1,b)||b.empty())return 0;
+            return static_cast<int64_t>(b[0]);
+        }
+        if(Take("(")){int64_t v=ParseOr();if(!Take(")"))throw std::runtime_error("missing )");return v;}
         if(pos_<source_.size()&&(std::isdigit(static_cast<unsigned char>(source_[pos_])))){
             size_t end=pos_;while(end<source_.size()&&(std::isalnum(static_cast<unsigned char>(source_[end]))||source_[end]=='x'||source_[end]=='X'))end++;
             std::string token=source_.substr(pos_,end-pos_);pos_=end;return std::stoll(token,nullptr,0);

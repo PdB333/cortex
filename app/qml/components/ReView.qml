@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -27,15 +27,16 @@ Rectangle {
                     Layout.fillWidth: true
                     Label { text: "RE OBJECTS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
                     Item { Layout.fillWidth: true }
-                    Button { text: "Refresh"; onClicked: { CortexRe.refresh(); CortexRe.refreshSessions() } }
+                    Button { text: "Refresh"; onClicked: { CortexRe.refresh(); CortexRe.refreshSessions(); CortexRe.refreshCheckpoints() } }
                 }
                 TextField { id: trackName; Layout.fillWidth: true; placeholderText: "Track name" }
                 TextField { id: trackAddress; Layout.fillWidth: true; placeholderText: "Address (0x..., module+RVA)" }
                 TextField { id: trackPath; Layout.fillWidth: true; placeholderText: "Pointer path (optional)" }
+                TextField { id: trackStruct; Layout.fillWidth: true; placeholderText: "Struct definition (optional, e.g. GameRequest)" }
                 RowLayout {
                     Layout.fillWidth: true
                     TextField { id: trackSize; Layout.fillWidth: true; text: "256"; placeholderText: "Size" }
-                    Button { text: "Track"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.trackObject(trackName.text, trackAddress.text, trackPath.text, Number(trackSize.text || 256), true) }
+                    Button { text: "Track"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.trackObject(trackName.text, trackAddress.text, trackPath.text, Number(trackSize.text || 256), true, trackStruct.text) }
                 }
                 CortexListView {
                     id: tracks
@@ -49,9 +50,9 @@ Rectangle {
                         color: mouse.containsMouse ? Theme.hover : "transparent"
                         Column {
                             anchors.left: parent.left; anchors.leftMargin: 7; anchors.verticalCenter: parent.verticalCenter
-                            Text { text: modelData.name + (modelData.alive ? "  ●" : "  ○"); color: modelData.alive ? Theme.textBright : Theme.textMuted; font.pixelSize: 11 }
-                            Text { text: modelData.address + "  •  " + modelData.size + " bytes"; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 10 }
-                            Text { text: modelData.pointer_path ? ("path: " + modelData.pointer_path) : "direct"; color: Theme.textDisabled; font.pixelSize: 9 }
+                            Text { text: modelData.name + (modelData.alive ? "  [live]" : "  [missing]"); color: modelData.alive ? Theme.textBright : Theme.textMuted; font.pixelSize: 11 }
+                            Text { text: modelData.address + "  |  " + modelData.size + " bytes"; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 10 }
+                            Text { text: (modelData.pointer_path ? ("path: " + modelData.pointer_path) : "direct") + (modelData.struct_name ? ("  |  struct: " + modelData.struct_name) : ""); color: Theme.textDisabled; font.pixelSize: 9 }
                         }
                         MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: CortexRe.selectTrack(modelData.id) }
                     }
@@ -151,10 +152,33 @@ Rectangle {
                                 Button { text: "Save fact"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.saveFact(factKey.text, factValue.text) }
                                 Button { text: "Apply saved BPs"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.applyBreakpointTemplates() }
                             }
-                            Label { text: "Saved facts: " + Object.keys(CortexRe.session.facts || {}).length + "   •   suggested breakpoints: " + ((CortexRe.session.suggested_breakpoints || []).length); color: Theme.textMuted; font.pixelSize: 10 }
+                            Label { text: "Saved facts: " + Object.keys(CortexRe.session.facts || {}).length + "  |  suggested breakpoints: " + ((CortexRe.session.suggested_breakpoints || []).length); color: Theme.textMuted; font.pixelSize: 10 }
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true; implicitHeight: 154; color: Theme.surface; border.color: Theme.border; radius: 3
+                        ColumnLayout {
+                            anchors.fill: parent; anchors.margins: 10; spacing: 6
+                            Label { text: "RE CHECKPOINT / ROLLBACK"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                TextField { id: checkpointLabel; Layout.preferredWidth: 210; placeholderText: "Checkpoint label" }
+                                TextField { id: checkpointRanges; Layout.fillWidth: true; text: "[]"; placeholderText: '[{"address":"0x...","size":64}]' }
+                                Button { text: "Checkpoint"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.createCheckpoint(checkpointLabel.text, checkpointRanges.text) }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                ComboBox { id: checkpointBox; Layout.preferredWidth: 300; model: CortexRe.checkpoints; textRole: "label"; valueRole: "id" }
+                                Label { text: checkpointBox.currentIndex >= 0 ? ("id " + checkpointBox.currentValue) : "No checkpoint"; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 10 }
+                                Button { text: "Rollback"; enabled: CortexApp.mutationPermission && checkpointBox.currentIndex >= 0; onClicked: CortexRe.rollbackCheckpoint(Number(checkpointBox.currentValue), false) }
+                                Button { text: "Rollback + keep"; enabled: CortexApp.mutationPermission && checkpointBox.currentIndex >= 0; onClicked: CortexRe.rollbackCheckpoint(Number(checkpointBox.currentValue), true) }
+                                Button { text: "Delete"; enabled: CortexApp.mutationPermission && checkpointBox.currentIndex >= 0; onClicked: CortexRe.deleteCheckpoint(Number(checkpointBox.currentValue)) }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Label { text: "A checkpoint restores the reversible Actions journal plus the explicit memory ranges captured above."; color: Theme.textMuted; font.pixelSize: 10; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        }
+                    }
                     Rectangle {
                         Layout.fillWidth: true; implicitHeight: 124; color: Theme.surface; border.color: Theme.border; radius: 3
                         ColumnLayout {
@@ -172,6 +196,39 @@ Rectangle {
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 240; color: Theme.surface; border.color: Theme.border; radius: 3
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 10; spacing: 10
+                            ColumnLayout {
+                                Layout.fillWidth: true; Layout.fillHeight: true; spacing: 5
+                                Label { text: "GHIDRA -> CORTEX"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+                                ScrollView {
+                                    Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                                    background: Rectangle { color: Theme.input; border.color: Theme.borderStrong; radius: 3 }
+                                    ScrollBar.vertical: CortexScrollBar {}
+                                    ScrollBar.horizontal: CortexScrollBar { orientation: Qt.Horizontal }
+                                    TextArea { id: ghidraImportJson; text: '{"symbols":[]}'; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; wrapMode: TextEdit.NoWrap; background: null }
+                                }
+                                Button { text: "Import symbols / structs / xrefs"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.ghidraImport(ghidraImportJson.text) }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true; Layout.fillHeight: true; spacing: 5
+                                Label { text: "SUGGESTED BREAKPOINTS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+                                ScrollView {
+                                    Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                                    background: Rectangle { color: Theme.input; border.color: Theme.borderStrong; radius: 3 }
+                                    ScrollBar.vertical: CortexScrollBar {}
+                                    ScrollBar.horizontal: CortexScrollBar { orientation: Qt.Horizontal }
+                                    TextArea { id: breakpointTemplatesJson; text: "[]"; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; wrapMode: TextEdit.NoWrap; background: null }
+                                }
+                                RowLayout {
+                                    Button { text: "Save templates"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.saveBreakpointTemplates(breakpointTemplatesJson.text) }
+                                    Button { text: "Arm templates"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.applyBreakpointTemplates() }
+                                }
+                            }
+                        }
+                    }
                     Rectangle {
                         Layout.fillWidth: true; Layout.preferredHeight: 300; color: Theme.panel; border.color: Theme.border; radius: 3
                         ColumnLayout {
@@ -191,6 +248,5 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: { if (CortexPayload.ready) { CortexRe.refresh(); CortexRe.refreshSessions() } }
+    Component.onCompleted: { if (CortexPayload.ready) { CortexRe.refresh(); CortexRe.refreshSessions(); CortexRe.refreshCheckpoints() } }
 }
-

@@ -1,4 +1,4 @@
-﻿#include "../core/api/mcp_contract.h"
+#include "../core/api/mcp_contract.h"
 
 #include <iostream>
 #include <string>
@@ -93,6 +93,28 @@ int main() {
           "typed manifest required marker is consumed instead of leaking into JSON Schema");
     check(api::mcp_contract::IsRequiredSpec(typedRequired),
           "typed manifest required marker contributes to the parent required array");
+    const auto reWriterRisk = api::mcp_contract::ClassifyTool(
+        "re_find_last_writer", "POST", "/re/last-writer");
+    check(reWriterRisk == api::mcp_contract::ToolRisk::Control,
+          "RE last-writer instrumentation is classified as control");
+    check(api::mcp_contract::RequiresMutationPermission(reWriterRisk),
+          "RE last-writer requires explicit mutation permission");
+    const auto reCheckpointRollbackRisk = api::mcp_contract::ClassifyTool(
+        "re_checkpoint_rollback", "POST", "/re/checkpoint/{id}/rollback");
+    check(reCheckpointRollbackRisk == api::mcp_contract::ToolRisk::Control,
+          "RE checkpoint rollback is classified as control");
+    check(api::mcp_contract::RequiresMutationPermission(reCheckpointRollbackRisk),
+          "RE checkpoint rollback requires explicit mutation permission");
+    const auto reCompareRisk = api::mcp_contract::ClassifyTool(
+        "re_object_compare", "POST", "/re/object/compare");
+    check(reCompareRisk == api::mcp_contract::ToolRisk::Analyze,
+          "RE object comparison remains an analysis operation");
+    check(!api::mcp_contract::RequiresMutationPermission(reCompareRisk),
+          "RE object comparison does not require mutation permission");
+    const auto reSubobjectRisk = api::mcp_contract::ClassifyTool(
+        "re_cpp_subobjects", "POST", "/re/cpp/subobjects");
+    check(reSubobjectRisk == api::mcp_contract::ToolRisk::Analyze,
+          "C++ subobject detection remains an analysis operation");
     const auto allocationSnapshotRisk = api::mcp_contract::ClassifyTool(
         "watch_allocations_events_snapshot", "GET", "/watch/allocations/events_snapshot");
     check(allocationSnapshotRisk == api::mcp_contract::ToolRisk::Observe,

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "payload_controller.h"
 
@@ -16,6 +16,7 @@ class ReController final : public QObject {
     Q_PROPERTY(QVariantList trackEvents READ trackEvents NOTIFY changed)
     Q_PROPERTY(QVariantMap session READ session NOTIFY changed)
     Q_PROPERTY(QVariantList sessions READ sessions NOTIFY changed)
+    Q_PROPERTY(QVariantList checkpoints READ checkpoints NOTIFY changed)
     Q_PROPERTY(QString result READ result NOTIFY changed)
     Q_PROPERTY(QString lastError READ lastError NOTIFY changed)
 public:
@@ -25,19 +26,24 @@ public:
     const QVariantList& trackEvents() const { return trackEvents_; }
     const QVariantMap& session() const { return session_; }
     const QVariantList& sessions() const { return sessions_; }
+    const QVariantList& checkpoints() const { return checkpoints_; }
     QString result() const { return result_; }
     QString lastError() const { return lastError_; }
 
     Q_INVOKABLE void reset();
     Q_INVOKABLE bool refresh();
     Q_INVOKABLE bool refreshSessions();
+    Q_INVOKABLE bool refreshCheckpoints();
     Q_INVOKABLE bool selectTrack(int id);
-    Q_INVOKABLE bool trackObject(const QString& name,const QString& address,const QString& pointerPath=QString(),int size=256,bool persist=true);
+    Q_INVOKABLE bool trackObject(const QString& name,const QString& address,const QString& pointerPath=QString(),int size=256,bool persist=true,const QString& structName=QString());
     Q_INVOKABLE bool deleteTrack(int id);
     Q_INVOKABLE bool findLastWriter(const QString& address,int size=1,int timeoutMs=5000);
     Q_INVOKABLE bool detectSubobjects(const QString& address,int size=256);
     Q_INVOKABLE bool traceTransition(const QString& jsonText);
     Q_INVOKABLE bool runTest(const QString& jsonText,bool experiment=false);
+    Q_INVOKABLE bool createCheckpoint(const QString& label,const QString& rangesJson=QString());
+    Q_INVOKABLE bool rollbackCheckpoint(int id,bool keep=false);
+    Q_INVOKABLE bool deleteCheckpoint(int id);
     Q_INVOKABLE bool saveFact(const QString& key,const QString& valueJson);
     Q_INVOKABLE bool saveBreakpointTemplates(const QString& jsonText);
     Q_INVOKABLE bool applyBreakpointTemplates();
@@ -58,6 +64,7 @@ private:
     QVariantList trackEvents_;
     QVariantMap session_;
     QVariantList sessions_;
+    QVariantList checkpoints_;
     QString result_;
     QString lastError_;
 };
