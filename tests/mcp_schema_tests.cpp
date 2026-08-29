@@ -60,6 +60,12 @@ int main() {
           "snapshot_delete is classified as a control operation");
     check(api::mcp_contract::RequiresMutationPermission(snapshotDeleteRisk),
           "snapshot_delete requires explicit mutation permission");
+    const auto pointerMapIntersectRisk = api::mcp_contract::ClassifyTool("pointermap_intersect", "POST", "/pointermap/intersect");
+    check(pointerMapIntersectRisk == api::mcp_contract::ToolRisk::Analyze,
+          "pointermap_intersect stays available without mutation permission");
+    const auto pointerMapDeleteRisk = api::mcp_contract::ClassifyTool("pointermap_delete", "DELETE", "/pointermap/{name}");
+    check(pointerMapDeleteRisk == api::mcp_contract::ToolRisk::Control,
+          "pointermap_delete is a control operation");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;

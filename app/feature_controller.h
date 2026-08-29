@@ -26,6 +26,8 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
     Q_PROPERTY(QVariantList patches READ patches NOTIFY patchesChanged)
     Q_PROPERTY(QVariantList snapshots READ snapshots NOTIFY snapshotsChanged)
+    Q_PROPERTY(QVariantList pointerMaps READ pointerMaps NOTIFY pointerMapsChanged)
+    Q_PROPERTY(QVariantList pointerPaths READ pointerPaths NOTIFY pointerMapsChanged)
     Q_PROPERTY(QString snapshotResult READ snapshotResult NOTIFY snapshotsChanged)
     Q_PROPERTY(QVariantList freezes READ freezes NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList watches READ watches NOTIFY watchesChanged)
@@ -55,6 +57,8 @@ public:
     const QVariantList& traces() const { return traces_; }
     const QVariantList& patches() const { return patches_; }
     const QVariantList& snapshots() const { return snapshots_; }
+    const QVariantList& pointerMaps() const { return pointerMaps_; }
+    const QVariantList& pointerPaths() const { return pointerPaths_; }
     QString snapshotResult() const { return snapshotResult_; }
     const QVariantList& freezes() const { return freezes_; }
     const QVariantList& watches() const { return watches_; }
@@ -108,6 +112,11 @@ public:
     Q_INVOKABLE bool deleteSnapshot(int snapshotId);
     Q_INVOKABLE bool lastSnapshotChange(const QString& address, int size);
 
+    Q_INVOKABLE bool refreshPointerMaps();
+    Q_INVOKABLE bool capturePointerMap(const QString& name, const QString& target, int maxDepth = 5, int maxOffset = 4096);
+    Q_INVOKABLE bool intersectPointerMaps(const QString& namesJson);
+    Q_INVOKABLE bool deletePointerMap(const QString& name);
+
     Q_INVOKABLE bool refreshTraces();
     Q_INVOKABLE bool startTrace(qulonglong threadId, int maxSteps = 10000);
     Q_INVOKABLE bool stopTrace(int traceId);
@@ -129,6 +138,7 @@ signals:
     void tracesChanged();
     void patchesChanged();
     void snapshotsChanged();
+    void pointerMapsChanged();
     void watchesChanged();
     void sessionChanged();
     void errorChanged();
@@ -160,6 +170,8 @@ private:
     QVariantList traces_;
     QVariantList patches_;
     QVariantList snapshots_;
+    QVariantList pointerMaps_;
+    QVariantList pointerPaths_;
     QString snapshotResult_;
     QVariantList freezes_;
     QVariantList watches_;

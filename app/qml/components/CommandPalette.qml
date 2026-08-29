@@ -22,6 +22,7 @@ Popup {
         { label: "View: Project", section: "Project", action: "view" },
         { label: "View: Memory", section: "Memory", action: "view" },
         { label: "View: Scanner", section: "Scanner", action: "view" },
+        { label: "View: Pointers", section: "Pointers", action: "view" },
         { label: "View: Disassembly", section: "Disassembly", action: "view" },
         { label: "View: Structures", section: "Structures", action: "view" },
         { label: "View: Modules", section: "Modules", action: "view" },

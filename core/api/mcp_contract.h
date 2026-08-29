@@ -52,7 +52,7 @@ inline ToolRisk ClassifyTool(const std::string& name,
     // POST is sometimes used for structured analysis requests. Keep those
     // callable in inspect mode unless their arguments can change runtime or
     // persisted Cortex state.
-    if (name == "struct_read" || name == "trace_compare") return ToolRisk::Analyze;
+    if (name == "struct_read" || name == "trace_compare" || name == "pointermap_intersect") return ToolRisk::Analyze;
 
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||

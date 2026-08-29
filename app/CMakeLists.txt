@@ -102,6 +102,7 @@ qt_add_qml_module(cortex
         qml/components/SnapshotsView.qml
         qml/components/MemoryView.qml
         qml/components/ScannerView.qml
+        qml/components/PointerMapsView.qml
         qml/components/ModulesView.qml
         qml/components/DebuggerView.qml
         qml/components/DisassemblyView.qml

@@ -60,6 +60,7 @@ Rectangle {
                            : CortexApp.selectedSection === "Project" ? projectComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
                            : CortexApp.selectedSection === "Scanner" ? scannerComponent
+                           : CortexApp.selectedSection === "Pointers" ? pointersComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
                            : CortexApp.selectedSection === "Structures" ? structuresComponent
                            : CortexApp.selectedSection === "Modules" ? modulesComponent
@@ -88,6 +89,7 @@ Rectangle {
     Component { id: projectComponent; ProjectView {} }
     Component { id: memoryComponent; MemoryView {} }
     Component { id: scannerComponent; ScannerView {} }
+    Component { id: pointersComponent; PointerMapsView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }
     Component { id: structuresComponent; StructuresView {} }
     Component { id: modulesComponent; ModulesView {} }

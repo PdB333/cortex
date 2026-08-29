@@ -12,6 +12,7 @@ Rectangle {
         ListElement { group: "TARGET"; label: "Project" }
         ListElement { group: "INSPECT"; label: "Memory" }
         ListElement { group: "INSPECT"; label: "Scanner" }
+        ListElement { group: "INSPECT"; label: "Pointers" }
         ListElement { group: "INSPECT"; label: "Disassembly" }
         ListElement { group: "INSPECT"; label: "Structures" }
         ListElement { group: "INSPECT"; label: "Modules" }

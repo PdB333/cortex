@@ -1,5 +1,7 @@
 #include "feature_controller.h"
 
+#include <QRegularExpression>
+
 #include <QVariantMap>
 
 #include <algorithm>
@@ -680,6 +682,86 @@ bool FeatureController::lastSnapshotChange(const QString& address, int size) {
     emit snapshotsChanged();
     return true;
 }
+bool FeatureController::refreshPointerMaps() {
+    json output;
+    if (!callTool("pointermap_list", json::object(), output, false)) return false;
+    const json result = RouteResult(output);
+    pointerMaps_.clear();
+    const json maps = result.value("pointermaps", json::array());
+    if (maps.is_array()) {
+        pointerMaps_.reserve(static_cast<qsizetype>(maps.size()));
+        for (const auto& entry : maps) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(entry.value("name", std::string())));
+            row.insert(QStringLiteral("target"), FromUtf8(entry.value("target", std::string())));
+            row.insert(QStringLiteral("created"), static_cast<qulonglong>(entry.value("created_ms", uint64_t{0})));
+            row.insert(QStringLiteral("pathCount"), static_cast<qulonglong>(entry.value("path_count", uint64_t{0})));
+            row.insert(QStringLiteral("truncated"), entry.value("truncated", false));
+            pointerMaps_.push_back(row);
+        }
+    }
+    setError(QString());
+    emit pointerMapsChanged();
+    return true;
+}
+
+bool FeatureController::capturePointerMap(const QString& name, const QString& target, int maxDepth, int maxOffset) {
+    const QString stable = name.trimmed();
+    static const QRegularExpression allowed(QStringLiteral("^[A-Za-z0-9_-]+$"));
+    if (!allowed.match(stable).hasMatch() || target.trimmed().isEmpty() || maxDepth <= 0 || maxOffset <= 0) {
+        setError(QStringLiteral("invalid_pointermap_configuration"));
+        return false;
+    }
+    json output;
+    if (!callTool("pointermap_capture",
+                  {{"name", stable.toUtf8().toStdString()},
+                   {"target", target.trimmed().toUtf8().toStdString()},
+                   {"max_depth", maxDepth}, {"max_offset", maxOffset}},
+                  output,
+                  true)) return false;
+    pointerPaths_.clear();
+    emit pointerMapsChanged();
+    return refreshPointerMaps();
+}
+
+bool FeatureController::intersectPointerMaps(const QString& namesJson) {
+    json names;
+    try { names = json::parse(namesJson.toStdString()); }
+    catch (const std::exception&) { setError(QStringLiteral("pointermap_names_invalid_json")); return false; }
+    if (!names.is_array() || names.size() < 2) { setError(QStringLiteral("pointermap_intersection_requires_two_maps")); return false; }
+    json output;
+    if (!callTool("pointermap_intersect", {{"names", names}}, output, false)) return false;
+    const json result = RouteResult(output);
+    pointerPaths_.clear();
+    const json paths = result.value("paths", json::array());
+    if (paths.is_array()) {
+        pointerPaths_.reserve(static_cast<qsizetype>(paths.size()));
+        for (const auto& entry : paths) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("module"), FromUtf8(entry.value("module", std::string())));
+            row.insert(QStringLiteral("baseOffset"), static_cast<qlonglong>(entry.value("base_offset", int64_t{0})));
+            row.insert(QStringLiteral("offsets"), entry.contains("offsets") ? JsonText(entry.at("offsets")) : QStringLiteral("[]"));
+            row.insert(QStringLiteral("sessions"), entry.value("sessions", 0));
+            row.insert(QStringLiteral("score"), entry.value("score", 0.0));
+            pointerPaths_.push_back(row);
+        }
+    }
+    setError(QString());
+    emit pointerMapsChanged();
+    return true;
+}
+
+bool FeatureController::deletePointerMap(const QString& name) {
+    const QString stable = name.trimmed();
+    if (stable.isEmpty()) { setError(QStringLiteral("pointermap_name_required")); return false; }
+    json output;
+    if (!callTool("pointermap_delete", {{"_path", {{"name", stable.toUtf8().toStdString()}}}}, output, true)) return false;
+    pointerPaths_.clear();
+    emit pointerMapsChanged();
+    return refreshPointerMaps();
+}
 bool FeatureController::refreshTraces() {
     json output;
     if (!callTool("trace_list", json::object(), output, false)) return false;
@@ -830,6 +912,8 @@ void FeatureController::reset() {
     patches_.clear();
     snapshots_.clear();
     snapshotResult_.clear();
+    pointerMaps_.clear();
+    pointerPaths_.clear();
     traceEvents_.clear();
     selectedTraceId_ = -1;
     sessionExportPath_.clear();
@@ -845,6 +929,7 @@ void FeatureController::reset() {
     emit tracesChanged();
     emit patchesChanged();
     emit snapshotsChanged();
+    emit pointerMapsChanged();
     emit sessionChanged();
     emit errorChanged();
 }

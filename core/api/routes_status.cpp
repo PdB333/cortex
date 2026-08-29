@@ -545,6 +545,7 @@ json BuildToolsManifest() {
         j.push_back({{"name","pointermap_list"},{"method","GET"},{"path","/pointermap/list"},{"description","Lists the game's persistent pointer maps."}});
         j.push_back({{"name","pointermap_intersect"},{"method","POST"},{"path","/pointermap/intersect"},
                      {"description","Intersects several sessions and scores the stable paths."},{"body",{{"names","at least two names"}}}});
+        j.push_back({{"name","pointermap_delete"},{"method","DELETE"},{"path","/pointermap/{name}"},{"description","Deletes a persisted pointer map."}});
         j.push_back({{"name","trace_start"},{"method","POST"},{"path","/trace/start"},
                      {"description","Starts a bounded single-step trace with thread/range filters and coverage."}});
         j.push_back({{"name","trace_stop"},{"method","POST"},{"path","/trace/{id}/stop"},
