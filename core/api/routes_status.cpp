@@ -215,11 +215,11 @@ json BuildToolsManifest() {
                       {"description", "Executes exactly one instruction on a frozen thread then re-freezes it; blocks the response until the step completes or times out."},
                       {"body", {{"thread_id", "required"}, {"timeout_ms", "optional, default 2000"}}}});
 
-        j.push_back({{"name", "symbols_resolve"}, {"method", "GET"}, {"path", "/symbols/resolve"},
+        j.push_back({{"name", "symbols_resolve"}, {"method", "GET"}, {"path", "/symbols/resolve"}, {"ok_false_is_error", false},
                       {"description", "Resolves an address to a symbol (name + offset) and file/line if a PDB is present. Most games (especially older ones without a public PDB) won't have any symbols -- returns ok=false in that case, which is not an error, just an absence of info."},
                       {"query", {{"address", "required"}}}});
 
-        j.push_back({{"name", "symbols_lookup"}, {"method", "GET"}, {"path", "/symbols/lookup"},
+        j.push_back({{"name", "symbols_lookup"}, {"method", "GET"}, {"path", "/symbols/lookup"}, {"ok_false_is_error", false},
                       {"description", "Reverse lookup: address of a named symbol (export or PDB)."},
                       {"query", {{"name", "required"}}}});
 

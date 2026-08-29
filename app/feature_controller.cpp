@@ -757,6 +757,7 @@ bool FeatureController::refreshWatches() {
     pageAccessWatches_.clear();
     allocationEvents_.clear();
     pageAccessEvents_.clear();
+    symbolResult_.clear();
     const json watchResult = RouteResult(watchOutput);
     const json watchEntries = watchResult.value("watches", json::array());
     if (watchEntries.is_array()) {
@@ -905,6 +906,7 @@ bool FeatureController::refreshInstrumentationEvents() {
     }
 
     pageAccessEvents_.clear();
+    symbolResult_.clear();
     const json pageEntries = pageResult.value("events", json::array());
     if (pageEntries.is_array()) {
         pageAccessEvents_.reserve(static_cast<qsizetype>(pageEntries.size()));
@@ -961,6 +963,114 @@ bool FeatureController::deletePageAccessWatch(int id) {
     json output;
     if (!callTool("watch_page_access_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
     return refreshInstrumentationState();
+}
+bool FeatureController::resolveSymbol(const QString& addressValue) {
+    const QString address = addressValue.trimmed();
+    if (address.isEmpty()) {
+        setError(QStringLiteral("symbol_address_required"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("symbols_resolve",
+                  {{"_query", {{"address", address.toUtf8().toStdString()}}}},
+                  output,
+                  false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("symbol_result_invalid"));
+        return false;
+    }
+
+    symbolResult_.clear();
+    symbolResult_.insert(QStringLiteral("mode"), QStringLiteral("resolve"));
+    symbolResult_.insert(QStringLiteral("query"), address);
+    symbolResult_.insert(QStringLiteral("found"), result.value("ok", false));
+    symbolResult_.insert(QStringLiteral("address"), FromUtf8(result.value("address", std::string())));
+    symbolResult_.insert(QStringLiteral("module"), FromUtf8(result.value("module", std::string())));
+    symbolResult_.insert(QStringLiteral("modulePath"), FromUtf8(result.value("module_path", std::string())));
+    symbolResult_.insert(QStringLiteral("moduleBase"), FromUtf8(result.value("module_base", std::string())));
+    symbolResult_.insert(QStringLiteral("rva"), FromUtf8(result.value("rva", std::string())));
+    symbolResult_.insert(QStringLiteral("buildId"), FromUtf8(result.value("build_id", std::string())));
+    symbolResult_.insert(QStringLiteral("hasSymbol"), result.value("has_symbol", false));
+    symbolResult_.insert(QStringLiteral("symbol"), FromUtf8(result.value("symbol", std::string())));
+    symbolResult_.insert(QStringLiteral("symbolAddress"), FromUtf8(result.value("symbol_address", std::string())));
+    symbolResult_.insert(QStringLiteral("displacement"), static_cast<qulonglong>(result.value("displacement", uint64_t{0})));
+    symbolResult_.insert(QStringLiteral("hasLine"), result.value("has_line", false));
+    symbolResult_.insert(QStringLiteral("file"), FromUtf8(result.value("file", std::string())));
+    symbolResult_.insert(QStringLiteral("line"), result.value("line", 0));
+    symbolResult_.insert(QStringLiteral("loadedPdb"), FromUtf8(result.value("loaded_pdb", std::string())));
+    symbolResult_.insert(QStringLiteral("symbolType"), FromUtf8(result.value("symbol_type", std::string())));
+    symbolResult_.insert(QStringLiteral("verification"), FromUtf8(result.value("verification", std::string())));
+    symbolResult_.insert(QStringLiteral("exactSymbols"), result.contains("exact_symbols") ? JsonInline(result.at("exact_symbols")) : QStringLiteral("[]"));
+    symbolResult_.insert(QStringLiteral("error"), FromUtf8(result.value("error", std::string())));
+    setError(QString());
+    emit symbolsChanged();
+    return true;
+}
+
+bool FeatureController::lookupSymbol(const QString& nameValue) {
+    const QString name = nameValue.trimmed();
+    if (name.isEmpty()) {
+        setError(QStringLiteral("symbol_name_required"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("symbols_lookup",
+                  {{"_query", {{"name", name.toUtf8().toStdString()}}}},
+                  output,
+                  false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("symbol_lookup_result_invalid"));
+        return false;
+    }
+
+    const bool found = result.value("ok", false);
+    const QString resolvedAddress = FromUtf8(result.value("address", std::string()));
+    symbolResult_.clear();
+    symbolResult_.insert(QStringLiteral("mode"), QStringLiteral("lookup"));
+    symbolResult_.insert(QStringLiteral("query"), name);
+    symbolResult_.insert(QStringLiteral("found"), found);
+    symbolResult_.insert(QStringLiteral("address"), resolvedAddress);
+    symbolResult_.insert(QStringLiteral("error"), FromUtf8(result.value("error", std::string())));
+
+    if (found && !resolvedAddress.isEmpty()) {
+        json detailOutput;
+        if (callTool("symbols_resolve",
+                     {{"_query", {{"address", resolvedAddress.toUtf8().toStdString()}}}},
+                     detailOutput,
+                     false)) {
+            const json detail = RouteResult(detailOutput);
+            if (detail.is_object()) {
+                symbolResult_.insert(QStringLiteral("module"), FromUtf8(detail.value("module", std::string())));
+                symbolResult_.insert(QStringLiteral("modulePath"), FromUtf8(detail.value("module_path", std::string())));
+                symbolResult_.insert(QStringLiteral("moduleBase"), FromUtf8(detail.value("module_base", std::string())));
+                symbolResult_.insert(QStringLiteral("rva"), FromUtf8(detail.value("rva", std::string())));
+                symbolResult_.insert(QStringLiteral("buildId"), FromUtf8(detail.value("build_id", std::string())));
+                symbolResult_.insert(QStringLiteral("symbol"), FromUtf8(detail.value("symbol", std::string())));
+                symbolResult_.insert(QStringLiteral("symbolAddress"), FromUtf8(detail.value("symbol_address", std::string())));
+                symbolResult_.insert(QStringLiteral("displacement"), static_cast<qulonglong>(detail.value("displacement", uint64_t{0})));
+                symbolResult_.insert(QStringLiteral("file"), FromUtf8(detail.value("file", std::string())));
+                symbolResult_.insert(QStringLiteral("line"), detail.value("line", 0));
+                symbolResult_.insert(QStringLiteral("loadedPdb"), FromUtf8(detail.value("loaded_pdb", std::string())));
+                symbolResult_.insert(QStringLiteral("symbolType"), FromUtf8(detail.value("symbol_type", std::string())));
+                symbolResult_.insert(QStringLiteral("verification"), FromUtf8(detail.value("verification", std::string())));
+            }
+        }
+    }
+
+    setError(QString());
+    emit symbolsChanged();
+    return true;
+}
+
+void FeatureController::clearSymbolResult() {
+    if (symbolResult_.isEmpty() && lastError_.isEmpty()) return;
+    symbolResult_.clear();
+    setError(QString());
+    emit symbolsChanged();
 }
 bool FeatureController::refreshPatches() {
     json output;
@@ -1324,6 +1434,7 @@ void FeatureController::reset() {
     pageAccessWatches_.clear();
     allocationEvents_.clear();
     pageAccessEvents_.clear();
+    symbolResult_.clear();
     traces_.clear();
     patches_.clear();
     snapshots_.clear();
@@ -1344,6 +1455,7 @@ void FeatureController::reset() {
     emit scriptsChanged();
     emit watchesChanged();
     emit instrumentationChanged();
+    emit symbolsChanged();
     emit tracesChanged();
     emit patchesChanged();
     emit snapshotsChanged();

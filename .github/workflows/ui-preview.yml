@@ -558,6 +558,41 @@ jobs:
               if ($pageSnapshotResponse.id -ne 143 -or $pageSnapshotResponse.result.isError) {
                 throw "$label non-destructive page-access snapshot failed"
               }
+              $missingSymbolLookup = @{
+                jsonrpc = "2.0"
+                id = 144
+                method = "tools/call"
+                params = @{
+                  name = "symbols_lookup"
+                  arguments = @{ _query = @{ name = "__cortex_missing_symbol_e2e_4f2c9b1d__" } }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($missingSymbolLookup)
+              $mcp.StandardInput.Flush()
+              $missingSymbolLookupResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $missingSymbolLookupResult = $missingSymbolLookupResponse.result.structuredContent.result
+              if ($missingSymbolLookupResponse.id -ne 144 -or $missingSymbolLookupResponse.result.isError -or
+                  $missingSymbolLookupResult.ok -or $missingSymbolLookupResult.error -ne "symbol_not_found") {
+                throw "$label missing symbol lookup was incorrectly reported as a tool error"
+              }
+
+              $missingSymbolResolve = @{
+                jsonrpc = "2.0"
+                id = 145
+                method = "tools/call"
+                params = @{
+                  name = "symbols_resolve"
+                  arguments = @{ _query = @{ address = "0x1" } }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($missingSymbolResolve)
+              $mcp.StandardInput.Flush()
+              $missingSymbolResolveResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $missingSymbolResolveResult = $missingSymbolResolveResponse.result.structuredContent.result
+              if ($missingSymbolResolveResponse.id -ne 145 -or $missingSymbolResolveResponse.result.isError -or
+                  $missingSymbolResolveResult.ok) {
+                throw "$label unresolved address was incorrectly reported as a tool error"
+              }
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {
                 throw "$label trace lifecycle tools are missing from the MCP catalog"

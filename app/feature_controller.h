@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
 
 #include <functional>
 
@@ -45,6 +46,7 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QVariantList pageAccessWatches READ pageAccessWatches NOTIFY instrumentationChanged)
     Q_PROPERTY(QVariantList allocationEvents READ allocationEvents NOTIFY instrumentationChanged)
     Q_PROPERTY(QVariantList pageAccessEvents READ pageAccessEvents NOTIFY instrumentationChanged)
+    Q_PROPERTY(QVariantMap symbolResult READ symbolResult NOTIFY symbolsChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
     Q_PROPERTY(int selectedTraceId READ selectedTraceId NOTIFY tracesChanged)
     Q_PROPERTY(QString sessionExportPath READ sessionExportPath NOTIFY sessionChanged)
@@ -90,6 +92,7 @@ public:
     const QVariantList& pageAccessWatches() const { return pageAccessWatches_; }
     const QVariantList& allocationEvents() const { return allocationEvents_; }
     const QVariantList& pageAccessEvents() const { return pageAccessEvents_; }
+    const QVariantMap& symbolResult() const { return symbolResult_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
     int selectedTraceId() const { return selectedTraceId_; }
     QString sessionExportPath() const { return sessionExportPath_; }
@@ -148,6 +151,10 @@ public:
     Q_INVOKABLE bool addPageAccessWatch(const QString& address, int size, const QString& label = QString());
     Q_INVOKABLE bool deletePageAccessWatch(int id);
 
+    Q_INVOKABLE bool resolveSymbol(const QString& address);
+    Q_INVOKABLE bool lookupSymbol(const QString& name);
+    Q_INVOKABLE void clearSymbolResult();
+
     Q_INVOKABLE bool refreshPatches();
     Q_INVOKABLE bool revertPatch(int patchId);
 
@@ -188,6 +195,7 @@ signals:
     void pointerMapsChanged();
     void watchesChanged();
     void instrumentationChanged();
+    void symbolsChanged();
     void sessionChanged();
     void errorChanged();
 
@@ -237,6 +245,7 @@ private:
     QVariantList pageAccessWatches_;
     QVariantList allocationEvents_;
     QVariantList pageAccessEvents_;
+    QVariantMap symbolResult_;
     QVariantList traceEvents_;
     int selectedTraceId_ = -1;
     QString sessionExportPath_;

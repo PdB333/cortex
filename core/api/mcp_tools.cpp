@@ -166,7 +166,7 @@ json Dispatch(const std::string& method, const std::string& path, const json& bo
     return output;
 }
 
-bool IsToolError(const json& result) {
+bool IsToolError(const json& result, bool okFalseIsError = true) {
     if (result.contains("status")) {
         if (result["status"].is_number_integer() && result["status"].get<int>() >= 400) return true;
         if (result["status"].is_string()) {
@@ -174,21 +174,21 @@ bool IsToolError(const json& result) {
             if (status == "failed" || status == "cancelled" || status == "timed_out") return true;
         }
     }
-    if (result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>()) return true;
+    if (okFalseIsError && result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>()) return true;
     if (result.contains("result") && result["result"].is_object()) {
         const auto& nested = result["result"];
-        if (nested.contains("ok") && nested["ok"].is_boolean() && !nested["ok"].get<bool>()) return true;
+        if (okFalseIsError && nested.contains("ok") && nested["ok"].is_boolean() && !nested["ok"].get<bool>()) return true;
         if (nested.contains("status") && nested["status"].is_string() &&
             nested["status"].get<std::string>() == "failed") return true;
     }
     return false;
 }
 
-json ToolCallPayload(const json& result) {
+json ToolCallPayload(const json& result, bool okFalseIsError = true) {
     return {
         {"content", json::array({{{"type", "text"}, {"text", result.dump(2)}}})},
         {"structuredContent", result},
-        {"isError", IsToolError(result)}
+        {"isError", IsToolError(result, okFalseIsError)}
     };
 }
 
@@ -444,7 +444,7 @@ json ExecuteSemantic(const std::string& wanted,
             {"output", output}
         });
 
-        if (IsToolError(output)) {
+        if (IsToolError(output, steps[index].manifest.value("ok_false_is_error", true))) {
             UnregisterCancellation(cancellationScope, requestId, cancelled);
             plan["failed_step"] = index;
             return TerminateExecution(std::move(plan), "failed", "primitive_execution_failed",
@@ -515,7 +515,7 @@ json CallToolScoped(const std::string& wanted,
                                 {"tool", manifest.value("name", wanted)},
                                 {"risk", mcp_contract::RiskName(risk)}});
     }
-    return ToolCallPayload(DispatchPrimitive(manifest, arguments));
+    return ToolCallPayload(DispatchPrimitive(manifest, arguments), manifest.value("ok_false_is_error", true));
 }
 
 } // namespace
