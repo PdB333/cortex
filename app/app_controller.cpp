@@ -135,7 +135,10 @@ bool ScanKindFromText(const QString& text, cortex::services::ScanValueKind& kind
 
 bool ScanComparisonFromText(const QString& text, cortex::services::ScanComparison& comparison) {
     const auto normalized = text.trimmed().toLower();
-    if (normalized == QStringLiteral("changed")) comparison = cortex::services::ScanComparison::Changed;
+    if (normalized == QStringLiteral("exact") || normalized == QStringLiteral("exact value"))
+        comparison = cortex::services::ScanComparison::Exact;
+    else if (normalized == QStringLiteral("changed")) comparison = cortex::services::ScanComparison::Changed;
+    else if (normalized == QStringLiteral("unchanged")) comparison = cortex::services::ScanComparison::Unchanged;
     else if (normalized == QStringLiteral("increased")) comparison = cortex::services::ScanComparison::Increased;
     else if (normalized == QStringLiteral("decreased")) comparison = cortex::services::ScanComparison::Decreased;
     else return false;
@@ -423,7 +426,7 @@ bool AppController::startScan(const QString& value, const QString& type,
     }
 
     std::vector<uint8_t> pattern;
-    cortex::services::ScanComparison comparison{};
+    cortex::services::ScanComparison comparison = cortex::services::ScanComparison::Exact;
     if (refine) {
         if (scanState_.empty()) {
             setLastError(QStringLiteral("no_previous_scan"));
@@ -435,6 +438,11 @@ bool AppController::startScan(const QString& value, const QString& type,
         }
         if (!ScanComparisonFromText(comparisonText, comparison)) {
             setLastError(QStringLiteral("invalid_scan_comparison"));
+            return false;
+        }
+        if (comparison == cortex::services::ScanComparison::Exact &&
+            !EncodeScanValue(value, type, pattern)) {
+            setLastError(QStringLiteral("invalid_scan_value"));
             return false;
         }
     } else if (!EncodeScanValue(value, type, pattern)) {
@@ -464,7 +472,8 @@ bool AppController::startScan(const QString& value, const QString& type,
         std::string error;
         if (refine) {
             task.ok = cortex::services::ScanService::Refine(
-                session, previous, kind, comparison, task.results, &error, cancelToken.get());
+                session, previous, kind, comparison, pattern,
+                task.results, &error, cancelToken.get());
         } else {
             task.ok = cortex::services::ScanService::Exact(
                 session, pattern, task.results, 5000, &error, cancelToken.get());

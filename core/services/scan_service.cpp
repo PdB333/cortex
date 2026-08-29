@@ -27,16 +27,26 @@ bool CompareTyped(const std::vector<uint8_t>& current,
     switch (comparison) {
         case ScanComparison::Increased: return now > before;
         case ScanComparison::Decreased: return now < before;
-        default: return now != before;
+        default: return false;
     }
 }
 
 bool MatchesRefinement(const std::vector<uint8_t>& current,
                        const std::vector<uint8_t>& previous,
                        ScanValueKind kind,
-                       ScanComparison comparison) {
-    if (comparison == ScanComparison::Changed)
-        return current != previous;
+                       ScanComparison comparison,
+                       const std::vector<uint8_t>& exactValue) {
+    switch (comparison) {
+        case ScanComparison::Exact:
+            return !exactValue.empty() && current == exactValue;
+        case ScanComparison::Changed:
+            return current != previous;
+        case ScanComparison::Unchanged:
+            return current == previous;
+        case ScanComparison::Increased:
+        case ScanComparison::Decreased:
+            break;
+    }
 
     switch (kind) {
         case ScanValueKind::I32: return CompareTyped<int32_t>(current, previous, comparison);
@@ -129,6 +139,7 @@ bool ScanService::Refine(const target::SessionPtr& session,
                          const std::vector<ScanResult>& previous,
                          ScanValueKind kind,
                          ScanComparison comparison,
+                         const std::vector<uint8_t>& exactValue,
                          std::vector<ScanResult>& results,
                          std::string* error,
                          const std::atomic_bool* cancelled) {
@@ -145,6 +156,16 @@ bool ScanService::Refine(const target::SessionPtr& session,
     if (previous.empty()) {
         if (error) *error = "no_previous_scan";
         return false;
+    }
+    if (comparison == ScanComparison::Exact) {
+        if (exactValue.empty()) {
+            if (error) *error = "invalid_scan_value";
+            return false;
+        }
+        if (!previous.front().value.empty() && exactValue.size() != previous.front().value.size()) {
+            if (error) *error = "scan_value_size_changed";
+            return false;
+        }
     }
     if ((comparison == ScanComparison::Increased || comparison == ScanComparison::Decreased) &&
         (kind == ScanValueKind::Bytes || kind == ScanValueKind::String)) {
@@ -165,7 +186,7 @@ bool ScanService::Refine(const target::SessionPtr& session,
         if (!session->ReadMemory(old.address, current.data(), current.size(), &read) || read != current.size())
             continue;
 
-        if (MatchesRefinement(current, old.value, kind, comparison))
+        if (MatchesRefinement(current, old.value, kind, comparison, exactValue))
             results.push_back({old.address, std::move(current)});
     }
     return true;

@@ -26,8 +26,12 @@ ColumnLayout {
                 font.pixelSize: 12
                 enabled: CortexApp.sessionActive && !CortexApp.scanBusy && scanMode.currentIndex === 0
                 Keys.onReturnPressed: {
-                    if (scanMode.currentIndex === 0 && text.length)
-                        CortexApp.startScan(text, valueType.currentText, "Exact value", false)
+                    if (scanMode.currentIndex === 0 && text.length) {
+                        if (CortexApp.scanResults.length > 0)
+                            CortexApp.startScan(text, valueType.currentText, "Exact value", true)
+                        else
+                            CortexApp.startScan(text, valueType.currentText, "Exact value", false)
+                    }
                 }
             }
             ComboBox {
@@ -42,11 +46,11 @@ ColumnLayout {
                 id: scanMode
                 Layout.preferredWidth: 130
                 Layout.preferredHeight: 30
-                model: ["Exact value", "Changed", "Increased", "Decreased"]
+                model: ["Exact value", "Changed", "Unchanged", "Increased", "Decreased"]
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive && !CortexApp.scanBusy
                 onCurrentIndexChanged: {
-                    if ((currentIndex === 2 || currentIndex === 3) &&
+                    if ((currentIndex === 3 || currentIndex === 4) &&
                         (valueType.currentText === "string" || valueType.currentText === "bytes"))
                         currentIndex = 1
                 }
@@ -64,9 +68,10 @@ ColumnLayout {
             Button {
                 text: "Next Scan"
                 font.pixelSize: 11
-                enabled: CortexApp.sessionActive && !CortexApp.scanBusy &&
-                         CortexApp.scanResults.length > 0 && scanMode.currentIndex > 0
-                onClicked: CortexApp.startScan("", valueType.currentText, scanMode.currentText, true)
+                enabled: CortexApp.sessionActive && !CortexApp.scanBusy && CortexApp.scanResults.length > 0 &&
+                         (scanMode.currentIndex !== 0 || valueField.text.length > 0)
+                onClicked: CortexApp.startScan(scanMode.currentIndex === 0 ? valueField.text : "",
+                                               valueType.currentText, scanMode.currentText, true)
             }
             Button {
                 text: "Cancel"

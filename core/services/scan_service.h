@@ -20,7 +20,9 @@ enum class ScanValueKind : uint8_t {
 };
 
 enum class ScanComparison : uint8_t {
-    Changed = 0,
+    Exact = 0,
+    Changed,
+    Unchanged,
     Increased,
     Decreased
 };
@@ -43,6 +45,7 @@ public:
                        const std::vector<ScanResult>& previous,
                        ScanValueKind kind,
                        ScanComparison comparison,
+                       const std::vector<uint8_t>& exactValue,
                        std::vector<ScanResult>& results,
                        std::string* error = nullptr,
                        const std::atomic_bool* cancelled = nullptr);
