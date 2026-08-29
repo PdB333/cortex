@@ -289,8 +289,6 @@ bool FeatureController::refreshRuntimeEvents() {
     }
     if (runtimeEvents_.size() > 512)
         runtimeEvents_.erase(runtimeEvents_.begin(), runtimeEvents_.begin() + (runtimeEvents_.size() - 512));
-    const qulonglong latest = static_cast<qulonglong>(result.value("latest_id", uint64_t{0}));
-    if (latest > lastRuntimeEventId_) lastRuntimeEventId_ = latest;
     setError(QString());
     emit runtimeEventsChanged();
     return true;
