@@ -38,6 +38,10 @@ DisassemblyController::DisassemblyController(cortex::target::SessionManager& ses
     : QObject(parent), service_(sessions) {}
 
 bool DisassemblyController::disassemble(const QString& addressText, int count) {
+    return decode(addressText, count, true);
+}
+
+bool DisassemblyController::decode(const QString& addressText, int count, bool recordHistory) {
     uint64_t address = 0;
     if (!ParseAddress(addressText, address) || count <= 0 || count > 1000) {
         setLastError(QStringLiteral("invalid_address_or_count"));
@@ -63,19 +67,62 @@ bool DisassemblyController::disassemble(const QString& addressText, int count) {
         row.insert(QStringLiteral("text"), FromUtf8(instruction.text));
         rows_.push_back(row);
     }
+    lastCount_ = count;
+    if (recordHistory) {
+        const QString normalized = HexAddress(address);
+        if (historyIndex_ < 0 || history_.at(historyIndex_) != normalized) {
+            while (history_.size() > historyIndex_ + 1) history_.removeLast();
+            history_.push_back(normalized);
+            historyIndex_ = history_.size() - 1;
+            if (history_.size() > 128) {
+                history_.removeFirst();
+                --historyIndex_;
+            }
+        }
+        emit historyChanged();
+    }
     emit rowsChanged();
     setLastError(QString());
     return true;
 }
 
-void DisassemblyController::clear() {
-    if (!rows_.isEmpty()) {
-        rows_.clear();
-        emit rowsChanged();
+bool DisassemblyController::goBack() {
+    if (!canGoBack()) return false;
+    const int previous = historyIndex_;
+    --historyIndex_;
+    if (!decode(history_.at(historyIndex_), lastCount_, false)) {
+        historyIndex_ = previous;
+        emit historyChanged();
+        return false;
     }
-    setLastError(QString());
+    emit historyChanged();
+    return true;
 }
 
+bool DisassemblyController::goForward() {
+    if (!canGoForward()) return false;
+    const int previous = historyIndex_;
+    ++historyIndex_;
+    if (!decode(history_.at(historyIndex_), lastCount_, false)) {
+        historyIndex_ = previous;
+        emit historyChanged();
+        return false;
+    }
+    emit historyChanged();
+    return true;
+}
+
+void DisassemblyController::clear() {
+    const bool hadRows = !rows_.isEmpty();
+    const bool hadHistory = !history_.isEmpty();
+    rows_.clear();
+    history_.clear();
+    historyIndex_ = -1;
+    lastCount_ = 128;
+    if (hadRows) emit rowsChanged();
+    if (hadHistory) emit historyChanged();
+    setLastError(QString());
+}
 void DisassemblyController::setLastError(const QString& error) {
     if (lastError_ == error) return;
     lastError_ = error;
