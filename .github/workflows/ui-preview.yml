@@ -541,7 +541,7 @@ jobs:
                   name = "patch_write"
                   arguments = @{
                     address = [string]$fixture.u32
-                    bytes = "78563412"
+                    bytes = "78 56 34 12"
                     label = "portable patch e2e"
                     mutation_permission = $true
                   }
