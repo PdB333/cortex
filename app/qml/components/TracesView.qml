@@ -36,6 +36,16 @@ ColumnLayout {
                 enabled: CortexFeatures.selectedTraceId >= 0
                 onClicked: CortexFeatures.loadTraceEvents(CortexFeatures.selectedTraceId, 250)
             }
+            Button {
+                text: "Stop"
+                enabled: CortexFeatures.selectedTraceId >= 0 && CortexApp.mutationPermission
+                onClicked: CortexFeatures.stopTrace(CortexFeatures.selectedTraceId)
+            }
+            Button {
+                text: "Delete"
+                enabled: CortexFeatures.selectedTraceId >= 0 && CortexApp.mutationPermission
+                onClicked: CortexFeatures.deleteTrace(CortexFeatures.selectedTraceId)
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: CortexFeatures.lastError

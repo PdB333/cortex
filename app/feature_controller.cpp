@@ -3,6 +3,7 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <string>
 
 namespace {
 
@@ -244,6 +245,56 @@ bool FeatureController::startTrace(qulonglong threadId, int maxSteps) {
     refreshTraces();
     if (selectedTraceId_ >= 0) loadTraceEvents(selectedTraceId_);
     return true;
+}
+
+bool FeatureController::stopTrace(int traceId) {
+    if (traceId < 0) {
+        setError(QStringLiteral("invalid_trace_request"));
+        return false;
+    }
+    if (!mutationAllowed_ || !mutationAllowed_()) {
+        setError(QStringLiteral("mutation_permission_required"));
+        return false;
+    }
+
+    json output;
+    QString error;
+    const std::string path = "/trace/" + std::to_string(traceId) + "/stop";
+    if (!payload_.CallRouteExisting("POST", path, json::object(), output, &error, true)) {
+        setError(error.isEmpty() ? QStringLiteral("trace_stop_failed") : error);
+        return false;
+    }
+
+    setError(QString());
+    const bool refreshed = refreshTraces();
+    if (selectedTraceId_ == traceId) loadTraceEvents(traceId);
+    return refreshed;
+}
+
+bool FeatureController::deleteTrace(int traceId) {
+    if (traceId < 0) {
+        setError(QStringLiteral("invalid_trace_request"));
+        return false;
+    }
+    if (!mutationAllowed_ || !mutationAllowed_()) {
+        setError(QStringLiteral("mutation_permission_required"));
+        return false;
+    }
+
+    json output;
+    QString error;
+    const std::string path = "/trace/" + std::to_string(traceId);
+    if (!payload_.CallRouteExisting("DELETE", path, json::object(), output, &error, true)) {
+        setError(error.isEmpty() ? QStringLiteral("trace_delete_failed") : error);
+        return false;
+    }
+
+    setError(QString());
+    if (selectedTraceId_ == traceId) {
+        selectedTraceId_ = -1;
+        traceEvents_.clear();
+    }
+    return refreshTraces();
 }
 
 bool FeatureController::selectTrace(int traceId) {

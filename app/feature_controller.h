@@ -60,6 +60,8 @@ public:
 
     Q_INVOKABLE bool refreshTraces();
     Q_INVOKABLE bool startTrace(qulonglong threadId, int maxSteps = 10000);
+    Q_INVOKABLE bool stopTrace(int traceId);
+    Q_INVOKABLE bool deleteTrace(int traceId);
     Q_INVOKABLE bool selectTrace(int traceId);
     Q_INVOKABLE bool loadTraceEvents(int traceId, int limit = 250);
 
