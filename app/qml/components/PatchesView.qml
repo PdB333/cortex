@@ -13,12 +13,6 @@ ColumnLayout {
 
     Component.onCompleted: if (CortexPayload.ready) CortexFeatures.refreshPatches()
 
-    function runMutation(tool, args) {
-        if (!CortexRuntime.callToolJson(tool, JSON.stringify(args))) return false
-        CortexFeatures.refreshPatches()
-        return true
-    }
-
     Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 78
@@ -39,12 +33,12 @@ ColumnLayout {
                     text: root.mode === 2 ? "Assemble / write" : root.mode === 5 ? "Allocate" : "Apply"
                     enabled: CortexPayload.ready && CortexApp.mutationPermission && addressField.text.length > 0 && valueField.text.length > 0
                     onClicked: {
-                        if (root.mode === 0) root.runMutation("patch_write", {address: addressField.text, bytes: valueField.text, label: labelField.text})
-                        else if (root.mode === 1) root.runMutation("patch_nop", {address: addressField.text, size: parseInt(valueField.text), label: labelField.text})
-                        else if (root.mode === 2) root.runMutation("patch_assemble", {address: addressField.text, lines: valueField.text.split(";").map(function(v){return v.trim()}).filter(function(v){return v.length > 0}), write: true, label: labelField.text})
-                        else if (root.mode === 3) root.runMutation("patch_detour", {address: addressField.text, target: valueField.text, jmp_size: parseInt(extraField.text) || 5})
-                        else if (root.mode === 4) root.runMutation("patch_trampoline", {address: addressField.text, target: valueField.text, minimum_overwrite: parseInt(extraField.text) || 5})
-                        else CortexRuntime.callToolJson("patch_alloc_cave", JSON.stringify({near_address: addressField.text, size: parseInt(valueField.text)}))
+                        if (root.mode === 0) CortexFeatures.applyPatchBytes(addressField.text, valueField.text, labelField.text)
+                        else if (root.mode === 1) CortexFeatures.applyPatchNop(addressField.text, parseInt(valueField.text), labelField.text)
+                        else if (root.mode === 2) CortexFeatures.applyPatchAssembly(addressField.text, valueField.text, labelField.text)
+                        else if (root.mode === 3) CortexFeatures.applyPatchDetour(addressField.text, valueField.text, parseInt(extraField.text) || 5)
+                        else if (root.mode === 4) CortexFeatures.applyPatchTrampoline(addressField.text, valueField.text, parseInt(extraField.text) || 5)
+                        else CortexFeatures.allocatePatchCave(addressField.text, parseInt(valueField.text))
                     }
                 }
                 Button { text: "Refresh"; enabled: CortexPayload.ready; onClicked: CortexFeatures.refreshPatches() }
@@ -143,8 +137,8 @@ ColumnLayout {
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextEdit.WrapAnywhere
-                    text: CortexRuntime.lastError.length ? CortexRuntime.lastError : (CortexRuntime.lastResult.length ? CortexRuntime.lastResult : "No patch operation yet.")
-                    color: CortexRuntime.lastError.length ? Theme.error : (CortexRuntime.lastResult.length ? Theme.text : Theme.textDisabled)
+                    text: CortexFeatures.lastError.length ? CortexFeatures.lastError : (CortexFeatures.patchOperationResult.length ? CortexFeatures.patchOperationResult : "No patch operation yet.")
+                    color: CortexFeatures.lastError.length ? Theme.error : (CortexFeatures.patchOperationResult.length ? Theme.text : Theme.textDisabled)
                     font.family: Theme.monoFont
                     font.pixelSize: 10
                     leftPadding: 10

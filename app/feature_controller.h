@@ -35,6 +35,7 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString scriptOutput READ scriptOutput NOTIFY scriptsChanged)
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
     Q_PROPERTY(QVariantList patches READ patches NOTIFY patchesChanged)
+    Q_PROPERTY(QString patchOperationResult READ patchOperationResult NOTIFY patchesChanged)
     Q_PROPERTY(QVariantList snapshots READ snapshots NOTIFY snapshotsChanged)
     Q_PROPERTY(QVariantList pointerMaps READ pointerMaps NOTIFY pointerMapsChanged)
     Q_PROPERTY(QVariantList pointerPaths READ pointerPaths NOTIFY pointerMapsChanged)
@@ -92,6 +93,7 @@ public:
     QString scriptOutput() const { return scriptOutput_; }
     const QVariantList& traces() const { return traces_; }
     const QVariantList& patches() const { return patches_; }
+    QString patchOperationResult() const { return patchOperationResult_; }
     const QVariantList& snapshots() const { return snapshots_; }
     const QVariantList& pointerMaps() const { return pointerMaps_; }
     const QVariantList& pointerPaths() const { return pointerPaths_; }
@@ -187,6 +189,12 @@ public:
     Q_INVOKABLE bool refreshDiagnostics();
 
     Q_INVOKABLE bool refreshPatches();
+    Q_INVOKABLE bool applyPatchBytes(const QString& address, const QString& bytes, const QString& label = QString());
+    Q_INVOKABLE bool applyPatchNop(const QString& address, int size, const QString& label = QString());
+    Q_INVOKABLE bool applyPatchAssembly(const QString& address, const QString& instructions, const QString& label = QString());
+    Q_INVOKABLE bool applyPatchDetour(const QString& address, const QString& target, int jumpSize = 5);
+    Q_INVOKABLE bool applyPatchTrampoline(const QString& address, const QString& target, int minimumOverwrite = 5);
+    Q_INVOKABLE bool allocatePatchCave(const QString& nearAddress, int size);
     Q_INVOKABLE bool revertPatch(int patchId);
 
     Q_INVOKABLE bool refreshSnapshots();
@@ -267,6 +275,7 @@ private:
     QString scriptOutput_;
     QVariantList traces_;
     QVariantList patches_;
+    QString patchOperationResult_;
     QVariantList snapshots_;
     QVariantList pointerMaps_;
     QVariantList pointerPaths_;

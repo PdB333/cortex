@@ -1460,6 +1460,61 @@ void FeatureController::clearSymbolResult() {
     setError(QString());
     emit symbolsChanged();
 }
+bool FeatureController::applyPatchBytes(const QString& addressValue, const QString& bytesValue, const QString& labelValue) {
+    const QString address = addressValue.trimmed();
+    const QString bytes = bytesValue.trimmed();
+    if (address.isEmpty() || bytes.isEmpty()) { setError(QStringLiteral("patch_address_and_bytes_required")); return false; }
+    json arguments{{"address", address.toUtf8().toStdString()}, {"bytes", bytes.toUtf8().toStdString()}};
+    if (!labelValue.trimmed().isEmpty()) arguments["label"] = labelValue.trimmed().toUtf8().toStdString();
+    json output; if (!callTool("patch_write", arguments, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); emit patchesChanged(); return refreshPatches();
+}
+
+bool FeatureController::applyPatchNop(const QString& addressValue, int size, const QString& labelValue) {
+    const QString address = addressValue.trimmed();
+    if (address.isEmpty() || size <= 0) { setError(QStringLiteral("patch_address_and_size_required")); return false; }
+    json arguments{{"address", address.toUtf8().toStdString()}, {"size", size}};
+    if (!labelValue.trimmed().isEmpty()) arguments["label"] = labelValue.trimmed().toUtf8().toStdString();
+    json output; if (!callTool("patch_nop", arguments, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); emit patchesChanged(); return refreshPatches();
+}
+
+bool FeatureController::applyPatchAssembly(const QString& addressValue, const QString& instructionsValue, const QString& labelValue) {
+    const QString address = addressValue.trimmed();
+    const QString instructions = instructionsValue.trimmed();
+    if (address.isEmpty() || instructions.isEmpty()) { setError(QStringLiteral("patch_address_and_assembly_required")); return false; }
+    json lines = json::array();
+    for (const QString& line : instructions.split(QLatin1Char(';'), Qt::SkipEmptyParts)) {
+        const QString trimmed = line.trimmed(); if (!trimmed.isEmpty()) lines.push_back(trimmed.toUtf8().toStdString());
+    }
+    if (lines.empty()) { setError(QStringLiteral("patch_assembly_lines_required")); return false; }
+    json arguments{{"address", address.toUtf8().toStdString()}, {"lines", lines}, {"write", true}};
+    if (!labelValue.trimmed().isEmpty()) arguments["label"] = labelValue.trimmed().toUtf8().toStdString();
+    json output; if (!callTool("patch_assemble", arguments, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); emit patchesChanged(); return refreshPatches();
+}
+
+bool FeatureController::applyPatchDetour(const QString& addressValue, const QString& targetValue, int jumpSize) {
+    const QString address = addressValue.trimmed(), target = targetValue.trimmed();
+    if (address.isEmpty() || target.isEmpty() || jumpSize < 5) { setError(QStringLiteral("patch_detour_configuration_invalid")); return false; }
+    json output; if (!callTool("patch_detour", {{"address", address.toUtf8().toStdString()}, {"target", target.toUtf8().toStdString()}, {"jmp_size", jumpSize}}, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); emit patchesChanged(); return refreshPatches();
+}
+
+bool FeatureController::applyPatchTrampoline(const QString& addressValue, const QString& targetValue, int minimumOverwrite) {
+    const QString address = addressValue.trimmed(), target = targetValue.trimmed();
+    if (address.isEmpty() || target.isEmpty() || minimumOverwrite < 5) { setError(QStringLiteral("patch_trampoline_configuration_invalid")); return false; }
+    json output; if (!callTool("patch_trampoline", {{"address", address.toUtf8().toStdString()}, {"target", target.toUtf8().toStdString()}, {"minimum_overwrite", minimumOverwrite}}, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); emit patchesChanged(); return refreshPatches();
+}
+
+bool FeatureController::allocatePatchCave(const QString& nearAddressValue, int size) {
+    const QString nearAddress = nearAddressValue.trimmed();
+    if (nearAddress.isEmpty() || size <= 0) { setError(QStringLiteral("patch_cave_configuration_invalid")); return false; }
+    json output; if (!callTool("patch_alloc_cave", {{"near_address", nearAddress.toUtf8().toStdString()}, {"size", size}}, output, true)) return false;
+    patchOperationResult_ = JsonText(RouteResult(output)); setError(QString()); emit patchesChanged(); return true;
+}
+
 bool FeatureController::refreshPatches() {
     json output;
     if (!callTool("patch_list", json::object(), output, false)) return false;
@@ -1836,6 +1891,7 @@ void FeatureController::reset() {
     diagnosticSummary_.clear();
     traces_.clear();
     patches_.clear();
+    patchOperationResult_.clear();
     snapshots_.clear();
     snapshotResult_.clear();
     pointerMaps_.clear();
