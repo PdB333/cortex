@@ -145,7 +145,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Horizontal
@@ -174,7 +174,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -261,7 +261,7 @@ ColumnLayout {
                     border.width: 1
                     border.color: Theme.border
 
-                    Flickable {
+                    CortexFlickable {
                         anchors.fill: parent
                         clip: true
                         contentWidth: width
@@ -291,7 +291,7 @@ ColumnLayout {
             SplitView.minimumWidth: 390
             color: Theme.background
 
-            SplitView {
+            CortexSplitView {
                 anchors.fill: parent
                 orientation: Qt.Vertical
 
@@ -333,7 +333,7 @@ ColumnLayout {
                             }
                         }
 
-                        ListView {
+                        CortexListView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
@@ -448,7 +448,7 @@ ColumnLayout {
                             }
                         }
 
-                        ListView {
+                        CortexListView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true

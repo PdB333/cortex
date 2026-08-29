@@ -9,6 +9,7 @@ QtObject {
     readonly property color surface: "#202020"
     readonly property color surfaceRaised: "#252526"
     readonly property color input: "#1f1f1f"
+    readonly property color inputBackground: input
     readonly property color border: "#303030"
     readonly property color borderStrong: "#444444"
     readonly property color text: "#cccccc"

@@ -109,17 +109,20 @@ ColumnLayout {
         Layout.fillHeight: true
         color: Theme.background
 
-        ScrollView {
+        CortexFlickable {
+            id: symbolScroll
             anchors.fill: parent
-            clip: true
-            contentWidth: availableWidth
+            contentWidth: width
+            contentHeight: symbolGrid.implicitHeight + 32
 
             GridLayout {
-                width: parent.width
+                id: symbolGrid
+                x: 16
+                y: 16
+                width: Math.max(0, parent.width - 32)
                 columns: 2
                 columnSpacing: 18
                 rowSpacing: 9
-                anchors.margins: 16
 
                 Label { text: "Query"; color: Theme.textMuted; font.pixelSize: 10 }
                 Text { Layout.fillWidth: true; text: root.field("query"); color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; wrapMode: Text.WrapAnywhere }

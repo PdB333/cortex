@@ -87,7 +87,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Horizontal
@@ -119,7 +119,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     id: disasmList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -187,7 +187,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     id: threadList
                     Layout.fillWidth: true
                     Layout.preferredHeight: 135
@@ -235,7 +235,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     id: breakpointList
                     Layout.fillWidth: true
                     Layout.preferredHeight: CortexPayload.ready ? 118 : 42
@@ -282,7 +282,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     id: registerList
                     Layout.fillWidth: true
                     Layout.fillHeight: true

@@ -59,7 +59,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Vertical
@@ -87,7 +87,7 @@ ColumnLayout {
                         Label { Layout.fillWidth: true; text: "STOP REASON"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -134,7 +134,7 @@ ColumnLayout {
                         Label { Layout.fillWidth: true; text: "REGISTERS"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

@@ -89,7 +89,7 @@ Rectangle {
             Layout.fillHeight: true
             color: Theme.background
 
-            ListView {
+            CortexListView {
                 anchors.fill: parent
                 anchors.margins: 10
                 visible: root.activeTab === 0
@@ -105,7 +105,7 @@ Rectangle {
                     Text { Layout.fillWidth: true; text: modelData.data; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 9; elide: Text.ElideRight }
                 }
             }
-            ListView {
+            CortexListView {
                 anchors.fill: parent
                 anchors.margins: 10
                 visible: root.activeTab === 1

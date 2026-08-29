@@ -100,7 +100,7 @@ Rectangle {
             Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
         }
 
-        SplitView {
+        CortexSplitView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             orientation: Qt.Horizontal
@@ -129,7 +129,7 @@ Rectangle {
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                     }
 
-                    ListView {
+                    CortexListView {
                         id: toolList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -311,7 +311,7 @@ Rectangle {
                         color: Theme.surface
                         border.color: Theme.border
                         border.width: 1
-                        Flickable {
+                        CortexFlickable {
                             id: resultFlick
                             anchors.fill: parent
                             anchors.margins: 8

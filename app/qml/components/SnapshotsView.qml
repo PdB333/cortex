@@ -45,7 +45,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Vertical
@@ -74,7 +74,7 @@ ColumnLayout {
                         Item { Layout.preferredWidth: 160 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -113,7 +113,7 @@ ColumnLayout {
                 anchors.fill: parent
                 spacing: 0
                 Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 28; color: Theme.panel; Label { anchors.left: parent.left; anchors.leftMargin: 10; anchors.verticalCenter: parent.verticalCenter; text: "SNAPSHOT RESULT"; color: Theme.textMuted; font.pixelSize: 9; font.bold: true } }
-                Flickable {
+                CortexFlickable {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

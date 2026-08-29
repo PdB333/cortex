@@ -76,7 +76,7 @@ Popup {
             color: Theme.border
         }
 
-        ListView {
+        CortexListView {
             id: processList
             Layout.fillWidth: true
             Layout.fillHeight: true

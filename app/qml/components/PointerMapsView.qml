@@ -57,7 +57,7 @@ ColumnLayout {
         font.pixelSize: 10
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Horizontal
@@ -84,7 +84,7 @@ ColumnLayout {
                         Label { Layout.fillWidth: true; text: "STATE"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -133,7 +133,7 @@ ColumnLayout {
                         Label { Layout.preferredWidth: 65; text: "SCORE"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

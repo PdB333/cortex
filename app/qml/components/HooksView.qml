@@ -141,7 +141,7 @@ ColumnLayout {
                 }
                 Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
             }
-            ListView {
+            CortexListView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -210,7 +210,7 @@ ColumnLayout {
         Layout.fillHeight: true
         color: Theme.background
 
-        ListView {
+        CortexListView {
             id: pageEventList
             anchors.fill: parent
             visible: !root.showAllocationEvents
@@ -273,7 +273,7 @@ ColumnLayout {
             }
         }
 
-        ListView {
+        CortexListView {
             id: allocationEventList
             anchors.fill: parent
             visible: root.showAllocationEvents

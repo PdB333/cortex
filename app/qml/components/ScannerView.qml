@@ -111,7 +111,7 @@ ColumnLayout {
         Layout.fillHeight: true
         color: Theme.background
 
-        ListView {
+        CortexListView {
             anchors.fill: parent
             clip: true
             model: CortexApp.scanResults

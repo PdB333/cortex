@@ -103,7 +103,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Horizontal
@@ -132,7 +132,7 @@ ColumnLayout {
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
 
-                ListView {
+                CortexListView {
                     id: scriptList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -224,7 +224,7 @@ ColumnLayout {
                     border.width: 1
                     border.color: Theme.border
 
-                    Flickable {
+                    CortexFlickable {
                         anchors.fill: parent
                         anchors.margins: 10
                         clip: true
@@ -277,7 +277,7 @@ ColumnLayout {
                     border.width: 1
                     border.color: Theme.border
 
-                    Flickable {
+                    CortexFlickable {
                         anchors.fill: parent
                         anchors.margins: 10
                         clip: true

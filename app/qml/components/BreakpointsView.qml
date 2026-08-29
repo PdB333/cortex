@@ -61,7 +61,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    ListView {
+    CortexListView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         clip: true

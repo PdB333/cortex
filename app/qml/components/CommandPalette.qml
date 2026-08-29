@@ -106,7 +106,7 @@ Popup {
             }
         }
 
-        ListView {
+        CortexListView {
             id: commandList
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(430, contentHeight)

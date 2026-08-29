@@ -92,6 +92,10 @@ qt_add_qml_module(cortex
         qml/components/Button.qml
         qml/components/TextField.qml
         qml/components/ComboBox.qml
+        qml/components/CortexScrollBar.qml
+        qml/components/CortexListView.qml
+        qml/components/CortexFlickable.qml
+        qml/components/CortexSplitView.qml
         qml/components/TopBar.qml
         qml/components/ProcessPicker.qml
         qml/components/Sidebar.qml

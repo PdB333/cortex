@@ -78,7 +78,7 @@ ColumnLayout {
         elide: Text.ElideRight
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Horizontal
@@ -103,7 +103,7 @@ ColumnLayout {
                         Label { Layout.fillWidth: true; text: "WATCH"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
@@ -149,7 +149,7 @@ ColumnLayout {
                         Label { Layout.fillWidth: true; text: "FREEZE"; color: Theme.textMuted; font.pixelSize: 10 }
                     }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

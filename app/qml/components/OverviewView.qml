@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
 
-Flickable {
+CortexFlickable {
     contentWidth: width
     contentHeight: column.implicitHeight + 56
     clip: true

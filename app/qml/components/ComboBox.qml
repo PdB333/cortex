@@ -100,7 +100,7 @@ C.ComboBox {
         padding: 1
         closePolicy: C.Popup.CloseOnEscape | C.Popup.CloseOnPressOutsideParent
 
-        contentItem: ListView {
+        contentItem: CortexListView {
             clip: true
             implicitHeight: Math.min(contentHeight, 240)
             model: control.delegateModel

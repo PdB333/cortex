@@ -35,7 +35,7 @@ Rectangle {
         ListElement { group: "AI"; label: "Sessions" }
     }
 
-    ListView {
+    CortexListView {
         id: list
         anchors.fill: parent
         anchors.topMargin: 5
@@ -46,19 +46,6 @@ Rectangle {
         section.property: "group"
         section.criteria: ViewSection.FullString
 
-        ScrollBar.vertical: ScrollBar {
-            id: navScroll
-            policy: ScrollBar.AsNeeded
-            width: 9
-            padding: 2
-            contentItem: Rectangle {
-                implicitWidth: 5
-                radius: 3
-                color: navScroll.pressed ? Theme.textMuted : Theme.borderStrong
-                opacity: navScroll.active ? 0.9 : 0.55
-            }
-            background: Item {}
-        }
 
         section.delegate: Rectangle {
             width: list.width - 9

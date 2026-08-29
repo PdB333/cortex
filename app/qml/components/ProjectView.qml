@@ -45,12 +45,12 @@ ColumnLayout {
         font.pixelSize: 10
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Vertical
 
-        SplitView {
+        CortexSplitView {
             SplitView.preferredHeight: 360
             SplitView.minimumHeight: 220
             orientation: Qt.Horizontal
@@ -85,7 +85,7 @@ ColumnLayout {
                         }
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                     }
-                    ListView {
+                    CortexListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -158,7 +158,7 @@ ColumnLayout {
                         }
                         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                     }
-                    ListView {
+                    CortexListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -246,7 +246,7 @@ ColumnLayout {
                     }
                     Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
                 }
-                ListView {
+                CortexListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true

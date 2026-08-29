@@ -166,7 +166,7 @@ ColumnLayout {
         border.width: 1
         border.color: Theme.border
 
-        Flickable {
+        CortexFlickable {
             anchors.fill: parent
             anchors.margins: 10
             contentWidth: width

@@ -94,7 +94,7 @@ ColumnLayout {
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
 
-    SplitView {
+    CortexSplitView {
         Layout.fillWidth: true
         Layout.fillHeight: true
         orientation: Qt.Vertical
@@ -103,7 +103,7 @@ ColumnLayout {
             SplitView.fillHeight: true
             SplitView.minimumHeight: 180
             color: Theme.background
-            ListView {
+            CortexListView {
                 id: list
                 anchors.fill: parent
                 clip: true
@@ -171,7 +171,7 @@ ColumnLayout {
                         Label { text: CortexDisasm.analysisError; visible: text.length > 0; color: Theme.error; font.pixelSize: 9 }
                     }
                 }
-                Flickable {
+                CortexFlickable {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
