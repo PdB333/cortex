@@ -98,7 +98,6 @@ ColumnLayout {
             font.family: CortexFeatures.sessionExportPath.length > 0 ? Theme.monoFont : Theme.uiFont
             font.pixelSize: 10
             wrapMode: Text.WrapAnywhere
-            selectByMouse: true
         }
 
         Label {
