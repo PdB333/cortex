@@ -740,26 +740,24 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
             }
         }
         if (hasPending) {
-            // A user may remove the breakpoint while this thread is stepping
-            // the original instruction. Never resurrect a deleted breakpoint.
-            int activeId = -1;
+            // Serialize the active check and INT3 write with RemoveBreakpoint.
+            // Otherwise removal could restore the original byte after the check
+            // but before this write, resurrecting an orphan 0xCC.
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
-                for (const auto& [id, e] : g_swBps) {
-                    if (e.address == pendingAddr) { activeId = id; break; }
+                auto active = g_swBps.end();
+                for (auto it = g_swBps.begin(); it != g_swBps.end(); ++it) {
+                    if (it->second.address == pendingAddr) { active = it; break; }
                 }
-            }
-            if (activeId >= 0 && !memory::WriteBytes(pendingAddr, {0xCC})) {
-                // The original byte is already back in memory, so failure to
-                // re-arm is safe: disable the logical breakpoint instead of
-                // pretending a trap is still installed.
-                std::lock_guard<std::mutex> lock(g_mutex);
-                const auto failed = g_swBps.find(activeId);
-                if (failed != g_swBps.end()) {
-                    RetireSoftwareBreakpoint(failed->second.address, failed->second.origByte);
-                    g_swBps.erase(failed);
+                if (active != g_swBps.end() && !memory::WriteBytes(pendingAddr, {0xCC})) {
+                    // The original byte is already back in memory, so failure to
+                    // re-arm is safe: disable the logical breakpoint instead of
+                    // pretending a trap is still installed.
+                    const int failedId = active->first;
+                    RetireSoftwareBreakpoint(active->second.address, active->second.origByte);
+                    g_swBps.erase(active);
+                    g_bpLogs.erase(failedId);
                 }
-                g_bpLogs.erase(activeId);
             }
             if (traceActive) ctx->EFlags |= kTF; else ctx->EFlags &= ~kTF;
             return EXCEPTION_CONTINUE_EXECUTION;
