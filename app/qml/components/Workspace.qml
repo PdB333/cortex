@@ -57,6 +57,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
+                           : CortexApp.selectedSection === "Project" ? projectComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
                            : CortexApp.selectedSection === "Scanner" ? scannerComponent
                            : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
@@ -82,6 +83,7 @@ Rectangle {
     }
 
     Component { id: overviewComponent; OverviewView {} }
+    Component { id: projectComponent; ProjectView {} }
     Component { id: memoryComponent; MemoryView {} }
     Component { id: scannerComponent; ScannerView {} }
     Component { id: disassemblyComponent; DisassemblyView {} }

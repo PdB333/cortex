@@ -97,6 +97,7 @@ qt_add_qml_module(cortex
         qml/components/Sidebar.qml
         qml/components/Workspace.qml
         qml/components/OverviewView.qml
+        qml/components/ProjectView.qml
         qml/components/MemoryView.qml
         qml/components/ScannerView.qml
         qml/components/ModulesView.qml

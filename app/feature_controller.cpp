@@ -23,6 +23,10 @@ QString JsonText(const json& value) {
     return FromUtf8(value.dump(2));
 }
 
+QString JsonInline(const json& value) {
+    return FromUtf8(value.dump());
+}
+
 bool ToolValueFromText(const QString& typeValue, const QString& textValue, json& value) {
     const QString type = typeValue.trimmed().toLower();
     const QString text = textValue.trimmed();
@@ -75,6 +79,187 @@ bool FeatureController::callTool(const std::string& name,
     return true;
 }
 
+bool FeatureController::refreshProject() {
+    json output;
+    if (!callTool("project_get", json::object(), output, false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("project_payload_invalid"));
+        return false;
+    }
+
+    projectAddresses_.clear();
+    const json addresses = result.value("addresses", json::object());
+    if (addresses.is_object()) {
+        for (auto it = addresses.begin(); it != addresses.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(it.key()));
+            row.insert(QStringLiteral("address"), FromUtf8(it.value().value("address", std::string())));
+            row.insert(QStringLiteral("type"), FromUtf8(it.value().value("type", std::string())));
+            row.insert(QStringLiteral("notes"), FromUtf8(it.value().value("notes", std::string())));
+            projectAddresses_.push_back(row);
+        }
+    }
+
+    projectPointerPaths_.clear();
+    const json paths = result.value("pointer_paths", json::object());
+    if (paths.is_object()) {
+        for (auto it = paths.begin(); it != paths.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(it.key()));
+            row.insert(QStringLiteral("module"), FromUtf8(it.value().value("module", std::string())));
+            const auto baseOffset = it.value().find("base_offset");
+            row.insert(QStringLiteral("baseOffset"), baseOffset != it.value().end() ? JsonText(*baseOffset) : QStringLiteral("0"));
+            const auto offsets = it.value().find("offsets");
+            row.insert(QStringLiteral("offsets"), offsets != it.value().end() ? JsonInline(*offsets) : QStringLiteral("[]"));
+            row.insert(QStringLiteral("finalType"), FromUtf8(it.value().value("final_type", std::string())));
+            row.insert(QStringLiteral("notes"), FromUtf8(it.value().value("notes", std::string())));
+            projectPointerPaths_.push_back(row);
+        }
+    }
+
+    projectNotes_.clear();
+    const json notes = result.value("notes", json::array());
+    if (notes.is_array()) {
+        projectNotes_.reserve(static_cast<qsizetype>(notes.size()));
+        for (const auto& entry : notes) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("id"), entry.value("id", -1));
+            row.insert(QStringLiteral("text"), FromUtf8(entry.value("text", std::string())));
+            const auto tags = entry.find("tags");
+            row.insert(QStringLiteral("tags"), tags != entry.end() ? JsonInline(*tags) : QStringLiteral("[]"));
+            projectNotes_.push_back(row);
+        }
+    }
+
+    setError(QString());
+    emit projectChanged();
+    return true;
+}
+
+bool FeatureController::setProjectAddress(const QString& name,
+                                          const QString& address,
+                                          const QString& type,
+                                          const QString& notes) {
+    if (name.trimmed().isEmpty() || address.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_address_requires_name_and_address"));
+        return false;
+    }
+    json arguments{{"name", name.trimmed().toUtf8().toStdString()},
+                   {"address", address.trimmed().toUtf8().toStdString()}};
+    if (!type.trimmed().isEmpty()) arguments["type"] = type.trimmed().toUtf8().toStdString();
+    if (!notes.trimmed().isEmpty()) arguments["notes"] = notes.trimmed().toUtf8().toStdString();
+    json output;
+    if (!callTool("project_address_set", arguments, output, true)) return false;
+    return refreshProject();
+}
+
+bool FeatureController::deleteProjectAddress(const QString& name) {
+    if (name.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_address_name_required"));
+        return false;
+    }
+    json output;
+    if (!callTool("project_address_delete",
+                  {{"_path", {{"name", name.trimmed().toUtf8().toStdString()}}}}, output, true)) return false;
+    return refreshProject();
+}
+
+bool FeatureController::setProjectPointerPath(const QString& name,
+                                              const QString& module,
+                                              const QString& baseOffset,
+                                              const QString& offsetsJson,
+                                              const QString& finalType,
+                                              const QString& notes) {
+    if (name.trimmed().isEmpty() || baseOffset.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_pointer_path_requires_name_and_base_offset"));
+        return false;
+    }
+    json offsets;
+    try {
+        offsets = json::parse(offsetsJson.trimmed().isEmpty() ? std::string("[]") : offsetsJson.toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("project_pointer_offsets_invalid_json"));
+        return false;
+    }
+    if (!offsets.is_array()) {
+        setError(QStringLiteral("project_pointer_offsets_must_be_array"));
+        return false;
+    }
+    json arguments{{"name", name.trimmed().toUtf8().toStdString()},
+                   {"base_offset", baseOffset.trimmed().toUtf8().toStdString()},
+                   {"offsets", std::move(offsets)}};
+    if (!module.trimmed().isEmpty()) arguments["module"] = module.trimmed().toUtf8().toStdString();
+    if (!finalType.trimmed().isEmpty()) arguments["final_type"] = finalType.trimmed().toUtf8().toStdString();
+    if (!notes.trimmed().isEmpty()) arguments["notes"] = notes.trimmed().toUtf8().toStdString();
+    json output;
+    if (!callTool("project_pointer_path_set", arguments, output, true)) return false;
+    return refreshProject();
+}
+
+bool FeatureController::deleteProjectPointerPath(const QString& name) {
+    if (name.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_pointer_path_name_required"));
+        return false;
+    }
+    json output;
+    if (!callTool("project_pointer_path_delete",
+                  {{"_path", {{"name", name.trimmed().toUtf8().toStdString()}}}}, output, true)) return false;
+    return refreshProject();
+}
+
+QString FeatureController::resolveProjectPointerPath(const QString& name) {
+    if (name.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_pointer_path_name_required"));
+        return {};
+    }
+    json output;
+    if (!callTool("project_pointer_path_resolve",
+                  {{"_path", {{"name", name.trimmed().toUtf8().toStdString()}}}}, output, false)) return {};
+    const json result = RouteResult(output);
+    if (!result.value("ok", false)) {
+        setError(FromUtf8(result.value("error", std::string("unresolvable_pointer_path"))));
+        return {};
+    }
+    const QString address = FromUtf8(result.value("address", std::string()));
+    setError(QString());
+    return address;
+}
+
+bool FeatureController::addProjectNote(const QString& text, const QString& tagsJson) {
+    if (text.trimmed().isEmpty()) {
+        setError(QStringLiteral("project_note_text_required"));
+        return false;
+    }
+    json tags;
+    try {
+        tags = json::parse(tagsJson.trimmed().isEmpty() ? std::string("[]") : tagsJson.toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("project_note_tags_invalid_json"));
+        return false;
+    }
+    if (!tags.is_array()) {
+        setError(QStringLiteral("project_note_tags_must_be_array"));
+        return false;
+    }
+    json output;
+    if (!callTool("project_note_add",
+                  {{"text", text.trimmed().toUtf8().toStdString()}, {"tags", std::move(tags)}}, output, true)) return false;
+    return refreshProject();
+}
+
+bool FeatureController::deleteProjectNote(int id) {
+    if (id < 0) {
+        setError(QStringLiteral("project_note_id_invalid"));
+        return false;
+    }
+    json output;
+    if (!callTool("project_note_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
+    return refreshProject();
+}
 bool FeatureController::refreshApiLog() {
     json output;
     QString error;
@@ -471,6 +656,9 @@ bool FeatureController::exportSession() {
 
 void FeatureController::reset() {
     apiLog_.clear();
+    projectAddresses_.clear();
+    projectPointerPaths_.clear();
+    projectNotes_.clear();
     actions_.clear();
     actionCheckpoint_ = 0;
     networkEvents_.clear();
@@ -487,6 +675,7 @@ void FeatureController::reset() {
     sessionExportPath_.clear();
     lastError_.clear();
     emit apiLogChanged();
+    emit projectChanged();
     emit actionsChanged();
     emit networkChanged();
     emit inputChanged();

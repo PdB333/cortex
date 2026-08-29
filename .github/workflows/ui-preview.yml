@@ -365,6 +365,147 @@ jobs:
                 throw "$label Qt prompt channel did not persist the desktop answer"
               }
 
+              $addressName = "preview-" + ($label -replace '[^a-zA-Z0-9_-]', '-') + "-address"
+              $setAddress = @{
+                jsonrpc = "2.0"
+                id = 6
+                method = "tools/call"
+                params = @{
+                  name = "project_address_set"
+                  arguments = @{
+                    name = $addressName
+                    address = "0x1234"
+                    type = "i32"
+                    notes = "portable project e2e"
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($setAddress)
+              $mcp.StandardInput.Flush()
+              $setAddressResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($setAddressResponse.id -ne 6 -or -not $setAddressResponse.result.structuredContent.result.ok) {
+                throw "$label failed to persist a project address"
+              }
+
+              $noteText = "portable project note $label"
+              $addNote = @{
+                jsonrpc = "2.0"
+                id = 7
+                method = "tools/call"
+                params = @{
+                  name = "project_note_add"
+                  arguments = @{
+                    text = $noteText
+                    tags = @("ci", "portable")
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($addNote)
+              $mcp.StandardInput.Flush()
+              $noteResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $noteId = [int]$noteResponse.result.structuredContent.result.id
+              if ($noteResponse.id -ne 7 -or $noteId -le 0) {
+                throw "$label failed to persist a project note"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"project_get","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $projectResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $project = $projectResponse.result.structuredContent.result
+              if ($projectResponse.id -ne 8 -or $project.addresses.$addressName.address -ne "0x1234" -or
+                  -not ($project.notes | Where-Object { $_.id -eq $noteId -and $_.text -eq $noteText })) {
+                throw "$label project persistence roundtrip failed"
+              }
+
+              $pointerName = "preview-" + ($label -replace ''[^a-zA-Z0-9_-]'', ''-'') + "-pointer"
+              $setPointer = @{
+                jsonrpc = "2.0"
+                id = 9
+                method = "tools/call"
+                params = @{
+                  name = "project_pointer_path_set"
+                  arguments = @{
+                    name = $pointerName
+                    base_offset = 0
+                    offsets = @()
+                    final_type = "ptr"
+                    notes = "portable project pointer e2e"
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($setPointer)
+              $mcp.StandardInput.Flush()
+              $setPointerResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($setPointerResponse.id -ne 9 -or -not $setPointerResponse.result.structuredContent.result.ok) {
+                throw "$label failed to persist a project pointer path"
+              }
+
+              $resolvePointer = @{
+                jsonrpc = "2.0"
+                id = 10
+                method = "tools/call"
+                params = @{
+                  name = "project_pointer_path_resolve"
+                  arguments = @{ _path = @{ name = $pointerName } }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($resolvePointer)
+              $mcp.StandardInput.Flush()
+              $resolvePointerResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $resolvedPointer = [string]$resolvePointerResponse.result.structuredContent.result.address
+              if ($resolvePointerResponse.id -ne 10 -or -not $resolvePointerResponse.result.structuredContent.result.ok -or -not $resolvedPointer.StartsWith("0x")) {
+                throw "$label project pointer path did not resolve"
+              }
+
+              $deletePointer = @{
+                jsonrpc = "2.0"
+                id = 11
+                method = "tools/call"
+                params = @{
+                  name = "project_pointer_path_delete"
+                  arguments = @{ _path = @{ name = $pointerName }; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deletePointer)
+              $mcp.StandardInput.Flush()
+              $deletePointerResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deletePointerResponse.id -ne 11 -or -not $deletePointerResponse.result.structuredContent.result.ok) {
+                throw "$label failed to clean the project pointer path"
+              }
+              $deleteAddress = @{
+                jsonrpc = "2.0"
+                id = 12
+                method = "tools/call"
+                params = @{
+                  name = "project_address_delete"
+                  arguments = @{ _path = @{ name = $addressName }; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deleteAddress)
+              $mcp.StandardInput.Flush()
+              $deleteAddressResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deleteAddressResponse.id -ne 12 -or -not $deleteAddressResponse.result.structuredContent.result.ok) {
+                throw "$label failed to clean the project address"
+              }
+
+              $deleteNote = @{
+                jsonrpc = "2.0"
+                id = 13
+                method = "tools/call"
+                params = @{
+                  name = "project_note_delete"
+                  arguments = @{ _path = @{ id = $noteId }; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deleteNote)
+              $mcp.StandardInput.Flush()
+              $deleteNoteResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deleteNoteResponse.id -ne 13 -or -not $deleteNoteResponse.result.structuredContent.result.ok) {
+                throw "$label failed to clean the project note"
+              }
               $mcp.StandardInput.Close()
               if (-not $mcp.WaitForExit(15000)) {
                 $mcp.Kill($true)

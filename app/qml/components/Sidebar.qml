@@ -9,6 +9,7 @@ Rectangle {
     ListModel {
         id: navigation
         ListElement { group: "TARGET"; label: "Overview" }
+        ListElement { group: "TARGET"; label: "Project" }
         ListElement { group: "INSPECT"; label: "Memory" }
         ListElement { group: "INSPECT"; label: "Scanner" }
         ListElement { group: "INSPECT"; label: "Disassembly" }
