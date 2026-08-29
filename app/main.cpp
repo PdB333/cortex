@@ -283,7 +283,7 @@ int main(int argc, char* argv[]) {
     PromptController prompt(payload);
     RuntimeController runtime(payload, [&controller] { return controller.mutationPermission(); });
     FeatureController features(payload, [&controller] { return controller.mutationPermission(); });
-    DisassemblyController disassembly(controller.sessionManager());
+    DisassemblyController disassembly(controller.sessionManager(), payload);
     DebuggerController debugger(controller.sessionManager(), payload,
                                 [&controller] { return controller.mutationPermission(); });
 

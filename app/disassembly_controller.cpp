@@ -34,8 +34,8 @@ bool ParseAddress(QString text, uint64_t& address) {
 
 } // namespace
 
-DisassemblyController::DisassemblyController(cortex::target::SessionManager& sessions, QObject* parent)
-    : QObject(parent), service_(sessions) {}
+DisassemblyController::DisassemblyController(cortex::target::SessionManager& sessions, PayloadController& payload, QObject* parent)
+    : QObject(parent), service_(sessions), payload_(payload) {}
 
 bool DisassemblyController::disassemble(const QString& addressText, int count) {
     return decode(addressText, count, true);
@@ -112,6 +112,53 @@ bool DisassemblyController::goForward() {
     return true;
 }
 
+bool DisassemblyController::analyze(const std::string& tool,
+                                    const nlohmann::json& arguments,
+                                    const QString& kind) {
+    nlohmann::json output;
+    QString error;
+    if (!payload_.CallTool(tool, arguments, output, &error)) {
+        analysisResult_.clear();
+        analysisKind_ = kind;
+        analysisError_ = error.isEmpty() ? QStringLiteral("analysis_failed") : error;
+        emit analysisChanged();
+        return false;
+    }
+    const auto it = output.find("result");
+    const nlohmann::json result = it != output.end() ? *it : output;
+    analysisResult_ = FromUtf8(result.dump(2));
+    analysisError_.clear();
+    analysisKind_ = kind;
+    emit analysisChanged();
+    return true;
+}
+
+bool DisassemblyController::analyzeCfg(const QString& address) {
+    const QString value = address.trimmed();
+    if (value.isEmpty()) { analysisError_ = QStringLiteral("analysis_address_required"); emit analysisChanged(); return false; }
+    return analyze("analysis_cfg", {{"address", value.toUtf8().toStdString()}}, QStringLiteral("CFG"));
+}
+
+bool DisassemblyController::analyzeXrefs(const QString& address, bool includeData) {
+    const QString value = address.trimmed();
+    if (value.isEmpty()) { analysisError_ = QStringLiteral("analysis_address_required"); emit analysisChanged(); return false; }
+    return analyze("analysis_xrefs", {{"target", value.toUtf8().toStdString()}, {"include_data", includeData}}, QStringLiteral("Xrefs"));
+}
+
+bool DisassemblyController::analyzeStructure(const QString& address) {
+    const QString value = address.trimmed();
+    if (value.isEmpty()) { analysisError_ = QStringLiteral("analysis_address_required"); emit analysisChanged(); return false; }
+    return analyze("analysis_structure", {{"address", value.toUtf8().toStdString()}}, QStringLiteral("Structured CFG"));
+}
+
+void DisassemblyController::clearAnalysis() {
+    if (analysisResult_.isEmpty() && analysisError_.isEmpty() && analysisKind_.isEmpty()) return;
+    analysisResult_.clear();
+    analysisError_.clear();
+    analysisKind_.clear();
+    emit analysisChanged();
+}
+
 void DisassemblyController::clear() {
     const bool hadRows = !rows_.isEmpty();
     const bool hadHistory = !history_.isEmpty();
@@ -119,6 +166,7 @@ void DisassemblyController::clear() {
     history_.clear();
     historyIndex_ = -1;
     lastCount_ = 128;
+    clearAnalysis();
     if (hadRows) emit rowsChanged();
     if (hadHistory) emit historyChanged();
     setLastError(QString());

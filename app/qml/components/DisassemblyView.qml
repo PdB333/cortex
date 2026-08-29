@@ -68,12 +68,12 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 6
                 Label { text: "ANALYSIS"; color: Theme.textMuted; font.pixelSize: 9; font.bold: true }
-                Button { text: "CFG"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexRuntime.callToolJson("analysis_cfg", JSON.stringify({address: root.analysisAddress()})) }
-                Button { text: "Xrefs"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexRuntime.callToolJson("analysis_xrefs", JSON.stringify({target: root.analysisAddress(), include_data: true})) }
-                Button { text: "Structured CFG"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexRuntime.callToolJson("analysis_structure", JSON.stringify({address: root.analysisAddress()})) }
+                Button { text: "CFG"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexDisasm.analyzeCfg(root.analysisAddress()) }
+                Button { text: "Xrefs"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexDisasm.analyzeXrefs(root.analysisAddress(), true) }
+                Button { text: "Structured CFG"; enabled: root.analysisAddress().length > 0 && CortexPayload.ready; onClicked: CortexDisasm.analyzeStructure(root.analysisAddress()) }
                 Label { text: root.selectedAddress.length > 0 ? "Selected " + root.selectedAddress : "Select an instruction or enter an address"; color: Theme.textDisabled; font.family: Theme.monoFont; font.pixelSize: 9 }
                 Item { Layout.fillWidth: true }
-                Button { text: "Clear analysis"; enabled: CortexRuntime.lastResult.length > 0 || CortexRuntime.lastError.length > 0; onClicked: CortexRuntime.clearResult() }
+                Button { text: "Clear analysis"; enabled: CortexDisasm.analysisResult.length > 0 || CortexDisasm.analysisError.length > 0; onClicked: CortexDisasm.clearAnalysis() }
             }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -166,9 +166,9 @@ ColumnLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 10
                         anchors.rightMargin: 10
-                        Label { text: "ANALYSIS RESULT"; color: Theme.textMuted; font.pixelSize: 9; font.bold: true }
+                        Label { text: CortexDisasm.analysisKind.length > 0 ? "ANALYSIS RESULT | " + CortexDisasm.analysisKind.toUpperCase() : "ANALYSIS RESULT"; color: Theme.textMuted; font.pixelSize: 9; font.bold: true }
                         Item { Layout.fillWidth: true }
-                        Label { text: CortexRuntime.lastError; visible: text.length > 0; color: Theme.error; font.pixelSize: 9 }
+                        Label { text: CortexDisasm.analysisError; visible: text.length > 0; color: Theme.error; font.pixelSize: 9 }
                     }
                 }
                 Flickable {
@@ -183,8 +183,8 @@ ColumnLayout {
                         readOnly: true
                         selectByMouse: true
                         wrapMode: TextEdit.WrapAnywhere
-                        text: CortexRuntime.lastResult.length > 0 ? CortexRuntime.lastResult : "Run CFG, Xrefs, or Structured CFG for the selected address."
-                        color: CortexRuntime.lastResult.length > 0 ? Theme.text : Theme.textDisabled
+                        text: CortexDisasm.analysisResult.length > 0 ? CortexDisasm.analysisResult : "Run CFG, Xrefs, or Structured CFG for the selected address."
+                        color: CortexDisasm.analysisResult.length > 0 ? Theme.text : Theme.textDisabled
                         font.family: Theme.monoFont
                         font.pixelSize: 10
                     }
