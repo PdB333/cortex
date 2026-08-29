@@ -3,6 +3,7 @@
 #include <QRegularExpression>
 
 #include <QVariantMap>
+#include <QStringList>
 
 #include <algorithm>
 #include <string>
@@ -29,6 +30,22 @@ QString JsonInline(const json& value) {
     return FromUtf8(value.dump());
 }
 
+bool ValidScriptName(const QString& name) {
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_-]+$"));
+    return !name.isEmpty() && pattern.match(name).hasMatch();
+}
+
+QString ScriptResultText(const json& result) {
+    QStringList lines;
+    const std::string output = result.value("output", std::string());
+    if (!output.empty()) lines.push_back(FromUtf8(output));
+    const auto resultIt = result.find("result");
+    if (resultIt != result.end() && !resultIt->is_null())
+        lines.push_back(QStringLiteral("result: ") + JsonText(*resultIt));
+    const std::string error = result.value("error", std::string());
+    if (!error.empty()) lines.push_back(QStringLiteral("error: ") + FromUtf8(error));
+    return lines.join(QLatin1Char('\n'));
+}
 bool ToolValueFromText(const QString& typeValue, const QString& textValue, json& value) {
     const QString type = typeValue.trimmed().toLower();
     const QString text = textValue.trimmed();
@@ -461,6 +478,145 @@ bool FeatureController::captureScreenshot(const QString& modeValue) {
     return true;
 }
 
+bool FeatureController::refreshScripts() {
+    json output;
+    if (!callTool("lua_scripts", json::object(), output, false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("scripts_payload_invalid"));
+        return false;
+    }
+    const json entries = result.value("scripts", json::array());
+    if (!entries.is_array()) {
+        setError(QStringLiteral("scripts_payload_invalid"));
+        return false;
+    }
+
+    scripts_.clear();
+    scripts_.reserve(static_cast<qsizetype>(entries.size()));
+    for (const auto& entry : entries) {
+        if (!entry.is_string()) continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("name"), FromUtf8(entry.get<std::string>()));
+        scripts_.push_back(row);
+    }
+    std::sort(scripts_.begin(), scripts_.end(), [](const QVariant& a, const QVariant& b) {
+        return a.toMap().value(QStringLiteral("name")).toString().compare(
+                   b.toMap().value(QStringLiteral("name")).toString(), Qt::CaseInsensitive) < 0;
+    });
+    setError(QString());
+    emit scriptsChanged();
+    return true;
+}
+
+bool FeatureController::loadScript(const QString& nameValue) {
+    const QString name = nameValue.trimmed();
+    if (!ValidScriptName(name)) {
+        setError(QStringLiteral("invalid_script_name"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("lua_scripts_get", {{"_path", {{"name", name.toStdString()}}}}, output, false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("script_payload_invalid"));
+        return false;
+    }
+    selectedScriptName_ = FromUtf8(result.value("name", name.toStdString()));
+    selectedScriptSource_ = FromUtf8(result.value("code", std::string()));
+    scriptOutput_.clear();
+    emit scriptsChanged();
+    return true;
+}
+
+bool FeatureController::saveScript(const QString& nameValue, const QString& code) {
+    const QString name = nameValue.trimmed();
+    if (!ValidScriptName(name)) {
+        setError(QStringLiteral("invalid_script_name"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("lua_scripts_save",
+                  {{"name", name.toStdString()}, {"code", code.toUtf8().toStdString()}},
+                  output,
+                  true)) return false;
+    const json result = RouteResult(output);
+    selectedScriptName_ = name;
+    selectedScriptSource_ = code;
+    scriptOutput_ = QStringLiteral("saved %1 (%2 bytes)")
+                        .arg(name)
+                        .arg(static_cast<qulonglong>(result.value("bytes", uint64_t{0})));
+    emit scriptsChanged();
+    return refreshScripts();
+}
+
+bool FeatureController::runScriptBuffer(const QString& code, int timeoutMs) {
+    if (code.isEmpty()) {
+        setError(QStringLiteral("script_source_empty"));
+        return false;
+    }
+    timeoutMs = qBound(100, timeoutMs, 120000);
+
+    json output;
+    if (!callTool("lua_exec", {{"code", code.toUtf8().toStdString()}, {"timeout_ms", timeoutMs}}, output, true)) {
+        scriptOutput_ = lastError_;
+        emit scriptsChanged();
+        return false;
+    }
+    scriptOutput_ = ScriptResultText(RouteResult(output));
+    emit scriptsChanged();
+    return true;
+}
+
+bool FeatureController::runSavedScript(const QString& nameValue, int timeoutMs) {
+    const QString name = nameValue.trimmed();
+    if (!ValidScriptName(name)) {
+        setError(QStringLiteral("invalid_script_name"));
+        return false;
+    }
+    timeoutMs = qBound(100, timeoutMs, 120000);
+
+    json output;
+    if (!callTool("lua_scripts_run",
+                  {{"_path", {{"name", name.toStdString()}}}, {"timeout_ms", timeoutMs}},
+                  output,
+                  true)) {
+        scriptOutput_ = lastError_;
+        emit scriptsChanged();
+        return false;
+    }
+    selectedScriptName_ = name;
+    scriptOutput_ = ScriptResultText(RouteResult(output));
+    emit scriptsChanged();
+    return true;
+}
+
+bool FeatureController::deleteScript(const QString& nameValue) {
+    const QString name = nameValue.trimmed();
+    if (!ValidScriptName(name)) {
+        setError(QStringLiteral("invalid_script_name"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("lua_scripts_delete", {{"_path", {{"name", name.toStdString()}}}}, output, true)) return false;
+    if (selectedScriptName_ == name) {
+        selectedScriptName_.clear();
+        selectedScriptSource_.clear();
+        scriptOutput_.clear();
+    }
+    emit scriptsChanged();
+    return refreshScripts();
+}
+void FeatureController::clearScriptSelection() {
+    selectedScriptName_.clear();
+    selectedScriptSource_.clear();
+    scriptOutput_.clear();
+    setError(QString());
+    emit scriptsChanged();
+}
 bool FeatureController::refreshWatches() {
     json freezeOutput;
     if (!callTool("freeze_list", json::object(), freezeOutput, false)) return false;
@@ -906,6 +1062,10 @@ void FeatureController::reset() {
     inputRecordingJson_.clear();
     screenshotSource_.clear();
     screenshotMeta_.clear();
+    scripts_.clear();
+    selectedScriptName_.clear();
+    selectedScriptSource_.clear();
+    scriptOutput_.clear();
     freezes_.clear();
     watches_.clear();
     traces_.clear();
@@ -925,6 +1085,7 @@ void FeatureController::reset() {
     emit networkChanged();
     emit inputChanged();
     emit screenshotChanged();
+    emit scriptsChanged();
     emit watchesChanged();
     emit tracesChanged();
     emit patchesChanged();

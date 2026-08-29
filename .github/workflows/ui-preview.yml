@@ -329,6 +329,92 @@ jobs:
                 throw "$label primitive mutation permission gate did not reject the call"
               }
 
+              $scriptName = "preview-$safeLabel-script"
+              $saveScript = @{
+                jsonrpc = "2.0"
+                id = 40
+                method = "tools/call"
+                params = @{
+                  name = "lua_scripts_save"
+                  arguments = @{ name = $scriptName; code = "return 42"; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($saveScript)
+              $mcp.StandardInput.Flush()
+              $saveScriptResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($saveScriptResponse.id -ne 40 -or -not $saveScriptResponse.result.structuredContent.result.ok) {
+                throw "$label failed to save a Lua script"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"lua_scripts","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $scriptListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($scriptListResponse.id -ne 41 -or -not ($scriptListResponse.result.structuredContent.result.scripts -contains $scriptName)) {
+                throw "$label saved Lua script was not listed"
+              }
+
+              $getScript = @{
+                jsonrpc = "2.0"
+                id = 42
+                method = "tools/call"
+                params = @{ name = "lua_scripts_get"; arguments = @{ _path = @{ name = $scriptName } } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($getScript)
+              $mcp.StandardInput.Flush()
+              $getScriptResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($getScriptResponse.id -ne 42 -or $getScriptResponse.result.structuredContent.result.code -ne "return 42") {
+                throw "$label saved Lua script source did not roundtrip"
+              }
+
+              $runScript = @{
+                jsonrpc = "2.0"
+                id = 43
+                method = "tools/call"
+                params = @{
+                  name = "lua_scripts_run"
+                  arguments = @{ _path = @{ name = $scriptName }; timeout_ms = 1000; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($runScript)
+              $mcp.StandardInput.Flush()
+              $runScriptResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $runScriptResult = $runScriptResponse.result.structuredContent.result
+              if ($runScriptResponse.id -ne 43 -or -not $runScriptResult.ok -or $runScriptResult.result -ne "42") {
+                throw "$label saved Lua script did not execute correctly"
+              }
+
+              $invalidScript = @{
+                jsonrpc = "2.0"
+                id = 44
+                method = "tools/call"
+                params = @{
+                  name = "lua_scripts_save"
+                  arguments = @{ name = "invalid name"; code = "return 1"; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($invalidScript)
+              $mcp.StandardInput.Flush()
+              $invalidScriptResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($invalidScriptResponse.id -ne 44 -or -not $invalidScriptResponse.result.isError -or
+                  $invalidScriptResponse.result.structuredContent.result.error -ne "invalid_name") {
+                throw "$label invalid Lua script name was not rejected"
+              }
+
+              $deleteScript = @{
+                jsonrpc = "2.0"
+                id = 45
+                method = "tools/call"
+                params = @{
+                  name = "lua_scripts_delete"
+                  arguments = @{ _path = @{ name = $scriptName }; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deleteScript)
+              $mcp.StandardInput.Flush()
+              $deleteScriptResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deleteScriptResponse.id -ne 45 -or -not $deleteScriptResponse.result.structuredContent.result.ok) {
+                throw "$label failed to delete the Lua script"
+              }
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {
                 throw "$label trace lifecycle tools are missing from the MCP catalog"

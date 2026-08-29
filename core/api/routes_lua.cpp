@@ -87,16 +87,28 @@ void RegisterLuaRoutes(httplib::Server& svr) {
             res.set_content("{\"ok\":false,\"error\":\"invalid_json\"}", "application/json");
             return;
         }
-        const std::string name = SanitizeName(body.value("name", std::string("")));
+        const std::string rawName = body.value("name", std::string(""));
+        const std::string name = SanitizeName(rawName);
         const std::string code = body.value("code", std::string(""));
-        if (name.empty()) {
+        if (name.empty() || name != rawName) {
             res.status = 400;
             res.set_content("{\"ok\":false,\"error\":\"invalid_name\"}", "application/json");
             return;
         }
         const std::string path = scripting::GetScriptsDir() + "\\" + name + ".lua";
         std::ofstream f(path, std::ios::binary | std::ios::trunc);
-        f << code;
+        if (!f.is_open()) {
+            res.status = 500;
+            res.set_content(json{{"ok", false}, {"error", "write_failed"}}.dump(), "application/json");
+            return;
+        }
+        f.write(code.data(), static_cast<std::streamsize>(code.size()));
+        f.flush();
+        if (!f.good()) {
+            res.status = 500;
+            res.set_content(json{{"ok", false}, {"error", "write_failed"}}.dump(), "application/json");
+            return;
+        }
         res.set_content(json{{"ok", true}, {"name", name}, {"bytes", code.size()}}.dump(),
                         "application/json");
         overlay::LogApiCall("POST /lua/scripts");
@@ -143,7 +155,14 @@ void RegisterLuaRoutes(httplib::Server& svr) {
         const std::string name = req.matches[1];
         const std::string path = scripting::GetScriptsDir() + "\\" + name + ".lua";
         BOOL ok = DeleteFileA(path.c_str());
-        res.set_content(json{{"ok", ok ? true : false}}.dump(), "application/json");
+        if (!ok) {
+            const DWORD error = GetLastError();
+            res.status = error == ERROR_FILE_NOT_FOUND ? 404 : 500;
+            res.set_content(json{{"ok", false}, {"error", error == ERROR_FILE_NOT_FOUND ? "not_found" : "delete_failed"}}.dump(),
+                            "application/json");
+            return;
+        }
+        res.set_content(json{{"ok", true}}.dump(), "application/json");
         overlay::LogApiCall("DELETE /lua/scripts/" + name);
     });
 }

@@ -23,6 +23,10 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString inputRecordingJson READ inputRecordingJson NOTIFY inputChanged)
     Q_PROPERTY(QString screenshotSource READ screenshotSource NOTIFY screenshotChanged)
     Q_PROPERTY(QString screenshotMeta READ screenshotMeta NOTIFY screenshotChanged)
+    Q_PROPERTY(QVariantList scripts READ scripts NOTIFY scriptsChanged)
+    Q_PROPERTY(QString selectedScriptName READ selectedScriptName NOTIFY scriptsChanged)
+    Q_PROPERTY(QString selectedScriptSource READ selectedScriptSource NOTIFY scriptsChanged)
+    Q_PROPERTY(QString scriptOutput READ scriptOutput NOTIFY scriptsChanged)
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
     Q_PROPERTY(QVariantList patches READ patches NOTIFY patchesChanged)
     Q_PROPERTY(QVariantList snapshots READ snapshots NOTIFY snapshotsChanged)
@@ -54,6 +58,10 @@ public:
     QString inputRecordingJson() const { return inputRecordingJson_; }
     QString screenshotSource() const { return screenshotSource_; }
     QString screenshotMeta() const { return screenshotMeta_; }
+    const QVariantList& scripts() const { return scripts_; }
+    QString selectedScriptName() const { return selectedScriptName_; }
+    QString selectedScriptSource() const { return selectedScriptSource_; }
+    QString scriptOutput() const { return scriptOutput_; }
     const QVariantList& traces() const { return traces_; }
     const QVariantList& patches() const { return patches_; }
     const QVariantList& snapshots() const { return snapshots_; }
@@ -95,6 +103,14 @@ public:
 
     Q_INVOKABLE bool captureScreenshot(const QString& mode = QStringLiteral("auto"));
 
+    Q_INVOKABLE bool refreshScripts();
+    Q_INVOKABLE bool loadScript(const QString& name);
+    Q_INVOKABLE bool saveScript(const QString& name, const QString& code);
+    Q_INVOKABLE bool runScriptBuffer(const QString& code, int timeoutMs = 5000);
+    Q_INVOKABLE bool runSavedScript(const QString& name, int timeoutMs = 5000);
+    Q_INVOKABLE bool deleteScript(const QString& name);
+    Q_INVOKABLE void clearScriptSelection();
+
     Q_INVOKABLE bool refreshWatches();
     Q_INVOKABLE bool addFreeze(const QString& address, const QString& type, const QString& value,
                                const QString& label = QString(), int ttlMs = 0);
@@ -135,6 +151,7 @@ signals:
     void networkChanged();
     void inputChanged();
     void screenshotChanged();
+    void scriptsChanged();
     void tracesChanged();
     void patchesChanged();
     void snapshotsChanged();
@@ -167,6 +184,10 @@ private:
     QString inputRecordingJson_;
     QString screenshotSource_;
     QString screenshotMeta_;
+    QVariantList scripts_;
+    QString selectedScriptName_;
+    QString selectedScriptSource_;
+    QString scriptOutput_;
     QVariantList traces_;
     QVariantList patches_;
     QVariantList snapshots_;
