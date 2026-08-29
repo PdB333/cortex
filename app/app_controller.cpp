@@ -4,12 +4,29 @@
 
 #include <QtConcurrent/QtConcurrentRun>
 #include <QVariantMap>
+#include <QSettings>
+#include <QStringList>
 
 #include <algorithm>
 #include <cstring>
 #include <memory>
 
 namespace {
+
+bool IsKnownWorkspaceSection(const QString& section) {
+    static const QStringList sections = {
+        QStringLiteral("Overview"), QStringLiteral("Project"), QStringLiteral("Memory"),
+        QStringLiteral("Scanner"), QStringLiteral("Pointers"), QStringLiteral("Disassembly"),
+        QStringLiteral("Structures"), QStringLiteral("Modules"), QStringLiteral("Symbols"),
+        QStringLiteral("Snapshots"), QStringLiteral("Debugger"), QStringLiteral("Breakpoints"),
+        QStringLiteral("Traces"), QStringLiteral("Patches"), QStringLiteral("Watches"),
+        QStringLiteral("Hooks"), QStringLiteral("Network"), QStringLiteral("Screenshots"),
+        QStringLiteral("Diagnostics"), QStringLiteral("Scripts"), QStringLiteral("Input"),
+        QStringLiteral("Actions"), QStringLiteral("MCP"), QStringLiteral("Semantic"),
+        QStringLiteral("Sessions")
+    };
+    return sections.contains(section);
+}
 
 QString FromUtf8(const std::string& value) {
     return QString::fromUtf8(value.data(), static_cast<int>(value.size()));
@@ -169,6 +186,10 @@ AppController::AppController(QObject* parent)
       sessionManager_(targetCatalog_),
       memoryService_(sessionManager_),
       moduleService_(sessionManager_) {
+    QSettings settings;
+    const QString restoredSection = settings.value(QStringLiteral("workspace/selectedSection")).toString();
+    if (IsKnownWorkspaceSection(restoredSection)) selectedSection_ = restoredSection;
+
     targetCatalog_.AddBackend(std::make_shared<cortex::target::LocalBackend>());
     connect(&scanWatcher_, &QFutureWatcher<ScanTaskResult>::finished, this, &AppController::finishScan);
     refreshTargets();
@@ -315,8 +336,9 @@ void AppController::detachTarget() {
 }
 
 void AppController::selectSection(const QString& section) {
-    if (section.isEmpty() || section == selectedSection_) return;
+    if (!IsKnownWorkspaceSection(section) || section == selectedSection_) return;
     selectedSection_ = section;
+    QSettings().setValue(QStringLiteral("workspace/selectedSection"), selectedSection_);
     if (section == QStringLiteral("Modules") && sessionActive()) refreshModules();
     emit selectedSectionChanged();
 }

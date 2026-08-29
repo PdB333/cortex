@@ -16,7 +16,10 @@
 #include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QRect>
 #include <QScreen>
+#include <QSettings>
+#include <QSize>
 #include <QTimer>
 #include <QThread>
 #include <QUrl>
@@ -30,6 +33,54 @@ void ConfigureApplicationIdentity() {
     QCoreApplication::setApplicationName("Cortex");
     QCoreApplication::setOrganizationName("Cortex");
     QCoreApplication::setApplicationVersion("0.7.0-dev");
+}
+
+QRect FitWindowGeometry(const QRect& requested, QScreen* screen, const QSize& minimumSize) {
+    const QRect area = screen ? screen->availableGeometry() : QRect();
+    if (!area.isValid()) return requested;
+
+    const int width = qMin(area.width(), qMax(minimumSize.width(), requested.width()));
+    const int height = qMin(area.height(), qMax(minimumSize.height(), requested.height()));
+    const int maxX = area.right() - width + 1;
+    const int maxY = area.bottom() - height + 1;
+    const int x = qBound(area.left(), requested.x(), maxX);
+    const int y = qBound(area.top(), requested.y(), maxY);
+    return QRect(x, y, width, height);
+}
+
+void RestoreWorkspaceWindow(QWindow* window, QObject* rootObject) {
+    if (!window || !rootObject) return;
+
+    QSettings settings;
+    rootObject->setProperty("bottomPanelVisible",
+                            settings.value(QStringLiteral("workspace/bottomPanelVisible"), true).toBool());
+
+    const QRect savedGeometry = settings.value(QStringLiteral("workspace/windowGeometry")).toRect();
+    if (savedGeometry.isValid()) {
+        QScreen* screen = QGuiApplication::screenAt(savedGeometry.center());
+        if (!screen) screen = window->screen() ? window->screen() : QGuiApplication::primaryScreen();
+        window->setGeometry(FitWindowGeometry(savedGeometry, screen, window->minimumSize()));
+    } else if (QScreen* screen = window->screen() ? window->screen() : QGuiApplication::primaryScreen()) {
+        const QRect area = screen->availableGeometry();
+        window->setX(area.x() + (area.width() - window->width()) / 2);
+        window->setY(area.y() + (area.height() - window->height()) / 2);
+    }
+
+    if (settings.value(QStringLiteral("workspace/windowMaximized"), false).toBool())
+        window->showMaximized();
+}
+
+void SaveWorkspaceWindow(QWindow* window, QObject* rootObject) {
+    if (!window || !rootObject) return;
+
+    QSettings settings;
+    const Qt::WindowState state = window->windowState();
+    if (state != Qt::WindowMaximized && state != Qt::WindowFullScreen)
+        settings.setValue(QStringLiteral("workspace/windowGeometry"), window->geometry());
+    settings.setValue(QStringLiteral("workspace/windowMaximized"), state == Qt::WindowMaximized);
+    settings.setValue(QStringLiteral("workspace/bottomPanelVisible"),
+                      rootObject->property("bottomPanelVisible").toBool());
+    settings.sync();
 }
 
 int RunPromptChannelSmoke(int argc, char* argv[], const QString& runtimeDirectory) {
@@ -262,12 +313,11 @@ int main(int argc, char* argv[]) {
     }
 
     if (!smokeTest) {
-        if (auto* window = qobject_cast<QWindow*>(engine.rootObjects().constFirst())) {
-            if (QScreen* screen = window->screen() ? window->screen() : QGuiApplication::primaryScreen()) {
-                const QRect area = screen->availableGeometry();
-                window->setX(area.x() + (area.width() - window->width()) / 2);
-                window->setY(area.y() + (area.height() - window->height()) / 2);
-            }
+        QObject* rootObject = engine.rootObjects().constFirst();
+        if (auto* window = qobject_cast<QWindow*>(rootObject)) {
+            RestoreWorkspaceWindow(window, rootObject);
+            QObject::connect(&app, &QCoreApplication::aboutToQuit, window,
+                             [window, rootObject] { SaveWorkspaceWindow(window, rootObject); });
         }
     }
 
