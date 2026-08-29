@@ -43,10 +43,10 @@ DebuggerController::DebuggerController(cortex::target::SessionManager& sessions,
       service_(sessions),
       payload_(payload),
       mutationAllowed_(std::move(mutationAllowed)) {
-    runtimePoll_.setInterval(350);
+    runtimePoll_.setInterval(900);
     runtimePoll_.setTimerType(Qt::CoarseTimer);
     connect(&runtimePoll_, &QTimer::timeout, this, [this]() {
-        if (!payload_.ready() && !payload_.tryConnectExisting(false)) return;
+        if (!payload_.ready()) return;
         refreshRuntimeState(false, false);
     });
     runtimePoll_.start();

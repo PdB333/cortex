@@ -292,10 +292,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&controller, &AppController::sessionChanged, &runtime, &RuntimeController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &features, &FeatureController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
-    QObject::connect(&controller, &AppController::sessionChanged, &debugger, [&controller, &debugger]() {
-        if (controller.sessionActive()) debugger.refreshThreads();
-        else debugger.clear();
-    });
+    QObject::connect(&controller, &AppController::sessionChanged, &debugger, &DebuggerController::clear);
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");

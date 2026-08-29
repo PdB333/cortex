@@ -37,7 +37,7 @@ public:
             return false;
         }
         const auto target = session->Target();
-        if (ConnectExisting(target, error)) return true;
+        if (ConnectExisting(target, error, 1)) return true;
         Reset();
         return false;
     }
@@ -134,8 +134,8 @@ public:
                     std::string* error = nullptr);
 
 private:
-    bool ConnectExisting(const target::TargetDescriptor& target, std::string* error);
-    bool VerifyTarget(const target::TargetDescriptor& target, std::string* error);
+    bool ConnectExisting(const target::TargetDescriptor& target, std::string* error, int attempts = 4);
+    bool VerifyTarget(const target::TargetDescriptor& target, std::string* error, int attempts = 4);
     bool InjectPayload(const target::TargetDescriptor& target, std::string* error);
     bool RoundTrip(const nlohmann::json& message,
                    nlohmann::json& response,

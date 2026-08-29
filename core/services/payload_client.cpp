@@ -125,6 +125,7 @@ HANDLE OpenPipe(const std::string& name, int attempts) {
                                   0, nullptr, OPEN_EXISTING, 0, nullptr);
         if (pipe != INVALID_HANDLE_VALUE) return pipe;
         const DWORD code = GetLastError();
+        if (attempt + 1 >= attempts) break;
         if (code == ERROR_PIPE_BUSY) WaitNamedPipeA(name.c_str(), 50);
         else std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -300,7 +301,7 @@ uint64_t PayloadClient::TargetProcessId() const {
     return verifiedProcessId_;
 }
 
-bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std::string* error) {
+bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std::string* error, int attempts) {
 #if !defined(_WIN32)
     (void)target;
     SetError(error, "payload_transport_not_supported_on_platform");
@@ -329,7 +330,7 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
         pipeName_ = api::mcp_pipe_protocol::PipeNameForToken(token);
         verifiedProcessId_ = 0;
     }
-    if (!VerifyTarget(target, error)) {
+    if (!VerifyTarget(target, error, attempts)) {
         std::lock_guard<std::mutex> lock(mutex_);
         verifiedProcessId_ = 0;
         return false;
@@ -338,7 +339,7 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
 #endif
 }
 
-bool PayloadClient::VerifyTarget(const target::TargetDescriptor& target, std::string* error) {
+bool PayloadClient::VerifyTarget(const target::TargetDescriptor& target, std::string* error, int attempts) {
     json response;
     const auto id = requestSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
     const json message = {
@@ -347,7 +348,7 @@ bool PayloadClient::VerifyTarget(const target::TargetDescriptor& target, std::st
         {"method", "tools/call"},
         {"params", {{"name", "status"}, {"arguments", json::object()}}}
     };
-    if (!RoundTrip(message, response, error, 4, "all", "2026-07-28", false)) return false;
+    if (!RoundTrip(message, response, error, std::max(1, attempts), "all", "2026-07-28", false)) return false;
     if (!response.is_object() || response.contains("error") || !response.contains("result")) {
         SetError(error, "payload_status_invalid_response");
         return false;
@@ -427,14 +428,14 @@ bool PayloadClient::EnsureReady(std::string* error) {
     }
     const auto target = session->Target();
 
-    if (ConnectExisting(target, nullptr)) return true;
+    if (ConnectExisting(target, nullptr, 1)) return true;
     Reset();
 
     if (!InjectPayload(target, error)) return false;
 
     std::string connectError;
     for (int attempt = 0; attempt < 120; ++attempt) {
-        if (ConnectExisting(target, &connectError)) return true;
+        if (ConnectExisting(target, &connectError, 1)) return true;
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     SetError(error, connectError.empty() ? "payload_start_timeout" : connectError);

@@ -304,7 +304,6 @@ void AppController::selectTarget(int index) {
             targets_[index] = TargetToVariant(session->Target());
         }
         setLastError(QString());
-        refreshModules();
     } else {
         setLastError(FromUtf8(error.empty() ? std::string("attach_failed") : error));
     }
