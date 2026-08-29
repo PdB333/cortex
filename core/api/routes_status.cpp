@@ -1,6 +1,7 @@
 ﻿#include "routes.h"
 #include "server.h"
 #include "mcp_contract.h"
+#include "native_routes.h"
 #include "../overlay/overlay.h"
 #ifdef CORTEX_KIERO
 #include "../hook/kiero_hook.h"
@@ -764,6 +765,7 @@ void RegisterStatusRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
 
 
 
