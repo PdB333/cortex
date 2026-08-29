@@ -36,28 +36,35 @@ namespace {
 
     detail::BackendShutdownFn g_backendShutdown = nullptr;
 
-    // Release game input whenever an in-process UI actually needs it. Human
-    // prompts are captured by ImGui only while Cortex Desktop is not actively
-    // presenting them through the short external-presenter lease.
+    bool DesktopPresenterActive() {
+        return prompt::ExternalPresenterActive();
+    }
+
+    // Cortex Desktop is the only visible UI while it is attached to this
+    // runtime. The injected ImGui surface remains available solely as a
+    // headless/failure fallback after the short desktop presenter lease
+    // expires.
     bool WantsInputCapture() {
-        const bool fallbackPrompt = !prompt::ExternalPresenterActive() && prompt::GetActive().has_value();
-        return g_visible || fallbackPrompt;
+        const bool desktop = DesktopPresenterActive();
+        const bool fallbackPrompt = !desktop && prompt::GetActive().has_value();
+        return (!desktop && g_visible) || fallbackPrompt;
     }
 
     LRESULT CALLBACK WndProcHook(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        if (msg == WM_KEYDOWN && static_cast<int>(wParam) == g_config.toggle_key) {
+        const bool desktop = DesktopPresenterActive();
+        if (!desktop && msg == WM_KEYDOWN && static_cast<int>(wParam) == g_config.toggle_key) {
             g_visible = !g_visible;
             dbglog::Line("toggle key: g_visible=%d", (int)g_visible);
         }
 
         ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
 
-        bool wantsCapture = WantsInputCapture();
-        bool isMouseMsg = (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) || msg == WM_MOUSEWHEEL;
-        bool isKeyMsg = (msg >= WM_KEYFIRST && msg <= WM_KEYLAST);
+        const bool wantsCapture = WantsInputCapture();
+        const bool isMouseMsg = (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) || msg == WM_MOUSEWHEEL;
+        const bool isKeyMsg = (msg >= WM_KEYFIRST && msg <= WM_KEYLAST);
 
         if (wantsCapture && isMouseMsg) return TRUE;
-        if (g_visible && ImGui::GetIO().WantCaptureKeyboard && isKeyMsg) return TRUE;
+        if (!desktop && g_visible && ImGui::GetIO().WantCaptureKeyboard && isKeyMsg) return TRUE;
 
         return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
     }
@@ -141,7 +148,7 @@ namespace {
         // Cortex Desktop is the primary human prompt surface. Keep this popup
         // only as a headless/failure fallback; if the desktop poll disappears,
         // its lease expires and the injected popup resumes automatically.
-        if (prompt::ExternalPresenterActive()) {
+        if (DesktopPresenterActive()) {
             openedForId = -1;
             return;
         }
@@ -215,12 +222,10 @@ namespace {
         }
     }
 
-    // Drawn unconditionally (like the prompt popup), regardless of g_visible:
-    // a paused breakpoint freezes the whole game, so the human needs to see
-    // why even if they never toggled the status window open. StepThread
-    // blocks the calling thread (this render thread, inside EndScene) for up
-    // to its timeout -- acceptable here since it's a bounded, manual click,
-    // not a per-frame cost.
+    // Fallback only. Cortex Desktop continuously polls paused state while it
+    // owns the presenter lease and surfaces pauses in the global top bar plus
+    // the Debugger view. If the desktop disappears, this panel resumes so a
+    // paused target never becomes unrecoverable in headless mode.
     void DrawPausedThreadsPanel() {
         auto threads = dbg::ListPausedThreads();
         if (threads.empty()) return;
@@ -277,11 +282,12 @@ void CommonInitPost(HWND hwnd) {
 }
 
 // Shared per-frame bookkeeping between the backend's own NewFrame() and
-// ImGui::Render(): cursor-visibility policy, our own UI content, and the
-// input-capture toggle wiring. Callers do the backend-specific NewFrame
-// before this and backend-specific RenderDrawData after.
+// ImGui::Render(): cursor-visibility policy, fallback UI content, and input
+// capture wiring. Cortex Desktop owns presentation whenever its lease is
+// active, so no injected window is rendered in that state.
 void CommonFrameBegin() {
-    bool wantsCapture = WantsInputCapture();
+    const bool desktop = DesktopPresenterActive();
+    const bool wantsCapture = WantsInputCapture();
     ImGuiIO& io = ImGui::GetIO();
     if (wantsCapture) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
     else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
@@ -289,15 +295,15 @@ void CommonFrameBegin() {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    if (g_visible) DrawStatusWindow();
+    if (!desktop && g_visible) DrawStatusWindow();
     DrawPromptPopup();
-    DrawPausedThreadsPanel();
+    if (!desktop) DrawPausedThreadsPanel();
 
     static bool s_lastWantsCapture = false;
     if (wantsCapture != s_lastWantsCapture) {
-        dbglog::Line("OnFrame: wantsCapture %d -> %d (g_visible=%d, prompt=%d, desktop_prompt=%d)",
+        dbglog::Line("OnFrame: wantsCapture %d -> %d (g_visible=%d, prompt=%d, desktop=%d)",
                      (int)s_lastWantsCapture, (int)wantsCapture, (int)g_visible,
-                     (int)prompt::GetActive().has_value(), (int)prompt::ExternalPresenterActive());
+                     (int)prompt::GetActive().has_value(), (int)desktop);
         s_lastWantsCapture = wantsCapture;
     }
     hook::SetInputCaptureActive(wantsCapture);
