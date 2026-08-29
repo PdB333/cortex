@@ -32,10 +32,10 @@ void LoadMainQml(QQmlApplicationEngine& engine) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     engine.loadFromModule("Cortex", "Main");
 #else
-    // loadFromModule was introduced in Qt 6.5. The module resource path is
-    // stable across Qt 6.4+, so older supported distributions can launch the
-    // same application without a separate frontend or build definition.
-    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/Cortex/Main.qml")));
+    // loadFromModule was introduced in Qt 6.5. With QTP0001 enabled by
+    // qt_standard_project_setup, qml/Main.qml is embedded below the module
+    // URI, hence the extra /qml segment in the 6.4 resource URL.
+    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/Cortex/qml/Main.qml")));
 #endif
 }
 
