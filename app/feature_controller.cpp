@@ -70,6 +70,12 @@ bool ToolValueFromText(const QString& typeValue, const QString& textValue, json&
     if (ok) value = static_cast<int64_t>(parsed);
     return ok;
 }
+QString JsonDisplay(const json& value) {
+    if (value.is_string()) return FromUtf8(value.get<std::string>());
+    if (value.is_boolean()) return value.get<bool>() ? QStringLiteral("true") : QStringLiteral("false");
+    if (value.is_null()) return QStringLiteral("null");
+    return FromUtf8(value.dump());
+}
 } // namespace
 
 FeatureController::FeatureController(PayloadController& payload,
@@ -757,7 +763,6 @@ bool FeatureController::refreshWatches() {
     pageAccessWatches_.clear();
     allocationEvents_.clear();
     pageAccessEvents_.clear();
-    symbolResult_.clear();
     const json watchResult = RouteResult(watchOutput);
     const json watchEntries = watchResult.value("watches", json::array());
     if (watchEntries.is_array()) {
@@ -906,7 +911,6 @@ bool FeatureController::refreshInstrumentationEvents() {
     }
 
     pageAccessEvents_.clear();
-    symbolResult_.clear();
     const json pageEntries = pageResult.value("events", json::array());
     if (pageEntries.is_array()) {
         pageAccessEvents_.reserve(static_cast<qsizetype>(pageEntries.size()));
@@ -963,6 +967,311 @@ bool FeatureController::deletePageAccessWatch(int id) {
     json output;
     if (!callTool("watch_page_access_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
     return refreshInstrumentationState();
+}
+bool FeatureController::refreshStructures() {
+    json output;
+    if (!callTool("struct_list", json::object(), output, false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("structures_payload_invalid"));
+        return false;
+    }
+    const json entries = result.value("structs", json::array());
+    if (!entries.is_array()) {
+        setError(QStringLiteral("structures_list_invalid"));
+        return false;
+    }
+
+    QVariantList nextDefinitions;
+    QString selectedFields;
+    bool selectedFound = false;
+    nextDefinitions.reserve(static_cast<qsizetype>(entries.size()));
+    for (const auto& entry : entries) {
+        if (!entry.is_object()) continue;
+        const QString name = FromUtf8(entry.value("name", std::string()));
+        const json fields = entry.value("fields", json::array());
+        QVariantMap row;
+        row.insert(QStringLiteral("name"), name);
+        row.insert(QStringLiteral("fieldCount"), static_cast<int>(fields.is_array() ? fields.size() : 0));
+        row.insert(QStringLiteral("fieldsJson"), fields.is_array() ? JsonText(fields) : QStringLiteral("[]"));
+        nextDefinitions.push_back(row);
+        if (!selectedStructureName_.isEmpty() && name == selectedStructureName_) {
+            selectedFound = true;
+            selectedFields = row.value(QStringLiteral("fieldsJson")).toString();
+        }
+    }
+
+    structureDefinitions_ = std::move(nextDefinitions);
+    if (!selectedStructureName_.isEmpty()) {
+        if (selectedFound) {
+            selectedStructureFieldsJson_ = selectedFields;
+        } else {
+            selectedStructureName_.clear();
+            selectedStructureFieldsJson_.clear();
+            structureReadFields_.clear();
+        }
+    }
+    structureStatus_ = QStringLiteral("%1 structure definition(s)").arg(structureDefinitions_.size());
+    setError(QString());
+    emit structuresChanged();
+    return true;
+}
+
+bool FeatureController::selectStructure(const QString& nameValue) {
+    const QString name = nameValue.trimmed();
+    if (name.isEmpty()) {
+        setError(QStringLiteral("structure_name_required"));
+        return false;
+    }
+    for (const QVariant& value : structureDefinitions_) {
+        const QVariantMap row = value.toMap();
+        if (row.value(QStringLiteral("name")).toString() != name) continue;
+        selectedStructureName_ = name;
+        selectedStructureFieldsJson_ = row.value(QStringLiteral("fieldsJson")).toString();
+        structureReadFields_.clear();
+        structureStatus_ = QStringLiteral("Selected %1").arg(name);
+        setError(QString());
+        emit structuresChanged();
+        return true;
+    }
+    setError(QStringLiteral("structure_not_found"));
+    return false;
+}
+
+void FeatureController::clearStructureSelection() {
+    selectedStructureName_.clear();
+    selectedStructureFieldsJson_.clear();
+    structureReadFields_.clear();
+    structureInferenceFields_.clear();
+    structureStatus_ = QStringLiteral("New structure");
+    setError(QString());
+    emit structuresChanged();
+}
+
+bool FeatureController::defineStructure(const QString& nameValue, const QString& fieldsJson) {
+    const QString name = nameValue.trimmed();
+    if (name.isEmpty()) {
+        setError(QStringLiteral("structure_name_required"));
+        return false;
+    }
+
+    json fields;
+    try {
+        fields = json::parse(fieldsJson.toUtf8().toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("structure_fields_invalid_json"));
+        return false;
+    }
+    if (!fields.is_array() || fields.empty()) {
+        setError(QStringLiteral("structure_fields_required"));
+        return false;
+    }
+    for (const auto& field : fields) {
+        if (!field.is_object() || !field.contains("name") || !field["name"].is_string() ||
+            field["name"].get<std::string>().empty() || !field.contains("offset") ||
+            !field["offset"].is_number_integer() || !field.contains("type") ||
+            !field["type"].is_string() || field["type"].get<std::string>().empty() ||
+            (field.contains("count") && !field["count"].is_number_integer())) {
+            setError(QStringLiteral("structure_field_invalid"));
+            return false;
+        }
+    }
+
+    json output;
+    if (!callTool("struct_define",
+                  {{"name", name.toUtf8().toStdString()}, {"fields", fields}},
+                  output,
+                  true)) return false;
+    selectedStructureName_ = name;
+    selectedStructureFieldsJson_ = JsonText(fields);
+    if (!refreshStructures()) return false;
+    structureStatus_ = QStringLiteral("Defined %1").arg(name);
+    emit structuresChanged();
+    return true;
+}
+
+bool FeatureController::deleteStructure(const QString& nameValue) {
+    const QString name = nameValue.trimmed();
+    if (name.isEmpty()) {
+        setError(QStringLiteral("structure_name_required"));
+        return false;
+    }
+    json output;
+    if (!callTool("struct_delete",
+                  {{"_path", {{"name", name.toUtf8().toStdString()}}}},
+                  output,
+                  true)) return false;
+    if (selectedStructureName_ == name) {
+        selectedStructureName_.clear();
+        selectedStructureFieldsJson_.clear();
+        structureReadFields_.clear();
+    }
+    if (!refreshStructures()) return false;
+    structureStatus_ = QStringLiteral("Deleted %1").arg(name);
+    emit structuresChanged();
+    return true;
+}
+
+bool FeatureController::readStructure(const QString& nameValue, const QString& addressValue) {
+    const QString name = nameValue.trimmed();
+    const QString address = addressValue.trimmed();
+    if (name.isEmpty() || address.isEmpty()) {
+        setError(QStringLiteral("structure_name_and_address_required"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("struct_read",
+                  {{"name", name.toUtf8().toStdString()}, {"address", address.toUtf8().toStdString()}},
+                  output,
+                  false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("structure_read_payload_invalid"));
+        return false;
+    }
+
+    const json fields = result.value("fields", json::object());
+    const json errors = result.value("errors", json::object());
+    structureReadFields_.clear();
+    if (fields.is_object()) {
+        structureReadFields_.reserve(static_cast<qsizetype>(fields.size() + (errors.is_object() ? errors.size() : 0)));
+        for (auto it = fields.begin(); it != fields.end(); ++it) {
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(it.key()));
+            row.insert(QStringLiteral("value"), JsonDisplay(it.value()));
+            row.insert(QStringLiteral("error"), errors.is_object() && errors.contains(it.key())
+                ? JsonDisplay(errors.at(it.key())) : QString());
+            structureReadFields_.push_back(row);
+        }
+    }
+    if (errors.is_object()) {
+        for (auto it = errors.begin(); it != errors.end(); ++it) {
+            if (fields.is_object() && fields.contains(it.key())) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(it.key()));
+            row.insert(QStringLiteral("value"), QString());
+            row.insert(QStringLiteral("error"), JsonDisplay(it.value()));
+            structureReadFields_.push_back(row);
+        }
+    }
+    structureStatus_ = QStringLiteral("Read %1 field(s) from %2").arg(structureReadFields_.size()).arg(address);
+    setError(QString());
+    emit structuresChanged();
+    return true;
+}
+
+bool FeatureController::writeStructure(const QString& nameValue,
+                                       const QString& addressValue,
+                                       const QString& valuesJson) {
+    const QString name = nameValue.trimmed();
+    const QString address = addressValue.trimmed();
+    if (name.isEmpty() || address.isEmpty()) {
+        setError(QStringLiteral("structure_name_and_address_required"));
+        return false;
+    }
+    json values;
+    try {
+        values = json::parse(valuesJson.toUtf8().toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("structure_values_invalid_json"));
+        return false;
+    }
+    if (!values.is_object() || values.empty()) {
+        setError(QStringLiteral("structure_values_required"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("struct_write",
+                  {{"name", name.toUtf8().toStdString()},
+                   {"address", address.toUtf8().toStdString()},
+                   {"values", values}},
+                  output,
+                  true)) return false;
+    const json result = RouteResult(output);
+    const json errors = result.is_object() ? result.value("errors", json::object()) : json::object();
+    if (!readStructure(name, address)) return false;
+    structureStatus_ = errors.is_object() && !errors.empty()
+        ? QStringLiteral("Write completed with field errors: %1").arg(JsonInline(errors))
+        : QStringLiteral("Write completed at %1").arg(address);
+    emit structuresChanged();
+    return true;
+}
+
+bool FeatureController::inferStructure(const QString& instancesJson,
+                                       int size,
+                                       bool define,
+                                       const QString& nameValue) {
+    json instances;
+    try {
+        instances = json::parse(instancesJson.toUtf8().toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("structure_instances_invalid_json"));
+        return false;
+    }
+    if (!instances.is_array() || instances.empty()) {
+        setError(QStringLiteral("structure_instances_required"));
+        return false;
+    }
+    if (size < 4 || size > 1024 * 1024) {
+        setError(QStringLiteral("structure_infer_size_out_of_range"));
+        return false;
+    }
+    const QString name = nameValue.trimmed();
+    if (define && name.isEmpty()) {
+        setError(QStringLiteral("structure_name_required_for_define"));
+        return false;
+    }
+
+    json arguments{{"instances", instances}, {"size", size}, {"define", define}};
+    if (define) arguments["name"] = name.toUtf8().toStdString();
+    json output;
+    if (!callTool("struct_infer", arguments, output, define)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("structure_infer_payload_invalid"));
+        return false;
+    }
+    const json fields = result.value("fields", json::array());
+    if (!fields.is_array()) {
+        setError(QStringLiteral("structure_infer_fields_invalid"));
+        return false;
+    }
+
+    structureInferenceFields_.clear();
+    structureInferenceFields_.reserve(static_cast<qsizetype>(fields.size()));
+    for (const auto& field : fields) {
+        if (!field.is_object()) continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("name"), FromUtf8(field.value("name", std::string())));
+        row.insert(QStringLiteral("offset"), static_cast<qulonglong>(field.value("offset", uint64_t{0})));
+        row.insert(QStringLiteral("byteSize"), static_cast<qulonglong>(field.value("size", uint64_t{0})));
+        row.insert(QStringLiteral("type"), FromUtf8(field.value("type", std::string())));
+        row.insert(QStringLiteral("confidence"), field.value("confidence", 0.0));
+        row.insert(QStringLiteral("constant"), field.value("constant", false));
+        row.insert(QStringLiteral("distinctValues"), static_cast<qulonglong>(field.value("distinct_values", uint64_t{0})));
+        row.insert(QStringLiteral("reasons"), field.contains("reasons") ? JsonInline(field.at("reasons")) : QStringLiteral("[]"));
+        row.insert(QStringLiteral("values"), field.contains("values") ? JsonInline(field.at("values")) : QStringLiteral("[]"));
+        structureInferenceFields_.push_back(row);
+    }
+
+    if (define) {
+        if (!result.value("defined", false)) {
+            setError(QStringLiteral("structure_infer_define_failed"));
+            emit structuresChanged();
+            return false;
+        }
+        selectedStructureName_ = name;
+        if (!refreshStructures()) return false;
+        structureStatus_ = QStringLiteral("Inferred and defined %1 (%2 field(s))")
+            .arg(name).arg(structureInferenceFields_.size());
+    } else {
+        structureStatus_ = QStringLiteral("Inferred %1 field(s)").arg(structureInferenceFields_.size());
+        setError(QString());
+    }
+    emit structuresChanged();
+    return true;
 }
 bool FeatureController::resolveSymbol(const QString& addressValue) {
     const QString address = addressValue.trimmed();
@@ -1435,6 +1744,12 @@ void FeatureController::reset() {
     allocationEvents_.clear();
     pageAccessEvents_.clear();
     symbolResult_.clear();
+    structureDefinitions_.clear();
+    selectedStructureName_.clear();
+    selectedStructureFieldsJson_.clear();
+    structureReadFields_.clear();
+    structureInferenceFields_.clear();
+    structureStatus_.clear();
     traces_.clear();
     patches_.clear();
     snapshots_.clear();
@@ -1456,6 +1771,7 @@ void FeatureController::reset() {
     emit watchesChanged();
     emit instrumentationChanged();
     emit symbolsChanged();
+    emit structuresChanged();
     emit tracesChanged();
     emit patchesChanged();
     emit snapshotsChanged();

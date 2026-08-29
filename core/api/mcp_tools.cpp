@@ -112,15 +112,18 @@ json ManifestEntryToMcpTool(const json& entry) {
         name,
         entry.value("method", std::string("GET")),
         entry.value("path", std::string()));
+    json cortexMetadata = {
+        {"risk", mcp_contract::RiskName(risk)},
+        {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}
+    };
+    const std::string mutationWhen = entry.value("mutation_permission_when", std::string());
+    if (!mutationWhen.empty()) cortexMetadata["mutation_permission_when"] = mutationWhen;
 
     return {
         {"name", SanitizeToolName(name)},
         {"description", entry.value("description", std::string())},
         {"inputSchema", std::move(schema)},
-        {"_cortex", {
-            {"risk", mcp_contract::RiskName(risk)},
-            {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}
-        }},
+        {"_cortex", std::move(cortexMetadata)},
         {"_http", {
             {"method", entry.value("method", std::string("GET"))},
             {"path", entry.value("path", std::string())}
@@ -224,10 +227,23 @@ bool SemanticAllowsPrimitive(const json& semanticTool, const std::string& wanted
     return false;
 }
 
+mcp_contract::ToolRisk EffectiveRiskForCall(const std::string& name,
+                                            mcp_contract::ToolRisk risk,
+                                            const json& arguments) {
+    if (name == "struct_infer" && arguments.is_object() && arguments.value("define", false))
+        return mcp_contract::ToolRisk::Control;
+    return risk;
+}
+
+bool RequiresMutationPermissionForCall(const std::string& name,
+                                       mcp_contract::ToolRisk risk,
+                                       const json& arguments) {
+    return mcp_contract::RequiresMutationPermission(EffectiveRiskForCall(name, risk, arguments));
+}
 bool SupportsTransactionalRollback(const std::string& name,
                                    mcp_contract::ToolRisk risk,
                                    const json& arguments) {
-    if (!mcp_contract::RequiresMutationPermission(risk)) return true;
+    if (!RequiresMutationPermissionForCall(name, risk, arguments)) return true;
     if (risk == mcp_contract::ToolRisk::NativeCall) return false;
 
     // These handlers record undo actions in action::Transaction. Active tools
@@ -243,7 +259,8 @@ bool SupportsTransactionalRollback(const std::string& name,
         "freeze_add",
         "watch_add",
         "watch_page_access",
-        "debug_breakpoint_add"
+        "debug_breakpoint_add",
+        "struct_infer"
     };
     if (transactional.find(name) != transactional.end()) return true;
     if (name == "batch_run")
@@ -383,26 +400,27 @@ json ExecuteSemantic(const std::string& wanted,
             manifest.value("method", std::string("GET")),
             manifest.value("path", std::string()));
         const json stepArguments = rawStep.value("arguments", json::object());
+        const auto effectiveRisk = EffectiveRiskForCall(canonical, risk, stepArguments);
 
-        if (mcp_contract::RequiresMutationPermission(risk) && !mutationPermission) {
+        if (RequiresMutationPermissionForCall(canonical, effectiveRisk, stepArguments) && !mutationPermission) {
             plan["status"] = "failed";
             plan["error"] = "mutation_permission_required";
             plan["rejected_tool"] = canonical;
-            plan["risk"] = mcp_contract::RiskName(risk);
+            plan["risk"] = mcp_contract::RiskName(effectiveRisk);
             plan["lifecycle"]["current"] = "failed";
             return plan;
         }
-        if (!SupportsTransactionalRollback(canonical, risk, stepArguments)) {
+        if (!SupportsTransactionalRollback(canonical, effectiveRisk, stepArguments)) {
             plan["status"] = "failed";
             plan["error"] = "primitive_lacks_safe_rollback_contract";
             plan["rejected_tool"] = canonical;
-            plan["risk"] = mcp_contract::RiskName(risk);
+            plan["risk"] = mcp_contract::RiskName(effectiveRisk);
             plan["lifecycle"]["current"] = "failed";
             return plan;
         }
-        if (mcp_contract::RequiresMutationPermission(risk)) needsTransaction = true;
+        if (RequiresMutationPermissionForCall(canonical, effectiveRisk, stepArguments)) needsTransaction = true;
 
-        steps.push_back({stepName, canonical, std::move(manifest), stepArguments, risk});
+        steps.push_back({stepName, canonical, std::move(manifest), stepArguments, effectiveRisk});
     }
 
     const int64_t timeoutMs = arguments.value("timeout_ms", static_cast<int64_t>(30000));
@@ -509,11 +527,13 @@ json CallToolScoped(const std::string& wanted,
         manifest.value("name", wanted),
         manifest.value("method", std::string("GET")),
         manifest.value("path", std::string()));
-    if (mcp_contract::RequiresMutationPermission(risk) && !arguments.value("mutation_permission", false)) {
+    const auto effectiveRisk = EffectiveRiskForCall(manifest.value("name", wanted), risk, arguments);
+    if (RequiresMutationPermissionForCall(manifest.value("name", wanted), effectiveRisk, arguments) &&
+        !arguments.value("mutation_permission", false)) {
         return ToolCallPayload({{"ok", false},
                                 {"error", "mutation_permission_required"},
                                 {"tool", manifest.value("name", wanted)},
-                                {"risk", mcp_contract::RiskName(risk)}});
+                                {"risk", mcp_contract::RiskName(effectiveRisk)}});
     }
     return ToolCallPayload(DispatchPrimitive(manifest, arguments), manifest.value("ok_false_is_error", true));
 }

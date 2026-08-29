@@ -47,6 +47,12 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QVariantList allocationEvents READ allocationEvents NOTIFY instrumentationChanged)
     Q_PROPERTY(QVariantList pageAccessEvents READ pageAccessEvents NOTIFY instrumentationChanged)
     Q_PROPERTY(QVariantMap symbolResult READ symbolResult NOTIFY symbolsChanged)
+    Q_PROPERTY(QVariantList structureDefinitions READ structureDefinitions NOTIFY structuresChanged)
+    Q_PROPERTY(QString selectedStructureName READ selectedStructureName NOTIFY structuresChanged)
+    Q_PROPERTY(QString selectedStructureFieldsJson READ selectedStructureFieldsJson NOTIFY structuresChanged)
+    Q_PROPERTY(QVariantList structureReadFields READ structureReadFields NOTIFY structuresChanged)
+    Q_PROPERTY(QVariantList structureInferenceFields READ structureInferenceFields NOTIFY structuresChanged)
+    Q_PROPERTY(QString structureStatus READ structureStatus NOTIFY structuresChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
     Q_PROPERTY(int selectedTraceId READ selectedTraceId NOTIFY tracesChanged)
     Q_PROPERTY(QString sessionExportPath READ sessionExportPath NOTIFY sessionChanged)
@@ -93,6 +99,12 @@ public:
     const QVariantList& allocationEvents() const { return allocationEvents_; }
     const QVariantList& pageAccessEvents() const { return pageAccessEvents_; }
     const QVariantMap& symbolResult() const { return symbolResult_; }
+    const QVariantList& structureDefinitions() const { return structureDefinitions_; }
+    QString selectedStructureName() const { return selectedStructureName_; }
+    QString selectedStructureFieldsJson() const { return selectedStructureFieldsJson_; }
+    const QVariantList& structureReadFields() const { return structureReadFields_; }
+    const QVariantList& structureInferenceFields() const { return structureInferenceFields_; }
+    QString structureStatus() const { return structureStatus_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
     int selectedTraceId() const { return selectedTraceId_; }
     QString sessionExportPath() const { return sessionExportPath_; }
@@ -153,7 +165,15 @@ public:
 
     Q_INVOKABLE bool resolveSymbol(const QString& address);
     Q_INVOKABLE bool lookupSymbol(const QString& name);
-    Q_INVOKABLE void clearSymbolResult();
+
+    Q_INVOKABLE bool refreshStructures();
+    Q_INVOKABLE bool selectStructure(const QString& name);
+    Q_INVOKABLE void clearStructureSelection();
+    Q_INVOKABLE bool defineStructure(const QString& name, const QString& fieldsJson);
+    Q_INVOKABLE bool deleteStructure(const QString& name);
+    Q_INVOKABLE bool readStructure(const QString& name, const QString& address);
+    Q_INVOKABLE bool writeStructure(const QString& name, const QString& address, const QString& valuesJson);
+    Q_INVOKABLE bool inferStructure(const QString& instancesJson, int size, bool define = false, const QString& name = QString());
 
     Q_INVOKABLE bool refreshPatches();
     Q_INVOKABLE bool revertPatch(int patchId);
@@ -196,6 +216,7 @@ signals:
     void watchesChanged();
     void instrumentationChanged();
     void symbolsChanged();
+    void structuresChanged();
     void sessionChanged();
     void errorChanged();
 
@@ -246,6 +267,12 @@ private:
     QVariantList allocationEvents_;
     QVariantList pageAccessEvents_;
     QVariantMap symbolResult_;
+    QVariantList structureDefinitions_;
+    QString selectedStructureName_;
+    QString selectedStructureFieldsJson_;
+    QVariantList structureReadFields_;
+    QVariantList structureInferenceFields_;
+    QString structureStatus_;
     QVariantList traceEvents_;
     int selectedTraceId_ = -1;
     QString sessionExportPath_;

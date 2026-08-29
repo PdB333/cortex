@@ -303,6 +303,15 @@ jobs:
                 throw "$label full MCP catalog is incomplete"
               }
 
+              $structInferTool = @($tools.result.tools | Where-Object { $_.name -eq "struct_infer" })
+              if ($structInferTool.Count -ne 1 -or
+                  $structInferTool[0]._cortex.risk -ne "analyze" -or
+                  $structInferTool[0]._cortex.mutation_permission_required -or
+                  $structInferTool[0]._cortex.mutation_permission_when -ne "define=true" -or
+                  $structInferTool[0].inputSchema.properties.define.type -ne "boolean" -or
+                  ($structInferTool[0].inputSchema.required -contains "name")) {
+                throw "$label struct_infer MCP risk metadata is incorrect"
+              }
               $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"status","arguments":{}}}')
               $mcp.StandardInput.Flush()
               $status = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
@@ -592,6 +601,127 @@ jobs:
               if ($missingSymbolResolveResponse.id -ne 145 -or $missingSymbolResolveResponse.result.isError -or
                   $missingSymbolResolveResult.ok) {
                 throw "$label unresolved address was incorrectly reported as a tool error"
+              }
+              $structName = "preview-$safeLabel-inferred"
+              $inferOnly = @{
+                jsonrpc = "2.0"
+                id = 146
+                method = "tools/call"
+                params = @{
+                  name = "struct_infer"
+                  arguments = @{ instances = @([string]$fixture.u32); size = 4; define = $false }
+                }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($inferOnly)
+              $mcp.StandardInput.Flush()
+              $inferOnlyResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $inferOnlyResult = $inferOnlyResponse.result.structuredContent.result
+              if ($inferOnlyResponse.id -ne 146 -or $inferOnlyResponse.result.isError -or
+                  -not $inferOnlyResult.ok -or @($inferOnlyResult.fields).Count -lt 1) {
+                throw "$label observational struct inference failed"
+              }
+
+              $deniedStructDefine = @{
+                jsonrpc = "2.0"
+                id = 147
+                method = "tools/call"
+                params = @{
+                  name = "struct_infer"
+                  arguments = @{ instances = @([string]$fixture.u32); size = 4; define = $true; name = $structName }
+                }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($deniedStructDefine)
+              $mcp.StandardInput.Flush()
+              $deniedStructDefineResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deniedStructDefineResponse.id -ne 147 -or -not $deniedStructDefineResponse.result.isError -or
+                  $deniedStructDefineResponse.result.structuredContent.error -ne "mutation_permission_required" -or
+                  $deniedStructDefineResponse.result.structuredContent.risk -ne "control") {
+                throw "$label struct Infer+Define bypassed mutation permission"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":148,"method":"tools/call","params":{"name":"actions_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $beforeStructActions = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $structCheckpoint = [uint64]$beforeStructActions.result.structuredContent.result.checkpoint
+              if ($beforeStructActions.id -ne 148 -or $structCheckpoint -le 0) {
+                throw "$label failed to capture the struct inference action checkpoint"
+              }
+
+              $defineInferredStruct = @{
+                jsonrpc = "2.0"
+                id = 149
+                method = "tools/call"
+                params = @{
+                  name = "struct_infer"
+                  arguments = @{
+                    instances = @([string]$fixture.u32)
+                    size = 4
+                    define = $true
+                    name = $structName
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($defineInferredStruct)
+              $mcp.StandardInput.Flush()
+              $defineInferredStructResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $defineInferredStructResult = $defineInferredStructResponse.result.structuredContent.result
+              if ($defineInferredStructResponse.id -ne 149 -or $defineInferredStructResponse.result.isError -or
+                  -not $defineInferredStructResult.ok -or -not $defineInferredStructResult.defined) {
+                throw "$label failed to infer and define a structure"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":150,"method":"tools/call","params":{"name":"struct_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $structListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $listedStruct = @($structListResponse.result.structuredContent.result.structs | Where-Object { $_.name -eq $structName })
+              if ($structListResponse.id -ne 150 -or $listedStruct.Count -ne 1 -or @($listedStruct[0].fields).Count -lt 1) {
+                throw "$label inferred structure was not listed"
+              }
+
+              $readInferredStruct = @{
+                jsonrpc = "2.0"
+                id = 151
+                method = "tools/call"
+                params = @{ name = "struct_read"; arguments = @{ name = $structName; address = [string]$fixture.u32 } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($readInferredStruct)
+              $mcp.StandardInput.Flush()
+              $readInferredStructResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $readInferredStructResult = $readInferredStructResponse.result.structuredContent.result
+              if ($readInferredStructResponse.id -ne 151 -or $readInferredStructResponse.result.isError -or
+                  -not $readInferredStructResult.ok -or @($readInferredStructResult.fields.PSObject.Properties).Count -lt 1) {
+                throw "$label inferred structure could not read the fixture"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":152,"method":"tools/call","params":{"name":"actions_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $afterStructActions = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $structAction = @($afterStructActions.result.structuredContent.result.actions | Where-Object { $_.description -eq "struct/infer define $structName" })
+              if ($afterStructActions.id -ne 152 -or $structAction.Count -ne 1) {
+                throw "$label Infer+Define did not record a reversible action"
+              }
+
+              $rollbackStruct = @{
+                jsonrpc = "2.0"
+                id = 153
+                method = "tools/call"
+                params = @{ name = "actions_rollback"; arguments = @{ checkpoint = $structCheckpoint; mutation_permission = $true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($rollbackStruct)
+              $mcp.StandardInput.Flush()
+              $rollbackStructResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($rollbackStructResponse.id -ne 153 -or -not $rollbackStructResponse.result.structuredContent.result.ok -or
+                  @($rollbackStructResponse.result.structuredContent.result.rolled_back).Count -lt 1) {
+                throw "$label failed to rollback the inferred structure"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":154,"method":"tools/call","params":{"name":"struct_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $structListAfterRollback = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $rolledBackStruct = @($structListAfterRollback.result.structuredContent.result.structs | Where-Object { $_.name -eq $structName })
+              if ($structListAfterRollback.id -ne 154 -or $rolledBackStruct.Count -ne 0) {
+                throw "$label rollback did not remove the inferred structure"
               }
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {

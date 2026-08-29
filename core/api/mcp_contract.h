@@ -52,7 +52,8 @@ inline ToolRisk ClassifyTool(const std::string& name,
     // POST is sometimes used for structured analysis requests. Keep those
     // callable in inspect mode unless their arguments can change runtime or
     // persisted Cortex state.
-    if (name == "struct_read" || name == "trace_compare" || name == "pointermap_intersect") return ToolRisk::Analyze;
+    if (name == "struct_read" || name == "struct_infer" || name == "trace_compare" ||
+        name == "pointermap_intersect") return ToolRisk::Analyze;
 
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||
@@ -150,7 +151,7 @@ inline bool IsBoolField(const std::string& name) {
            name.find("_only") != std::string::npos ||
            name == "pause_process" || name == "copy_on_write" ||
            name == "stop_on_error" || name == "transactional" ||
-           name == "execute";
+           name == "execute" || name == "define";
 }
 
 inline bool IsIntegerField(const std::string& name) {

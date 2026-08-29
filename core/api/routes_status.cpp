@@ -422,8 +422,8 @@ json BuildToolsManifest() {
                       {"description", "Lists active freezes."}});
 
         j.push_back({{"name", "struct_define"}, {"method", "POST"}, {"path", "/struct/define"},
-                      {"description", "Defines (or overwrites) a named struct layout -- list of fields {name, offset, type}. Complementary to /project (which only knows individual addresses/pointer paths, not composite layouts). Not persisted to disk: must be redefined every session."},
-                      {"body", {{"name", "required"}, {"fields", "required: array of {name, offset, type: i8|i16|i32|i64|u8|u16|u32|u64|float|double|bytes|string, count: optional for bytes/string}"}}}});
+                      {"description", "Defines (or overwrites) a named struct layout -- list of fields {name, offset, type}. Complementary to /project (which only knows individual addresses/pointer paths, not composite layouts). Persisted in the current Cortex project and restored on the next runtime session."},
+                      {"body", {{"name", "required"}, {"fields", "required: array of {name, offset, type: i8|i16|i32|i64|u8|u16|u32|u64|float|double|pointer|vtable|vec3|vec4|matrix4|bytes|string, count: optional for bytes/string}"}}}});
 
         j.push_back({{"name", "struct_delete"}, {"method", "DELETE"}, {"path", "/struct/{name}"},
                       {"description", "Deletes a struct definition."}});
@@ -565,7 +565,11 @@ json BuildToolsManifest() {
         j.push_back({{"name","trace_callgraph"},{"method","GET"},{"path","/trace/{id}/callgraph"},{"description","Dynamic call graph of observed direct calls."}});
         j.push_back({{"name","trace_compare"},{"method","POST"},{"path","/trace/compare"},{"description","Compares the coverage of two actions."}});
         j.push_back({{"name","struct_infer"},{"method","POST"},{"path","/struct/infer"},
-                     {"description","Infers a typed layout from several instances and can persist it."}});
+                     {"mutation_permission_when","define=true"},
+                     {"description","Infers a typed layout from several instances and can optionally persist it in the current Cortex project."},
+                     {"body",{{"instances","required: array of instance addresses"},{"size","required: bytes to infer (4..1048576)"},
+                               {"define","optional bool, default false; requires mutation_permission when true"},
+                               {"name","optional; required when define=true"}}}});
         j.push_back({{"name","patch_trampoline"},{"method","POST"},{"path","/patch/trampoline"},
                      {"description","Builds a detour with a gateway and relocation of relative instructions."}});
         j.push_back({{"name","snapshot_create"},{"method","POST"},{"path","/snapshot/create"},{"description","Captures several memory ranges into a target checkpoint."},

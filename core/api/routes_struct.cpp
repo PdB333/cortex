@@ -149,10 +149,26 @@ void RegisterStructRoutes(httplib::Server& svr) {
                 std::string storedType = guess.type;
                 definition.push_back({guess.name, static_cast<int64_t>(guess.offset), storedType, 0});
             }
+            const bool defineRequested = body.value("define", false);
             bool defined = false;
-            if (body.value("define", false)) {
+            if (defineRequested) {
+                auto mutation = action::LockMutations();
                 const std::string name = body.at("name").get<std::string>();
+                std::vector<structs::Field> previous;
+                bool existed = false;
+                for (const auto& current : structs::List()) {
+                    if (current.name == name) {
+                        previous = current.fields;
+                        existed = true;
+                        break;
+                    }
+                }
                 defined = structs::Define(name, definition);
+                if (defined) {
+                    action::Record("struct/infer define " + name, [name, previous, existed] {
+                        return existed ? structs::Define(name, previous) : structs::Remove(name);
+                    });
+                }
             }
             res.set_content(json{{"ok",true},{"fields",fields},{"defined",defined}}.dump(), "application/json");
             overlay::LogApiCall("POST /struct/infer (" + std::to_string(instances.size()) + " instances)");

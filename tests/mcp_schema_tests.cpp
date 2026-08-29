@@ -66,6 +66,12 @@ int main() {
     const auto pointerMapDeleteRisk = api::mcp_contract::ClassifyTool("pointermap_delete", "DELETE", "/pointermap/{name}");
     check(pointerMapDeleteRisk == api::mcp_contract::ToolRisk::Control,
           "pointermap_delete is a control operation");
+    const auto structInferRisk = api::mcp_contract::ClassifyTool(
+        "struct_infer", "POST", "/struct/infer");
+    check(structInferRisk == api::mcp_contract::ToolRisk::Analyze,
+          "struct_infer is observational unless define=true is requested");
+    check(!api::mcp_contract::RequiresMutationPermission(structInferRisk),
+          "plain struct inference does not require mutation permission");
     const auto allocationSnapshotRisk = api::mcp_contract::ClassifyTool(
         "watch_allocations_events_snapshot", "GET", "/watch/allocations/events_snapshot");
     check(allocationSnapshotRisk == api::mcp_contract::ToolRisk::Observe,
