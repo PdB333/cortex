@@ -156,7 +156,7 @@ void RegisterLuaRoutes(httplib::Server& svr) {
         const std::string path = scripting::GetScriptsDir() + "\\" + name + ".lua";
         BOOL ok = DeleteFileA(path.c_str());
         if (!ok) {
-            const DWORD error = GetLastError();
+            const DWORD error = ::GetLastError();
             res.status = error == ERROR_FILE_NOT_FOUND ? 404 : 500;
             res.set_content(json{{"ok", false}, {"error", error == ERROR_FILE_NOT_FOUND ? "not_found" : "delete_failed"}}.dump(),
                             "application/json");

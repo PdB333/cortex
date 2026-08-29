@@ -77,7 +77,7 @@ void RegisterSessionRoutes(httplib::Server& svr) {
         std::string root = config::GetModuleDir() + "\\cortex_sessions";
         CreateDirectoryA(root.c_str(), nullptr);
         std::string dir = root + "\\session_" + TimestampSlug();
-        if (!CreateDirectoryA(dir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        if (!CreateDirectoryA(dir.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS) {
             res.status = 500;
             res.set_content(json{{"ok", false}, {"error", "create_dir_failed"}}.dump(), "application/json");
             return;
