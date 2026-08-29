@@ -85,6 +85,7 @@ qt_add_executable(cortex WIN32
 qt_add_qml_module(cortex
     URI Cortex
     VERSION 1.0
+    RESOURCE_PREFIX /qt/qml
     QML_FILES
         qml/Main.qml
         qml/Theme.qml
