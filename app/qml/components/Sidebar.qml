@@ -16,6 +16,7 @@ Rectangle {
         ListElement { group: "INSPECT"; label: "Structures" }
         ListElement { group: "INSPECT"; label: "Modules" }
         ListElement { group: "INSPECT"; label: "Symbols" }
+        ListElement { group: "INSPECT"; label: "Snapshots" }
         ListElement { group: "DEBUG"; label: "Debugger" }
         ListElement { group: "DEBUG"; label: "Breakpoints" }
         ListElement { group: "DEBUG"; label: "Traces" }

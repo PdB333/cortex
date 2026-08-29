@@ -64,6 +64,7 @@ Rectangle {
                            : CortexApp.selectedSection === "Structures" ? structuresComponent
                            : CortexApp.selectedSection === "Modules" ? modulesComponent
                            : CortexApp.selectedSection === "Symbols" ? symbolsComponent
+                           : CortexApp.selectedSection === "Snapshots" ? snapshotsComponent
                            : CortexApp.selectedSection === "Debugger" ? debuggerComponent
                            : CortexApp.selectedSection === "Breakpoints" ? breakpointsComponent
                            : CortexApp.selectedSection === "Traces" ? tracesComponent
@@ -91,6 +92,7 @@ Rectangle {
     Component { id: structuresComponent; StructuresView {} }
     Component { id: modulesComponent; ModulesView {} }
     Component { id: symbolsComponent; SymbolsView {} }
+    Component { id: snapshotsComponent; SnapshotsView {} }
     Component { id: debuggerComponent; DebuggerView {} }
     Component { id: breakpointsComponent; BreakpointsView {} }
     Component { id: tracesComponent; TracesView {} }

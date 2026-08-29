@@ -55,6 +55,11 @@ int main() {
           "trace_delete is classified as a control operation");
     check(api::mcp_contract::RequiresMutationPermission(traceDeleteRisk),
           "trace_delete requires explicit mutation permission");
+    const auto snapshotDeleteRisk = api::mcp_contract::ClassifyTool("snapshot_delete", "DELETE", "/snapshot/{id}");
+    check(snapshotDeleteRisk == api::mcp_contract::ToolRisk::Control,
+          "snapshot_delete is classified as a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(snapshotDeleteRisk),
+          "snapshot_delete requires explicit mutation permission");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;

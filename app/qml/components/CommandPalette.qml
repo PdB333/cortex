@@ -26,6 +26,7 @@ Popup {
         { label: "View: Structures", section: "Structures", action: "view" },
         { label: "View: Modules", section: "Modules", action: "view" },
         { label: "View: Symbols", section: "Symbols", action: "view" },
+        { label: "View: Snapshots", section: "Snapshots", action: "view" },
         { label: "View: Debugger", section: "Debugger", action: "view" },
         { label: "View: Breakpoints", section: "Breakpoints", action: "view" },
         { label: "View: Traces", section: "Traces", action: "view" },

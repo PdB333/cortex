@@ -560,10 +560,15 @@ json BuildToolsManifest() {
                      {"description","Infers a typed layout from several instances and can persist it."}});
         j.push_back({{"name","patch_trampoline"},{"method","POST"},{"path","/patch/trampoline"},
                      {"description","Builds a detour with a gateway and relocation of relative instructions."}});
-        j.push_back({{"name","snapshot_create"},{"method","POST"},{"path","/snapshot/create"},{"description","Captures several memory ranges into a target checkpoint."}});
-        j.push_back({{"name","snapshot_diff"},{"method","POST"},{"path","/snapshot/diff"},{"description","Compares two checkpoints."}});
+        j.push_back({{"name","snapshot_create"},{"method","POST"},{"path","/snapshot/create"},{"description","Captures several memory ranges into a target checkpoint."},
+                     {"body",{{"ranges","required: array of {address,size}"},{"label","optional"}}}});
+        j.push_back({{"name","snapshot_list"},{"method","GET"},{"path","/snapshot/list"},{"description","Lists in-memory target checkpoints."}});
+        j.push_back({{"name","snapshot_diff"},{"method","POST"},{"path","/snapshot/diff"},{"description","Compares two checkpoints."},
+                     {"body",{{"from","required snapshot id"},{"to","required snapshot id"}}}});
         j.push_back({{"name","snapshot_rewind"},{"method","POST"},{"path","/snapshot/{id}/rewind"},{"description","Restores a checkpoint with a logged undo."}});
-        j.push_back({{"name","snapshot_last_change"},{"method","POST"},{"path","/snapshot/last_change"},{"description","Finds the last observed transition for a value."}});
+        j.push_back({{"name","snapshot_last_change"},{"method","POST"},{"path","/snapshot/last_change"},{"description","Finds the last observed transition for a value."},
+                     {"body",{{"address","required"},{"size","required, 1..4096"}}}});
+        j.push_back({{"name","snapshot_delete"},{"method","DELETE"},{"path","/snapshot/{id}"},{"description","Deletes a checkpoint from the runtime timeline."}});
         j.push_back({{"name","ghidra_export"},{"method","POST"},{"path","/ghidra/export"},{"description","Exports the runtime and generates the CortexImport.py script."}});
         j.push_back({{"name","ghidra_import"},{"method","POST"},{"path","/ghidra/import"},{"description","Imports names, types, and comments into the Cortex project."}});
 

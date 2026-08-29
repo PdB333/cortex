@@ -66,7 +66,7 @@ inline ToolRisk ClassifyTool(const std::string& name,
         StartsWith(name, "watch_") || StartsWith(name, "window_") ||
         StartsWith(name, "project_") || StartsWith(name, "struct_") ||
         StartsWith(name, "pointermap_") || name == "network_capture" ||
-        name == "actions_clear" || name == "ghidra_import") {
+        name == "actions_clear" || name == "ghidra_import" || name == "snapshot_delete") {
         return ToolRisk::Control;
     }
 

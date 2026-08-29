@@ -601,6 +601,115 @@ jobs:
               if ($restoredReadResponse.id -ne 18 -or [uint64]$restoredReadResponse.result.structuredContent.result.value -ne [uint64]3735928559) {
                 throw "$label patch revert did not restore the original bytes"
               }
+              $snapshotCreateA = @{
+                jsonrpc = "2.0"
+                id = 19
+                method = "tools/call"
+                params = @{
+                  name = "snapshot_create"
+                  arguments = @{ ranges = @(@{ address = [string]$fixture.u32; size = 4 }); label = "before-change" }
+                }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($snapshotCreateA)
+              $mcp.StandardInput.Flush()
+              $snapshotCreateAResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $snapshotA = [int]$snapshotCreateAResponse.result.structuredContent.result.id
+              if ($snapshotCreateAResponse.id -ne 19 -or $snapshotA -le 0) {
+                throw "$label failed to create the first snapshot"
+              }
+
+              $snapshotMutation = @{
+                jsonrpc = "2.0"
+                id = 20
+                method = "tools/call"
+                params = @{ name = "memory_write"; arguments = @{ address = [string]$fixture.u32; type = "u32"; value = 3405691582; mutation_permission = $true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($snapshotMutation)
+              $mcp.StandardInput.Flush()
+              $snapshotMutationResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($snapshotMutationResponse.id -ne 20 -or -not $snapshotMutationResponse.result.structuredContent.result.ok) {
+                throw "$label failed to mutate memory between snapshots"
+              }
+
+              $snapshotCreateB = @{
+                jsonrpc = "2.0"
+                id = 21
+                method = "tools/call"
+                params = @{
+                  name = "snapshot_create"
+                  arguments = @{ ranges = @(@{ address = [string]$fixture.u32; size = 4 }); label = "after-change" }
+                }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($snapshotCreateB)
+              $mcp.StandardInput.Flush()
+              $snapshotCreateBResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $snapshotB = [int]$snapshotCreateBResponse.result.structuredContent.result.id
+              if ($snapshotCreateBResponse.id -ne 21 -or $snapshotB -le $snapshotA) {
+                throw "$label failed to create the second snapshot"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"snapshot_list","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $snapshotListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $snapshotIds = @($snapshotListResponse.result.structuredContent.result.snapshots | ForEach-Object { [int]$_.id })
+              if ($snapshotListResponse.id -ne 22 -or -not ($snapshotIds -contains $snapshotA) -or -not ($snapshotIds -contains $snapshotB)) {
+                throw "$label snapshot_list is missing captured checkpoints"
+              }
+
+              $snapshotDiff = @{
+                jsonrpc = "2.0"
+                id = 23
+                method = "tools/call"
+                params = @{ name = "snapshot_diff"; arguments = @{ from = $snapshotA; to = $snapshotB } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($snapshotDiff)
+              $mcp.StandardInput.Flush()
+              $snapshotDiffResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $changes = @($snapshotDiffResponse.result.structuredContent.result.changes)
+              if ($snapshotDiffResponse.id -ne 23 -or $changes.Count -lt 1) {
+                throw "$label snapshot_diff did not observe the memory transition"
+              }
+
+              $snapshotRewind = @{
+                jsonrpc = "2.0"
+                id = 24
+                method = "tools/call"
+                params = @{ name = "snapshot_rewind"; arguments = @{ _path = @{ id = $snapshotA }; mutation_permission = $true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($snapshotRewind)
+              $mcp.StandardInput.Flush()
+              $snapshotRewindResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($snapshotRewindResponse.id -ne 24 -or -not $snapshotRewindResponse.result.structuredContent.result.ok) {
+                throw "$label snapshot rewind failed"
+              }
+
+              $snapshotRead = @{
+                jsonrpc = "2.0"
+                id = 25
+                method = "tools/call"
+                params = @{ name = "memory_read"; arguments = @{ address = [string]$fixture.u32; type = "u32" } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($snapshotRead)
+              $mcp.StandardInput.Flush()
+              $snapshotReadResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($snapshotReadResponse.id -ne 25 -or [uint64]$snapshotReadResponse.result.structuredContent.result.value -ne [uint64]3735928559) {
+                throw "$label snapshot rewind did not restore the captured value"
+              }
+
+              foreach ($snapshotId in @($snapshotA, $snapshotB)) {
+                $snapshotDelete = @{
+                  jsonrpc = "2.0"
+                  id = 26 + $snapshotId
+                  method = "tools/call"
+                  params = @{ name = "snapshot_delete"; arguments = @{ _path = @{ id = $snapshotId }; mutation_permission = $true } }
+                } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($snapshotDelete)
+                $mcp.StandardInput.Flush()
+                $snapshotDeleteResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                if (-not $snapshotDeleteResponse.result.structuredContent.result.ok) {
+                  throw "$label failed to delete snapshot $snapshotId"
+                }
+              }
               $mcp.StandardInput.Close()
               if (-not $mcp.WaitForExit(15000)) {
                 $mcp.Kill($true)

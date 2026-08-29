@@ -592,6 +592,94 @@ bool FeatureController::revertPatch(int patchId) {
     if (!callTool("patch_revert", {{"_path", {{"id", patchId}}}}, output, true)) return false;
     return refreshPatches();
 }
+bool FeatureController::refreshSnapshots() {
+    json output;
+    if (!callTool("snapshot_list", json::object(), output, false)) return false;
+    const json result = RouteResult(output);
+    snapshots_.clear();
+    const json entries = result.value("snapshots", json::array());
+    if (entries.is_array()) {
+        snapshots_.reserve(static_cast<qsizetype>(entries.size()));
+        for (const auto& entry : entries) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("id"), entry.value("id", -1));
+            row.insert(QStringLiteral("timestamp"), static_cast<qulonglong>(entry.value("timestamp_ms", uint64_t{0})));
+            row.insert(QStringLiteral("label"), FromUtf8(entry.value("label", std::string())));
+            row.insert(QStringLiteral("rangeCount"), static_cast<qulonglong>(entry.value("range_count", uint64_t{0})));
+            row.insert(QStringLiteral("totalBytes"), static_cast<qulonglong>(entry.value("total_bytes", uint64_t{0})));
+            snapshots_.push_back(row);
+        }
+    }
+    setError(QString());
+    emit snapshotsChanged();
+    return true;
+}
+
+bool FeatureController::createSnapshot(const QString& rangesJson, const QString& label) {
+    json ranges;
+    try {
+        ranges = json::parse(rangesJson.trimmed().isEmpty() ? std::string("[]") : rangesJson.toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("snapshot_ranges_invalid_json"));
+        return false;
+    }
+    if (!ranges.is_array() || ranges.empty()) {
+        setError(QStringLiteral("snapshot_ranges_required"));
+        return false;
+    }
+    json arguments{{"ranges", std::move(ranges)}};
+    if (!label.trimmed().isEmpty()) arguments["label"] = label.trimmed().toUtf8().toStdString();
+    json output;
+    if (!callTool("snapshot_create", arguments, output, false)) return false;
+    snapshotResult_ = JsonText(RouteResult(output));
+    emit snapshotsChanged();
+    return refreshSnapshots();
+}
+
+bool FeatureController::diffSnapshots(int fromId, int toId) {
+    if (fromId < 0 || toId < 0 || fromId == toId) {
+        setError(QStringLiteral("snapshot_diff_requires_two_ids"));
+        return false;
+    }
+    json output;
+    if (!callTool("snapshot_diff", {{"from", fromId}, {"to", toId}}, output, false)) return false;
+    snapshotResult_ = JsonText(RouteResult(output));
+    setError(QString());
+    emit snapshotsChanged();
+    return true;
+}
+
+bool FeatureController::rewindSnapshot(int snapshotId) {
+    if (snapshotId < 0) { setError(QStringLiteral("invalid_snapshot_id")); return false; }
+    json output;
+    if (!callTool("snapshot_rewind", {{"_path", {{"id", snapshotId}}}}, output, true)) return false;
+    snapshotResult_ = JsonText(RouteResult(output));
+    emit snapshotsChanged();
+    return refreshSnapshots();
+}
+
+bool FeatureController::deleteSnapshot(int snapshotId) {
+    if (snapshotId < 0) { setError(QStringLiteral("invalid_snapshot_id")); return false; }
+    json output;
+    if (!callTool("snapshot_delete", {{"_path", {{"id", snapshotId}}}}, output, true)) return false;
+    snapshotResult_ = JsonText(RouteResult(output));
+    emit snapshotsChanged();
+    return refreshSnapshots();
+}
+
+bool FeatureController::lastSnapshotChange(const QString& address, int size) {
+    if (address.trimmed().isEmpty() || size <= 0 || size > 4096) {
+        setError(QStringLiteral("invalid_snapshot_last_change_request"));
+        return false;
+    }
+    json output;
+    if (!callTool("snapshot_last_change", {{"address", address.trimmed().toUtf8().toStdString()}, {"size", size}}, output, false)) return false;
+    snapshotResult_ = JsonText(RouteResult(output));
+    setError(QString());
+    emit snapshotsChanged();
+    return true;
+}
 bool FeatureController::refreshTraces() {
     json output;
     if (!callTool("trace_list", json::object(), output, false)) return false;
@@ -740,6 +828,8 @@ void FeatureController::reset() {
     watches_.clear();
     traces_.clear();
     patches_.clear();
+    snapshots_.clear();
+    snapshotResult_.clear();
     traceEvents_.clear();
     selectedTraceId_ = -1;
     sessionExportPath_.clear();
@@ -754,6 +844,7 @@ void FeatureController::reset() {
     emit watchesChanged();
     emit tracesChanged();
     emit patchesChanged();
+    emit snapshotsChanged();
     emit sessionChanged();
     emit errorChanged();
 }

@@ -25,6 +25,8 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString screenshotMeta READ screenshotMeta NOTIFY screenshotChanged)
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
     Q_PROPERTY(QVariantList patches READ patches NOTIFY patchesChanged)
+    Q_PROPERTY(QVariantList snapshots READ snapshots NOTIFY snapshotsChanged)
+    Q_PROPERTY(QString snapshotResult READ snapshotResult NOTIFY snapshotsChanged)
     Q_PROPERTY(QVariantList freezes READ freezes NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList watches READ watches NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
@@ -52,6 +54,8 @@ public:
     QString screenshotMeta() const { return screenshotMeta_; }
     const QVariantList& traces() const { return traces_; }
     const QVariantList& patches() const { return patches_; }
+    const QVariantList& snapshots() const { return snapshots_; }
+    QString snapshotResult() const { return snapshotResult_; }
     const QVariantList& freezes() const { return freezes_; }
     const QVariantList& watches() const { return watches_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
@@ -97,6 +101,13 @@ public:
     Q_INVOKABLE bool refreshPatches();
     Q_INVOKABLE bool revertPatch(int patchId);
 
+    Q_INVOKABLE bool refreshSnapshots();
+    Q_INVOKABLE bool createSnapshot(const QString& rangesJson, const QString& label = QString());
+    Q_INVOKABLE bool diffSnapshots(int fromId, int toId);
+    Q_INVOKABLE bool rewindSnapshot(int snapshotId);
+    Q_INVOKABLE bool deleteSnapshot(int snapshotId);
+    Q_INVOKABLE bool lastSnapshotChange(const QString& address, int size);
+
     Q_INVOKABLE bool refreshTraces();
     Q_INVOKABLE bool startTrace(qulonglong threadId, int maxSteps = 10000);
     Q_INVOKABLE bool stopTrace(int traceId);
@@ -117,6 +128,7 @@ signals:
     void screenshotChanged();
     void tracesChanged();
     void patchesChanged();
+    void snapshotsChanged();
     void watchesChanged();
     void sessionChanged();
     void errorChanged();
@@ -147,6 +159,8 @@ private:
     QString screenshotMeta_;
     QVariantList traces_;
     QVariantList patches_;
+    QVariantList snapshots_;
+    QString snapshotResult_;
     QVariantList freezes_;
     QVariantList watches_;
     QVariantList traceEvents_;
