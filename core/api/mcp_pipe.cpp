@@ -3,6 +3,7 @@
 #include "mcp_pipe_protocol.h"
 #include "mcp_protocol.h"
 #include "mcp_tools.h"
+#include "native_routes.h"
 
 #include <windows.h>
 #include <nlohmann/json.hpp>
@@ -119,6 +120,44 @@ json RpcErrorForEnvelope(const json& envelope, int code, const std::string& mess
     return mcp_protocol::Error(id, code, message);
 }
 
+bool IsPrivateRouteRequest(const json& message) {
+    return message.is_object() &&
+           message.value("jsonrpc", std::string()) == "2.0" &&
+           message.value("method", std::string()) == "cortex/private/route";
+}
+
+json HandlePrivateRouteRequest(const json& message) {
+    const json id = message.contains("id") ? message["id"] : json(nullptr);
+    if (!message.contains("id"))
+        return mcp_protocol::Error(nullptr, -32600, "private_route_requires_id");
+
+    const json params = message.value("params", json::object());
+    if (!params.is_object()) return mcp_protocol::Error(id, -32602, "invalid_private_route_params");
+
+    const std::string method = params.value("method", std::string());
+    const std::string path = params.value("path", std::string());
+    if (method.empty() || path.empty() || path.front() != '/')
+        return mcp_protocol::Error(id, -32602, "invalid_private_route_target");
+
+    const json body = params.value("body", json::object());
+    httplib::Headers headers = {{"Content-Type", "application/json"}};
+    const auto route = DispatchNativeRoute(method, path, body.dump(), headers);
+    if (!route.found) return mcp_protocol::Error(id, -32601, "private_route_not_found");
+
+    json result{{"status", route.status}, {"content_type", route.contentType}};
+    if (route.contentType.rfind("application/json", 0) == 0 ||
+        (!route.body.empty() && (route.body.front() == '{' || route.body.front() == '['))) {
+        try {
+            result["result"] = json::parse(route.body);
+        } catch (...) {
+            result["result_raw"] = route.body;
+        }
+    } else {
+        result["result_raw"] = route.body;
+    }
+    return {{"jsonrpc", "2.0"}, {"id", id}, {"result", std::move(result)}};
+}
+
 void CloseWorkerPipe(const std::shared_ptr<Worker>& worker) {
     std::lock_guard<std::mutex> lock(g_workersMutex);
     if (worker->pipe != INVALID_HANDLE_VALUE) {
@@ -147,6 +186,12 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
             responsePayload = RpcErrorForEnvelope(envelope, -32001, "invalid_token").dump();
         } else if (!envelope.contains("message")) {
             responsePayload = RpcErrorForEnvelope(envelope, -32600, "missing_message").dump();
+        } else if (IsPrivateRouteRequest(envelope["message"])) {
+            // This method exists only on the authenticated local Named Pipe.
+            // It is intentionally not part of HTTP MCP/tools/list: Cortex
+            // Desktop uses it for UI-side adapters such as human prompts
+            // without making those controls callable by an AI client.
+            responsePayload = HandlePrivateRouteRequest(envelope["message"]).dump();
         } else {
             const auto profile = mcp_tools::ParseProfile(
                 envelope.value("tools", std::string("compact")),

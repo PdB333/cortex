@@ -24,12 +24,19 @@ public:
     QString lastError() const { return lastError_; }
 
     Q_INVOKABLE bool ensureReady();
+    Q_INVOKABLE bool tryConnectExisting(bool reportError = false);
     Q_INVOKABLE void reset();
 
     bool CallTool(const std::string& name,
                   const nlohmann::json& arguments,
                   nlohmann::json& output,
                   QString* error = nullptr);
+    bool CallRouteExisting(const std::string& method,
+                           const std::string& path,
+                           const nlohmann::json& body,
+                           nlohmann::json& output,
+                           QString* error = nullptr,
+                           bool reportError = false);
 
     cortex::services::PayloadClient& client() { return client_; }
 

@@ -28,6 +28,22 @@ bool PayloadController::ensureReady() {
     return ok;
 }
 
+bool PayloadController::tryConnectExisting(bool reportError) {
+    std::string error;
+    const bool ok = client_.TryConnectExisting(&error);
+    if (ok) {
+        setLastError(QString());
+        emit stateChanged();
+        return true;
+    }
+
+    if (reportError) {
+        setLastError(FromUtf8(error));
+        emit stateChanged();
+    }
+    return false;
+}
+
 void PayloadController::reset() {
     client_.Reset();
     setLastError(QString());
@@ -44,6 +60,23 @@ bool PayloadController::CallTool(const std::string& name,
     setLastError(message);
     if (error) *error = message;
     emit stateChanged();
+    return ok;
+}
+
+bool PayloadController::CallRouteExisting(const std::string& method,
+                                          const std::string& path,
+                                          const nlohmann::json& body,
+                                          nlohmann::json& output,
+                                          QString* error,
+                                          bool reportError) {
+    std::string nativeError;
+    const bool ok = client_.CallRouteExisting(method, path, body, output, &nativeError);
+    const QString message = ok ? QString() : FromUtf8(nativeError);
+    if (ok || reportError) {
+        setLastError(message);
+        emit stateChanged();
+    }
+    if (error) *error = message;
     return ok;
 }
 

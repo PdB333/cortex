@@ -56,6 +56,8 @@ qt_add_executable(cortex WIN32
     feature_controller.h
     payload_controller.cpp
     payload_controller.h
+    prompt_controller.cpp
+    prompt_controller.h
     runtime_controller.cpp
     runtime_controller.h
     ../core/target/local_backend.cpp
@@ -115,6 +117,7 @@ qt_add_qml_module(cortex
         qml/components/GenericToolView.qml
         qml/components/BottomPanel.qml
         qml/components/CommandPalette.qml
+        qml/components/PromptSurface.qml
 )
 
 target_include_directories(cortex PRIVATE

@@ -4,6 +4,7 @@
 #include "feature_controller.h"
 #include "mcp_mode.h"
 #include "payload_controller.h"
+#include "prompt_controller.h"
 #include "runtime_controller.h"
 #include "startup_diagnostics.h"
 
@@ -97,6 +98,7 @@ int main(int argc, char* argv[]) {
 
     AppController controller;
     PayloadController payload(controller.sessionManager(), QCoreApplication::applicationDirPath());
+    PromptController prompt(payload);
     RuntimeController runtime(payload, [&controller] { return controller.mutationPermission(); });
     FeatureController features(payload, [&controller] { return controller.mutationPermission(); });
     DisassemblyController disassembly(controller.sessionManager());
@@ -104,6 +106,7 @@ int main(int argc, char* argv[]) {
                                 [&controller] { return controller.mutationPermission(); });
 
     QObject::connect(&controller, &AppController::sessionChanged, &payload, &PayloadController::reset);
+    QObject::connect(&controller, &AppController::sessionChanged, &prompt, &PromptController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &runtime, &RuntimeController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &features, &FeatureController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
@@ -116,6 +119,7 @@ int main(int argc, char* argv[]) {
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.rootContext()->setContextProperty("CortexPayload", &payload);
+    engine.rootContext()->setContextProperty("CortexPrompt", &prompt);
     engine.rootContext()->setContextProperty("CortexRuntime", &runtime);
     engine.rootContext()->setContextProperty("CortexFeatures", &features);
     engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);

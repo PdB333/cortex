@@ -1,16 +1,12 @@
 #pragma once
-#include <string>
 #include <optional>
+#include <string>
 
 namespace prompt {
 
 // Two distinct human <-> AI interactions, deliberately not one generic
-// blob: they have different UX needs. A TimedTest asks the player to *do*
-// something in-game for a fixed duration and report a result -- the answer
-// widget must stay hidden until the duration has elapsed, otherwise nothing
-// stops the player from answering before actually testing anything. A
-// ValueChange just asks the player to set something to a given value and
-// confirm, with no time pressure at all.
+// blob: they have different UX needs. TimedTest asks the player to perform
+// an in-game test for a fixed duration before an answer is accepted.
 enum class Kind { TimedTest, ValueChange };
 enum class AnswerType { Text, Number };
 enum class Status { Pending, Answered };
@@ -20,36 +16,41 @@ struct PromptRequest {
     Kind kind = Kind::TimedTest;
 
     // TimedTest fields.
-    std::string message;             // instruction to play out, e.g. "Tire-toi dessus et compte les degats"
-    double duration_seconds = 0.0;   // > 0, required for TimedTest
+    std::string message;
+    double duration_seconds = 0.0;
     AnswerType answer_type = AnswerType::Number;
 
     // ValueChange fields.
-    std::string label;               // what to change, e.g. "Vie"
-    std::string current_value;       // optional context, e.g. "100"
-    std::string target_value;        // e.g. "50"
+    std::string label;
+    std::string current_value;
+    std::string target_value;
 
     Status status = Status::Pending;
-    std::string response_value;      // TimedTest: the reported result. ValueChange: "ack".
+    std::string response_value;
     long long created_at_ms = 0;
 };
 
-// Creates a timed test. Fails (nullopt) if one is already pending -- V1
-// only supports a single active prompt at a time.
-std::optional<int> CreateTimedTest(const std::string& message, double duration_seconds, AnswerType answer_type);
+// Creates a timed test. Fails (nullopt) for an invalid duration or if one is
+// already pending. V1 deliberately supports a single active prompt at a time.
+std::optional<int> CreateTimedTest(const std::string& message,
+                                   double duration_seconds,
+                                   AnswerType answer_type);
 
 // Creates an untimed value-change request.
-std::optional<int> CreateValueChange(const std::string& label, const std::string& target_value,
-                                      const std::string& current_value);
+std::optional<int> CreateValueChange(const std::string& label,
+                                     const std::string& target_value,
+                                     const std::string& current_value);
 
-// Called by the API layer to poll a prompt's current status.
 std::optional<PromptRequest> GetStatus(int id);
-
-// Called by the overlay: returns the currently pending prompt to render, if any.
 std::optional<PromptRequest> GetActive();
 
-// Called by the overlay when the human answers/dismisses the popup.
-void Answer(int id, const std::string& value);
+// Monotonic countdown owned by the core, not by any particular UI.
+long long RemainingMs(const PromptRequest& request);
+bool CanAnswer(const PromptRequest& request);
+
+// Returns false with a stable error when the prompt cannot be answered. In
+// particular, a TimedTest is rejected until its duration has elapsed.
+bool Answer(int id, const std::string& value, std::string* error = nullptr);
 
 AnswerType ParseAnswerType(const std::string& s);
 std::string ToString(Kind k);

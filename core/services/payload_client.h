@@ -25,6 +25,23 @@ public:
     bool Ready() const;
     uint64_t TargetProcessId() const;
 
+    // Connect only when Cortex instrumentation is already present in the
+    // selected target. This never injects code and is suitable for passive UI
+    // adapters such as the human prompt surface.
+    bool TryConnectExisting(std::string* error = nullptr) {
+        if (error) error->clear();
+        const auto session = sessions_.Active();
+        if (!session || !session->Alive()) {
+            if (error) *error = "no_active_session";
+            Reset();
+            return false;
+        }
+        const auto target = session->Target();
+        if (ConnectExisting(target, error)) return true;
+        Reset();
+        return false;
+    }
+
     // Connects to an already-loaded payload or loads cortex_core.dll on demand
     // when the application and target have matching bitness. Cross-bitness
     // bootstrap is intentionally delegated to a private helper rather than
@@ -38,6 +55,73 @@ public:
                   const nlohmann::json& arguments,
                   nlohmann::json& output,
                   std::string* error = nullptr);
+
+    // Desktop-only route adapter over the authenticated local Named Pipe. It
+    // never injects the payload and is not exposed through HTTP MCP/tools/list.
+    // This keeps human-side operations (notably answering a prompt) out of the
+    // AI-facing tool catalog while still reusing the exact registered route.
+    bool CallRouteExisting(const std::string& method,
+                           const std::string& path,
+                           const nlohmann::json& body,
+                           nlohmann::json& output,
+                           std::string* error = nullptr) {
+        using json = nlohmann::json;
+        output = json::object();
+        if (error) error->clear();
+        if (method.empty() || path.empty() || path.front() != '/' || !body.is_object()) {
+            if (error) *error = "invalid_private_route_call";
+            return false;
+        }
+        if (!Ready() && !TryConnectExisting(error)) return false;
+
+        const auto id = requestSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+        const json message = {
+            {"jsonrpc", "2.0"},
+            {"id", id},
+            {"method", "cortex/private/route"},
+            {"params", {{"method", method}, {"path", path}, {"body", body}}}
+        };
+
+        json response;
+        if (!RoundTrip(message, response, error, 4, "all", "2026-07-28", false)) {
+            Reset();
+            return false;
+        }
+        if (!response.is_object()) {
+            if (error) *error = "private_route_invalid_response";
+            return false;
+        }
+        if (response.contains("error")) {
+            if (error) {
+                const json& rpcError = response["error"];
+                if (rpcError.is_object())
+                    *error = rpcError.value("message", std::string("private_route_rpc_error"));
+                else
+                    *error = "private_route_rpc_error";
+            }
+            return false;
+        }
+        if (!response.contains("result") || !response["result"].is_object()) {
+            if (error) *error = "private_route_missing_result";
+            return false;
+        }
+
+        output = response["result"];
+        const int status = output.value("status", 200);
+        if (status >= 400) {
+            if (error) {
+                *error = "private_route_failed:" + std::to_string(status);
+                const auto result = output.find("result");
+                if (result != output.end() && result->is_object()) {
+                    const auto routeError = result->find("error");
+                    if (routeError != result->end() && routeError->is_string())
+                        *error = routeError->get<std::string>();
+                }
+            }
+            return false;
+        }
+        return true;
+    }
 
     // Forwards a complete JSON-RPC MCP message without changing its protocol
     // semantics. This is used by `cortex mcp`: the desktop app and headless

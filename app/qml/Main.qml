@@ -33,10 +33,12 @@ ApplicationWindow {
 
     Shortcut {
         sequences: ["Ctrl+Shift+P", "Ctrl+K"]
+        enabled: !CortexPrompt.active
         onActivated: commandPalette.open()
     }
     Shortcut {
         sequence: "Ctrl+J"
+        enabled: !CortexPrompt.active
         onActivated: root.bottomPanelVisible = !root.bottomPanelVisible
     }
 
@@ -140,6 +142,10 @@ ApplicationWindow {
         anchors.centerIn: parent
     }
 
+    PromptSurface {
+        anchors.fill: parent
+    }
+
     Rectangle {
         anchors.fill: parent
         color: "transparent"
@@ -150,7 +156,7 @@ ApplicationWindow {
     }
 
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -160,7 +166,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.LeftEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -170,7 +176,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.RightEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -180,7 +186,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.TopEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
@@ -190,7 +196,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.BottomEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.left: parent.left
         anchors.top: parent.top
         width: 9
@@ -200,7 +206,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.TopEdge | Qt.LeftEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.right: parent.right
         anchors.top: parent.top
         width: 9
@@ -210,7 +216,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.TopEdge | Qt.RightEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         width: 9
@@ -220,7 +226,7 @@ ApplicationWindow {
         onPressed: root.startSystemResize(Qt.BottomEdge | Qt.LeftEdge)
     }
     MouseArea {
-        visible: root.customFrame && root.visibility !== Window.Maximized
+        visible: root.customFrame && root.visibility !== Window.Maximized && !CortexPrompt.active
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         width: 9
