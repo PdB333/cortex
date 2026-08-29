@@ -167,13 +167,24 @@ json DetectCppSubobjects(uintptr_t address,size_t size){
            {"size",size},{"subobjects",subs},{"multiple_inheritance_likely",subs.size()>1}};
 }
 
-json FindLastWriter(uintptr_t address,int size,uint32_t timeoutMs){
+json FindLastWriter(uintptr_t address,int size,uint32_t timeoutMs,const std::function<json()>& afterArm){
     if(size!=1&&size!=2&&size!=4)return{{"ok",false},{"error","hardware_watch_size_must_be_1_2_or_4"}};
     timeoutMs=std::max<uint32_t>(1,std::min<uint32_t>(timeoutMs,60000));
     std::vector<uint8_t>before;if(!memory::ReadBytes(address,size,before))return{{"ok",false},{"error","address_not_readable"}};
     dbg::BpCapture cap{"written_value",HexAddr(address),size,"bytes"};std::vector<dbg::BpCapture>caps{cap};
     int id=dbg::AddBreakpoint(dbg::BpKind::HwWrite,address,size,dbg::BpAction::Log,nullptr,&caps,true,0);
     if(id<0)return{{"ok",false},{"error","hardware_breakpoint_unavailable"}};
+    json afterArmResult;
+    if(afterArm){
+        try{
+            afterArmResult=afterArm();
+            if(afterArmResult.is_object()&&!afterArmResult.value("ok",true)){
+                dbg::RemoveBreakpoint(id);
+                return{{"ok",false},{"error","after_arm_failed"},{"after_arm",afterArmResult}};
+            }
+        }catch(const std::exception&e){dbg::RemoveBreakpoint(id);return{{"ok",false},{"error","after_arm_exception"},{"message",e.what()}};}
+        catch(...){dbg::RemoveBreakpoint(id);return{{"ok",false},{"error","after_arm_exception"}};}
+    }
     const ULONGLONG deadline=GetTickCount64()+timeoutMs;dbg::BpLogEntry hit{};bool found=false;
     while(GetTickCount64()<deadline){std::vector<dbg::BpLogEntry>entries;uint64_t dropped=0,total=0;if(dbg::GetBreakpointLogPaged(id,0,1,entries,dropped,total)&&!entries.empty()){hit=entries.front();found=true;break;}Sleep(5);}
     dbg::RemoveBreakpoint(id);
@@ -182,10 +193,11 @@ json FindLastWriter(uintptr_t address,int size,uint32_t timeoutMs){
     json out=LogEntryJson(hit);out["ok"]=true;out["address"]=HexAddr(address);out["address_named"]=process::DescribeAddress(address);out["old"]=HexBytes(before);out["new"]=HexBytes(after);
     if(!hit.stack.empty()){out["caller"]=HexAddr(hit.stack.front());out["caller_named"]=process::DescribeAddress(hit.stack.front());}
     uintptr_t self=ThisRegister(hit.regs);out["this"]=HexAddr(self);uintptr_t vt=0;if(ReadPointer(self,vt)){out["vtable"]=HexAddr(vt);out["vtable_named"]=process::DescribeAddress(vt);}
+    if(!afterArmResult.is_null())out["after_arm"]=afterArmResult;
     return out;
 }
 
-json TraceTransition(const json& body){
+json TraceTransition(const json& body,const std::function<json()>& afterArm){
     if(!body.is_object())return{{"ok",false},{"error","body_object_required"}};
     const uint32_t timeoutMs=std::max<uint32_t>(1,std::min<uint32_t>(body.value("timeout_ms",5000u),60000));
     const size_t maxEvents=std::max<size_t>(1,std::min<size_t>(body.value("max_events",512u),4096));
@@ -211,6 +223,17 @@ json TraceTransition(const json& body){
             for(const auto&p:body["probes"]){std::string err;uintptr_t address=process::ResolveAddress(p.at("address"),&err);if(!address)throw std::runtime_error(err.empty()?"invalid_probe":err);int id=dbg::AddBreakpoint(dbg::BpKind::Software,address,1,dbg::BpAction::Log,nullptr,nullptr,true,0);if(id<0)throw std::runtime_error("probe_breakpoint_unavailable");ids.push_back(id);meta.push_back({id,p.value("label",HexAddr(address)),"probe",address,1,"",0});}
         }
     }catch(const std::exception&e){cleanup();return{{"ok",false},{"error",e.what()}};}
+    json afterArmResult;
+    if(afterArm){
+        try{
+            afterArmResult=afterArm();
+            if(afterArmResult.is_object()&&!afterArmResult.value("ok",true)){
+                cleanup();
+                return{{"ok",false},{"error","after_arm_failed"},{"after_arm",afterArmResult}};
+            }
+        }catch(const std::exception&e){cleanup();return{{"ok",false},{"error","after_arm_exception"},{"message",e.what()}};}
+        catch(...){cleanup();return{{"ok",false},{"error","after_arm_exception"}};}
+    }
     json timeline=json::array();bool untilMatched=false;const ULONGLONG deadline=GetTickCount64()+timeoutMs;
     while(GetTickCount64()<deadline&&timeline.size()<maxEvents){
         for(auto&m:meta){
@@ -222,7 +245,9 @@ json TraceTransition(const json& body){
         if(body.contains("until")&&UntilSatisfied(body["until"])){untilMatched=true;break;}Sleep(5);
     }
     cleanup();std::vector<json>sorted;for(auto&e:timeline)sorted.push_back(e);std::stable_sort(sorted.begin(),sorted.end(),[](const json&a,const json&b){return a.value("timestamp_ms",0ull)<b.value("timestamp_ms",0ull);});
-    return{{"ok",true},{"until_matched",untilMatched},{"timed_out",body.contains("until")&&!untilMatched},{"events",sorted},{"event_count",sorted.size()}};
+    json result{{"ok",true},{"until_matched",untilMatched},{"timed_out",body.contains("until")&&!untilMatched},{"events",sorted},{"event_count",sorted.size()}};
+    if(!afterArmResult.is_null())result["after_arm"]=afterArmResult;
+    return result;
 }
 
 } // namespace retools

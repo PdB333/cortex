@@ -33,6 +33,22 @@ void Reply(httplib::Response& res,const json& out,int missingStatus=404) {
     }
     res.set_content(out.dump(),"application/json");
 }
+json DispatchAfterArm(const json& action) {
+    if(!action.is_object())return{{"ok",false},{"error","after_arm_object_required"}};
+    const std::string method=action.value("method",std::string("POST"));
+    const std::string path=action.value("path",std::string());
+    if(path.empty()||path.front()!='/')return{{"ok",false},{"error","after_arm_path_required"}};
+    if(path=="/re/last-writer"||path=="/re/transition/trace"||path=="/re/test/run"||path=="/re/experiment/run")
+        return{{"ok",false},{"error","recursive_after_arm_forbidden"},{"path",path}};
+    const json body=action.value("body",json::object());
+    const auto native=DispatchNativeRoute(method,path,body.dump());
+    json result{{"ok",native.found&&native.status>=200&&native.status<300},{"found",native.found},{"status",native.status},{"method",method},{"path",path}};
+    if(!native.body.empty()){
+        try{result["result"]=json::parse(native.body);}catch(...){result["result_raw"]=native.body;}
+    }
+    if(result["ok"].get<bool>()&&result.contains("result")&&result["result"].is_object()&&result["result"].contains("ok")&&!result["result"].value("ok",true))result["ok"]=false;
+    return result;
+}
 int ParseVirtualKey(const json& step) {
     if (step.contains("vk")) return step.at("vk").get<int>();
     if (!step.contains("key") || !step.at("key").is_string()) throw std::runtime_error("press_requires_key_or_vk");
@@ -251,8 +267,8 @@ void RegisterReRoutes(RouteRegistrar& svr) {
     });
     svr.Delete(R"(/re/checkpoint/(\d+))",[](const httplib::Request& req,httplib::Response& res){auto mutation=action::LockMutations();const bool ok=DeleteReCheckpoint(std::stoi(req.matches[1]));Reply(res,{{"ok",ok},{"error",ok?"":"checkpoint_not_found"}});});
     svr.Post("/re/cpp/subobjects",[](const httplib::Request& req,httplib::Response& res){try{json b=json::parse(req.body);Reply(res,retools::DetectCppSubobjects(ParseAddress(b.at("address")),b.value("size",256u)));}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
-    svr.Post("/re/last-writer",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body);Reply(res,retools::FindLastWriter(ParseAddress(b.at("address")),b.value("size",1),b.value("timeout_ms",5000u)));overlay::LogApiCall("POST /re/last-writer");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
-    svr.Post("/re/transition/trace",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body.empty()?"{}":req.body);Reply(res,retools::TraceTransition(b));overlay::LogApiCall("POST /re/transition/trace");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
+    svr.Post("/re/last-writer",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body);std::function<json()> afterArm;if(b.contains("after_arm")){const json trigger=b["after_arm"];afterArm=[trigger]{return DispatchAfterArm(trigger);};}Reply(res,retools::FindLastWriter(ParseAddress(b.at("address")),b.value("size",1),b.value("timeout_ms",5000u),afterArm));overlay::LogApiCall("POST /re/last-writer");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
+    svr.Post("/re/transition/trace",[](const httplib::Request& req,httplib::Response& res){try{auto mutation=action::LockMutations();json b=json::parse(req.body.empty()?"{}":req.body);std::function<json()> afterArm;if(b.contains("after_arm")){const json trigger=b["after_arm"];afterArm=[trigger]{return DispatchAfterArm(trigger);};}Reply(res,retools::TraceTransition(b,afterArm));overlay::LogApiCall("POST /re/transition/trace");}catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}});
     auto testHandler=[](const httplib::Request& req,httplib::Response& res){
         try{auto mutation=action::LockMutations();json body=json::parse(req.body.empty()?"{}":req.body);json out=RunReTest(body);res.status=out.value("ok",false)?200:409;res.set_content(out.dump(),"application/json");overlay::LogApiCall("POST /re/test/run");}
         catch(const std::exception&e){res.status=400;res.set_content(json{{"ok",false},{"status","FAIL"},{"error",e.what()}}.dump(),"application/json");}

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <nlohmann/json.hpp>
 
@@ -15,6 +16,6 @@ json GetTrack(int id);
 json GetTrackEvents(int id);
 json CompareTracks(int a, int b);
 json DetectCppSubobjects(uintptr_t address, size_t size);
-json FindLastWriter(uintptr_t address, int size, uint32_t timeoutMs);
-json TraceTransition(const json& body);
+json FindLastWriter(uintptr_t address, int size, uint32_t timeoutMs, const std::function<json()>& afterArm = {});
+json TraceTransition(const json& body, const std::function<json()>& afterArm = {});
 } // namespace retools

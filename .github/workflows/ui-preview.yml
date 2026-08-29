@@ -497,49 +497,53 @@ jobs:
               $mcp.StandardInput.WriteLine($deleteTrack); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
               $deleteTrackedStruct = @{ jsonrpc="2.0"; id=409; method="tools/call"; params=@{ name="struct_delete"; arguments=@{ _path=@{ name=$trackedStructName }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($deleteTrackedStruct); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
-              # High-level who-wrote-this. Trigger a fresh worker, then let the
-              # blocking tool install its temporary process-global HW watch.
-              $lastWriterEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
-              [void]$lastWriterEvent.Set()
+              # High-level who-wrote-this with a deterministic trigger that is
+              # executed by Cortex only after the process-global HW watch is armed.
               $lastWriterCall = @{
                 jsonrpc="2.0"; id=410; method="tools/call"
                 params=@{ name="re_find_last_writer"; arguments=@{
-                  address=[string]$fixture.hw_value; size=4; timeout_ms=4000; mutation_permission=$true
+                  address=[string]$fixture.hw_value; size=4; timeout_ms=4000
+                  after_arm=@{
+                    method="POST"; path="/call/thread"
+                    body=@{ thread_id=[uint32]$fixture.main_thread_id; address=[string]$fixture.native_increment_hw_value; args=@(); convention="cdecl"; timeout_ms=3000 }
+                  }
+                  mutation_permission=$true
                 } }
-              } | ConvertTo-Json -Depth 8 -Compress
+              } | ConvertTo-Json -Depth 12 -Compress
               $mcp.StandardInput.WriteLine($lastWriterCall); $mcp.StandardInput.Flush()
               $lastWriterResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $lastWriterResult = $lastWriterResponse.result.structuredContent.result
               if ($lastWriterResponse.id -ne 410 -or -not $lastWriterResult.ok -or
-                  [uint64]$lastWriterResult.thread_id -eq 0 -or [string]::IsNullOrWhiteSpace([string]$lastWriterResult.instruction)) {
-                throw "$label find_last_writer failed to identify the writer"
+                  [uint64]$lastWriterResult.thread_id -eq 0 -or [string]::IsNullOrWhiteSpace([string]$lastWriterResult.instruction) -or
+                  -not $lastWriterResult.after_arm.ok) {
+                throw "$label find_last_writer failed to identify the post-arm writer"
               }
-              $lastWriterEvent.Dispose()
 
-              # Transition trace: capture a real write timeline and stop when the
-              # watched value advances at least once.
+              # Transition trace uses the same post-arm trigger contract, so the
+              # write cannot race ahead of watch/probe installation.
               $readHwValue = @{ jsonrpc="2.0"; id=411; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=[string]$fixture.hw_value; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($readHwValue); $mcp.StandardInput.Flush()
               $readHwValueResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $hwBefore = [uint64]$readHwValueResponse.result.structuredContent.result.value
-              $transitionEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
-              [void]$transitionEvent.Set()
               $transitionCall = @{
                 jsonrpc="2.0"; id=412; method="tools/call"
                 params=@{ name="re_trace_transition"; arguments=@{
                   watches=@(@{ address=[string]$fixture.hw_value; size=4; label="hw-state" })
                   until=@{ address=[string]$fixture.hw_value; size=4; value=($hwBefore + 1); op=">=" }
+                  after_arm=@{
+                    method="POST"; path="/call/thread"
+                    body=@{ thread_id=[uint32]$fixture.main_thread_id; address=[string]$fixture.native_increment_hw_value; args=@(); convention="cdecl"; timeout_ms=3000 }
+                  }
                   timeout_ms=4000; max_events=64; mutation_permission=$true
                 } }
-              } | ConvertTo-Json -Depth 12 -Compress
+              } | ConvertTo-Json -Depth 14 -Compress
               $mcp.StandardInput.WriteLine($transitionCall); $mcp.StandardInput.Flush()
               $transitionResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $transitionResult = $transitionResponse.result.structuredContent.result
-              if ($transitionResponse.id -ne 412 -or -not $transitionResult.ok -or -not $transitionResult.until_matched -or [int]$transitionResult.event_count -lt 1) {
-                throw "$label transition trace did not reconstruct the state write"
+              if ($transitionResponse.id -ne 412 -or -not $transitionResult.ok -or -not $transitionResult.until_matched -or
+                  [int]$transitionResult.event_count -lt 1 -or -not $transitionResult.after_arm.ok) {
+                throw "$label transition trace did not reconstruct the post-arm state write"
               }
-              $transitionEvent.Dispose()
-
               # Automated in-game experiment with a real mutation. The tool must
               # PASS while restoring the original bytes afterwards.
               $experimentArgs = @{

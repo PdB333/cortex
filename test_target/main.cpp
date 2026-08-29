@@ -1,4 +1,4 @@
-﻿// cortex_test_target: minimal x86/x64 target for testing Cortex end-to-end.
+// cortex_test_target: minimal x86/x64 target for testing Cortex end-to-end.
 //
 // Exposes well-known memory values at exported symbols so tests can verify
 // /memory/read, scans, freezes, crash capture and hangs without a real game.
@@ -32,6 +32,9 @@ extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNa
 }
 extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNativeIdentity(uintptr_t value) {
     return value;
+}
+extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNativeIncrementHwValue() {
+    return static_cast<uintptr_t>(++g_cortex_hw_value);
 }
 
 struct CortexFakeObject {
@@ -211,6 +214,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
          << "  \"native_add\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeAdd) << "\",\n"
+         << "  \"native_increment_hw_value\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeIncrementHwValue) << "\",\n"
          << "  \"hw_value\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_value) << "\",\n"
          << "  \"hw_writer_tid\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_writer_tid) << "\",\n"
          << "  \"fake_object\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_fake_object) << "\",\n"

@@ -673,15 +673,18 @@ json BuildToolsManifest() {
                      {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});
         j.push_back({{"name","re_find_last_writer"},{"method","POST"},{"path","/re/last-writer"},
                      {"description","High-level who-wrote-this primitive. Installs a temporary process-global HW write breakpoint and returns instruction/caller names, registers, this/vtable, callstack, old/new bytes, or bounded timeout."},
-                     {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"enum",json::array({1,2,4})},{"description","Hardware watch size."}}},
-                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000},{"description","Wait timeout, default 5000."}}}}}});
+                     {"body",{{"address",reAddressRequired},
+                              {"size",{{"type","integer"},{"enum",json::array({1,2,4})},{"description","Hardware watch size."}}},
+                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000},{"description","Wait timeout, default 5000."}}},
+                              {"after_arm",{{"type","object"},{"description","Optional deterministic trigger executed only after the HW watch is installed: {method,path,body}. Recursive RE wait/test routes are rejected."}}}}}});
         j.push_back({{"name","re_trace_transition"},{"method","POST"},{"path","/re/transition/trace"},
                      {"description","Records a bounded transition timeline by combining up to four HW write watches and software execution probes until an optional value predicate becomes true."},
                      {"body",{{"watches",{{"type","array"},{"maxItems",4},{"items",{{"type","object"}}},{"description","[{address,size,label}]"}}},
                               {"probes",{{"type","array"},{"items",{{"type","object"}}},{"description","[{address,label}]"}}},
                               {"until",{{"type","object"},{"description","Optional {address,size,value,op} state predicate."}}},
                               {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000}}},
-                              {"max_events",{{"type","integer"},{"minimum",1},{"maximum",4096}}}}}});
+                              {"max_events",{{"type","integer"},{"minimum",1},{"maximum",4096}}},
+                              {"after_arm",{{"type","object"},{"description","Optional deterministic trigger executed after all watches/probes are armed: {method,path,body}. Useful for reproducible state-transition experiments."}}}}}});
         j.push_back({{"name","ghidra_export"},{"method","POST"},{"path","/ghidra/export"},{"description","Exports the runtime and generates the CortexImport.py script."}});
         const json ghidraImportBody = {{"addresses",{{"type","array"},{"items",{{"type","object"}}}}},
                                        {"symbols",{{"type","array"},{"items",{{"type","object"}}}}},
