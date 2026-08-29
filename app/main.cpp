@@ -95,6 +95,66 @@ int RunPromptChannelSmoke(int argc, char* argv[], const QString& runtimeDirector
     qInfo().noquote() << "PASS: Qt prompt channel answered prompt" << promptId;
     return 0;
 }
+int RunEventChannelSmoke(int argc, char* argv[], const QString& runtimeDirectory) {
+    qulonglong pid = 0;
+    QString expectedType = QStringLiteral("prompt.answered");
+    for (int i = 1; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("--pid") && i + 1 < argc) {
+            bool ok = false;
+            pid = QString::fromLocal8Bit(argv[++i]).toULongLong(&ok);
+            if (!ok) pid = 0;
+        } else if (arg == QStringLiteral("--expect") && i + 1 < argc) {
+            expectedType = QString::fromLocal8Bit(argv[++i]);
+        }
+    }
+    if (pid == 0) {
+        qCritical("--event-channel-smoke requires --pid <target pid>");
+        return 2;
+    }
+
+    AppController controller;
+    int targetIndex = -1;
+    for (int attempt = 0; attempt < 30 && targetIndex < 0; ++attempt) {
+        controller.refreshTargets();
+        const auto& targets = controller.targets();
+        for (qsizetype i = 0; i < targets.size(); ++i) {
+            if (targets.at(i).toMap().value(QStringLiteral("pid")).toULongLong() == pid) {
+                targetIndex = static_cast<int>(i);
+                break;
+            }
+        }
+        if (targetIndex < 0) QThread::msleep(100);
+    }
+    if (targetIndex < 0) {
+        qCritical("event smoke target was not found");
+        return 3;
+    }
+
+    controller.selectTarget(targetIndex);
+    if (!controller.sessionActive()) {
+        qCritical().noquote() << "event smoke attach failed:" << controller.lastError();
+        return 4;
+    }
+
+    PayloadController payload(controller.sessionManager(), runtimeDirectory);
+    FeatureController features(payload, [&controller] { return controller.mutationPermission(); });
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        if (features.refreshRuntimeEvents()) {
+            for (const auto& value : features.runtimeEvents()) {
+                if (value.toMap().value(QStringLiteral("type")).toString() == expectedType) {
+                    qInfo().noquote() << "PASS: Qt event channel observed" << expectedType;
+                    return 0;
+                }
+            }
+        }
+        QCoreApplication::processEvents();
+        QThread::msleep(100);
+    }
+
+    qCritical().noquote() << "event smoke did not observe" << expectedType << features.lastError();
+    return 5;
+}
 void LoadMainQml(QQmlApplicationEngine& engine) {
     // Always load the application root from the QML resource embedded in
     // cortex.exe. loadFromModule("Cortex", "Main") works from the build tree,
@@ -127,6 +187,11 @@ void LoadMainQml(QQmlApplicationEngine& engine) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc > 1 && argv[1] && std::string(argv[1]) == "--event-channel-smoke") {
+        QCoreApplication app(argc, argv);
+        ConfigureApplicationIdentity();
+        return RunEventChannelSmoke(argc, argv, QCoreApplication::applicationDirPath());
+    }
     if (argc > 1 && argv[1] && std::string(argv[1]) == "--prompt-channel-smoke") {
         QCoreApplication app(argc, argv);
         ConfigureApplicationIdentity();

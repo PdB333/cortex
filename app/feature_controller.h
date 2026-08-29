@@ -12,6 +12,7 @@ class FeatureController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList actions READ actions NOTIFY actionsChanged)
     Q_PROPERTY(QVariantList apiLog READ apiLog NOTIFY apiLogChanged)
+    Q_PROPERTY(QVariantList runtimeEvents READ runtimeEvents NOTIFY runtimeEventsChanged)
     Q_PROPERTY(QVariantList projectAddresses READ projectAddresses NOTIFY projectChanged)
     Q_PROPERTY(QVariantList projectPointerPaths READ projectPointerPaths NOTIFY projectChanged)
     Q_PROPERTY(QVariantList projectNotes READ projectNotes NOTIFY projectChanged)
@@ -37,6 +38,7 @@ public:
 
     const QVariantList& actions() const { return actions_; }
     const QVariantList& apiLog() const { return apiLog_; }
+    const QVariantList& runtimeEvents() const { return runtimeEvents_; }
     const QVariantList& projectAddresses() const { return projectAddresses_; }
     const QVariantList& projectPointerPaths() const { return projectPointerPaths_; }
     const QVariantList& projectNotes() const { return projectNotes_; }
@@ -56,6 +58,7 @@ public:
     QString lastError() const { return lastError_; }
 
     Q_INVOKABLE bool refreshApiLog();
+    Q_INVOKABLE bool refreshRuntimeEvents();
     Q_INVOKABLE bool refreshProject();
     Q_INVOKABLE bool setProjectAddress(const QString& name, const QString& address,
                                        const QString& type = QString(), const QString& notes = QString());
@@ -101,6 +104,7 @@ public:
 
 signals:
     void apiLogChanged();
+    void runtimeEventsChanged();
     void projectChanged();
     void actionsChanged();
     void networkChanged();
@@ -122,6 +126,8 @@ private:
     std::function<bool()> mutationAllowed_;
 
     QVariantList apiLog_;
+    QVariantList runtimeEvents_;
+    qulonglong lastRuntimeEventId_ = 0;
     QVariantList projectAddresses_;
     QVariantList projectPointerPaths_;
     QVariantList projectNotes_;

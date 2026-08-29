@@ -365,6 +365,25 @@ jobs:
                 throw "$label Qt prompt channel did not persist the desktop answer"
               }
 
+              $eventStdout = Join-Path $env:RUNNER_TEMP "cortex-event-$label-stdout.txt"
+              $eventStderr = Join-Path $env:RUNNER_TEMP "cortex-event-$label-stderr.txt"
+              $eventProcess = Start-Process `
+                -FilePath (Join-Path $preview "cortex.exe") `
+                -ArgumentList @("--event-channel-smoke", "--pid", $target.Id, "--expect", "prompt.answered") `
+                -WorkingDirectory $preview `
+                -RedirectStandardOutput $eventStdout `
+                -RedirectStandardError $eventStderr `
+                -PassThru
+              if (-not $eventProcess.WaitForExit(15000)) {
+                Stop-Process -Id $eventProcess.Id -Force -ErrorAction SilentlyContinue
+                throw "$label Qt event channel smoke timed out"
+              }
+              if (Test-Path $eventStdout) { Get-Content $eventStdout }
+              if (Test-Path $eventStderr) { Get-Content $eventStderr }
+              if ($eventProcess.ExitCode -ne 0) {
+                throw "$label Qt event channel smoke failed with $($eventProcess.ExitCode)"
+              }
+
               $addressName = "preview-" + ($label -replace '[^a-zA-Z0-9_-]', '-') + "-address"
               $setAddress = @{
                 jsonrpc = "2.0"
@@ -419,7 +438,7 @@ jobs:
                 throw "$label project persistence roundtrip failed"
               }
 
-              $pointerName = "preview-" + ($label -replace ''[^a-zA-Z0-9_-]'', ''-'') + "-pointer"
+              $pointerName = "preview-" + ($label -replace '[^a-zA-Z0-9_-]', '-') + "-pointer"
               $setPointer = @{
                 jsonrpc = "2.0"
                 id = 9

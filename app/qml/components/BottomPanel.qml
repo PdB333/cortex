@@ -10,8 +10,18 @@ Rectangle {
 
     property int activeTab: 0
     property var tabs: ["Events", "Console", "Breakpoints", "Watches", "MCP Calls", "Diagnostics"]
-    onActiveTabChanged: if (activeTab === 1 && CortexPayload.ready) CortexFeatures.refreshApiLog()
+    onActiveTabChanged: {
+        if (!CortexPayload.ready) return
+        if (activeTab === 0) CortexFeatures.refreshRuntimeEvents()
+        else if (activeTab === 1) CortexFeatures.refreshApiLog()
+    }
 
+    Timer {
+        interval: 750
+        repeat: true
+        running: root.activeTab === 0 && CortexPayload.ready
+        onTriggered: CortexFeatures.refreshRuntimeEvents()
+    }
     Timer {
         interval: 1000
         repeat: true
@@ -82,6 +92,22 @@ Rectangle {
             ListView {
                 anchors.fill: parent
                 anchors.margins: 10
+                visible: root.activeTab === 0
+                clip: true
+                model: CortexFeatures.runtimeEvents
+                spacing: 2
+                delegate: RowLayout {
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: 8
+                    Text { Layout.preferredWidth: 82; text: modelData.id; color: Theme.textDisabled; font.family: Theme.monoFont; font.pixelSize: 9 }
+                    Text { Layout.preferredWidth: 145; text: modelData.type; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight }
+                    Text { Layout.fillWidth: true; text: modelData.data; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 9; elide: Text.ElideRight }
+                }
+            }
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 10
                 visible: root.activeTab === 1
                 clip: true
                 model: CortexFeatures.apiLog
@@ -101,7 +127,7 @@ Rectangle {
                 anchors.top: parent.top
                 anchors.margins: 12
                 spacing: 7
-                visible: root.activeTab !== 1
+                visible: root.activeTab !== 0 && root.activeTab !== 1
 
                 Text {
                     text: root.tabs[root.activeTab]

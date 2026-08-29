@@ -260,6 +260,39 @@ bool FeatureController::deleteProjectNote(int id) {
     if (!callTool("project_note_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
     return refreshProject();
 }
+bool FeatureController::refreshRuntimeEvents() {
+    json output;
+    QString error;
+    const std::string path = "/ui/events?since=" + std::to_string(lastRuntimeEventId_) + "&limit=128";
+    if (!payload_.CallRouteExisting("GET", path, json::object(), output, &error, false)) {
+        setError(error.isEmpty() ? QStringLiteral("runtime_events_unavailable") : error);
+        return false;
+    }
+
+    const json result = RouteResult(output);
+    const json rows = result.value("events", json::array());
+    if (rows.is_array()) {
+        for (const auto& event : rows) {
+            if (!event.is_object()) continue;
+            QVariantMap row;
+            const qulonglong id = static_cast<qulonglong>(event.value("id", uint64_t{0}));
+            row.insert(QStringLiteral("id"), id);
+            row.insert(QStringLiteral("timestamp"), static_cast<qulonglong>(event.value("timestamp_ms", uint64_t{0})));
+            row.insert(QStringLiteral("type"), FromUtf8(event.value("type", std::string())));
+            const auto data = event.find("data");
+            row.insert(QStringLiteral("data"), data != event.end() ? JsonText(*data) : QStringLiteral("{}"));
+            runtimeEvents_.push_back(row);
+            if (id > lastRuntimeEventId_) lastRuntimeEventId_ = id;
+        }
+    }
+    if (runtimeEvents_.size() > 512)
+        runtimeEvents_.erase(runtimeEvents_.begin(), runtimeEvents_.begin() + (runtimeEvents_.size() - 512));
+    const qulonglong latest = static_cast<qulonglong>(result.value("latest_id", uint64_t{0}));
+    if (latest > lastRuntimeEventId_) lastRuntimeEventId_ = latest;
+    setError(QString());
+    emit runtimeEventsChanged();
+    return true;
+}
 bool FeatureController::refreshApiLog() {
     json output;
     QString error;
@@ -656,6 +689,8 @@ bool FeatureController::exportSession() {
 
 void FeatureController::reset() {
     apiLog_.clear();
+    runtimeEvents_.clear();
+    lastRuntimeEventId_ = 0;
     projectAddresses_.clear();
     projectPointerPaths_.clear();
     projectNotes_.clear();
@@ -675,6 +710,7 @@ void FeatureController::reset() {
     sessionExportPath_.clear();
     lastError_.clear();
     emit apiLogChanged();
+    emit runtimeEventsChanged();
     emit projectChanged();
     emit actionsChanged();
     emit networkChanged();
