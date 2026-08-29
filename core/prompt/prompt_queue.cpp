@@ -16,6 +16,8 @@ namespace {
 std::mutex g_mutex;
 std::optional<PromptRequest> g_active;
 std::atomic<int> g_next_id{1};
+std::atomic<long long> g_external_presenter_at_ms{0};
+constexpr long long kExternalPresenterLeaseMs = 1500;
 
 long long NowMs() {
     using namespace std::chrono;
@@ -43,7 +45,6 @@ void SetError(std::string* error, const char* value) {
     if (error) *error = value;
 }
 
-// Caller must hold g_mutex.
 std::optional<int> CreateLocked(PromptRequest req) {
     if (g_active.has_value() && g_active->status == Status::Pending) return std::nullopt;
     req.id = g_next_id.fetch_add(1, std::memory_order_relaxed);
@@ -143,6 +144,15 @@ bool Answer(int id, const std::string& value, std::string* error) {
     g_active->response_value = response;
     events::Publish("prompt.answered", "{\"id\":" + std::to_string(id) + "}");
     return true;
+}
+
+void NoteExternalPresenter() {
+    g_external_presenter_at_ms.store(NowMs(), std::memory_order_release);
+}
+
+bool ExternalPresenterActive() {
+    const long long last = g_external_presenter_at_ms.load(std::memory_order_acquire);
+    return last > 0 && NowMs() - last <= kExternalPresenterLeaseMs;
 }
 
 AnswerType ParseAnswerType(const std::string& s) {

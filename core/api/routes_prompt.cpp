@@ -115,6 +115,7 @@ void RegisterPromptRoutes(httplib::Server& svr) {
     // authenticated local Named Pipe. They are intentionally absent from the
     // public MCP tool manifest so an AI cannot answer its own human prompt.
     svr.Get("/prompt/active", [](const httplib::Request&, httplib::Response& res) {
+        prompt::NoteExternalPresenter();
         const auto active = prompt::GetActive();
         res.set_content(json{{"ok", true},
                              {"prompt", active.has_value() ? ToJson(*active) : json(nullptr)}}.dump(),

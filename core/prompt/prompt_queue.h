@@ -30,13 +30,9 @@ struct PromptRequest {
     long long created_at_ms = 0;
 };
 
-// Creates a timed test. Fails (nullopt) for an invalid duration or if one is
-// already pending. V1 deliberately supports a single active prompt at a time.
 std::optional<int> CreateTimedTest(const std::string& message,
                                    double duration_seconds,
                                    AnswerType answer_type);
-
-// Creates an untimed value-change request.
 std::optional<int> CreateValueChange(const std::string& label,
                                      const std::string& target_value,
                                      const std::string& current_value);
@@ -51,6 +47,13 @@ bool CanAnswer(const PromptRequest& request);
 // Returns false with a stable error when the prompt cannot be answered. In
 // particular, a TimedTest is rejected until its duration has elapsed.
 bool Answer(int id, const std::string& value, std::string* error = nullptr);
+
+// The injected ImGui prompt remains a temporary headless fallback while the
+// product moves to Qt. Cortex Desktop renews this short lease while polling;
+// the in-process popup stays hidden during the lease and automatically comes
+// back if the desktop presenter disappears.
+void NoteExternalPresenter();
+bool ExternalPresenterActive();
 
 AnswerType ParseAnswerType(const std::string& s);
 std::string ToString(Kind k);

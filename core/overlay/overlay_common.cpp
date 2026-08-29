@@ -36,15 +36,12 @@ namespace {
 
     detail::BackendShutdownFn g_backendShutdown = nullptr;
 
-    // Gating this on io.WantCaptureMouse (hover detection) was the bug: while
-    // the game holds exclusive DirectInput mouse capture, no WM_MOUSEMOVE
-    // ever reaches the window, so ImGui can never detect the cursor is over
-    // our UI, so WantCaptureMouse never flips true, so capture never gets
-    // released -- a deadlock. Capture must instead be released as soon as the
-    // overlay is *meant* to be usable (g_visible / an active prompt), which
-    // is exactly the toggle-key transition the game responds to.
+    // Release game input whenever an in-process UI actually needs it. Human
+    // prompts are captured by ImGui only while Cortex Desktop is not actively
+    // presenting them through the short external-presenter lease.
     bool WantsInputCapture() {
-        return g_visible || prompt::GetActive().has_value();
+        const bool fallbackPrompt = !prompt::ExternalPresenterActive() && prompt::GetActive().has_value();
+        return g_visible || fallbackPrompt;
     }
 
     LRESULT CALLBACK WndProcHook(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -141,6 +138,14 @@ namespace {
         static char textBuf[256] = "";
         static float numBuf = 0.0f;
 
+        // Cortex Desktop is the primary human prompt surface. Keep this popup
+        // only as a headless/failure fallback; if the desktop poll disappears,
+        // its lease expires and the injected popup resumes automatically.
+        if (prompt::ExternalPresenterActive()) {
+            openedForId = -1;
+            return;
+        }
+
         auto activeOpt = prompt::GetActive();
         if (activeOpt.has_value() && openedForId != activeOpt->id) {
             ImGui::OpenPopup("AI request");
@@ -160,12 +165,13 @@ namespace {
                     ImGui::TextWrapped("%s", req.message.c_str());
                     ImGui::Separator();
 
-                    long long elapsedMs = static_cast<long long>(GetTickCount64()) - req.created_at_ms;
-                    double remaining = req.duration_seconds - elapsedMs / 1000.0;
-                    bool timeUp = remaining <= 0.0;
+                    const long long remainingMs = prompt::RemainingMs(req);
+                    const double remaining = static_cast<double>(remainingMs) / 1000.0;
+                    const bool timeUp = remainingMs <= 0;
 
                     if (!timeUp) {
-                        ImGui::ProgressBar(static_cast<float>(1.0 - remaining / req.duration_seconds), ImVec2(-1, 0));
+                        const double duration = req.duration_seconds > 0.0 ? req.duration_seconds : 1.0;
+                        ImGui::ProgressBar(static_cast<float>(1.0 - remaining / duration), ImVec2(-1, 0));
                         ImGui::Text("%.1fs remaining -- keep playing, the answer field will unlock at the end.", remaining);
                     } else {
                         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Time's up -- enter the result:");
@@ -275,14 +281,6 @@ void CommonInitPost(HWND hwnd) {
 // input-capture toggle wiring. Callers do the backend-specific NewFrame
 // before this and backend-specific RenderDrawData after.
 void CommonFrameBegin() {
-    // ImGui's Win32 backend calls ::SetCursor() every frame to keep the OS
-    // cursor icon in sync with ImGui's hover state, regardless of whether we
-    // actually want input this frame. Left alone, that fights the game's own
-    // cursor hiding while the overlay is closed, leaving a visible OS cursor
-    // frozen wherever DirectInput last left it. Must be set before
-    // ImGui_ImplWin32_NewFrame(), which is where that SetCursor() call
-    // happens -- so this flag flip happens ahead of that call in every
-    // Init*/OnFrame* pairing.
     bool wantsCapture = WantsInputCapture();
     ImGuiIO& io = ImGui::GetIO();
     if (wantsCapture) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -297,9 +295,9 @@ void CommonFrameBegin() {
 
     static bool s_lastWantsCapture = false;
     if (wantsCapture != s_lastWantsCapture) {
-        dbglog::Line("OnFrame: wantsCapture %d -> %d (g_visible=%d, prompt=%d)",
+        dbglog::Line("OnFrame: wantsCapture %d -> %d (g_visible=%d, prompt=%d, desktop_prompt=%d)",
                      (int)s_lastWantsCapture, (int)wantsCapture, (int)g_visible,
-                     (int)prompt::GetActive().has_value());
+                     (int)prompt::GetActive().has_value(), (int)prompt::ExternalPresenterActive());
         s_lastWantsCapture = wantsCapture;
     }
     hook::SetInputCaptureActive(wantsCapture);
