@@ -6,6 +6,7 @@ on:
       - agent/p2-mcp-contracts
       - agent/final-integration
       - refactor/native-mcp-tool-executor
+      - next/unified-cortex-ui
   pull_request:
     paths:
       - "core/api/mcp_contract.h"
