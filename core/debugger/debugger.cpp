@@ -1080,25 +1080,29 @@ bool ClearBreakpointTrigger(int id) {
 }
 
 bool RemoveBreakpoint(int id) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    auto sw = g_swBps.find(id);
-    if (sw != g_swBps.end()) {
-        if (!memory::WriteBytes(sw->second.address, {sw->second.origByte})) return false;
-        RetireSoftwareBreakpoint(sw->second.address, sw->second.origByte);
-        g_swBps.erase(sw);
-        g_bpLogs.erase(id);
-        return true;
-    }
-    auto hw = g_hwBps.find(id);
-    if (hw != g_hwBps.end()) {
-        int slot = hw->second.slot;
-        g_hwSlotUsed[slot] = false;
+    int hwSlotToClear = -1;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto sw = g_swBps.find(id);
+        if (sw != g_swBps.end()) {
+            if (!memory::WriteBytes(sw->second.address, {sw->second.origByte})) return false;
+            RetireSoftwareBreakpoint(sw->second.address, sw->second.origByte);
+            g_swBps.erase(sw);
+            g_bpLogs.erase(id);
+            return true;
+        }
+        auto hw = g_hwBps.find(id);
+        if (hw == g_hwBps.end()) return false;
+        hwSlotToClear = hw->second.slot;
+        g_hwSlotUsed[hwSlotToClear] = false;
         g_hwBps.erase(hw);
-        ClearHwSlotOnAllThreads(slot);
         g_bpLogs.erase(id);
-        return true;
     }
-    return false;
+    // Never suspend another target thread while holding g_mutex. A thread can
+    // already be inside the VEH and waiting for this mutex; suspending it here
+    // would deadlock breakpoint removal and potentially freeze the game.
+    ClearHwSlotOnAllThreads(hwSlotToClear);
+    return true;
 }
 
 std::vector<BreakpointInfo> ListBreakpoints() {
@@ -1391,6 +1395,7 @@ bool RemoveTrace(int id) {
 }
 
 } // namespace dbg
+
 
 
 

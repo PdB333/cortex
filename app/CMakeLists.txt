@@ -60,6 +60,8 @@ qt_add_executable(cortex WIN32
     prompt_controller.h
     runtime_controller.cpp
     runtime_controller.h
+    re_controller.cpp
+    re_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
     ../core/target/module_provider.cpp
@@ -152,4 +154,5 @@ set_target_properties(cortex PROPERTIES
     OUTPUT_NAME "cortex"
     MACOSX_BUNDLE TRUE
 )
+
 

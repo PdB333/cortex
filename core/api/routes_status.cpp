@@ -618,6 +618,7 @@ json BuildToolsManifest() {
         json reAddressRequired = reAddress; reAddressRequired["required"] = true;
         const json anyJsonValue = {{"oneOf",json::array({{{"type","string"}},{{"type","integer"}},{{"type","number"}},{{"type","boolean"}},{{"type","object"}},{{"type","array"}},{{"type","null"}}})},
                                    {"description","Any JSON value."}};
+        json anyJsonValueRequired = anyJsonValue; anyJsonValueRequired["required"] = true;
         j.push_back({{"name","re_track_object"},{"method","POST"},{"path","/re/object/track"},
                      {"description","Persistently tracks an object across address changes and records changed byte ranges, pointed objects, vtables/subobjects, destruction/reappearance, and related allocation metadata."},
                      {"body",{{"name",{{"type","string"},{"required",true},{"description","Stable track name."}}},
@@ -635,7 +636,7 @@ json BuildToolsManifest() {
                      {"description","Returns persistent reverse-engineering facts, persisted object-track locators and suggested breakpoint templates for the current target project."}});
         j.push_back({{"name","re_session_fact_set"},{"method","POST"},{"path","/re/session/fact"},
                      {"description","Stores or updates a proved RE fact in the persistent target project."},
-                     {"body",{{"key",{{"type","string"},{"required",true}}},{"value",anyJsonValue}}}});
+                     {"body",{{"key",{{"type","string"},{"required",true}}},{"value",anyJsonValueRequired}}}});
         j.push_back({{"name","re_session_fact_delete"},{"method","DELETE"},{"path","/re/session/fact"},
                      {"description","Deletes a persistent RE fact with undo support."},
                      {"body",{{"key",{{"type","string"},{"required",true}}}}}});
@@ -643,7 +644,7 @@ json BuildToolsManifest() {
                      {"description","Stores breakpoint templates suggested for the next RE session; Cortex does not auto-arm them without an explicit mutation action."},
                      {"body",{{"templates",{{"type","array"},{"required",true},{"items",{{"type","object"}}}}}}}});
         const json reTestSteps = {{"type","array"},{"required",true},{"items",{{"type","object"}}},
-                                  {"description","Steps: press, delay, wait, assert, call_game_thread, tool, checkpoint."}};
+                                  {"description","Steps: press (key name such as F7 or numeric vk), delay, wait/assert (including exists=true), call_game_thread, tool, checkpoint."}};
         j.push_back({{"name","re_test_run"},{"method","POST"},{"path","/re/test/run"},
                      {"description","Runs an automated in-game RE test and returns PASS/FAIL. Supports input, waits/asserts, game-thread native calls and arbitrary registered Cortex tools under one Actions transaction. Default is rollback; commit=true keeps reversible mutations."},
                      {"body",{{"steps",reTestSteps},{"rollback_ranges",{{"type","array"},{"items",{{"type","object"}}},{"description","Optional memory ranges captured before the test and restored afterwards, including side effects from native calls."}}},
@@ -831,6 +832,8 @@ void RegisterStatusRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
+
 
 
 
