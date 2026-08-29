@@ -1,4 +1,4 @@
-﻿#include "call.h"
+#include "call.h"
 
 #include <windows.h>
 #include <csetjmp>
@@ -43,8 +43,36 @@ constexpr size_t kMaxCallsPerFrame = 8;
 std::mutex g_threadHookMutex;
 std::map<DWORD, std::shared_ptr<PendingCall>> g_threadHookRequests;
 
+bool IsNativeCallFault(DWORD code) {
+    // Debugger/watch instrumentation also uses vectored exceptions. Let
+    // BREAKPOINT, SINGLE_STEP, GUARD_PAGE and other control exceptions
+    // continue through the VEH chain; only real native-call faults become
+    // a failed CallResult.
+    switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION:
+        case EXCEPTION_IN_PAGE_ERROR:
+        case EXCEPTION_ILLEGAL_INSTRUCTION:
+        case EXCEPTION_PRIV_INSTRUCTION:
+        case EXCEPTION_INT_DIVIDE_BY_ZERO:
+        case EXCEPTION_INT_OVERFLOW:
+        case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+        case EXCEPTION_DATATYPE_MISALIGNMENT:
+        case EXCEPTION_FLT_DENORMAL_OPERAND:
+        case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+        case EXCEPTION_FLT_INEXACT_RESULT:
+        case EXCEPTION_FLT_INVALID_OPERATION:
+        case EXCEPTION_FLT_OVERFLOW:
+        case EXCEPTION_FLT_STACK_CHECK:
+        case EXCEPTION_FLT_UNDERFLOW:
+            return true;
+        default:
+            return false;
+    }
+}
+
 LONG CALLBACK CallVEH(PEXCEPTION_POINTERS info) {
-    if (g_inCall) {
+    if (g_inCall && info && info->ExceptionRecord &&
+        IsNativeCallFault(info->ExceptionRecord->ExceptionCode)) {
         g_lastExceptionCode = info->ExceptionRecord->ExceptionCode;
         longjmp(g_jmpBuf, 1);
     }

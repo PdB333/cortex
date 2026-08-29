@@ -513,6 +513,7 @@ jobs:
               $mcp.StandardInput.WriteLine($lastWriterCall); $mcp.StandardInput.Flush()
               $lastWriterResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $lastWriterResult = $lastWriterResponse.result.structuredContent.result
+              Write-Host ("$label last-writer: " + ($lastWriterResult | ConvertTo-Json -Depth 12 -Compress))
               if ($lastWriterResponse.id -ne 410 -or -not $lastWriterResult.ok -or
                   [uint64]$lastWriterResult.thread_id -eq 0 -or [string]::IsNullOrWhiteSpace([string]$lastWriterResult.instruction) -or
                   -not $lastWriterResult.after_arm.ok) {
@@ -540,6 +541,7 @@ jobs:
               $mcp.StandardInput.WriteLine($transitionCall); $mcp.StandardInput.Flush()
               $transitionResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $transitionResult = $transitionResponse.result.structuredContent.result
+              Write-Host ("$label transition: " + ($transitionResult | ConvertTo-Json -Depth 12 -Compress))
               if ($transitionResponse.id -ne 412 -or -not $transitionResult.ok -or -not $transitionResult.until_matched -or
                   [int]$transitionResult.event_count -lt 1 -or -not $transitionResult.after_arm.ok) {
                 throw "$label transition trace did not reconstruct the post-arm state write"
