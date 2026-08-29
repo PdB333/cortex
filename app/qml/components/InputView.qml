@@ -7,7 +7,18 @@ ColumnLayout {
     id: root
     anchors.fill: parent
     spacing: 0
+
     property bool backgroundText: false
+    property bool sequenceRunning: CortexFeatures.inputSequenceStatus === "pending"
+                                   || CortexFeatures.inputSequenceStatus === "running"
+                                   || CortexFeatures.inputSequenceStatus === "cancelling"
+
+    Timer {
+        interval: 300
+        repeat: true
+        running: root.sequenceRunning && CortexApp.sessionActive
+        onTriggered: CortexFeatures.refreshInputSequence()
+    }
 
     Rectangle {
         Layout.fillWidth: true
@@ -28,7 +39,7 @@ ColumnLayout {
             Rectangle { Layout.preferredWidth: 1; Layout.preferredHeight: 18; color: Theme.borderStrong }
             Button {
                 text: CortexFeatures.inputRecording ? "Stop recording" : "Record input"
-                enabled: CortexApp.sessionActive && CortexApp.mutationPermission
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission && !root.sequenceRunning
                 onClicked: CortexFeatures.inputRecording ? CortexFeatures.stopInputRecording() : CortexFeatures.startInputRecording()
             }
             Item { Layout.fillWidth: true }
@@ -43,7 +54,57 @@ ColumnLayout {
 
     Rectangle {
         Layout.fillWidth: true
-        Layout.preferredHeight: 74
+        Layout.preferredHeight: 44
+        color: Theme.panel
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 6
+            Label { text: "Replay"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+            ComboBox {
+                id: replayMode
+                Layout.preferredWidth: 120
+                model: ["os", "game", "dinput"]
+                font.pixelSize: 10
+            }
+            Button {
+                text: "Run recorded"
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission
+                         && CortexFeatures.inputRecordingJson.length > 0 && !root.sequenceRunning
+                onClicked: CortexFeatures.replayRecordedInput(replayMode.currentText)
+            }
+            Button {
+                text: "Refresh job"
+                enabled: CortexApp.sessionActive && CortexFeatures.inputSequenceJobId > 0
+                onClicked: CortexFeatures.refreshInputSequence()
+            }
+            Button {
+                text: CortexFeatures.inputSequenceStatus === "cancelling" ? "Cancelling..." : "Cancel job"
+                enabled: CortexApp.sessionActive && CortexApp.mutationPermission
+                         && CortexFeatures.inputSequenceJobId > 0 && root.sequenceRunning
+                         && CortexFeatures.inputSequenceStatus !== "cancelling"
+                onClicked: CortexFeatures.cancelInputSequence()
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                text: CortexFeatures.inputSequenceJobId > 0
+                      ? ("Job " + CortexFeatures.inputSequenceJobId + " | "
+                         + CortexFeatures.inputSequenceStatus + " | "
+                         + CortexFeatures.inputSequenceStepIndex + "/" + CortexFeatures.inputSequenceStepCount
+                         + " | " + CortexFeatures.inputSequenceMode)
+                      : "No replay job"
+                color: root.sequenceRunning ? Theme.mutation : Theme.textMuted
+                font.family: Theme.monoFont
+                font.pixelSize: 9
+            }
+        }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 64
         color: Theme.panel
         RowLayout {
             anchors.fill: parent
@@ -75,7 +136,16 @@ ColumnLayout {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
+            spacing: 8
             Label { text: "RECORDED SEQUENCE"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+            Label {
+                visible: CortexFeatures.inputSequenceJobId > 0
+                text: "replay " + CortexFeatures.inputSequenceStatus + "  "
+                      + CortexFeatures.inputSequenceStepIndex + "/" + CortexFeatures.inputSequenceStepCount
+                color: root.sequenceRunning ? Theme.mutation : Theme.textDisabled
+                font.family: Theme.monoFont
+                font.pixelSize: 9
+            }
             Item { Layout.fillWidth: true }
             Label {
                 text: CortexFeatures.lastError
@@ -100,7 +170,7 @@ ColumnLayout {
             anchors.fill: parent
             anchors.margins: 10
             contentWidth: width
-            contentHeight: recordedText.implicitHeight
+            contentHeight: Math.max(height, recordedText.implicitHeight)
             clip: true
             TextEdit {
                 id: recordedText

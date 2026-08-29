@@ -415,6 +415,112 @@ jobs:
               if ($deleteScriptResponse.id -ne 45 -or -not $deleteScriptResponse.result.structuredContent.result.ok) {
                 throw "$label failed to delete the Lua script"
               }
+              $startSequence = @{
+                jsonrpc = "2.0"
+                id = 46
+                method = "tools/call"
+                params = @{
+                  name = "input_sequence"
+                  arguments = @{
+                    mode = "os"
+                    steps = @(@{ delay_ms = 50 }, @{ delay_ms = 50 })
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($startSequence)
+              $mcp.StandardInput.Flush()
+              $startSequenceResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $sequenceJob = [int]$startSequenceResponse.result.structuredContent.result.job_id
+              if ($startSequenceResponse.id -ne 46 -or $sequenceJob -le 0) {
+                throw "$label failed to start the input sequence E2E job"
+              }
+
+              $sequenceStatus = ""
+              for ($attempt = 0; $attempt -lt 30 -and $sequenceStatus -ne "done"; $attempt++) {
+                $statusRequest = @{
+                  jsonrpc = "2.0"
+                  id = 50 + $attempt
+                  method = "tools/call"
+                  params = @{
+                    name = "input_sequence_status"
+                    arguments = @{ _path = @{ id = $sequenceJob } }
+                  }
+                } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($statusRequest)
+                $mcp.StandardInput.Flush()
+                $statusResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $statusResult = $statusResponse.result.structuredContent.result
+                $sequenceStatus = [string]$statusResult.status
+                if ($sequenceStatus -eq "failed" -or $sequenceStatus -eq "cancelled") {
+                  throw "$label input sequence E2E ended unexpectedly: $sequenceStatus"
+                }
+                if ($sequenceStatus -ne "done") { Start-Sleep -Milliseconds 100 }
+              }
+              if ($sequenceStatus -ne "done") {
+                throw "$label input sequence E2E did not complete"
+              }
+
+              $startCancelableSequence = @{
+                jsonrpc = "2.0"
+                id = 80
+                method = "tools/call"
+                params = @{
+                  name = "input_sequence"
+                  arguments = @{
+                    mode = "os"
+                    steps = @(@{ delay_ms = 1000 }, @{ delay_ms = 1000 })
+                    mutation_permission = $true
+                  }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($startCancelableSequence)
+              $mcp.StandardInput.Flush()
+              $startCancelableResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $cancelJob = [int]$startCancelableResponse.result.structuredContent.result.job_id
+              if ($startCancelableResponse.id -ne 80 -or $cancelJob -le 0) {
+                throw "$label failed to start the cancellable input sequence E2E job"
+              }
+
+              $cancelRequest = @{
+                jsonrpc = "2.0"
+                id = 81
+                method = "tools/call"
+                params = @{
+                  name = "input_sequence_cancel"
+                  arguments = @{ _path = @{ id = $cancelJob }; mutation_permission = $true }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($cancelRequest)
+              $mcp.StandardInput.Flush()
+              $cancelResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($cancelResponse.id -ne 81 -or -not $cancelResponse.result.structuredContent.result.ok) {
+                throw "$label failed to cancel the input sequence E2E job"
+              }
+
+              $cancelStatus = ""
+              for ($attempt = 0; $attempt -lt 40 -and $cancelStatus -ne "cancelled"; $attempt++) {
+                $cancelStatusRequest = @{
+                  jsonrpc = "2.0"
+                  id = 90 + $attempt
+                  method = "tools/call"
+                  params = @{
+                    name = "input_sequence_status"
+                    arguments = @{ _path = @{ id = $cancelJob } }
+                  }
+                } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($cancelStatusRequest)
+                $mcp.StandardInput.Flush()
+                $cancelStatusResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $cancelStatus = [string]$cancelStatusResponse.result.structuredContent.result.status
+                if ($cancelStatus -eq "done" -or $cancelStatus -eq "failed") {
+                  throw "$label cancellable input sequence ended unexpectedly: $cancelStatus"
+                }
+                if ($cancelStatus -ne "cancelled") { Start-Sleep -Milliseconds 100 }
+              }
+              if ($cancelStatus -ne "cancelled") {
+                throw "$label input sequence cancellation did not become visible"
+              }
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {
                 throw "$label trace lifecycle tools are missing from the MCP catalog"

@@ -21,6 +21,11 @@ class FeatureController final : public QObject {
     Q_PROPERTY(bool networkCaptureEnabled READ networkCaptureEnabled NOTIFY networkChanged)
     Q_PROPERTY(bool inputRecording READ inputRecording NOTIFY inputChanged)
     Q_PROPERTY(QString inputRecordingJson READ inputRecordingJson NOTIFY inputChanged)
+    Q_PROPERTY(int inputSequenceJobId READ inputSequenceJobId NOTIFY inputChanged)
+    Q_PROPERTY(QString inputSequenceStatus READ inputSequenceStatus NOTIFY inputChanged)
+    Q_PROPERTY(int inputSequenceStepIndex READ inputSequenceStepIndex NOTIFY inputChanged)
+    Q_PROPERTY(int inputSequenceStepCount READ inputSequenceStepCount NOTIFY inputChanged)
+    Q_PROPERTY(QString inputSequenceMode READ inputSequenceMode NOTIFY inputChanged)
     Q_PROPERTY(QString screenshotSource READ screenshotSource NOTIFY screenshotChanged)
     Q_PROPERTY(QString screenshotMeta READ screenshotMeta NOTIFY screenshotChanged)
     Q_PROPERTY(QVariantList scripts READ scripts NOTIFY scriptsChanged)
@@ -56,6 +61,11 @@ public:
     bool networkCaptureEnabled() const { return networkCaptureEnabled_; }
     bool inputRecording() const { return inputRecording_; }
     QString inputRecordingJson() const { return inputRecordingJson_; }
+    int inputSequenceJobId() const { return inputSequenceJobId_; }
+    QString inputSequenceStatus() const { return inputSequenceStatus_; }
+    int inputSequenceStepIndex() const { return inputSequenceStepIndex_; }
+    int inputSequenceStepCount() const { return inputSequenceStepCount_; }
+    QString inputSequenceMode() const { return inputSequenceMode_; }
     QString screenshotSource() const { return screenshotSource_; }
     QString screenshotMeta() const { return screenshotMeta_; }
     const QVariantList& scripts() const { return scripts_; }
@@ -100,6 +110,10 @@ public:
     Q_INVOKABLE bool sendText(const QString& text, bool background = false);
     Q_INVOKABLE bool startInputRecording();
     Q_INVOKABLE bool stopInputRecording();
+    Q_INVOKABLE bool startInputSequence(const QString& stepsJson, const QString& mode = QStringLiteral("os"));
+    Q_INVOKABLE bool replayRecordedInput(const QString& mode = QStringLiteral("os"));
+    Q_INVOKABLE bool refreshInputSequence();
+    Q_INVOKABLE bool cancelInputSequence();
 
     Q_INVOKABLE bool captureScreenshot(const QString& mode = QStringLiteral("auto"));
 
@@ -182,6 +196,11 @@ private:
     bool networkCaptureEnabled_ = false;
     bool inputRecording_ = false;
     QString inputRecordingJson_;
+    int inputSequenceJobId_ = -1;
+    QString inputSequenceStatus_;
+    int inputSequenceStepIndex_ = 0;
+    int inputSequenceStepCount_ = 0;
+    QString inputSequenceMode_;
     QString screenshotSource_;
     QString screenshotMeta_;
     QVariantList scripts_;

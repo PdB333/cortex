@@ -435,6 +435,11 @@ bool FeatureController::startInputRecording() {
     const json result = RouteResult(output);
     inputRecording_ = result.value("recording", true);
     inputRecordingJson_.clear();
+    inputSequenceJobId_ = -1;
+    inputSequenceStatus_.clear();
+    inputSequenceStepIndex_ = 0;
+    inputSequenceStepCount_ = 0;
+    inputSequenceMode_.clear();
     emit inputChanged();
     return true;
 }
@@ -449,6 +454,112 @@ bool FeatureController::stopInputRecording() {
     return true;
 }
 
+bool FeatureController::startInputSequence(const QString& stepsJson, const QString& modeValue) {
+    const QString mode = modeValue.trimmed().toLower();
+    if (mode != QStringLiteral("os") && mode != QStringLiteral("game") && mode != QStringLiteral("dinput")) {
+        setError(QStringLiteral("invalid_input_sequence_mode"));
+        return false;
+    }
+
+    json steps;
+    try {
+        steps = json::parse(stepsJson.toUtf8().toStdString());
+    } catch (const std::exception&) {
+        setError(QStringLiteral("input_sequence_invalid_json"));
+        return false;
+    }
+    if (!steps.is_array() || steps.empty()) {
+        setError(QStringLiteral("input_sequence_steps_required"));
+        return false;
+    }
+    for (const auto& step : steps) {
+        if (!step.is_object()) {
+            setError(QStringLiteral("input_sequence_step_invalid"));
+            return false;
+        }
+    }
+
+    json output;
+    if (!callTool("input_sequence",
+                  {{"mode", mode.toStdString()}, {"steps", steps}},
+                  output,
+                  true)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("input_sequence_payload_invalid"));
+        return false;
+    }
+    const int jobId = result.value("job_id", -1);
+    if (jobId < 1) {
+        setError(QStringLiteral("input_sequence_job_missing"));
+        return false;
+    }
+
+    inputSequenceJobId_ = jobId;
+    inputSequenceStatus_ = QStringLiteral("pending");
+    inputSequenceStepIndex_ = 0;
+    inputSequenceStepCount_ = static_cast<int>(steps.size());
+    inputSequenceMode_ = mode;
+    setError(QString());
+    emit inputChanged();
+    return true;
+}
+
+bool FeatureController::replayRecordedInput(const QString& mode) {
+    if (inputRecordingJson_.trimmed().isEmpty()) {
+        setError(QStringLiteral("input_recording_empty"));
+        return false;
+    }
+    return startInputSequence(inputRecordingJson_, mode);
+}
+
+bool FeatureController::refreshInputSequence() {
+    if (inputSequenceJobId_ < 1) {
+        setError(QStringLiteral("input_sequence_job_missing"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("input_sequence_status",
+                  {{"_path", {{"id", inputSequenceJobId_}}}},
+                  output,
+                  false)) return false;
+    const json result = RouteResult(output);
+    if (!result.is_object()) {
+        setError(QStringLiteral("input_sequence_status_invalid"));
+        return false;
+    }
+
+    inputSequenceStatus_ = FromUtf8(result.value("status", std::string("unknown")));
+    inputSequenceStepIndex_ = result.value("step_index", 0);
+    inputSequenceStepCount_ = result.value("step_count", inputSequenceStepCount_);
+    setError(QString());
+    emit inputChanged();
+    return true;
+}
+
+bool FeatureController::cancelInputSequence() {
+    if (inputSequenceJobId_ < 1) {
+        setError(QStringLiteral("input_sequence_job_missing"));
+        return false;
+    }
+    if (inputSequenceStatus_ == QStringLiteral("done") ||
+        inputSequenceStatus_ == QStringLiteral("failed") ||
+        inputSequenceStatus_ == QStringLiteral("cancelled")) {
+        setError(QStringLiteral("input_sequence_not_running"));
+        return false;
+    }
+
+    json output;
+    if (!callTool("input_sequence_cancel",
+                  {{"_path", {{"id", inputSequenceJobId_}}}},
+                  output,
+                  true)) return false;
+    inputSequenceStatus_ = QStringLiteral("cancelling");
+    setError(QString());
+    emit inputChanged();
+    return true;
+}
 bool FeatureController::captureScreenshot(const QString& modeValue) {
     const QString mode = modeValue.trimmed().toLower();
     if (mode != QStringLiteral("auto") && mode != QStringLiteral("render") &&
@@ -1060,6 +1171,11 @@ void FeatureController::reset() {
     networkCaptureEnabled_ = false;
     inputRecording_ = false;
     inputRecordingJson_.clear();
+    inputSequenceJobId_ = -1;
+    inputSequenceStatus_.clear();
+    inputSequenceStepIndex_ = 0;
+    inputSequenceStepCount_ = 0;
+    inputSequenceMode_.clear();
     screenshotSource_.clear();
     screenshotMeta_.clear();
     scripts_.clear();
