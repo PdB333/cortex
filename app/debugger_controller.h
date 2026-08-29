@@ -5,6 +5,7 @@
 #include "target/session_manager.h"
 
 #include <QObject>
+#include <QTimer>
 #include <QVariantList>
 
 #include <functional>
@@ -55,12 +56,14 @@ signals:
 
 private:
     bool requireMutation();
+    bool refreshRuntimeState(bool ensureRuntime, bool reportErrors);
     void applyPayloadRegisters(const nlohmann::json& registers, qulonglong threadId);
     void setLastError(const QString& error);
 
     cortex::services::DebuggerService service_;
     PayloadController& payload_;
     std::function<bool()> mutationAllowed_;
+    QTimer runtimePoll_;
     QVariantList threads_;
     QVariantList registers_;
     QVariantList breakpoints_;

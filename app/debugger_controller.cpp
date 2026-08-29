@@ -42,7 +42,15 @@ DebuggerController::DebuggerController(cortex::target::SessionManager& sessions,
     : QObject(parent),
       service_(sessions),
       payload_(payload),
-      mutationAllowed_(std::move(mutationAllowed)) {}
+      mutationAllowed_(std::move(mutationAllowed)) {
+    runtimePoll_.setInterval(350);
+    runtimePoll_.setTimerType(Qt::CoarseTimer);
+    connect(&runtimePoll_, &QTimer::timeout, this, [this]() {
+        if (!payload_.ready() && !payload_.tryConnectExisting(false)) return;
+        refreshRuntimeState(false, false);
+    });
+    runtimePoll_.start();
+}
 
 void DebuggerController::refreshThreads() {
     std::string error;
@@ -107,19 +115,28 @@ bool DebuggerController::enableRuntime() {
         setLastError(payload_.lastError());
         return false;
     }
-    return refreshRuntime();
+    return refreshRuntimeState(false, true);
 }
 
 bool DebuggerController::refreshRuntime() {
-    if (!payload_.ready() && !payload_.ensureReady()) {
-        setLastError(payload_.lastError());
-        return false;
+    return refreshRuntimeState(true, true);
+}
+
+bool DebuggerController::refreshRuntimeState(bool ensureRuntime, bool reportErrors) {
+    if (!payload_.ready()) {
+        const bool connected = ensureRuntime
+            ? payload_.ensureReady()
+            : payload_.tryConnectExisting(false);
+        if (!connected) {
+            if (reportErrors && ensureRuntime) setLastError(payload_.lastError());
+            return false;
+        }
     }
 
     QString callError;
     json output;
     if (!payload_.CallTool("debug_breakpoint_list", json::object(), output, &callError)) {
-        setLastError(callError);
+        if (reportErrors) setLastError(callError);
         return false;
     }
 
@@ -141,7 +158,7 @@ bool DebuggerController::refreshRuntime() {
 
     output = json::object();
     if (!payload_.CallTool("debug_paused", json::object(), output, &callError)) {
-        setLastError(callError);
+        if (reportErrors) setLastError(callError);
         return false;
     }
 
@@ -167,7 +184,7 @@ bool DebuggerController::refreshRuntime() {
     if (firstPausedThread != 0 && firstPausedRegisters.is_object())
         applyPayloadRegisters(firstPausedRegisters, firstPausedThread);
 
-    setLastError(QString());
+    if (reportErrors) setLastError(QString());
     return true;
 }
 
