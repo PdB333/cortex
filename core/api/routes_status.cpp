@@ -599,6 +599,14 @@ void RegisterStatusRoutes(httplib::Server& svr) {
         overlay::LogApiCall("GET /status");
     });
 
+    // Desktop-only diagnostics surface. Deliberately omitted from the MCP
+    // tool manifest so an agent cannot use the UI activity feed as another
+    // public protocol surface.
+    svr.Get("/ui/api-log", [](const httplib::Request&, httplib::Response& res) {
+        json lines = json::array();
+        for (const auto& line : overlay::ApiLogSnapshot()) lines.push_back(line);
+        res.set_content(json{{"ok", true}, {"lines", lines}}.dump(), "application/json");
+    });
     svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         json hooks = json::object();
 #ifdef CORTEX_KIERO

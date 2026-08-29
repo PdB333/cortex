@@ -1,13 +1,10 @@
 #include "overlay_common.h"
 #include "overlay.h"
-#include "../config.h"
 #include "../log.h"
 #include "../prompt/prompt_queue.h"
 #include "../hook/input_hook.h"
 #include "../hook/dinput_hook.h"
-#include "../freeze/freeze.h"
 #include "../debugger/debugger.h"
-#include "../watch/watch.h"
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -24,11 +21,8 @@ bool g_initialized = false;
 }
 
 namespace {
-    bool g_visible = false;
     HWND g_hwnd = nullptr;
     WNDPROC g_originalWndProc = nullptr;
-    config::Config g_config;
-    ULONGLONG g_startTimeMs = 0;
 
     std::mutex g_logMutex;
     std::deque<std::string> g_apiLog;
@@ -46,17 +40,13 @@ namespace {
     // expires.
     bool WantsInputCapture() {
         const bool desktop = DesktopPresenterActive();
-        const bool fallbackPrompt = !desktop && prompt::GetActive().has_value();
-        return (!desktop && g_visible) || fallbackPrompt;
+        if (desktop) return false;
+        const bool fallbackPrompt = prompt::GetActive().has_value();
+        const bool fallbackPaused = !dbg::ListPausedThreads().empty();
+        return fallbackPrompt || fallbackPaused;
     }
 
     LRESULT CALLBACK WndProcHook(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-        const bool desktop = DesktopPresenterActive();
-        if (!desktop && msg == WM_KEYDOWN && static_cast<int>(wParam) == g_config.toggle_key) {
-            g_visible = !g_visible;
-            dbglog::Line("toggle key: g_visible=%d", (int)g_visible);
-        }
-
         ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
 
         const bool wantsCapture = WantsInputCapture();
@@ -64,80 +54,9 @@ namespace {
         const bool isKeyMsg = (msg >= WM_KEYFIRST && msg <= WM_KEYLAST);
 
         if (wantsCapture && isMouseMsg) return TRUE;
-        if (!desktop && g_visible && ImGui::GetIO().WantCaptureKeyboard && isKeyMsg) return TRUE;
+        if (wantsCapture && ImGui::GetIO().WantCaptureKeyboard && isKeyMsg) return TRUE;
 
         return CallWindowProc(g_originalWndProc, hWnd, msg, wParam, lParam);
-    }
-
-    void DrawStatusWindow() {
-        ImGui::SetNextWindowSize(ImVec2(420, 320), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Cortex", &g_visible);
-
-        ULONGLONG uptimeMs = GetTickCount64() - g_startTimeMs;
-        ImGui::Text("API port : %d", g_config.port);
-        ImGui::Text("Uptime   : %llus", (unsigned long long)(uptimeMs / 1000));
-        ImGui::Text("PID      : %lu", GetCurrentProcessId());
-        ImGui::Separator();
-        ImGui::TextDisabled("Show/hide key: configurable via cortex.ini");
-        ImGui::Separator();
-
-        if (ImGui::CollapsingHeader("Active freezes")) {
-            auto freezes = freeze::List();
-            if (freezes.empty()) {
-                ImGui::TextDisabled("(none)");
-            } else {
-                for (const auto& f : freezes) {
-                    ImGui::Text("#%d  0x%llX  %s  %s", f.id, (unsigned long long)f.address, f.type.c_str(),
-                                f.label.empty() ? "-" : f.label.c_str());
-                }
-            }
-        }
-
-        if (ImGui::CollapsingHeader("Breakpoints")) {
-            auto bps = dbg::ListBreakpoints();
-            if (bps.empty()) {
-                ImGui::TextDisabled("(none)");
-            } else {
-                for (const auto& bp : bps) {
-                    const char* kindStr = bp.kind == dbg::BpKind::Software ? "SW" :
-                                          bp.kind == dbg::BpKind::HwExecute ? "HW-X" :
-                                          bp.kind == dbg::BpKind::HwWrite ? "HW-W" : "HW-RW";
-                    const char* actionStr = bp.action == dbg::BpAction::Pause ? "pause" : "log";
-                    ImGui::Text("#%d  %s  0x%llX  %s  hits=%llu%s", bp.id, kindStr,
-                                (unsigned long long)bp.address, actionStr,
-                                (unsigned long long)bp.hitCount, bp.hasCondition ? "  [cond]" : "");
-                }
-            }
-        }
-
-        if (ImGui::CollapsingHeader("Active watches")) {
-            auto watches = watch::List();
-            if (watches.empty()) {
-                ImGui::TextDisabled("(none)");
-            } else {
-                for (const auto& w : watches) {
-                    ImGui::Text("#%d  0x%llX  %s  %s", w.id, (unsigned long long)w.address, w.type.c_str(),
-                                w.label.empty() ? "-" : w.label.c_str());
-                }
-            }
-        }
-
-        ImGui::Separator();
-        ImGui::Text("Recent API requests:");
-
-        ImGui::BeginChild("api_log", ImVec2(0, 0), true);
-        {
-            std::lock_guard<std::mutex> lock(g_logMutex);
-            for (const auto& line : g_apiLog) {
-                ImGui::TextUnformatted(line.c_str());
-            }
-        }
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
-            ImGui::SetScrollHereY(1.0f);
-        }
-        ImGui::EndChild();
-
-        ImGui::End();
     }
 
     void DrawPromptPopup() {
@@ -262,8 +181,6 @@ namespace detail {
 
 void CommonInitPre(HWND hwnd) {
     g_hwnd = hwnd;
-    g_config = config::Load();
-    g_startTimeMs = GetTickCount64();
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -295,15 +212,14 @@ void CommonFrameBegin() {
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    if (!desktop && g_visible) DrawStatusWindow();
     DrawPromptPopup();
     if (!desktop) DrawPausedThreadsPanel();
 
     static bool s_lastWantsCapture = false;
     if (wantsCapture != s_lastWantsCapture) {
-        dbglog::Line("OnFrame: wantsCapture %d -> %d (g_visible=%d, prompt=%d, desktop=%d)",
-                     (int)s_lastWantsCapture, (int)wantsCapture, (int)g_visible,
-                     (int)prompt::GetActive().has_value(), (int)desktop);
+        dbglog::Line("OnFrame: wantsCapture %d -> %d (prompt=%d, paused=%d, desktop=%d)",
+                     (int)s_lastWantsCapture, (int)wantsCapture,
+                     (int)prompt::GetActive().has_value(), (int)!dbg::ListPausedThreads().empty(), (int)desktop);
         s_lastWantsCapture = wantsCapture;
     }
     hook::SetInputCaptureActive(wantsCapture);
@@ -334,6 +250,11 @@ void LogApiCall(const std::string& line) {
     std::lock_guard<std::mutex> lock(g_logMutex);
     g_apiLog.push_back(line);
     while (g_apiLog.size() > kMaxLogLines) g_apiLog.pop_front();
+}
+
+std::vector<std::string> ApiLogSnapshot() {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    return {g_apiLog.begin(), g_apiLog.end()};
 }
 
 HWND GetHwnd() {

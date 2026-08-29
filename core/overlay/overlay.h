@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include <vector>
 
 #ifdef CORTEX_KIERO
 #include <dxgiformat.h>
@@ -85,6 +86,7 @@ void Shutdown();
 // Appends a line to the small in-overlay log of recent API activity, so a
 // human watching the screen can see what the AI is doing.
 void LogApiCall(const std::string& line);
+std::vector<std::string> ApiLogSnapshot();
 
 // The game's main window, captured during Init. Null before the first frame.
 HWND GetHwnd();

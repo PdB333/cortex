@@ -44,6 +44,17 @@ int main() {
     check(api::mcp_contract::IsRequiredSpec("required: value"), "required legacy property detected");
     check(!api::mcp_contract::IsRequiredSpec("optional: value"), "optional legacy property detected");
 
+    const auto traceStopRisk = api::mcp_contract::ClassifyTool("trace_stop", "POST", "/trace/{id}/stop");
+    check(traceStopRisk == api::mcp_contract::ToolRisk::Control,
+          "trace_stop is classified as a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(traceStopRisk),
+          "trace_stop requires explicit mutation permission");
+
+    const auto traceDeleteRisk = api::mcp_contract::ClassifyTool("trace_delete", "DELETE", "/trace/{id}");
+    check(traceDeleteRisk == api::mcp_contract::ToolRisk::Control,
+          "trace_delete is classified as a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(traceDeleteRisk),
+          "trace_delete requires explicit mutation permission");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;

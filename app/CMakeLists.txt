@@ -104,6 +104,7 @@ qt_add_qml_module(cortex
         qml/components/DisassemblyView.qml
         qml/components/BreakpointsView.qml
         qml/components/TracesView.qml
+        qml/components/WatchesView.qml
         qml/components/StructuresView.qml
         qml/components/SymbolsView.qml
         qml/components/HooksView.qml

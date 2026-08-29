@@ -23,6 +23,30 @@ QString JsonText(const json& value) {
     return FromUtf8(value.dump(2));
 }
 
+bool ToolValueFromText(const QString& typeValue, const QString& textValue, json& value) {
+    const QString type = typeValue.trimmed().toLower();
+    const QString text = textValue.trimmed();
+    if (text.isEmpty()) return false;
+
+    bool ok = false;
+    if (type == QStringLiteral("float") || type == QStringLiteral("double")) {
+        const double parsed = text.toDouble(&ok);
+        if (ok) value = parsed;
+        return ok;
+    }
+    if (type == QStringLiteral("bytes")) {
+        value = text.toUtf8().toStdString();
+        return true;
+    }
+    if (type.startsWith(QLatin1Char('u'))) {
+        const qulonglong parsed = text.toULongLong(&ok, 0);
+        if (ok) value = static_cast<uint64_t>(parsed);
+        return ok;
+    }
+    const qlonglong parsed = text.toLongLong(&ok, 0);
+    if (ok) value = static_cast<int64_t>(parsed);
+    return ok;
+}
 } // namespace
 
 FeatureController::FeatureController(PayloadController& payload,
@@ -51,6 +75,27 @@ bool FeatureController::callTool(const std::string& name,
     return true;
 }
 
+bool FeatureController::refreshApiLog() {
+    json output;
+    QString error;
+    if (!payload_.CallRouteExisting("GET", "/ui/api-log", json::object(), output, &error, false)) {
+        setError(error.isEmpty() ? QStringLiteral("api_log_unavailable") : error);
+        return false;
+    }
+
+    apiLog_.clear();
+    const json result = RouteResult(output);
+    const json lines = result.value("lines", json::array());
+    if (lines.is_array()) {
+        apiLog_.reserve(static_cast<qsizetype>(lines.size()));
+        for (const auto& line : lines) {
+            if (line.is_string()) apiLog_.push_back(FromUtf8(line.get<std::string>()));
+        }
+    }
+    setError(QString());
+    emit apiLogChanged();
+    return true;
+}
 bool FeatureController::refreshActions() {
     json output;
     if (!callTool("actions_list", {{"_query", {{"offset", 0}, {"limit", 512}}}}, output, false)) return false;
@@ -196,6 +241,105 @@ bool FeatureController::captureScreenshot(const QString& modeValue) {
     return true;
 }
 
+bool FeatureController::refreshWatches() {
+    json freezeOutput;
+    if (!callTool("freeze_list", json::object(), freezeOutput, false)) return false;
+    json watchOutput;
+    if (!callTool("watch_list", json::object(), watchOutput, false)) return false;
+    freezes_.clear();
+    const json freezeResult = RouteResult(freezeOutput);
+    const json freezeEntries = freezeResult.value("freezes", json::array());
+    if (freezeEntries.is_array()) {
+        freezes_.reserve(static_cast<qsizetype>(freezeEntries.size()));
+        for (const auto& entry : freezeEntries) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("id"), entry.value("id", -1));
+            row.insert(QStringLiteral("address"), FromUtf8(entry.value("address", std::string())));
+            row.insert(QStringLiteral("type"), FromUtf8(entry.value("type", std::string())));
+            row.insert(QStringLiteral("value"), FromUtf8(entry.value("value_bytes", std::string())));
+            row.insert(QStringLiteral("label"), FromUtf8(entry.value("label", std::string())));
+            row.insert(QStringLiteral("ttl"), static_cast<qlonglong>(entry.value("ttl_ms_remaining", int64_t{0})));
+            freezes_.push_back(row);
+        }
+    }
+
+    watches_.clear();
+    const json watchResult = RouteResult(watchOutput);
+    const json watchEntries = watchResult.value("watches", json::array());
+    if (watchEntries.is_array()) {
+        watches_.reserve(static_cast<qsizetype>(watchEntries.size()));
+        for (const auto& entry : watchEntries) {
+            if (!entry.is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("id"), entry.value("id", -1));
+            row.insert(QStringLiteral("address"), FromUtf8(entry.value("address", std::string())));
+            row.insert(QStringLiteral("type"), FromUtf8(entry.value("type", std::string())));
+            row.insert(QStringLiteral("label"), FromUtf8(entry.value("label", std::string())));
+            watches_.push_back(row);
+        }
+    }
+
+    emit watchesChanged();
+    return true;
+}
+
+bool FeatureController::addFreeze(const QString& address,
+                                  const QString& type,
+                                  const QString& valueText,
+                                  const QString& label,
+                                  int ttlMs) {
+    if (address.trimmed().isEmpty() || type.trimmed().isEmpty() || ttlMs < 0) {
+        setError(QStringLiteral("invalid_freeze_configuration"));
+        return false;
+    }
+    json value;
+    if (!ToolValueFromText(type, valueText, value)) {
+        setError(QStringLiteral("invalid_freeze_value"));
+        return false;
+    }
+    json arguments = {{"address", address.trimmed().toUtf8().toStdString()},
+                      {"type", type.trimmed().toLower().toUtf8().toStdString()},
+                      {"value", std::move(value)}};
+    if (!label.trimmed().isEmpty()) arguments["label"] = label.trimmed().toUtf8().toStdString();
+    if (ttlMs > 0) arguments["ttl_ms"] = ttlMs;
+    json output;
+    if (!callTool("freeze_add", arguments, output, true)) return false;
+    return refreshWatches();
+}
+
+bool FeatureController::deleteFreeze(int id) {
+    if (id < 0) {
+        setError(QStringLiteral("invalid_freeze_id"));
+        return false;
+    }
+    json output;
+    if (!callTool("freeze_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
+    return refreshWatches();
+}
+
+bool FeatureController::addWatch(const QString& address, const QString& type, const QString& label) {
+    if (address.trimmed().isEmpty() || type.trimmed().isEmpty()) {
+        setError(QStringLiteral("invalid_watch_configuration"));
+        return false;
+    }
+    json arguments = {{"address", address.trimmed().toUtf8().toStdString()},
+                      {"type", type.trimmed().toLower().toUtf8().toStdString()}};
+    if (!label.trimmed().isEmpty()) arguments["label"] = label.trimmed().toUtf8().toStdString();
+    json output;
+    if (!callTool("watch_add", arguments, output, true)) return false;
+    return refreshWatches();
+}
+
+bool FeatureController::deleteWatch(int id) {
+    if (id < 0) {
+        setError(QStringLiteral("invalid_watch_id"));
+        return false;
+    }
+    json output;
+    if (!callTool("watch_delete", {{"_path", {{"id", id}}}}, output, true)) return false;
+    return refreshWatches();
+}
 bool FeatureController::refreshTraces() {
     json output;
     if (!callTool("trace_list", json::object(), output, false)) return false;
@@ -326,6 +470,7 @@ bool FeatureController::exportSession() {
 }
 
 void FeatureController::reset() {
+    apiLog_.clear();
     actions_.clear();
     actionCheckpoint_ = 0;
     networkEvents_.clear();
@@ -334,15 +479,19 @@ void FeatureController::reset() {
     inputRecordingJson_.clear();
     screenshotSource_.clear();
     screenshotMeta_.clear();
+    freezes_.clear();
+    watches_.clear();
     traces_.clear();
     traceEvents_.clear();
     selectedTraceId_ = -1;
     sessionExportPath_.clear();
     lastError_.clear();
+    emit apiLogChanged();
     emit actionsChanged();
     emit networkChanged();
     emit inputChanged();
     emit screenshotChanged();
+    emit watchesChanged();
     emit tracesChanged();
     emit sessionChanged();
     emit errorChanged();

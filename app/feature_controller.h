@@ -11,6 +11,7 @@
 class FeatureController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList actions READ actions NOTIFY actionsChanged)
+    Q_PROPERTY(QVariantList apiLog READ apiLog NOTIFY apiLogChanged)
     Q_PROPERTY(qulonglong actionCheckpoint READ actionCheckpoint NOTIFY actionsChanged)
     Q_PROPERTY(QVariantList networkEvents READ networkEvents NOTIFY networkChanged)
     Q_PROPERTY(bool networkCaptureEnabled READ networkCaptureEnabled NOTIFY networkChanged)
@@ -19,6 +20,8 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QString screenshotSource READ screenshotSource NOTIFY screenshotChanged)
     Q_PROPERTY(QString screenshotMeta READ screenshotMeta NOTIFY screenshotChanged)
     Q_PROPERTY(QVariantList traces READ traces NOTIFY tracesChanged)
+    Q_PROPERTY(QVariantList freezes READ freezes NOTIFY watchesChanged)
+    Q_PROPERTY(QVariantList watches READ watches NOTIFY watchesChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
     Q_PROPERTY(int selectedTraceId READ selectedTraceId NOTIFY tracesChanged)
     Q_PROPERTY(QString sessionExportPath READ sessionExportPath NOTIFY sessionChanged)
@@ -30,6 +33,7 @@ public:
                       QObject* parent = nullptr);
 
     const QVariantList& actions() const { return actions_; }
+    const QVariantList& apiLog() const { return apiLog_; }
     qulonglong actionCheckpoint() const { return actionCheckpoint_; }
     const QVariantList& networkEvents() const { return networkEvents_; }
     bool networkCaptureEnabled() const { return networkCaptureEnabled_; }
@@ -38,11 +42,14 @@ public:
     QString screenshotSource() const { return screenshotSource_; }
     QString screenshotMeta() const { return screenshotMeta_; }
     const QVariantList& traces() const { return traces_; }
+    const QVariantList& freezes() const { return freezes_; }
+    const QVariantList& watches() const { return watches_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
     int selectedTraceId() const { return selectedTraceId_; }
     QString sessionExportPath() const { return sessionExportPath_; }
     QString lastError() const { return lastError_; }
 
+    Q_INVOKABLE bool refreshApiLog();
     Q_INVOKABLE bool refreshActions();
     Q_INVOKABLE bool rollbackAllActions();
     Q_INVOKABLE bool rollbackTo(qulonglong checkpoint);
@@ -58,6 +65,13 @@ public:
 
     Q_INVOKABLE bool captureScreenshot(const QString& mode = QStringLiteral("auto"));
 
+    Q_INVOKABLE bool refreshWatches();
+    Q_INVOKABLE bool addFreeze(const QString& address, const QString& type, const QString& value,
+                               const QString& label = QString(), int ttlMs = 0);
+    Q_INVOKABLE bool deleteFreeze(int id);
+    Q_INVOKABLE bool addWatch(const QString& address, const QString& type, const QString& label = QString());
+    Q_INVOKABLE bool deleteWatch(int id);
+
     Q_INVOKABLE bool refreshTraces();
     Q_INVOKABLE bool startTrace(qulonglong threadId, int maxSteps = 10000);
     Q_INVOKABLE bool stopTrace(int traceId);
@@ -69,11 +83,13 @@ public:
     Q_INVOKABLE void reset();
 
 signals:
+    void apiLogChanged();
     void actionsChanged();
     void networkChanged();
     void inputChanged();
     void screenshotChanged();
     void tracesChanged();
+    void watchesChanged();
     void sessionChanged();
     void errorChanged();
 
@@ -87,6 +103,7 @@ private:
     PayloadController& payload_;
     std::function<bool()> mutationAllowed_;
 
+    QVariantList apiLog_;
     QVariantList actions_;
     qulonglong actionCheckpoint_ = 0;
     QVariantList networkEvents_;
@@ -96,6 +113,8 @@ private:
     QString screenshotSource_;
     QString screenshotMeta_;
     QVariantList traces_;
+    QVariantList freezes_;
+    QVariantList watches_;
     QVariantList traceEvents_;
     int selectedTraceId_ = -1;
     QString sessionExportPath_;

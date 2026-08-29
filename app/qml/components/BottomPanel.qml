@@ -10,7 +10,14 @@ Rectangle {
 
     property int activeTab: 0
     property var tabs: ["Events", "Console", "Breakpoints", "Watches", "MCP Calls", "Diagnostics"]
+    onActiveTabChanged: if (activeTab === 1 && CortexPayload.ready) CortexFeatures.refreshApiLog()
 
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.activeTab === 1 && CortexPayload.ready
+        onTriggered: CortexFeatures.refreshApiLog()
+    }
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -72,11 +79,29 @@ Rectangle {
             Layout.fillHeight: true
             color: Theme.background
 
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 10
+                visible: root.activeTab === 1
+                clip: true
+                model: CortexFeatures.apiLog
+                spacing: 2
+                delegate: Text {
+                    required property var modelData
+                    width: ListView.view.width
+                    text: modelData
+                    color: Theme.textMuted
+                    font.family: Theme.monoFont
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
             Column {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.margins: 12
                 spacing: 7
+                visible: root.activeTab !== 1
 
                 Text {
                     text: root.tabs[root.activeTab]
@@ -86,10 +111,12 @@ Rectangle {
                     font.bold: true
                 }
                 Text {
-                    text: root.activeTab === 4
-                          ? "No MCP calls in this session."
-                          : "No entries."
-                    color: Theme.textDisabled
+                    text: root.activeTab === 3
+                          ? (CortexFeatures.watches.length + " active watches | " + CortexFeatures.freezes.length + " active freezes")
+                          : root.activeTab === 4
+                            ? "No MCP calls in this session."
+                            : "No entries."
+                    color: root.activeTab === 3 && (CortexFeatures.watches.length > 0 || CortexFeatures.freezes.length > 0) ? Theme.textMuted : Theme.textDisabled
                     font.family: Theme.uiFont
                     font.pixelSize: 11
                 }
