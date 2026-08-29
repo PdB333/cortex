@@ -147,6 +147,8 @@ bool RuntimeController::callToolJson(const QString& nameValue, const QString& ar
         setError(QStringLiteral("mutation_permission_required"));
         return false;
     }
+    if (!metaIt->second.semantic && metaIt->second.mutationRequired) arguments["mutation_permission"] = true;
+
 
     json output;
     QString error;

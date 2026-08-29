@@ -72,8 +72,10 @@ bool FeatureController::callTool(const std::string& name,
         return false;
     }
 
+    json effectiveArguments = arguments;
+    if (mutationRequired) effectiveArguments["mutation_permission"] = true;
     QString error;
-    if (!payload_.CallTool(name, arguments, output, &error)) {
+    if (!payload_.CallTool(name, effectiveArguments, output, &error)) {
         setError(error.isEmpty() ? QStringLiteral("runtime_tool_failed") : error);
         return false;
     }

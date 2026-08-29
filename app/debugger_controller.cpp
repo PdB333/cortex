@@ -206,7 +206,8 @@ bool DebuggerController::addBreakpoint(const QString& address,
     const json arguments = {
         {"address", address.trimmed().toStdString()},
         {"kind", kind.toStdString()},
-        {"action", action.toStdString()}
+        {"action", action.toStdString()},
+        {"mutation_permission", true}
     };
     json output;
     QString error;
@@ -223,7 +224,7 @@ bool DebuggerController::removeBreakpoint(int id) {
 
     json output;
     QString error;
-    const json arguments = {{"_path", {{"id", id}}}};
+    const json arguments = {{"_path", {{"id", id}}}, {"mutation_permission", true}};
     if (!payload_.CallTool("debug_breakpoint_delete", arguments, output, &error)) {
         setLastError(error);
         return false;
@@ -240,7 +241,7 @@ bool DebuggerController::continueCurrent() {
 
     json output;
     QString error;
-    if (!payload_.CallTool("debug_continue", {{"thread_id", static_cast<uint64_t>(currentThreadId_)}}, output, &error)) {
+    if (!payload_.CallTool("debug_continue", {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"mutation_permission", true}}, output, &error)) {
         setLastError(error);
         return false;
     }
@@ -260,7 +261,7 @@ bool DebuggerController::stepCurrent(int timeoutMs) {
     json output;
     QString error;
     if (!payload_.CallTool("debug_step",
-                           {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"timeout_ms", timeoutMs}},
+                           {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"timeout_ms", timeoutMs}, {"mutation_permission", true}},
                            output, &error)) {
         setLastError(error);
         return false;

@@ -132,6 +132,7 @@ json BodyPayload(const json& arguments) {
     json body = arguments;
     body.erase("_path");
     body.erase("_query");
+    body.erase("mutation_permission");
     return body;
 }
 
@@ -503,6 +504,17 @@ json CallToolScoped(const std::string& wanted,
     json manifest;
     if (!FindPrimitiveTool(wanted, manifest))
         return ToolCallPayload({{"ok", false}, {"error", "unknown_tool"}});
+
+    const auto risk = mcp_contract::ClassifyTool(
+        manifest.value("name", wanted),
+        manifest.value("method", std::string("GET")),
+        manifest.value("path", std::string()));
+    if (mcp_contract::RequiresMutationPermission(risk) && !arguments.value("mutation_permission", false)) {
+        return ToolCallPayload({{"ok", false},
+                                {"error", "mutation_permission_required"},
+                                {"tool", manifest.value("name", wanted)},
+                                {"risk", mcp_contract::RiskName(risk)}});
+    }
     return ToolCallPayload(DispatchPrimitive(manifest, arguments));
 }
 

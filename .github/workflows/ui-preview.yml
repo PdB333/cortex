@@ -311,6 +311,24 @@ jobs:
                 throw "$label status resolved the wrong target"
               }
 
+              $deniedMutation = @{
+                jsonrpc = "2.0"
+                id = 39
+                method = "tools/call"
+                params = @{
+                  name = "project_address_set"
+                  arguments = @{ name = "must-not-exist"; address = "0x1234" }
+                }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deniedMutation)
+              $mcp.StandardInput.Flush()
+              $deniedMutationResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($deniedMutationResponse.id -ne 39 -or
+                  -not $deniedMutationResponse.result.isError -or
+                  $deniedMutationResponse.result.structuredContent.error -ne "mutation_permission_required") {
+                throw "$label primitive mutation permission gate did not reject the call"
+              }
+
               if (-not ($tools.result.tools.name -contains "trace_stop") -or
                   -not ($tools.result.tools.name -contains "trace_delete")) {
                 throw "$label trace lifecycle tools are missing from the MCP catalog"
