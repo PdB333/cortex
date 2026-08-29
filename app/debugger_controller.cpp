@@ -1,4 +1,4 @@
-#include "debugger_controller.h"
+﻿#include "debugger_controller.h"
 
 #include <QVariantMap>
 
@@ -151,6 +151,11 @@ bool DebuggerController::refreshRuntimeState(bool ensureRuntime, bool reportErro
             row.insert(QStringLiteral("kind"), FromUtf8(bp.value("kind", std::string())));
             row.insert(QStringLiteral("action"), FromUtf8(bp.value("action", std::string())));
             row.insert(QStringLiteral("hitCount"), static_cast<qulonglong>(bp.value("hit_count", uint64_t{0})));
+            row.insert(QStringLiteral("processGlobal"), bp.value("process_global", true));
+            row.insert(QStringLiteral("targetThreadId"), static_cast<qulonglong>(bp.value("target_thread_id", uint64_t{0})));
+            row.insert(QStringLiteral("appliedThreads"), static_cast<qulonglong>(bp.value("applied_threads", uint64_t{0})));
+            row.insert(QStringLiteral("totalThreads"), static_cast<qulonglong>(bp.value("total_threads", uint64_t{0})));
+            row.insert(QStringLiteral("coverageComplete"), bp.value("coverage_complete", true));
             breakpoints_.push_back(row);
         }
     }
@@ -196,7 +201,9 @@ bool DebuggerController::requireMutation() {
 
 bool DebuggerController::addBreakpoint(const QString& address,
                                        const QString& kind,
-                                       const QString& action) {
+                                       const QString& action,
+                                       bool processGlobal,
+                                       qulonglong threadId) {
     if (!requireMutation()) return false;
     if (address.trimmed().isEmpty()) {
         setLastError(QStringLiteral("missing_breakpoint_address"));
@@ -207,6 +214,8 @@ bool DebuggerController::addBreakpoint(const QString& address,
         {"address", address.trimmed().toStdString()},
         {"kind", kind.toStdString()},
         {"action", action.toStdString()},
+        {"process_global", processGlobal},
+        {"thread_id", static_cast<uint64_t>(threadId)},
         {"mutation_permission", true}
     };
     json output;
@@ -311,3 +320,4 @@ void DebuggerController::setLastError(const QString& error) {
     lastError_ = error;
     emit lastErrorChanged();
 }
+

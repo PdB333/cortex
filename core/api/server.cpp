@@ -1,4 +1,4 @@
-#include "server.h"
+﻿#include "server.h"
 #include "routes.h"
 #include "mcp_pipe.h"
 #include "request_id.h"
@@ -244,6 +244,17 @@ bool Start(int port, const std::string& configuredToken) {
     RegisterLuaRoutes(routes);
     RegisterOcrRoutes(routes);
 
+    nlohmann::json contractReport;
+    if (!ValidateApiContracts(contractReport)) {
+        SetLastError("api_contract_validation_failed:" + contractReport.dump());
+        ClearNativeRoutes();
+        g_server.reset();
+        return false;
+    }
+    dbglog::Line("API contracts validated: %llu tools / %llu native routes",
+                 static_cast<unsigned long long>(contractReport.value("tool_count", 0u)),
+                 static_cast<unsigned long long>(contractReport.value("native_route_count", 0u)));
+
     if (!g_server->bind_to_port("127.0.0.1", port)) {
         SetLastError("bind_failed");
         ClearNativeRoutes();
@@ -291,3 +302,4 @@ std::string GetTokenPath() { return g_tokenPath; }
 std::string GetToken() { std::lock_guard<std::mutex> lock(g_stateMutex); return g_token; }
 
 } // namespace api
+

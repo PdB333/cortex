@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <nlohmann/json.hpp>
 
@@ -47,7 +47,7 @@ inline ToolRisk ClassifyTool(const std::string& name,
     // prefix with the mutating/control half of that subsystem.
     if (method == "GET") return ToolRisk::Observe;
 
-    if (name == "call_function" || path == "/call/function") return ToolRisk::NativeCall;
+    if (StartsWith(path, "/call/") || StartsWith(name, "call_")) return ToolRisk::NativeCall;
 
     // POST is sometimes used for structured analysis requests. Keep those
     // callable in inspect mode unless their arguments can change runtime or
@@ -151,7 +151,8 @@ inline bool IsBoolField(const std::string& name) {
            name.find("_only") != std::string::npos ||
            name == "pause_process" || name == "copy_on_write" ||
            name == "stop_on_error" || name == "transactional" ||
-           name == "execute" || name == "define";
+           name == "execute" || name == "define" || name == "process_global" ||
+           name == "auto_capture";
 }
 
 inline bool IsIntegerField(const std::string& name) {
@@ -169,7 +170,11 @@ inline bool IsAddressField(const std::string& name) {
 }
 
 inline json SchemaForProperty(const std::string& name, const json& spec) {
-    if (spec.is_object() && spec.contains("type")) return spec;
+    if (spec.is_object() && (spec.contains("type") || spec.contains("oneOf") || spec.contains("anyOf"))) {
+        json typed = spec;
+        typed.erase("required");
+        return typed;
+    }
 
     const std::string description = spec.is_string() ? spec.get<std::string>() : spec.dump();
     std::string lower = description;
@@ -222,3 +227,5 @@ inline QuerySchemaResult BuildQuerySchema(const json& queryManifest) {
 }
 
 } // namespace api::mcp_contract
+
+

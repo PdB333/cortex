@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -33,10 +33,30 @@ ColumnLayout {
             TextField { id: addressField; Layout.preferredWidth: 180; placeholderText: "Address (0x...)" }
             ComboBox { id: kindBox; Layout.preferredWidth: 125; model: ["software", "hw_execute", "hw_write", "hw_readwrite"] }
             ComboBox { id: actionBox; Layout.preferredWidth: 90; model: ["pause", "log"] }
+            Rectangle {
+                id: globalToggle
+                property bool checked: true
+                Layout.preferredWidth: 82
+                Layout.preferredHeight: 28
+                radius: 3
+                color: checked ? Theme.accentMuted : Theme.surface
+                border.color: checked ? Theme.accent : Theme.border
+                Text { anchors.centerIn: parent; text: parent.checked ? "Global" : "1 thread"; color: Theme.text; font.pixelSize: 10 }
+                MouseArea { anchors.fill: parent; onClicked: globalToggle.checked = !globalToggle.checked }
+            }
+            TextField {
+                id: threadField
+                Layout.preferredWidth: globalToggle.checked || kindBox.currentText === "software" ? 0 : 96
+                visible: Layout.preferredWidth > 0
+                placeholderText: "TID"
+                text: CortexDebugger.currentThreadId > 0 ? String(CortexDebugger.currentThreadId) : ""
+            }
             Button {
                 text: "Add"
                 enabled: CortexPayload.ready && CortexApp.mutationPermission && addressField.text.length > 0
-                onClicked: CortexDebugger.addBreakpoint(addressField.text, kindBox.currentText, actionBox.currentText)
+                onClicked: CortexDebugger.addBreakpoint(addressField.text, kindBox.currentText, actionBox.currentText,
+                                                         kindBox.currentText === "software" || globalToggle.checked,
+                                                         Number(threadField.text || 0))
             }
             Item { Layout.fillWidth: true }
         }
@@ -56,6 +76,7 @@ ColumnLayout {
             Label { Layout.preferredWidth: 140; text: "KIND"; color: Theme.textMuted; font.pixelSize: 10 }
             Label { Layout.preferredWidth: 90; text: "ACTION"; color: Theme.textMuted; font.pixelSize: 10 }
             Label { Layout.preferredWidth: 100; text: "HITS"; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { Layout.preferredWidth: 130; text: "THREAD COVERAGE"; color: Theme.textMuted; font.pixelSize: 10 }
             Item { Layout.fillWidth: true }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -81,6 +102,13 @@ ColumnLayout {
                 Text { Layout.preferredWidth: 140; text: modelData.kind; color: Theme.text; font.pixelSize: 10 }
                 Text { Layout.preferredWidth: 90; text: modelData.action; color: modelData.action === "pause" ? Theme.mutation : Theme.textMuted; font.pixelSize: 10 }
                 Text { Layout.preferredWidth: 100; text: modelData.hitCount; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10 }
+                Text {
+                    Layout.preferredWidth: 130
+                    text: modelData.kind === "software" ? "n/a" : (String(modelData.appliedThreads) + "/" + String(modelData.totalThreads) + (modelData.processGlobal ? " global" : " tid"))
+                    color: modelData.coverageComplete ? Theme.success : Theme.mutation
+                    font.family: Theme.monoFont
+                    font.pixelSize: 10
+                }
                 Item { Layout.fillWidth: true }
                 Button {
                     text: "Remove"
@@ -112,3 +140,4 @@ ColumnLayout {
         font.pixelSize: 10
     }
 }
+

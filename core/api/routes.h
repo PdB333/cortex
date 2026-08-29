@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "native_routes.h"
 #include <nlohmann/json.hpp>
 
@@ -7,6 +7,8 @@ namespace api {
 // Master tool manifest -- single source of truth for /tools, /openapi.json,
 // and the MCP tools/list dispatch. Defined in routes_status.cpp.
 nlohmann::json BuildToolsManifest();
+nlohmann::json BuildOpenApiDocument();
+bool ValidateApiContracts(nlohmann::json& report);
 
 void RegisterStatusRoutes(RouteRegistrar& svr);
 void RegisterModulesRoutes(RouteRegistrar& svr);
@@ -52,3 +54,4 @@ void RegisterOcrRoutes(RouteRegistrar& svr);
 namespace httplib { using RouteRegistrar = ::api::RouteRegistrar; }
 #define Server RouteRegistrar
 #endif
+

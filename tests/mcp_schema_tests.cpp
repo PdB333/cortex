@@ -1,4 +1,4 @@
-#include "../core/api/mcp_contract.h"
+﻿#include "../core/api/mcp_contract.h"
 
 #include <iostream>
 #include <string>
@@ -72,6 +72,27 @@ int main() {
           "struct_infer is observational unless define=true is requested");
     check(!api::mcp_contract::RequiresMutationPermission(structInferRisk),
           "plain struct inference does not require mutation permission");
+    const auto gameThreadRisk = api::mcp_contract::ClassifyTool(
+        "call_on_game_thread", "POST", "/call/game-thread");
+    check(gameThreadRisk == api::mcp_contract::ToolRisk::NativeCall,
+          "game-thread native calls are classified as native-call risk");
+    check(api::mcp_contract::RequiresMutationPermission(gameThreadRisk),
+          "game-thread native calls require explicit mutation permission");
+    const auto callStatusRisk = api::mcp_contract::ClassifyTool(
+        "call_game_thread_status", "GET", "/call/game-thread/status");
+    check(callStatusRisk == api::mcp_contract::ToolRisk::Observe,
+          "game-thread status remains observational");
+    const auto processGlobalSchema = api::mcp_contract::SchemaForProperty(
+        "process_global", "optional bool");
+    check(processGlobalSchema.value("type", std::string()) == "boolean",
+          "process_global is a boolean schema field");
+    const json typedRequired = {{"type","integer"},{"required",true},{"minimum",1}};
+    const auto typedRequiredSchema = api::mcp_contract::SchemaForProperty("thread_id", typedRequired);
+    check(typedRequiredSchema.value("type", std::string()) == "integer" &&
+          !typedRequiredSchema.contains("required"),
+          "typed manifest required marker is consumed instead of leaking into JSON Schema");
+    check(api::mcp_contract::IsRequiredSpec(typedRequired),
+          "typed manifest required marker contributes to the parent required array");
     const auto allocationSnapshotRisk = api::mcp_contract::ClassifyTool(
         "watch_allocations_events_snapshot", "GET", "/watch/allocations/events_snapshot");
     check(allocationSnapshotRisk == api::mcp_contract::ToolRisk::Observe,
@@ -94,3 +115,4 @@ int main() {
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;
 }
+

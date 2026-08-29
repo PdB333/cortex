@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "payload_controller.h"
 #include "services/debugger_service.h"
@@ -40,7 +40,9 @@ public:
     Q_INVOKABLE bool refreshRuntime();
     Q_INVOKABLE bool addBreakpoint(const QString& address,
                                    const QString& kind = QStringLiteral("software"),
-                                   const QString& action = QStringLiteral("pause"));
+                                   const QString& action = QStringLiteral("pause"),
+                                   bool processGlobal = true,
+                                   qulonglong threadId = 0);
     Q_INVOKABLE bool removeBreakpoint(int id);
     Q_INVOKABLE bool continueCurrent();
     Q_INVOKABLE bool stepCurrent(int timeoutMs = 2000);
@@ -72,3 +74,4 @@ private:
     QString instructionPointer_;
     QString lastError_;
 };
+

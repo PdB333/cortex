@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <MinHook.h>
 #include <cstdio>
 #include <atomic>
@@ -183,7 +183,11 @@ namespace {
         if (!g_shutdownState.compare_exchange_strong(expected, 1)) return expected == 2 ? 0 : 1;
         api::Stop();
         watch::Shutdown();
-        remotecall::Shutdown();
+        if (!remotecall::Shutdown()) {
+            dbglog::Line("shutdown refused: a native call is still executing on a target thread");
+            g_shutdownState = 0;
+            return 1;
+        }
         freeze::Shutdown();
         diagnostics::SharedChannelShutdown();
         diagnostics::HookRegistryShutdown();
@@ -234,3 +238,5 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     }
     return TRUE;
 }
+
+

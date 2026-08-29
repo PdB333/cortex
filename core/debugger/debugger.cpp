@@ -1,4 +1,4 @@
-#include "debugger.h"
+﻿#include "debugger.h"
 #include "../memory/memory.h"
 
 #include <tlhelp32.h>
@@ -84,6 +84,9 @@ struct HwEntry {
     std::optional<BpCondition> condition;
     std::vector<BpCapture> captures;
     std::optional<BpTriggerState> trigger;
+    bool processGlobal = true;
+    DWORD targetThreadId = 0;
+    std::set<DWORD> appliedThreads;
 };
 
 // State for a single thread of the *target* process while it is (or was)
@@ -116,7 +119,7 @@ std::map<DWORD, uintptr_t> g_pendingSwRestore;
 PVOID g_vehHandle = nullptr;
 std::atomic<bool> g_hwMonitorRunning{false};
 std::thread g_hwMonitorThread;
-std::set<DWORD> g_hwConfiguredThreads;
+std::atomic<DWORD> g_hwMonitorThreadId{0};
 
 void PruneRetiredSoftwareBreakpoints() {
     const ULONGLONG now = GetTickCount64();
@@ -565,6 +568,7 @@ private:
     int64_t ParseUnary(){if(Take("!"))return !ParseUnary();if(Take("-"))return-ParseUnary();return ParsePrimary();}
     int64_t ParsePrimary(){
         Skip();if(Take("(")){int64_t v=ParseOr();if(!Take(")"))throw std::runtime_error("missing )");return v;}
+        if(Take("[")){uintptr_t address=static_cast<uintptr_t>(ParseOr());if(!Take("]"))throw std::runtime_error("missing ]");std::vector<uint8_t>b;if(!memory::ReadBytes(address,1,b)||b.empty())return 0;return b[0];}
         if(pos_<source_.size()&&(std::isdigit(static_cast<unsigned char>(source_[pos_])))){
             size_t end=pos_;while(end<source_.size()&&(std::isalnum(static_cast<unsigned char>(source_[end]))||source_[end]=='x'||source_[end]=='X'))end++;
             std::string token=source_.substr(pos_,end-pos_);pos_=end;return std::stoll(token,nullptr,0);
@@ -838,32 +842,48 @@ bool ApplyHwEntriesToThread(DWORD tid, const std::vector<HwEntry>& entries) {
 }
 
 void HwThreadMonitor() {
+    const DWORD monitorTid = GetCurrentThreadId();
+    g_hwMonitorThreadId.store(monitorTid, std::memory_order_release);
+    struct ApplyJob { DWORD tid; std::vector<std::pair<int,HwEntry>> entries; };
     while (g_hwMonitorRunning.load()) {
         const auto tids = ListThreadIds();
-        std::set<DWORD> live(tids.begin(), tids.end());
-        std::vector<HwEntry> entries;
-        std::vector<DWORD> newThreads;
+        const std::set<DWORD> live(tids.begin(), tids.end());
+        std::vector<ApplyJob> jobs;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            for (auto it = g_hwConfiguredThreads.begin(); it != g_hwConfiguredThreads.end();) {
-                if (live.count(*it) == 0) it = g_hwConfiguredThreads.erase(it); else ++it;
+            for (auto& [id, entry] : g_hwBps) {
+                for (auto it = entry.appliedThreads.begin(); it != entry.appliedThreads.end();) {
+                    if (!live.count(*it)) it = entry.appliedThreads.erase(it); else ++it;
+                }
             }
-            if (!g_hwBps.empty()) {
-                for (const auto& [id, entry] : g_hwBps) entries.push_back(entry);
-                for (DWORD tid : tids) {
-                    if (tid != GetCurrentThreadId() && g_hwConfiguredThreads.count(tid) == 0)
-                        newThreads.push_back(tid);
+            for (DWORD tid : tids) {
+                if (tid == monitorTid) continue;
+                ApplyJob job{tid,{}};
+                for (const auto& [id, entry] : g_hwBps) {
+                    if (!entry.processGlobal && entry.targetThreadId != tid) continue;
+                    if (entry.appliedThreads.count(tid)) continue;
+                    job.entries.push_back({id,entry});
+                }
+                if (!job.entries.empty()) jobs.push_back(std::move(job));
+            }
+        }
+        for (const auto& job : jobs) {
+            std::vector<HwEntry> entries;
+            entries.reserve(job.entries.size());
+            for (const auto& item : job.entries) entries.push_back(item.second);
+            if (!ApplyHwEntriesToThread(job.tid, entries)) continue;
+            std::lock_guard<std::mutex> lock(g_mutex);
+            for (const auto& [id, snapshot] : job.entries) {
+                auto it = g_hwBps.find(id);
+                if (it != g_hwBps.end() && it->second.slot == snapshot.slot &&
+                    (it->second.processGlobal || it->second.targetThreadId == job.tid)) {
+                    it->second.appliedThreads.insert(job.tid);
                 }
             }
         }
-        for (DWORD tid : newThreads) {
-            if (ApplyHwEntriesToThread(tid, entries)) {
-                std::lock_guard<std::mutex> lock(g_mutex);
-                g_hwConfiguredThreads.insert(tid);
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    g_hwMonitorThreadId.store(0, std::memory_order_release);
 }
 
 } // namespace
@@ -937,7 +957,6 @@ bool Shutdown() {
     }
     g_hwBps.clear();
     for (bool& used : g_hwSlotUsed) used = false;
-    g_hwConfiguredThreads.clear();
     for (auto& [tid, ctl] : g_threadCtl) {
         if (ctl.resumeEvent) CloseHandle(ctl.resumeEvent);
         if (ctl.doneEvent) CloseHandle(ctl.doneEvent);
@@ -953,7 +972,8 @@ bool Shutdown() {
 }
 
 int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
-                  const BpCondition* condition, const std::vector<BpCapture>* captures) {
+                  const BpCondition* condition, const std::vector<BpCapture>* captures,
+                  bool processGlobal, DWORD threadId) {
     std::optional<BpCondition> cond = condition ? std::optional<BpCondition>(*condition) : std::nullopt;
     std::vector<BpCapture> caps = captures ? *captures : std::vector<BpCapture>{};
 
@@ -1003,17 +1023,37 @@ int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
     ULONG_PTR rw = (kind == BpKind::HwExecute) ? 0u : (kind == BpKind::HwWrite ? 1u : 3u);
     ULONG_PTR len = (effSize == 1) ? 0u : (effSize == 2 ? 1u : 3u);
 
+    if (!processGlobal) {
+        if (!threadId || threadId == g_hwMonitorThreadId.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_hwSlotUsed[slot] = false;
+            return -1;
+        }
+        const auto live = ListThreadIds();
+        if (std::find(live.begin(), live.end(), threadId) == live.end()) {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_hwSlotUsed[slot] = false;
+            return -1;
+        }
+    }
+
     int id;
-    HwEntry newEntry{address, effSize, kind, slot, action, 0, cond, caps};
+    HwEntry newEntry{address, effSize, kind, slot, action, 0, cond, caps, std::nullopt,
+                     processGlobal, processGlobal ? 0 : threadId, {}};
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         id = g_nextBpId++;
         g_hwBps[id] = newEntry;
     }
+    const DWORD currentTid = GetCurrentThreadId();
+    const DWORD monitorTid = g_hwMonitorThreadId.load(std::memory_order_acquire);
     for (DWORD tid : ListThreadIds()) {
+        if (tid == currentTid || tid == monitorTid) continue;
+        if (!processGlobal && tid != threadId) continue;
         if (ApplyHwEntriesToThread(tid, {newEntry})) {
             std::lock_guard<std::mutex> lock(g_mutex);
-            g_hwConfiguredThreads.insert(tid);
+            auto it = g_hwBps.find(id);
+            if (it != g_hwBps.end()) it->second.appliedThreads.insert(tid);
         }
     }
     return id;
@@ -1063,12 +1103,29 @@ bool RemoveBreakpoint(int id) {
 
 std::vector<BreakpointInfo> ListBreakpoints() {
     std::vector<BreakpointInfo> out;
+    const auto tids = ListThreadIds();
+    const std::set<DWORD> live(tids.begin(), tids.end());
+    const DWORD monitorTid = g_hwMonitorThreadId.load(std::memory_order_acquire);
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto& [id, e] : g_swBps) {
-        out.push_back(BreakpointInfo{id, BpKind::Software, e.address, 1, e.action, e.hitCount, e.condition.has_value()});
+        BreakpointInfo info{id, BpKind::Software, e.address, 1, e.action, e.hitCount, e.condition.has_value()};
+        info.processGlobal = true;
+        out.push_back(std::move(info));
     }
     for (auto& [id, e] : g_hwBps) {
-        out.push_back(BreakpointInfo{id, e.kind, e.address, e.size, e.action, e.hitCount, e.condition.has_value()});
+        BreakpointInfo info{id, e.kind, e.address, e.size, e.action, e.hitCount, e.condition.has_value()};
+        info.processGlobal = e.processGlobal;
+        info.targetThreadId = e.targetThreadId;
+        if (e.processGlobal) {
+            for (DWORD tid : live) if (tid != monitorTid) ++info.totalThreads;
+        } else if (live.count(e.targetThreadId)) {
+            info.totalThreads = 1;
+        }
+        for (DWORD tid : e.appliedThreads) {
+            if (!live.count(tid)) continue;
+            if (e.processGlobal || tid == e.targetThreadId) ++info.appliedThreads;
+        }
+        out.push_back(std::move(info));
     }
     return out;
 }
@@ -1334,3 +1391,7 @@ bool RemoveTrace(int id) {
 }
 
 } // namespace dbg
+
+
+
+

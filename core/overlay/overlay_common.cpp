@@ -1,10 +1,11 @@
-#include "overlay_common.h"
+﻿#include "overlay_common.h"
 #include "overlay.h"
 #include "../log.h"
 #include "../prompt/prompt_queue.h"
 #include "../hook/input_hook.h"
 #include "../hook/dinput_hook.h"
 #include "../debugger/debugger.h"
+#include "../call/call.h"
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -203,6 +204,7 @@ void CommonInitPost(HWND hwnd) {
 // capture wiring. Cortex Desktop owns presentation whenever its lease is
 // active, so no injected window is rendered in that state.
 void CommonFrameBegin() {
+    remotecall::PumpGameThread();
     const bool desktop = DesktopPresenterActive();
     const bool wantsCapture = WantsInputCapture();
     ImGuiIO& io = ImGui::GetIO();
@@ -262,3 +264,5 @@ HWND GetHwnd() {
 }
 
 } // namespace overlay
+
+

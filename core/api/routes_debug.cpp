@@ -1,4 +1,4 @@
-#include "routes.h"
+﻿#include "routes.h"
 #include "../process/address.h"
 #include "../debugger/debugger.h"
 #include "../overlay/overlay.h"
@@ -82,21 +82,48 @@ void RegisterDebugRoutes(httplib::Server& svr) {
             }
             int size = body.value("size", 4);
             bool pauseOnHit = body.value("action", std::string("pause")) == "pause";
+            const bool processGlobal = body.value("process_global", true);
+            const DWORD targetThreadId = body.value("thread_id", static_cast<DWORD>(0));
+            if (kind != dbg::BpKind::Software && !processGlobal && targetThreadId == 0) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", "thread_id_required_when_process_global_false"}}.dump(), "application/json");
+                return;
+            }
 
             dbg::BpCondition cond;
-            bool hasCondition = body.contains("condition");
-            if (hasCondition) {
+            bool hasCondition = body.contains("condition") || body.contains("if");
+            if (body.contains("if")) {
+                if (!body.at("if").is_string()) throw std::runtime_error("if_must_be_string");
+                cond.expression = body.at("if").get<std::string>();
+            } else if (body.contains("condition")) {
                 const auto& c = body.at("condition");
-                cond.expression = c.value("expression", std::string(""));
-                cond.source = c.value("source", std::string("register"));
-                cond.reg = c.value("register", std::string(""));
-                if (c.contains("address")) cond.address = ParseAddress(c.at("address"));
-                cond.size = c.value("size", 4);
-                cond.op = c.value("op", std::string("=="));
-                cond.value = c.value("value", static_cast<int64_t>(0));
+                if (c.is_string()) {
+                    cond.expression = c.get<std::string>();
+                } else if (c.is_object()) {
+                    cond.expression = c.value("expression", std::string(""));
+                    cond.source = c.value("source", std::string("register"));
+                    cond.reg = c.value("register", std::string(""));
+                    if (c.contains("address")) cond.address = ParseAddress(c.at("address"));
+                    cond.size = c.value("size", 4);
+                    cond.op = c.value("op", std::string("=="));
+                    cond.value = c.value("value", static_cast<int64_t>(0));
+                } else {
+                    throw std::runtime_error("condition_must_be_string_or_object");
+                }
             }
 
             std::vector<dbg::BpCapture> captures;
+            if (body.value("auto_capture", false)) {
+#ifdef _WIN64
+                captures.push_back({"this_object", "rcx", 64, "bytes"});
+                captures.push_back({"vtable", "[rcx]", 32, "bytes"});
+                captures.push_back({"stack_args", "rsp", 64, "bytes"});
+#else
+                captures.push_back({"this_object", "ecx", 64, "bytes"});
+                captures.push_back({"vtable", "[ecx]", 32, "bytes"});
+                captures.push_back({"stack_args", "esp", 64, "bytes"});
+#endif
+            }
             if (body.contains("capture") && body["capture"].is_array()) {
                 for (const auto& c : body["capture"]) {
                     dbg::BpCapture cap;
@@ -110,7 +137,8 @@ void RegisterDebugRoutes(httplib::Server& svr) {
 
             int id = dbg::AddBreakpoint(kind, address, size, pauseOnHit ? dbg::BpAction::Pause : dbg::BpAction::Log,
                                          hasCondition ? &cond : nullptr,
-                                         captures.empty() ? nullptr : &captures);
+                                         captures.empty() ? nullptr : &captures,
+                                         processGlobal, targetThreadId);
             if (id >= 0) action::Record("debug/breakpoint " + HexAddr(address), [id] { return dbg::RemoveBreakpoint(id); });
             json out;
             out["ok"] = id >= 0;
@@ -174,7 +202,10 @@ void RegisterDebugRoutes(httplib::Server& svr) {
         for (const auto& bp : dbg::ListBreakpoints()) {
             arr.push_back({{"id", bp.id}, {"kind", KindToStr(bp.kind)}, {"address", HexAddr(bp.address)},
                             {"size", bp.size}, {"action", bp.action == dbg::BpAction::Pause ? "pause" : "log"},
-                            {"hit_count", bp.hitCount}, {"has_condition", bp.hasCondition}});
+                            {"hit_count", bp.hitCount}, {"has_condition", bp.hasCondition},
+                            {"process_global", bp.processGlobal}, {"target_thread_id", bp.targetThreadId},
+                            {"applied_threads", bp.appliedThreads}, {"total_threads", bp.totalThreads},
+                            {"coverage_complete", bp.totalThreads == 0 || bp.appliedThreads >= bp.totalThreads}});
         }
         res.set_content(json{{"ok", true}, {"breakpoints", arr}}.dump(), "application/json");
         overlay::LogApiCall("GET /debug/breakpoint/list");
@@ -250,7 +281,7 @@ void RegisterDebugRoutes(httplib::Server& svr) {
         json arr = json::array();
         uint64_t nextSeq = sinceSeq;
         for (const auto& e : entries) {
-            json stack=json::array();for(uintptr_t frame:e.stack)stack.push_back(HexAddr(frame));
+            json stack=json::array(), stackNamed=json::array();for(uintptr_t frame:e.stack){stack.push_back(HexAddr(frame));stackNamed.push_back(process::DescribeAddress(frame));}
             std::ostringstream bytes;bytes<<std::hex<<std::setfill('0');for(uint8_t byte:e.bytes)bytes<<std::setw(2)<<static_cast<unsigned>(byte);
             json caps = json::array();
             for (const auto& c : e.captures) {
@@ -263,7 +294,8 @@ void RegisterDebugRoutes(httplib::Server& svr) {
             }
             arr.push_back({{"seq", e.seq}, {"thread_id", e.threadId},
                             {"timestamp_ms", e.timestampMs}, {"instruction",HexAddr(e.instruction)},
-                            {"bytes",bytes.str()},{"registers", RegsToJson(e.regs)},{"stack",stack},
+                            {"instruction_named",process::DescribeAddress(e.instruction)},
+                            {"bytes",bytes.str()},{"registers", RegsToJson(e.regs)},{"stack",stack},{"stack_named",stackNamed},
                             {"captures", caps}});
             if (e.seq >= nextSeq) nextSeq = e.seq + 1;
         }
@@ -314,3 +346,5 @@ void RegisterDebugRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
+

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -71,6 +71,10 @@ struct BreakpointInfo {
     BpAction action;
     uint64_t hitCount;
     bool hasCondition;
+    bool processGlobal = true;
+    DWORD targetThreadId = 0;
+    size_t appliedThreads = 0;
+    size_t totalThreads = 0;
 };
 
 struct PausedThread {
@@ -132,7 +136,9 @@ bool Shutdown();
 // hit; the hit is only counted/logged/paused when it passes.
 int AddBreakpoint(BpKind kind, uintptr_t address, int size, BpAction action,
                   const BpCondition* condition = nullptr,
-                  const std::vector<BpCapture>* captures = nullptr);
+                  const std::vector<BpCapture>* captures = nullptr,
+                  bool processGlobal = true,
+                  DWORD threadId = 0);
 bool RemoveBreakpoint(int id);
 std::vector<BreakpointInfo> ListBreakpoints();
 
@@ -194,3 +200,4 @@ bool GetTraceCoverage(int id, std::vector<std::pair<uintptr_t, uint64_t>>& out);
 bool RemoveTrace(int id);
 
 } // namespace dbg
+

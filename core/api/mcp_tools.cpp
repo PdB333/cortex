@@ -1,4 +1,4 @@
-#include "mcp_tools.h"
+﻿#include "mcp_tools.h"
 
 #include "routes.h"
 #include "native_routes.h"
@@ -69,6 +69,11 @@ void HandleNotification(const json& notification, const std::string& scope) {
 
 json ManifestEntryToMcpTool(const json& entry) {
     const std::string name = entry.value("name", std::string());
+    const auto risk = mcp_contract::ClassifyTool(
+        name,
+        entry.value("method", std::string("GET")),
+        entry.value("path", std::string()));
+    const std::string mutationWhen = entry.value("mutation_permission_when", std::string());
     json properties = json::object();
     json required = json::array();
 
@@ -104,19 +109,20 @@ json ManifestEntryToMcpTool(const json& entry) {
         };
         required.push_back("_path");
     }
+    if (mcp_contract::RequiresMutationPermission(risk) || !mutationWhen.empty()) {
+        properties["mutation_permission"] = {{"type", "boolean"},
+            {"description", mutationWhen.empty() ? "Required explicit permission for this mutating/control/native operation."
+                                                 : "Required when " + mutationWhen + "."}};
+        if (mcp_contract::RequiresMutationPermission(risk)) required.push_back("mutation_permission");
+    }
 
     json schema = {{"type", "object"}, {"properties", std::move(properties)}};
     if (!required.empty()) schema["required"] = std::move(required);
 
-    const auto risk = mcp_contract::ClassifyTool(
-        name,
-        entry.value("method", std::string("GET")),
-        entry.value("path", std::string()));
     json cortexMetadata = {
         {"risk", mcp_contract::RiskName(risk)},
         {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}
     };
-    const std::string mutationWhen = entry.value("mutation_permission_when", std::string());
     if (!mutationWhen.empty()) cortexMetadata["mutation_permission_when"] = mutationWhen;
 
     return {
@@ -588,3 +594,4 @@ mcp_protocol::Result Handle(const json& input,
 }
 
 } // namespace api::mcp_tools
+
