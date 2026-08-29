@@ -2,6 +2,7 @@
 
 #include <httplib.h>
 
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <utility>
@@ -79,4 +80,5 @@ private:
 };
 
 } // namespace api
+
 

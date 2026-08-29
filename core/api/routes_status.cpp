@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 using json = nlohmann::json;
@@ -763,6 +764,7 @@ void RegisterStatusRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
 
 
 

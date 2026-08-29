@@ -5,7 +5,9 @@
 #include "../action/action.h"
 
 #include <nlohmann/json.hpp>
+#include <windows.h>
 #include <sstream>
+#include <stdexcept>
 
 using json = nlohmann::json;
 
@@ -173,3 +175,4 @@ void RegisterCallRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
