@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -58,6 +58,7 @@ Rectangle {
             Layout.fillHeight: true
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
                            : CortexApp.selectedSection === "Project" ? projectComponent
+                           : CortexApp.selectedSection === "RE" ? reComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
                            : CortexApp.selectedSection === "Scanner" ? scannerComponent
                            : CortexApp.selectedSection === "Pointers" ? pointersComponent
@@ -87,6 +88,7 @@ Rectangle {
 
     Component { id: overviewComponent; OverviewView {} }
     Component { id: projectComponent; ProjectView {} }
+    Component { id: reComponent; ReView {} }
     Component { id: memoryComponent; MemoryView {} }
     Component { id: scannerComponent; ScannerView {} }
     Component { id: pointersComponent; PointerMapsView {} }
@@ -112,3 +114,4 @@ Rectangle {
     Component { id: sessionsComponent; SessionsView {} }
     Component { id: genericComponent; GenericToolView {} }
 }
+

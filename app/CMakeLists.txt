@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+﻿cmake_minimum_required(VERSION 3.21)
 project(cortex_app LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -102,6 +102,7 @@ qt_add_qml_module(cortex
         qml/components/Workspace.qml
         qml/components/OverviewView.qml
         qml/components/ProjectView.qml
+        qml/components/ReView.qml
         qml/components/PatchesView.qml
         qml/components/SnapshotsView.qml
         qml/components/MemoryView.qml
@@ -151,3 +152,4 @@ set_target_properties(cortex PROPERTIES
     OUTPUT_NAME "cortex"
     MACOSX_BUNDLE TRUE
 )
+

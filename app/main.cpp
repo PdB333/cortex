@@ -1,4 +1,4 @@
-#include "app_controller.h"
+﻿#include "app_controller.h"
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
 #include "feature_controller.h"
@@ -6,6 +6,7 @@
 #include "payload_controller.h"
 #include "prompt_controller.h"
 #include "runtime_controller.h"
+#include "re_controller.h"
 #include "startup_diagnostics.h"
 
 #include <QColor>
@@ -283,6 +284,7 @@ int main(int argc, char* argv[]) {
     PromptController prompt(payload);
     RuntimeController runtime(payload, [&controller] { return controller.mutationPermission(); });
     FeatureController features(payload, [&controller] { return controller.mutationPermission(); });
+    ReController re(payload, [&controller] { return controller.mutationPermission(); });
     DisassemblyController disassembly(controller.sessionManager(), payload);
     DebuggerController debugger(controller.sessionManager(), payload,
                                 [&controller] { return controller.mutationPermission(); });
@@ -291,6 +293,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(&controller, &AppController::sessionChanged, &prompt, &PromptController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &runtime, &RuntimeController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &features, &FeatureController::reset);
+    QObject::connect(&controller, &AppController::sessionChanged, &re, &ReController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
     QObject::connect(&controller, &AppController::sessionChanged, &debugger, &DebuggerController::clear);
 
@@ -301,6 +304,7 @@ int main(int argc, char* argv[]) {
     engine.rootContext()->setContextProperty("CortexPrompt", &prompt);
     engine.rootContext()->setContextProperty("CortexRuntime", &runtime);
     engine.rootContext()->setContextProperty("CortexFeatures", &features);
+    engine.rootContext()->setContextProperty("CortexRe", &re);
     engine.rootContext()->setContextProperty("CortexDisasm", &disassembly);
     engine.rootContext()->setContextProperty("CortexDebugger", &debugger);
     LoadMainQml(engine);
@@ -321,3 +325,4 @@ int main(int argc, char* argv[]) {
     if (smokeTest) QTimer::singleShot(750, &app, &QCoreApplication::quit);
     return app.exec();
 }
+

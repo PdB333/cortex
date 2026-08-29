@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -20,6 +20,7 @@ Popup {
         { label: "Safety: Toggle mutation permission", action: "mutation" },
         { label: "View: Overview", section: "Overview", action: "view" },
         { label: "View: Project", section: "Project", action: "view" },
+        { label: "View: RE", section: "RE", action: "view" },
         { label: "View: Memory", section: "Memory", action: "view" },
         { label: "View: Scanner", section: "Scanner", action: "view" },
         { label: "View: Pointers", section: "Pointers", action: "view" },
@@ -163,3 +164,5 @@ Popup {
         }
     }
 }
+
+

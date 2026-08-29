@@ -58,6 +58,13 @@ json ResultJson(const remotecall::CallResult& result) {
     if (result.ok) {
         out["return_value"] = HexAddr(static_cast<uintptr_t>(result.returnValue));
         out["return_value_u64"] = result.returnValue;
+#ifdef _WIN64
+        out["rax"] = HexAddr(static_cast<uintptr_t>(result.returnValue));
+        out["return_register"] = "rax";
+#else
+        out["eax"] = HexAddr(static_cast<uintptr_t>(result.returnValue));
+        out["return_register"] = "eax";
+#endif
     } else {
         out["error"] = result.error.empty() ? "native_call_failed" : result.error;
         if (result.exceptionCode) {
@@ -175,4 +182,5 @@ void RegisterCallRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
 

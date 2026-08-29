@@ -1,15 +1,17 @@
-#include "ghidra.h"
+﻿#include "ghidra.h"
 #include "../config.h"
 #include "../debugger/debugger.h"
 #include "../process/modules.h"
 #include "../project/project.h"
 #include "../struct/structs.h"
+#include "../re/re_tools.h"
 
 #include <windows.h>
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <sstream>
+#include <set>
 
 using json = nlohmann::json;
 
@@ -48,13 +50,50 @@ data = json.load(open(f.absolutePath, "r"))
 image = currentProgram.getImageBase().getOffset()
 runtime_main = int(data["modules"][0]["base"], 0) if data.get("modules") else image
 
+def runtime_addr(value):
+    runtime = int(value, 0) if isinstance(value, basestring) else int(value)
+    return toAddr(image + runtime - runtime_main)
+
+def safe_label(name):
+    return "".join(c if c.isalnum() or c == '_' else '_' for c in name)
+
 for item in data.get("addresses", []):
-    runtime = int(item["address"], 0)
-    addr = toAddr(image + runtime - runtime_main)
-    name = item.get("name", "cortex_%x" % runtime)
-    createLabel(addr, name, True, SourceType.USER_DEFINED)
-    if item.get("notes"):
-        setEOLComment(addr, item["notes"])
+    addr = runtime_addr(item["address"])
+    createLabel(addr, safe_label(item.get("name", "cortex_runtime")), True, SourceType.USER_DEFINED)
+    note = item.get("notes", "")
+    if note:
+        setEOLComment(addr, note)
+
+# Runtime-discovered C++ subobjects/vtables become labels/comments so a track
+# made in Cortex remains understandable in the static database.
+for obj in data.get("tracked_objects", []):
+    obj_name = safe_label(obj.get("name", "tracked_object"))
+    if obj.get("address"):
+        try:
+            setEOLComment(runtime_addr(obj["address"]), "Cortex tracked object: %s" % obj_name)
+        except Exception:
+            pass
+    for sub in obj.get("subobjects", []):
+        try:
+            off = int(sub.get("offset", 0))
+            vt = runtime_addr(sub["vtable"])
+            createLabel(vt, "%s_sub_%X_vtable" % (obj_name, off), True, SourceType.USER_DEFINED)
+            setEOLComment(vt, "Cortex runtime vtable; subobject +0x%X, this-adjust %s" % (off, sub.get("this_adjust", 0)))
+        except Exception:
+            pass
+
+# Observed runtime call edges are kept as comments on the caller/callee. This
+# does not invent a static reference when Ghidra cannot prove one.
+for edge in data.get("runtime_xrefs", []):
+    try:
+        src = runtime_addr(edge["from"])
+        dst_name = edge.get("to_name", edge.get("to", "?"))
+        old = getEOLComment(src) or ""
+        line = "Cortex observed call -> %s" % dst_name
+        if line not in old:
+            setEOLComment(src, (old + "\n" + line).strip())
+    except Exception:
+        pass
 
 dtm = currentProgram.getDataTypeManager()
 for item in data.get("structs", []):
@@ -66,11 +105,12 @@ for item in data.get("structs", []):
             struct.add(ByteDataType.dataType, 1, None, None); cursor += 1
         typ = field.get("type", "bytes")
         dt = PointerDataType.dataType if typ in ("pointer", "vtable") else FloatDataType.dataType if typ == "float" else IntegerDataType.dataType
-        struct.add(dt, dt.getLength(), field["name"], "Cortex inferred")
+        struct.add(dt, dt.getLength(), field["name"], "Cortex runtime/project type")
         cursor += dt.getLength()
     dtm.addDataType(struct, None)
 
-print("Cortex import complete: %d addresses, %d structures" % (len(data.get("addresses", [])), len(data.get("structs", []))))
+print("Cortex import complete: %d addresses, %d structures, %d tracked objects, %d runtime xrefs" %
+      (len(data.get("addresses", [])), len(data.get("structs", [])), len(data.get("tracked_objects", [])), len(data.get("runtime_xrefs", []))))
 )PY";
 
 } // namespace
@@ -113,26 +153,79 @@ bool ExportRuntime(const std::string& requestedName, std::string& jsonPath, std:
         traces.push_back({{"id",info.id},{"thread_id",info.threadId},{"coverage",hits}});
     }
 
-    json document{{"schema_version",1},{"exported_ms",GetTickCount64()},{"pointer_size",sizeof(uintptr_t)},
+    json trackedObjects = json::array();
+    const json trackList = retools::ListTracks();
+    for (const auto& row : trackList.value("tracks",json::array())) {
+        json snapshot = retools::GetTrack(row.value("id",0));
+        if (snapshot.value("ok",false)) trackedObjects.push_back(std::move(snapshot));
+    }
+
+    json runtimeXrefs = json::array();
+    std::set<std::pair<uintptr_t,uintptr_t>> seenXrefs;
+    for (const auto& bp : dbg::ListBreakpoints()) {
+        std::vector<dbg::BpLogEntry> entries; uint64_t dropped=0,total=0;
+        if (!dbg::GetBreakpointLogPaged(bp.id,0,0,entries,dropped,total)) continue;
+        for (const auto& hit : entries) {
+            if (hit.stack.empty()) continue;
+            const uintptr_t caller=hit.stack.front(), callee=hit.instruction;
+            if (!seenXrefs.insert({caller,callee}).second) continue;
+            runtimeXrefs.push_back({{"from",Hex(caller)},{"from_name",process::DescribeAddress(caller)},
+                                    {"to",Hex(callee)},{"to_name",process::DescribeAddress(callee)},
+                                    {"kind","observed_callstack"}});
+        }
+    }
+    json document{{"schema_version",2},{"exported_ms",GetTickCount64()},{"pointer_size",sizeof(uintptr_t)},
                   {"modules",modules},{"addresses",addresses},{"pointer_paths",projectData.value("pointer_paths",json::object())},
-                  {"structs",definitions},{"traces",traces}};
+                  {"structs",definitions},{"traces",traces},{"re_facts",project::GetReFacts()},
+                  {"tracked_objects",trackedObjects},{"runtime_xrefs",runtimeXrefs}};
     if (!Write(jsonPath, document.dump(2))) { error = "export_write_failed"; return false; }
     if (!Write(scriptPath, ImportScript)) { error = "script_write_failed"; return false; }
     return true;
 }
 
 bool ImportAnnotations(const json& document, size_t& imported, std::string& error) {
-    if (!document.is_object() || !document.contains("addresses") || !document["addresses"].is_array()) {
-        error = "addresses_array_required"; return false;
-    }
+    if (!document.is_object()) { error = "document_object_required"; return false; }
     imported = 0;
-    for (const auto& item : document["addresses"]) {
-        try {
-            if (project::SetAddress(item.at("name").get<std::string>(), Address(item.at("address")),
-                                    item.value("type",std::string()), item.value("notes",std::string()))) imported++;
-        } catch (...) { /* keep importing independent annotations */ }
+    auto importAddressArray = [&](const json& rows, const std::string& defaultType) {
+        if (!rows.is_array()) return;
+        for (const auto& item : rows) {
+            try {
+                const std::string name=item.at("name").get<std::string>();
+                const std::string notes=item.value("notes",item.value("comment",std::string()));
+                const std::string type=item.value("type",defaultType);
+                if (project::SetAddress(name,Address(item.at("address")),type,notes)) ++imported;
+            } catch (...) {}
+        }
+    };
+    if (document.contains("addresses")) importAddressArray(document["addresses"], "");
+    if (document.contains("symbols")) importAddressArray(document["symbols"], "symbol");
+    if (document.contains("vtables")) importAddressArray(document["vtables"], "vtable");
+
+    if (document.contains("structs") && document["structs"].is_array()) {
+        for (const auto& item : document["structs"]) {
+            try {
+                std::vector<structs::Field> fields;
+                for (const auto& field : item.value("fields",json::array()))
+                    fields.push_back({field.at("name").get<std::string>(),field.at("offset").get<int64_t>(),
+                                      field.value("type",std::string("bytes")),field.value("count",0)});
+                if (structs::Define(item.at("name").get<std::string>(),fields)) ++imported;
+            } catch (...) {}
+        }
+    }
+    if (document.contains("re_facts") && document["re_facts"].is_object()) {
+        for (auto it=document["re_facts"].begin();it!=document["re_facts"].end();++it)
+            if (project::SetReFact(it.key(),it.value())) ++imported;
+    }
+    if (document.contains("xrefs") && document["xrefs"].is_array()) {
+        project::SetReFact("ghidra.xrefs",document["xrefs"]); ++imported;
+    }
+    if (imported==0 && !document.contains("addresses") && !document.contains("symbols") &&
+        !document.contains("vtables") && !document.contains("structs") && !document.contains("re_facts")) {
+        error="addresses_symbols_vtables_structs_or_re_facts_required"; return false;
     }
     return true;
 }
 
 } // namespace ghidra
+
+

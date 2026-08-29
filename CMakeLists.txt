@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(cortex LANGUAGES C CXX)
 
 include(CTest)
@@ -216,6 +216,7 @@ set(CORTEX_API_ROUTE_SOURCES
     core/api/routes_mcp.cpp
     core/api/routes_lua.cpp
     core/api/routes_ocr.cpp
+    core/api/routes_re.cpp
 )
 set_source_files_properties(${CORTEX_API_ROUTE_SOURCES} PROPERTIES
     COMPILE_DEFINITIONS "CORTEX_ROUTE_REGISTRAR")
@@ -251,6 +252,7 @@ add_library(core SHARED
     core/timeline/timeline.cpp
     core/call/call.cpp
     core/watch/watch.cpp
+    core/re/re_tools.cpp
     core/watch/alloc_watch.cpp
     core/watch/page_watch.cpp
     core/analysis/analysis.cpp

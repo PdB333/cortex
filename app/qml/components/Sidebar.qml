@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import Cortex 1.0
 
@@ -10,6 +10,7 @@ Rectangle {
         id: navigation
         ListElement { group: "TARGET"; label: "Overview" }
         ListElement { group: "TARGET"; label: "Project" }
+        ListElement { group: "TARGET"; label: "RE" }
         ListElement { group: "INSPECT"; label: "Memory" }
         ListElement { group: "INSPECT"; label: "Scanner" }
         ListElement { group: "INSPECT"; label: "Pointers" }
@@ -108,3 +109,4 @@ Rectangle {
         color: Theme.border
     }
 }
+

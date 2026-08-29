@@ -1,4 +1,4 @@
-#include "routes.h"
+﻿#include "routes.h"
 #include "../capture/capture.h"
 #include "../config.h"
 #include "../debugger/debugger.h"
@@ -64,6 +64,97 @@ bool WriteBinary(const std::string& path, const std::vector<uint8_t>& data) {
     return f.good();
 }
 
+std::string SessionRoot() { return config::GetModuleDir() + "\\cortex_sessions"; }
+
+bool SafeSessionId(const std::string& id) {
+    if (id.size() < 9 || id.rfind("session_", 0) != 0) return false;
+    for (unsigned char c : id) if (!std::isalnum(c) && c != '_' && c != '-') return false;
+    return true;
+}
+
+std::string SessionJsonPath(const std::string& id) {
+    return SafeSessionId(id) ? SessionRoot() + "\\" + id + "\\session.json" : std::string();
+}
+
+bool ReadJsonFile(const std::string& path, json& out) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    try { f >> out; return out.is_object(); } catch (...) { return false; }
+}
+
+std::vector<std::string> ListSessionIds() {
+    std::vector<std::string> ids;
+    WIN32_FIND_DATAA fd{};
+    HANDLE h = FindFirstFileA((SessionRoot() + "\\session_*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return ids;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && SafeSessionId(fd.cFileName)) ids.push_back(fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(ids.rbegin(), ids.rend());
+    return ids;
+}
+
+std::set<std::string> ExecutedFunctions(const json& session) {
+    std::set<std::string> out;
+    for (const auto& bp : session.value("breakpoints", json::array())) {
+        if (bp.value("hit_count", uint64_t{0}) > 0) out.insert(bp.value("address_named", bp.value("address", std::string())));
+        for (const auto& hit : bp.value("log", json::array())) out.insert(hit.value("instruction_named", hit.value("instruction", std::string())));
+    }
+    for (const auto& event : session.value("execution_sequence", json::array())) out.insert(event.value("instruction_named",event.value("instruction",std::string())));
+    for (const auto& trace : session.value("traces",json::array())) for(const auto& hit:trace.value("coverage",json::array())) out.insert(hit.value("address_named",hit.value("address",std::string())));
+    return out;
+}
+
+json SetDifference(const std::set<std::string>& a, const std::set<std::string>& b) {
+    json out = json::array();
+    for (const auto& value : a) if (!b.count(value)) out.push_back(value);
+    return out;
+}
+
+json DiffSessions(const json& a, const json& b) {
+    const auto funcsA = ExecutedFunctions(a), funcsB = ExecutedFunctions(b);
+    json result{{"ok",true},
+                {"functions",{{"only_a",SetDifference(funcsA,funcsB)},{"only_b",SetDifference(funcsB,funcsA)},
+                               {"count_a",funcsA.size()},{"count_b",funcsB.size()}}},
+                {"network",{{"count_a",a.value("network",json::array()).size()},
+                             {"count_b",b.value("network",json::array()).size()}}},
+                {"allocations",{{"count_a",a.value("allocations",json::array()).size()},
+                                 {"count_b",b.value("allocations",json::array()).size()}}}};
+    const json seqA = a.value("execution_sequence", json::array());
+    const json seqB = b.value("execution_sequence", json::array());
+    json order = json::array();
+    const size_t common = std::min(seqA.size(), seqB.size());
+    for (size_t i=0;i<common && order.size()<256;++i) {
+        const std::string aa=seqA[i].value("instruction_named",seqA[i].value("instruction",std::string()));
+        const std::string bb=seqB[i].value("instruction_named",seqB[i].value("instruction",std::string()));
+        if(aa!=bb) order.push_back({{"index",i},{"a",aa},{"b",bb}});
+    }
+    result["functions"]["order_differences"] = std::move(order);
+
+    std::map<std::string,json> objectsA, objectsB;
+    for(const auto& o:a.value("tracked_objects",json::array())) objectsA[o.value("name",std::string())]=o;
+    for(const auto& o:b.value("tracked_objects",json::array())) objectsB[o.value("name",std::string())]=o;
+    json objectDiffs=json::array();
+    std::set<std::string> names; for(const auto&[n,v]:objectsA)names.insert(n);for(const auto&[n,v]:objectsB)names.insert(n);
+    for(const auto& name:names){
+        const auto ia=objectsA.find(name), ib=objectsB.find(name);
+        if(ia==objectsA.end()){objectDiffs.push_back({{"name",name},{"state","only_b"}});continue;}
+        if(ib==objectsB.end()){objectDiffs.push_back({{"name",name},{"state","only_a"}});continue;}
+        const json& oa=ia->second; const json& ob=ib->second;
+        if(oa.value("hex",std::string())!=ob.value("hex",std::string()) || oa.value("address",std::string())!=ob.value("address",std::string()) || oa.value("alive",false)!=ob.value("alive",false))
+            objectDiffs.push_back({{"name",name},{"state","changed"},{"address_a",oa.value("address",std::string())},{"address_b",ob.value("address",std::string())},
+                                   {"alive_a",oa.value("alive",false)},{"alive_b",ob.value("alive",false)},
+                                   {"subobjects_a",oa.value("subobjects",json::array())},{"subobjects_b",ob.value("subobjects",json::array())}});
+    }
+    result["objects"] = std::move(objectDiffs);
+    auto networkSignatures=[](const json& session){std::set<std::string> out;for(const auto& e:session.value("network",json::array()))out.insert(e.value("direction",std::string())+":"+std::to_string(e.value("size",0u))+":"+e.value("generated_by_named",std::string()));return out;};
+    auto allocationSignatures=[](const json& session){std::set<std::string> out;for(const auto& e:session.value("allocations",json::array()))out.insert(e.value("api",std::string())+":"+std::to_string(e.value("size",0ull)));return out;};
+    const auto netA=networkSignatures(a),netB=networkSignatures(b),allocA=allocationSignatures(a),allocB=allocationSignatures(b);
+    result["network"]["only_a"] = SetDifference(netA,netB); result["network"]["only_b"] = SetDifference(netB,netA);
+    result["allocations"]["only_a"] = SetDifference(allocA,allocB); result["allocations"]["only_b"] = SetDifference(allocB,allocA);
+    return result;
+}
 } // namespace
 
 void RegisterSessionRoutes(httplib::Server& svr) {
@@ -74,9 +165,10 @@ void RegisterSessionRoutes(httplib::Server& svr) {
     //   screenshot.png - best-effort mode=auto capture at export time.
     // The folder path is returned so the caller can zip / copy it out.
     svr.Post("/session/export", [](const httplib::Request&, httplib::Response& res) {
-        std::string root = config::GetModuleDir() + "\\cortex_sessions";
+        std::string root = SessionRoot();
         CreateDirectoryA(root.c_str(), nullptr);
-        std::string dir = root + "\\session_" + TimestampSlug();
+        const std::string sessionId = "session_" + TimestampSlug();
+        std::string dir = root + "\\" + sessionId;
         if (!CreateDirectoryA(dir.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS) {
             res.status = 500;
             res.set_content(json{{"ok", false}, {"error", "create_dir_failed"}}.dump(), "application/json");
@@ -129,19 +221,66 @@ void RegisterSessionRoutes(httplib::Server& svr) {
             e["log_total"] = total;
             bps.push_back(e);
         }
-        out["breakpoints"] = std::move(bps);
+        out["breakpoints"] = bps;
+        json sequence = json::array();
+        for (const auto& bp : bps) for (const auto& hit : bp.value("log", json::array()))
+            sequence.push_back({{"timestamp_ms",hit.value("timestamp_ms",uint64_t{0})},
+                                {"instruction",hit.value("instruction",std::string())},
+                                {"instruction_named",hit.value("instruction_named",std::string())},
+                                {"thread_id",hit.value("thread_id",uint32_t{0})}});
+        std::vector<json> ordered; for (auto& event : sequence) ordered.push_back(event);
+        std::stable_sort(ordered.begin(), ordered.end(), [](const json& a,const json& b){return a.value("timestamp_ms",0ull)<b.value("timestamp_ms",0ull);});
+        out["execution_sequence"] = ordered;
 
-        // Traces metadata (event data can be huge; caller can /trace/events).
+        // Traces: keep coverage and a bounded execution sequence so two saved
+        // runs can be compared without requiring the live trace objects later.
         json tr = json::array();
         for (const auto& t : dbg::ListTraces()) {
+            json coverage=json::array();std::vector<std::pair<uintptr_t,uint64_t>> cov;
+            if(dbg::GetTraceCoverage(t.id,cov)) for(const auto& h:cov) coverage.push_back({{"address",HexAddr(h.first)},{"address_named",process::DescribeAddress(h.first)},{"hits",h.second}});
+            json traceEvents=json::array();size_t offset=0,totalEvents=0;
+            while(traceEvents.size()<5000){std::vector<dbg::TraceEvent> chunk;if(!dbg::GetTraceEvents(t.id,offset,500,chunk,totalEvents)||chunk.empty())break;for(const auto&e:chunk){json row{{"timestamp_ms",e.timestampMs},{"thread_id",e.threadId},{"instruction",HexAddr(e.instruction)},{"instruction_named",process::DescribeAddress(e.instruction)}};traceEvents.push_back(row);out["execution_sequence"].push_back(row);if(traceEvents.size()>=5000)break;}offset+=chunk.size();if(offset>=totalEvents)break;}
             tr.push_back({{"id", t.id}, {"thread_id", t.threadId}, {"active", t.active},
-                           {"stop_reason", t.stopReason}, {"steps", t.steps},
-                           {"event_count", (uint64_t)t.eventCount}, {"truncated", t.truncated}});
+                           {"stop_reason", t.stopReason}, {"steps", t.steps}, {"event_count", (uint64_t)t.eventCount},
+                           {"truncated", t.truncated || totalEvents>traceEvents.size()},{"coverage",coverage},{"events",traceEvents}});
         }
         out["traces"] = std::move(tr);
+        std::vector<json> finalSequence;for(auto&e:out["execution_sequence"])finalSequence.push_back(e);
+        std::stable_sort(finalSequence.begin(),finalSequence.end(),[](const json&a,const json&b){return a.value("timestamp_ms",0ull)<b.value("timestamp_ms",0ull);});
+        out["execution_sequence"] = finalSequence;
 
-        // Project (named addresses, pointer paths, notes).
+        // Project and persistent RE knowledge.
         out["project"] = project::GetAll();
+        json tracked = json::array();
+        const json trackList = retools::ListTracks();
+        for (const auto& row : trackList.value("tracks",json::array())) {
+            json snapshot = retools::GetTrack(row.value("id",0));
+            if (snapshot.value("ok",false)) tracked.push_back(std::move(snapshot));
+        }
+        out["tracked_objects"] = std::move(tracked);
+
+        json network = json::array();
+        auto netEvents = nethook::Snapshot(512);
+        std::reverse(netEvents.begin(), netEvents.end());
+        for (const auto& e : netEvents) {
+            json stack=json::array(), stackNamed=json::array();
+            for(uintptr_t frame:e.stack){stack.push_back(HexAddr(frame));stackNamed.push_back(process::DescribeAddress(frame));}
+            json row{{"id",e.id},{"timestamp_ms",e.tickMs},{"direction",e.direction==0?"recv":"send"},
+                     {"socket",e.socket},{"size",e.size},{"preview_hex",e.previewHex},{"thread_id",e.threadId},
+                     {"stack",stack},{"stack_named",stackNamed}};
+            if(!e.stack.empty()){
+                row["generated_by"]=HexAddr(e.stack[0]);row["generated_by_named"]=process::DescribeAddress(e.stack[0]);
+                if(e.stack.size()>1){row["caller"]=HexAddr(e.stack[1]);row["caller_named"]=process::DescribeAddress(e.stack[1]);}
+            }
+            network.push_back(std::move(row));
+        }
+        out["network"] = std::move(network);
+
+        json allocations = json::array();
+        for (const auto& e : watch::SnapshotAllocEvents()) allocations.push_back({{"timestamp_ms",e.timestamp_ms},{"api",e.api},
+                                                                                  {"address",HexAddr(e.address)},{"size",e.size},
+                                                                                  {"flags",e.protect_or_flags}});
+        out["allocations"] = std::move(allocations);
 
         WriteFile(dir + "\\session.json", out.dump(2));
 
@@ -151,9 +290,28 @@ void RegisterSessionRoutes(httplib::Server& svr) {
             WriteBinary(dir + "\\screenshot.png", png);
         }
 
-        res.set_content(json{{"ok", true}, {"path", dir}}.dump(), "application/json");
+        res.set_content(json{{"ok", true}, {"id", sessionId}, {"path", dir}}.dump(), "application/json");
         overlay::LogApiCall("POST /session/export");
+    });
+    svr.Get("/session/list", [](const httplib::Request&, httplib::Response& res) {
+        json rows=json::array();
+        for(const auto& id:ListSessionIds()){json doc;const bool ok=ReadJsonFile(SessionJsonPath(id),doc);rows.push_back({{"id",id},{"readable",ok},{"pid",ok?doc.value("pid",0u):0u},{"exported_at_ms",ok?doc.value("exported_at_ms",0ull):0ull}});}
+        res.set_content(json{{"ok",true},{"sessions",rows}}.dump(),"application/json");
+    });
+
+    svr.Post("/session/diff", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json body=json::parse(req.body.empty()?"{}":req.body);
+            const std::string a=body.at("a").get<std::string>(), b=body.at("b").get<std::string>();
+            const std::string pa=SessionJsonPath(a), pb=SessionJsonPath(b); json da,db;
+            if(pa.empty()||pb.empty()||!ReadJsonFile(pa,da)||!ReadJsonFile(pb,db)){res.status=404;res.set_content(json{{"ok",false},{"error","session_not_found_or_unreadable"}}.dump(),"application/json");return;}
+            json diff=DiffSessions(da,db);diff["a"]=a;diff["b"]=b;res.set_content(diff.dump(),"application/json");
+        } catch(const std::exception& e){res.status=400;res.set_content(json{{"ok",false},{"error",e.what()}}.dump(),"application/json");}
     });
 }
 
 } // namespace api
+
+
+
+

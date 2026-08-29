@@ -71,7 +71,21 @@ jobs:
 
       - name: Build Cortex
         shell: msys2 {0}
-        run: cmake --build build/p2-${{ matrix.arch }} --parallel 2
+        run: |
+          set +e
+          log="build/p2-${{ matrix.arch }}/compile.log"
+          cmake --build "build/p2-${{ matrix.arch }}" --parallel 2 >"$log" 2>&1
+          rc=$?
+          tail -n 250 "$log" || true
+          exit $rc
+
+      - name: Upload compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-compile-${{ matrix.arch }}
+          path: build/p2-${{ matrix.arch }}/compile.log
+          if-no-files-found: warn
 
       - name: Run core tests
         shell: msys2 {0}
@@ -143,4 +157,5 @@ jobs:
           -o build/p2-${{ matrix.arch }}/pagination_tests.exe
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/pagination_tests.exe
+
 

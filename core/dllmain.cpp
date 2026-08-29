@@ -35,6 +35,7 @@
 #include "struct/structs.h"
 #include "call/call.h"
 #include "watch/watch.h"
+#include "re/re_tools.h"
 
 namespace {
     HMODULE g_hModule = nullptr;
@@ -167,6 +168,9 @@ namespace {
         watch::Init();
         dbglog::Line("watch::Init done");
 
+        retools::Init();
+        dbglog::Line("retools::Init done");
+
         if (api::Start(cfg.port, cfg.api_token)) {
             printf("[Cortex] API listening on http://127.0.0.1:%d\n", cfg.port);
             dbglog::Line("api::Start done, port=%d", cfg.port);
@@ -182,6 +186,7 @@ namespace {
         int expected = 0;
         if (!g_shutdownState.compare_exchange_strong(expected, 1)) return expected == 2 ? 0 : 1;
         api::Stop();
+        retools::Shutdown();
         watch::Shutdown();
         if (!remotecall::Shutdown()) {
             dbglog::Line("shutdown refused: a native call is still executing on a target thread");
@@ -238,5 +243,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     }
     return TRUE;
 }
+
 
 

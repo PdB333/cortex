@@ -1,7 +1,6 @@
 ﻿#include "routes.h"
 #include "server.h"
 #include "mcp_contract.h"
-#include "native_routes.h"
 #include "../overlay/overlay.h"
 #ifdef CORTEX_KIERO
 #include "../hook/kiero_hook.h"
@@ -54,11 +53,13 @@ json BuildToolsManifest() {
                                       "`_path` for {id} substitutions."}});
 
         j.push_back({{"name", "session_export"}, {"method", "POST"}, {"path", "/session/export"},
-                      {"description", "Dumps the current state (modules, breakpoints + their log ring "
-                                      "with captures, traces metadata, project data, screenshot) into "
-                                      "a folder under <module-dir>/cortex_sessions/session_<UTC>. "
-                                      "Returns {path} for post-hoc analysis or regression testing."}});
-
+                      {"description", "Exports a persistent RE run snapshot: modules, breakpoint logs/execution order, tracked objects/vtables, network events, allocations, traces, project/RE knowledge and screenshot. Returns a stable session id and path."}});
+        j.push_back({{"name", "session_list"}, {"method", "GET"}, {"path", "/session/list"},
+                      {"description", "Lists persisted RE run snapshots available for cross-run comparison."}});
+        j.push_back({{"name", "session_diff"}, {"method", "POST"}, {"path", "/session/diff"},
+                      {"description", "Compares two persisted runs: executed functions, callback order differences, tracked objects/vtables, network-event count and allocations."},
+                      {"body", {{"a", {{"type","string"},{"required",true},{"description","First session id from session_list/export."}}},
+                                {"b", {{"type","string"},{"required",true},{"description","Second session id."}}}}}});
         j.push_back({{"name", "lua_exec"}, {"method", "POST"}, {"path", "/lua/exec"},
                       {"description", "Executes a Lua 5.4 snippet in a fresh sandbox. The `cortex.*` "
                                       "table exposes memory.read/write/read_bytes, module_base, "
@@ -612,8 +613,73 @@ json BuildToolsManifest() {
         j.push_back({{"name","snapshot_last_change"},{"method","POST"},{"path","/snapshot/last_change"},{"description","Finds the last observed transition for a value."},
                      {"body",{{"address","required"},{"size","required, 1..4096"}}}});
         j.push_back({{"name","snapshot_delete"},{"method","DELETE"},{"path","/snapshot/{id}"},{"description","Deletes a checkpoint from the runtime timeline."}});
+        const json reAddress = {{"oneOf",json::array({{{"type","integer"}},{{"type","string"}},{{"type","object"}}})},
+                                {"description","Address: integer, decimal/hex string, module+RVA, or {module,rva}."}};
+        json reAddressRequired = reAddress; reAddressRequired["required"] = true;
+        const json anyJsonValue = {{"oneOf",json::array({{{"type","string"}},{{"type","integer"}},{{"type","number"}},{{"type","boolean"}},{{"type","object"}},{{"type","array"}},{{"type","null"}}})},
+                                   {"description","Any JSON value."}};
+        j.push_back({{"name","re_track_object"},{"method","POST"},{"path","/re/object/track"},
+                     {"description","Persistently tracks an object across address changes and records changed byte ranges, pointed objects, vtables/subobjects, destruction/reappearance, and related allocation metadata."},
+                     {"body",{{"name",{{"type","string"},{"required",true},{"description","Stable track name."}}},
+                              {"address",reAddress},{"pointer_path",{{"type","string"},{"description","Optional persisted project pointer-path name; when set it is re-resolved on every sample."}}},
+                              {"size",{{"type","integer"},{"minimum",1},{"maximum",4096},{"description","Bytes to observe, default 256."}}},
+                              {"persist",{{"type","boolean"},{"description","Persist into the RE session project, default true."}}}}}});
+        j.push_back({{"name","re_object_tracks"},{"method","GET"},{"path","/re/object/tracks"},{"description","Lists tracked objects and their current address/alive state."}});
+        j.push_back({{"name","re_object_get"},{"method","GET"},{"path","/re/object/{id}"},{"description","Returns the current tracked-object snapshot with pointers, vtables/subobjects and allocation metadata."}});
+        j.push_back({{"name","re_object_events"},{"method","GET"},{"path","/re/object/{id}/events"},{"description","Returns non-destructive tracked-object events: relocation, destruction/reappearance and changed byte ranges."}});
+        j.push_back({{"name","re_object_delete"},{"method","DELETE"},{"path","/re/object/{id}"},{"description","Stops and removes an object track."}});
+        j.push_back({{"name","re_object_compare"},{"method","POST"},{"path","/re/object/compare"},
+                     {"description","Compares two tracked object snapshots byte-by-byte and compares detected C++ subobjects/vtables."},
+                     {"body",{{"a",{{"type","integer"},{"required",true}}},{"b",{{"type","integer"},{"required",true}}}}}});
+        j.push_back({{"name","re_session"},{"method","GET"},{"path","/re/session"},
+                     {"description","Returns persistent reverse-engineering facts, persisted object-track locators and suggested breakpoint templates for the current target project."}});
+        j.push_back({{"name","re_session_fact_set"},{"method","POST"},{"path","/re/session/fact"},
+                     {"description","Stores or updates a proved RE fact in the persistent target project."},
+                     {"body",{{"key",{{"type","string"},{"required",true}}},{"value",anyJsonValue}}}});
+        j.push_back({{"name","re_session_fact_delete"},{"method","DELETE"},{"path","/re/session/fact"},
+                     {"description","Deletes a persistent RE fact with undo support."},
+                     {"body",{{"key",{{"type","string"},{"required",true}}}}}});
+        j.push_back({{"name","re_session_breakpoints"},{"method","POST"},{"path","/re/session/breakpoints"},
+                     {"description","Stores breakpoint templates suggested for the next RE session; Cortex does not auto-arm them without an explicit mutation action."},
+                     {"body",{{"templates",{{"type","array"},{"required",true},{"items",{{"type","object"}}}}}}}});
+        const json reTestSteps = {{"type","array"},{"required",true},{"items",{{"type","object"}}},
+                                  {"description","Steps: press, delay, wait, assert, call_game_thread, tool, checkpoint."}};
+        j.push_back({{"name","re_test_run"},{"method","POST"},{"path","/re/test/run"},
+                     {"description","Runs an automated in-game RE test and returns PASS/FAIL. Supports input, waits/asserts, game-thread native calls and arbitrary registered Cortex tools under one Actions transaction. Default is rollback; commit=true keeps reversible mutations."},
+                     {"body",{{"steps",reTestSteps},{"rollback_ranges",{{"type","array"},{"items",{{"type","object"}}},{"description","Optional memory ranges captured before the test and restored afterwards, including side effects from native calls."}}},
+                              {"commit",{{"type","boolean"},{"description","Keep reversible changes only if the test passes; default false."}}},
+                              {"stop_on_failure",{{"type","boolean"},{"description","Default true."}}}}}});
+        j.push_back({{"name","re_experiment_run"},{"method","POST"},{"path","/re/experiment/run"},
+                     {"description","Alias of re_test_run for checkpointed experiments: patch/call/struct-write/assert then automatic Actions rollback plus explicit memory-range restoration."},
+                     {"body",{{"steps",reTestSteps},{"rollback_ranges",{{"type","array"},{"items",{{"type","object"}}}}},{"commit",{{"type","boolean"}}}}}});
+        j.push_back({{"name","re_session_apply_breakpoints"},{"method","POST"},{"path","/re/session/apply-breakpoints"},
+                     {"description","Explicitly arms the breakpoint templates persisted for this RE target. Nothing is auto-armed at startup; this opt-in action keeps restored sessions safe."},
+                     {"body",{{"stop_on_error",{{"type","boolean"},{"description","Stop at first failed template, default true."}}}}}});
+        j.push_back({{"name","re_cpp_subobjects"},{"method","POST"},{"path","/re/cpp/subobjects"},
+                     {"description","Detects multiple vtables/C++ subobjects and common this-adjustment thunks inside an object."},
+                     {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});
+        j.push_back({{"name","re_find_last_writer"},{"method","POST"},{"path","/re/last-writer"},
+                     {"description","High-level who-wrote-this primitive. Installs a temporary process-global HW write breakpoint and returns instruction/caller names, registers, this/vtable, callstack, old/new bytes, or bounded timeout."},
+                     {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"enum",json::array({1,2,4})},{"description","Hardware watch size."}}},
+                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000},{"description","Wait timeout, default 5000."}}}}}});
+        j.push_back({{"name","re_trace_transition"},{"method","POST"},{"path","/re/transition/trace"},
+                     {"description","Records a bounded transition timeline by combining up to four HW write watches and software execution probes until an optional value predicate becomes true."},
+                     {"body",{{"watches",{{"type","array"},{"maxItems",4},{"items",{{"type","object"}}},{"description","[{address,size,label}]"}}},
+                              {"probes",{{"type","array"},{"items",{{"type","object"}}},{"description","[{address,label}]"}}},
+                              {"until",{{"type","object"},{"description","Optional {address,size,value,op} state predicate."}}},
+                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000}}},
+                              {"max_events",{{"type","integer"},{"minimum",1},{"maximum",4096}}}}}});
         j.push_back({{"name","ghidra_export"},{"method","POST"},{"path","/ghidra/export"},{"description","Exports the runtime and generates the CortexImport.py script."}});
-        j.push_back({{"name","ghidra_import"},{"method","POST"},{"path","/ghidra/import"},{"description","Imports names, types, and comments into the Cortex project."}});
+        const json ghidraImportBody = {{"addresses",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"symbols",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"vtables",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"structs",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"xrefs",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"re_facts",{{"type","object"}}}};
+        j.push_back({{"name","ghidra_import"},{"method","POST"},{"path","/ghidra/import"},
+                     {"description","Imports Ghidra names/symbols, types, comments, vtables, structs, xrefs and RE facts into the persistent Cortex project."},{"body",ghidraImportBody}});
+        j.push_back({{"name","ghidra_import_symbols"},{"method","POST"},{"path","/ghidra/import"},
+                     {"description","AI-friendly alias for ghidra_import; accepts symbols/addresses/vtables/structs/xrefs/re_facts at the document root."},{"body",ghidraImportBody}});
 
         return j;
 }
@@ -704,7 +770,7 @@ json BuildOpenApiDocument() {
         if (!tool.value("public", false)) operation["security"] = json::array({{{"CortexToken", json::array()}}});
         paths[tool.at("path").get<std::string>()][method] = std::move(operation);
     }
-    return {{"openapi", "3.0.3"},
+    return {{"openapi", "3.1.0"},
             {"info", {{"title", "Cortex API"}, {"version", "2.1.0"}}},
             {"servers", json::array({{{"url", "http://127.0.0.1:" + std::to_string(GetPort())}}})},
             {"paths", paths},
@@ -765,6 +831,13 @@ void RegisterStatusRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+
+
+
+
+
+
+
 
 
 

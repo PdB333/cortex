@@ -1,4 +1,4 @@
-#include "net_hook.h"
+﻿#include "net_hook.h"
 #include "../log.h"
 
 #include <winsock2.h>
@@ -54,6 +54,11 @@ void Push(int dir, SOCKET s, const void* data, uint32_t n) {
     e.socket = (int)s;
     e.size = n;
     e.previewHex = ToHex(data, n);
+    e.threadId = GetCurrentThreadId();
+    void* frames[10]{};
+    const USHORT count = RtlCaptureStackBackTrace(2, 10, frames, nullptr);
+    e.stack.reserve(count);
+    for (USHORT i = 0; i < count; ++i) e.stack.push_back(reinterpret_cast<uintptr_t>(frames[i]));
     std::lock_guard<std::mutex> lock(g_mutex);
     g_events.push_back(std::move(e));
     while (g_events.size() > kMax) g_events.pop_front();
@@ -123,3 +128,4 @@ std::vector<Event> Snapshot(size_t max) {
 }
 
 } // namespace nethook
+

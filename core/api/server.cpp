@@ -243,6 +243,7 @@ bool Start(int port, const std::string& configuredToken) {
     RegisterMcpRoutes(routes);
     RegisterLuaRoutes(routes);
     RegisterOcrRoutes(routes);
+    RegisterReRoutes(routes);
 
     nlohmann::json contractReport;
     if (!ValidateApiContracts(contractReport)) {
@@ -302,4 +303,5 @@ std::string GetTokenPath() { return g_tokenPath; }
 std::string GetToken() { std::lock_guard<std::mutex> lock(g_stateMutex); return g_token; }
 
 } // namespace api
+
 

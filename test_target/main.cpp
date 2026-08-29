@@ -1,4 +1,4 @@
-// cortex_test_target: minimal x86/x64 target for testing Cortex end-to-end.
+﻿// cortex_test_target: minimal x86/x64 target for testing Cortex end-to-end.
 //
 // Exposes well-known memory values at exported symbols so tests can verify
 // /memory/read, scans, freezes, crash capture and hangs without a real game.
@@ -21,9 +21,53 @@ extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_breakpoint_canary = 0;
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_hw_value = 0;
+extern "C" __declspec(dllexport) volatile DWORD g_cortex_hw_writer_tid = 0;
 
 extern "C" __declspec(dllexport) __declspec(noinline) void CortexBreakpointCanary() {
     ++g_cortex_breakpoint_canary;
+}
+extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNativeAdd(uintptr_t a, uintptr_t b, uintptr_t c) {
+    return a + b + c;
+}
+extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNativeIdentity(uintptr_t value) {
+    return value;
+}
+
+struct CortexFakeObject {
+    uintptr_t primaryVtable = 0;
+    uintptr_t secondaryVtable = 0;
+    uint32_t state = 7;
+    uint32_t mode = 2;
+};
+
+extern "C" __declspec(dllexport) uintptr_t g_cortex_fake_vtable_primary[4]{};
+extern "C" __declspec(dllexport) uintptr_t g_cortex_fake_vtable_secondary[4]{};
+extern "C" __declspec(dllexport) CortexFakeObject g_cortex_fake_object{};
+
+void InitializeFakeObject() {
+    const uintptr_t add = reinterpret_cast<uintptr_t>(&CortexNativeAdd);
+    const uintptr_t identity = reinterpret_cast<uintptr_t>(&CortexNativeIdentity);
+    g_cortex_fake_vtable_primary[0] = add;
+    g_cortex_fake_vtable_primary[1] = identity;
+    g_cortex_fake_vtable_primary[2] = add;
+    g_cortex_fake_vtable_primary[3] = identity;
+    g_cortex_fake_vtable_secondary[0] = identity;
+    g_cortex_fake_vtable_secondary[1] = add;
+    g_cortex_fake_vtable_secondary[2] = identity;
+    g_cortex_fake_vtable_secondary[3] = add;
+    g_cortex_fake_object.primaryVtable = reinterpret_cast<uintptr_t>(&g_cortex_fake_vtable_primary[0]);
+    g_cortex_fake_object.secondaryVtable = reinterpret_cast<uintptr_t>(&g_cortex_fake_vtable_secondary[0]);
+}
+
+DWORD WINAPI CortexHwWriterThread(void*) {
+    g_cortex_hw_writer_tid = GetCurrentThreadId();
+    Sleep(180);
+    for (int i = 0; i < 8; ++i) {
+        ++g_cortex_hw_value;
+        Sleep(25);
+    }
+    return 0;
 }
 
 namespace {
@@ -34,9 +78,11 @@ struct E2EControl {
     std::string crashEventName;
     std::string hangEventName;
     std::string stopEventName;
+    std::string hwThreadEventName;
     HANDLE crashEvent = nullptr;
     HANDLE hangEvent = nullptr;
     HANDLE stopEvent = nullptr;
+    HANDLE hwThreadEvent = nullptr;
 };
 
 std::vector<std::string> CommandLineArguments() {
@@ -135,10 +181,12 @@ bool InitializeE2E(const std::vector<std::string>& arguments, E2EControl& contro
     control.crashEventName = EventName("Crash");
     control.hangEventName = EventName("Hang");
     control.stopEventName = EventName("Stop");
+    control.hwThreadEventName = EventName("HwThread");
     control.crashEvent = CreateEventA(nullptr, TRUE, FALSE, control.crashEventName.c_str());
     control.hangEvent = CreateEventA(nullptr, TRUE, FALSE, control.hangEventName.c_str());
     control.stopEvent = CreateEventA(nullptr, TRUE, FALSE, control.stopEventName.c_str());
-    return control.crashEvent && control.hangEvent && control.stopEvent;
+    control.hwThreadEvent = CreateEventA(nullptr, TRUE, FALSE, control.hwThreadEventName.c_str());
+    return control.crashEvent && control.hangEvent && control.stopEvent && control.hwThreadEvent;
 }
 
 void WriteManifest(const E2EControl& control, HWND window) {
@@ -162,10 +210,18 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
+         << "  \"native_add\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeAdd) << "\",\n"
+         << "  \"hw_value\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_value) << "\",\n"
+         << "  \"hw_writer_tid\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_writer_tid) << "\",\n"
+         << "  \"fake_object\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_fake_object) << "\",\n"
+         << "  \"fake_object_size\": " << std::dec << sizeof(g_cortex_fake_object) << ",\n"
+         << "  \"fake_state\": \"0x" << std::hex << reinterpret_cast<uintptr_t>(&g_cortex_fake_object.state) << "\",\n"
          << std::dec
+         << "  \"main_thread_id\": " << GetCurrentThreadId() << ",\n"
          << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
          << "  \"hang_event\": \"" << EscapeJson(control.hangEventName) << "\",\n"
-         << "  \"stop_event\": \"" << EscapeJson(control.stopEventName) << "\"\n"
+         << "  \"stop_event\": \"" << EscapeJson(control.stopEventName) << "\",\n"
+         << "  \"hw_thread_event\": \"" << EscapeJson(control.hwThreadEventName) << "\"\n"
          << "}\n";
     file.flush();
 }
@@ -174,6 +230,7 @@ void CloseE2E(E2EControl& control) {
     if (control.crashEvent) CloseHandle(control.crashEvent);
     if (control.hangEvent) CloseHandle(control.hangEvent);
     if (control.stopEvent) CloseHandle(control.stopEvent);
+    if (control.hwThreadEvent) CloseHandle(control.hwThreadEvent);
     control = {};
 }
 
@@ -223,6 +280,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         nullptr, nullptr, instance, nullptr);
     ShowWindow(window, show);
 
+    InitializeFakeObject();
     E2EControl e2e;
     if (!InitializeE2E(arguments, e2e)) return 3;
     WriteManifest(e2e, window);
@@ -247,6 +305,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         }
         if (e2e.enabled && WaitForSingleObject(e2e.crashEvent, 0) == WAIT_OBJECT_0)
             TriggerNullCrash();
+        if (e2e.enabled && WaitForSingleObject(e2e.hwThreadEvent, 0) == WAIT_OBJECT_0) {
+            ResetEvent(e2e.hwThreadEvent);
+            HANDLE writer = CreateThread(nullptr, 0, CortexHwWriterThread, nullptr, 0, nullptr);
+            if (writer) CloseHandle(writer);
+        }
         if (e2e.enabled && WaitForSingleObject(e2e.hangEvent, 0) == WAIT_OBJECT_0) {
             while (WaitForSingleObject(e2e.stopEvent, 100) == WAIT_TIMEOUT) {}
             CloseE2E(e2e);
@@ -262,3 +325,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         Sleep(16);
     }
 }
+
+
+
+

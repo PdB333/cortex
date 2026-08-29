@@ -1,4 +1,4 @@
-#include "project.h"
+﻿#include "project.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
 
@@ -86,8 +86,9 @@ bool SaveToDisk() {
 }
 
 json DefaultSkeleton() {
-    return json{{"schema_version", 1}, {"addresses", json::object()}, {"pointer_paths", json::object()}, {"notes", json::array()},
-                {"freezes", json::array()}, {"struct_defs", json::array()}};
+    return json{{"schema_version", 2}, {"addresses", json::object()}, {"pointer_paths", json::object()}, {"notes", json::array()},
+                {"freezes", json::array()}, {"struct_defs", json::array()}, {"re_facts", json::object()},
+                {"object_tracks", json::array()}, {"breakpoint_templates", json::array()}};
 }
 
 bool LoadJsonFile(const std::string& path, json& out) {
@@ -105,6 +106,10 @@ void MigrateAndRepair(json& data) {
     if (!data.contains("notes") || !data["notes"].is_array()) data["notes"] = json::array();
     if (!data.contains("freezes") || !data["freezes"].is_array()) data["freezes"] = json::array();
     if (!data.contains("struct_defs") || !data["struct_defs"].is_array()) data["struct_defs"] = json::array();
+    if (!data.contains("re_facts") || !data["re_facts"].is_object()) data["re_facts"] = json::object();
+    if (!data.contains("object_tracks") || !data["object_tracks"].is_array()) data["object_tracks"] = json::array();
+    if (!data.contains("breakpoint_templates") || !data["breakpoint_templates"].is_array()) data["breakpoint_templates"] = json::array();
+    if (version < 2) data["schema_version"] = 2;
 }
 
 } // namespace
@@ -280,4 +285,59 @@ void SetStructDefs(const json& defs) {
     if (!SaveToDisk()) g_data = std::move(before);
 }
 
+json GetReFacts() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_data["re_facts"];
+}
+
+bool SetReFact(const std::string& key, const json& value) {
+    if (key.empty()) return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    json before = g_data;
+    g_data["re_facts"][key] = value;
+    if (SaveToDisk()) return true;
+    g_data = std::move(before);
+    return false;
+}
+
+bool RemoveReFact(const std::string& key) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_data["re_facts"].contains(key)) return false;
+    json before = g_data;
+    g_data["re_facts"].erase(key);
+    if (SaveToDisk()) return true;
+    g_data = std::move(before);
+    return false;
+}
+
+json GetObjectTracks() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_data["object_tracks"];
+}
+
+bool SetObjectTracks(const json& tracks) {
+    if (!tracks.is_array()) return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    json before = g_data;
+    g_data["object_tracks"] = tracks;
+    if (SaveToDisk()) return true;
+    g_data = std::move(before);
+    return false;
+}
+
+json GetBreakpointTemplates() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_data["breakpoint_templates"];
+}
+
+bool SetBreakpointTemplates(const json& templates) {
+    if (!templates.is_array()) return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    json before = g_data;
+    g_data["breakpoint_templates"] = templates;
+    if (SaveToDisk()) return true;
+    g_data = std::move(before);
+    return false;
+}
 } // namespace project
+

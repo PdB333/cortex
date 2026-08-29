@@ -1,4 +1,4 @@
-name: Unified Cortex UI Preview
+﻿name: Unified Cortex UI Preview
 
 on:
   push:
@@ -319,6 +319,249 @@ jobs:
               if ($status.id -ne 3 -or $reportedPid -ne [int64]$target.Id) {
                 throw "$label status resolved the wrong target"
               }
+              # Contract coherence: startup already refuses invalid manifests; this
+              # explicit probe makes the guarantee visible in the portable gate.
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"schema_validate","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $schemaResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $schemaResult = $schemaResponse.result.structuredContent.result
+              if ($schemaResponse.id -ne 4 -or -not $schemaResult.ok -or [int]$schemaResult.tool_count -lt 1) {
+                throw "$label API manifest/native-route validation failed"
+              }
+
+              $fixtureU32Text = [string]$fixture.u32
+              $fixtureU32Numeric = [Convert]::ToUInt64(($fixtureU32Text -replace '^0x',''), 16)
+              $readText = @{ jsonrpc="2.0"; id=5; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=$fixtureU32Text; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($readText); $mcp.StandardInput.Flush()
+              $readTextResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $readNumeric = @{ jsonrpc="2.0"; id=6; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=$fixtureU32Numeric; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($readNumeric); $mcp.StandardInput.Flush()
+              $readNumericResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ([uint64]$readTextResponse.result.structuredContent.result.value -ne [uint64]$readNumericResponse.result.structuredContent.result.value) {
+                throw "$label numeric and hex-string address forms disagree"
+              }
+
+              # Real target-thread native call. cortex_test_target's main TID owns
+              # a PeekMessage loop, so call_on_thread must marshal there without
+              # suspend/context hijacking and return the function's EAX/RAX value.
+              $threadCall = @{
+                jsonrpc="2.0"; id=7; method="tools/call"
+                params=@{ name="call_on_thread"; arguments=@{
+                  thread_id=[uint64]$fixture.main_thread_id
+                  address=[string]$fixture.native_add
+                  args=@(10,20,12)
+                  convention="cdecl"
+                  timeout_ms=3000
+                  mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($threadCall); $mcp.StandardInput.Flush()
+              $threadCallResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $threadCallResult = $threadCallResponse.result.structuredContent.result
+              if ($threadCallResponse.id -ne 7 -or -not $threadCallResult.ok -or
+                  [uint64]$threadCallResult.return_value_u64 -ne 42 -or
+                  [uint64]$threadCallResult.thread_id -ne [uint64]$fixture.main_thread_id) {
+                throw "$label call_on_thread did not execute on the requested target TID"
+              }
+
+              # Install a process-global HW write breakpoint *before* a new writer
+              # thread exists. The new thread must inherit DR state automatically.
+              $hwAdd = @{
+                jsonrpc="2.0"; id=8; method="tools/call"
+                params=@{ name="debug_breakpoint_add"; arguments=@{
+                  address=[string]$fixture.hw_value; kind="hw_write"; size=4; action="log"
+                  process_global=$true; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($hwAdd); $mcp.StandardInput.Flush()
+              $hwAddResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $hwId = [int]$hwAddResponse.result.structuredContent.result.id
+              if ($hwAddResponse.id -ne 8 -or $hwId -le 0) { throw "$label failed to arm process-global HW breakpoint" }
+
+              $hwEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
+              [void]$hwEvent.Set()
+              $hwHit = $null
+              for ($attempt = 0; $attempt -lt 30 -and -not $hwHit; $attempt++) {
+                Start-Sleep -Milliseconds 50
+                $hwLog = @{ jsonrpc="2.0"; id=9; method="tools/call"; params=@{ name="debug_breakpoint_log"; arguments=@{ _path=@{ id=$hwId }; limit=8 } } } | ConvertTo-Json -Depth 8 -Compress
+                $mcp.StandardInput.WriteLine($hwLog); $mcp.StandardInput.Flush()
+                $hwLogResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $entries = @($hwLogResponse.result.structuredContent.result.entries)
+                if ($entries.Count -gt 0) { $hwHit = $entries[0] }
+              }
+              if (-not $hwHit) { throw "$label process-global HW breakpoint missed a newly created writer thread" }
+
+              $writerTidRead = @{ jsonrpc="2.0"; id=9; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=[string]$fixture.hw_writer_tid; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($writerTidRead); $mcp.StandardInput.Flush()
+              $writerTidResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $writerTid = [uint64]$writerTidResponse.result.structuredContent.result.value
+              if ($writerTid -eq 0 -or [uint64]$hwHit.thread_id -ne $writerTid) {
+                throw "$label HW breakpoint hit did not come from the newly created worker TID"
+              }
+
+              $hwList = @{ jsonrpc="2.0"; id=9; method="tools/call"; params=@{ name="debug_breakpoint_list"; arguments=@{} } } | ConvertTo-Json -Depth 6 -Compress
+              $mcp.StandardInput.WriteLine($hwList); $mcp.StandardInput.Flush()
+              $hwListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $hwRow = @($hwListResponse.result.structuredContent.result.breakpoints | Where-Object { [int]$_.id -eq $hwId })
+              if ($hwRow.Count -ne 1 -or -not $hwRow[0].process_global -or [int]$hwRow[0].applied_threads -lt 1) {
+                throw "$label HW breakpoint coverage metadata is incomplete"
+              }
+
+              $hwDelete = @{ jsonrpc="2.0"; id=9; method="tools/call"; params=@{ name="debug_breakpoint_delete"; arguments=@{ _path=@{ id=$hwId }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($hwDelete); $mcp.StandardInput.Flush()
+              [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              $hwEvent.Dispose()
+              # C++ subobject detection on a deterministic object containing two
+              # valid vtable pointers.
+              $subobjectsCall = @{ jsonrpc="2.0"; id=400; method="tools/call"; params=@{ name="re_cpp_subobjects"; arguments=@{ address=[string]$fixture.fake_object; size=[int]$fixture.fake_object_size } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($subobjectsCall); $mcp.StandardInput.Flush()
+              $subobjectsResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $subobjectsResult = $subobjectsResponse.result.structuredContent.result
+              if ($subobjectsResponse.id -ne 400 -or -not $subobjectsResult.ok -or @($subobjectsResult.subobjects).Count -lt 2 -or -not $subobjectsResult.multiple_inheritance_likely) {
+                throw "$label C++ subobject/vtable detection failed"
+              }
+
+              $trackName = "preview-$safeLabel-fake-object"
+              $trackCall = @{
+                jsonrpc="2.0"; id=401; method="tools/call"
+                params=@{ name="re_track_object"; arguments=@{
+                  name=$trackName; address=[string]$fixture.fake_object; size=[int]$fixture.fake_object_size
+                  persist=$false; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($trackCall); $mcp.StandardInput.Flush()
+              $trackResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $trackId = [int]$trackResponse.result.structuredContent.result.id
+              if ($trackResponse.id -ne 401 -or $trackId -le 0) { throw "$label object tracker could not start" }
+              Start-Sleep -Milliseconds 350
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":402,"method":"tools/call","params":{"name":"session_export","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $sessionAResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $sessionA = [string]$sessionAResponse.result.structuredContent.result.id
+              if ($sessionAResponse.id -ne 402 -or [string]::IsNullOrWhiteSpace($sessionA)) { throw "$label first RE run export failed" }
+
+              $mutateTracked = @{ jsonrpc="2.0"; id=403; method="tools/call"; params=@{ name="memory_write"; arguments=@{ address=[string]$fixture.fake_state; type="u32"; value=91; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($mutateTracked); $mcp.StandardInput.Flush()
+              $mutateTrackedResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $mutateTrackedResponse.result.structuredContent.result.ok) { throw "$label could not mutate tracked object" }
+              Start-Sleep -Milliseconds 400
+
+              $trackEvents = @{ jsonrpc="2.0"; id=404; method="tools/call"; params=@{ name="re_object_events"; arguments=@{ _path=@{ id=$trackId } } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($trackEvents); $mcp.StandardInput.Flush()
+              $trackEventsResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $changedEvents = @($trackEventsResponse.result.structuredContent.result.events | Where-Object { $_.type -eq "fields_changed" })
+              if ($changedEvents.Count -lt 1) { throw "$label tracked-object field changes were not detected" }
+
+              # Session ids have second resolution; ensure the second export is a
+              # distinct durable run and then compare it to the first one.
+              Start-Sleep -Milliseconds 1100
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":405,"method":"tools/call","params":{"name":"session_export","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $sessionBResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $sessionB = [string]$sessionBResponse.result.structuredContent.result.id
+              if ($sessionBResponse.id -ne 405 -or [string]::IsNullOrWhiteSpace($sessionB) -or $sessionB -eq $sessionA) { throw "$label second RE run export failed" }
+
+              $sessionDiff = @{ jsonrpc="2.0"; id=406; method="tools/call"; params=@{ name="session_diff"; arguments=@{ a=$sessionA; b=$sessionB } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($sessionDiff); $mcp.StandardInput.Flush()
+              $sessionDiffResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $sessionDiffResult = $sessionDiffResponse.result.structuredContent.result
+              $trackedDiff = @($sessionDiffResult.objects | Where-Object { $_.name -eq $trackName -and $_.state -eq "changed" })
+              if ($sessionDiffResponse.id -ne 406 -or -not $sessionDiffResult.ok -or $trackedDiff.Count -ne 1) {
+                throw "$label cross-run tracked-object diff failed"
+              }
+
+              $restoreTracked = @{ jsonrpc="2.0"; id=407; method="tools/call"; params=@{ name="memory_write"; arguments=@{ address=[string]$fixture.fake_state; type="u32"; value=7; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($restoreTracked); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              $deleteTrack = @{ jsonrpc="2.0"; id=408; method="tools/call"; params=@{ name="re_object_delete"; arguments=@{ _path=@{ id=$trackId }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deleteTrack); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              # High-level who-wrote-this. Trigger a fresh worker, then let the
+              # blocking tool install its temporary process-global HW watch.
+              $lastWriterEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
+              [void]$lastWriterEvent.Set()
+              $lastWriterCall = @{
+                jsonrpc="2.0"; id=410; method="tools/call"
+                params=@{ name="re_find_last_writer"; arguments=@{
+                  address=[string]$fixture.hw_value; size=4; timeout_ms=4000; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($lastWriterCall); $mcp.StandardInput.Flush()
+              $lastWriterResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $lastWriterResult = $lastWriterResponse.result.structuredContent.result
+              if ($lastWriterResponse.id -ne 410 -or -not $lastWriterResult.ok -or
+                  [uint64]$lastWriterResult.thread_id -eq 0 -or [string]::IsNullOrWhiteSpace([string]$lastWriterResult.instruction)) {
+                throw "$label find_last_writer failed to identify the writer"
+              }
+              $lastWriterEvent.Dispose()
+
+              # Transition trace: capture a real write timeline and stop when the
+              # watched value advances at least once.
+              $readHwValue = @{ jsonrpc="2.0"; id=411; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=[string]$fixture.hw_value; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($readHwValue); $mcp.StandardInput.Flush()
+              $readHwValueResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $hwBefore = [uint64]$readHwValueResponse.result.structuredContent.result.value
+              $transitionEvent = [System.Threading.EventWaitHandle]::OpenExisting([string]$fixture.hw_thread_event)
+              [void]$transitionEvent.Set()
+              $transitionCall = @{
+                jsonrpc="2.0"; id=412; method="tools/call"
+                params=@{ name="re_trace_transition"; arguments=@{
+                  watches=@(@{ address=[string]$fixture.hw_value; size=4; label="hw-state" })
+                  until=@{ address=[string]$fixture.hw_value; size=4; value=($hwBefore + 1); op=">=" }
+                  timeout_ms=4000; max_events=64; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 12 -Compress
+              $mcp.StandardInput.WriteLine($transitionCall); $mcp.StandardInput.Flush()
+              $transitionResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $transitionResult = $transitionResponse.result.structuredContent.result
+              if ($transitionResponse.id -ne 412 -or -not $transitionResult.ok -or -not $transitionResult.until_matched -or [int]$transitionResult.event_count -lt 1) {
+                throw "$label transition trace did not reconstruct the state write"
+              }
+              $transitionEvent.Dispose()
+
+              # Automated in-game experiment with a real mutation. The tool must
+              # PASS while restoring the original bytes afterwards.
+              $experimentArgs = @{
+                steps = @(
+                  @{ action="tool"; method="POST"; path="/memory/write"; body=@{ address=[string]$fixture.fake_state; type="u32"; value=123 } },
+                  @{ action="assert"; address=[string]$fixture.fake_state; size=4; value=123; op="==" },
+                  @{ action="delay"; ms=25 }
+                )
+                rollback_ranges = @(@{ address=[string]$fixture.fake_state; size=4 })
+                commit = $false
+                mutation_permission = $true
+              }
+              $experimentCall = @{ jsonrpc="2.0"; id=413; method="tools/call"; params=@{ name="re_experiment_run"; arguments=$experimentArgs } } | ConvertTo-Json -Depth 14 -Compress
+              $mcp.StandardInput.WriteLine($experimentCall); $mcp.StandardInput.Flush()
+              $experimentResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $experimentResult = $experimentResponse.result.structuredContent.result
+              if ($experimentResponse.id -ne 413 -or -not $experimentResult.ok -or $experimentResult.status -ne "PASS" -or -not $experimentResult.rollback.performed) {
+                throw "$label checkpointed in-game experiment failed"
+              }
+              $verifyRollback = @{ jsonrpc="2.0"; id=414; method="tools/call"; params=@{ name="memory_read"; arguments=@{ address=[string]$fixture.fake_state; type="u32" } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($verifyRollback); $mcp.StandardInput.Flush()
+              $verifyRollbackResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ([uint64]$verifyRollbackResponse.result.structuredContent.result.value -ne 7) {
+                throw "$label experiment rollback did not restore target memory"
+              }
+
+              # Persistent RE evidence and Ghidra -> Cortex symbol import.
+              $factKey = "preview.$safeLabel.fake_state"
+              $factSet = @{ jsonrpc="2.0"; id=415; method="tools/call"; params=@{ name="re_session_fact_set"; arguments=@{ key=$factKey; value=@{ address=[string]$fixture.fake_state; meaning="fixture-state" }; mutation_permission=$true } } } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($factSet); $mcp.StandardInput.Flush(); [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":416,"method":"tools/call","params":{"name":"re_session","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $reSessionResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $reSessionResponse.result.structuredContent.result.facts.$factKey) { throw "$label persistent RE fact was not restored from the project" }
+
+              $ghidraSymbolName = "Preview_${safeLabel}_FakeState"
+              $ghidraImportArgs = @{
+                symbols=@(@{ name=$ghidraSymbolName; address=[string]$fixture.fake_state; comment="portable CI Ghidra import" })
+                mutation_permission=$true
+              }
+              $ghidraImportCall = @{ jsonrpc="2.0"; id=417; method="tools/call"; params=@{ name="ghidra_import_symbols"; arguments=$ghidraImportArgs } } | ConvertTo-Json -Depth 12 -Compress
+              $mcp.StandardInput.WriteLine($ghidraImportCall); $mcp.StandardInput.Flush()
+              $ghidraImportResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ([int]$ghidraImportResponse.result.structuredContent.result.imported -lt 1) { throw "$label Ghidra symbol import did not update Cortex project knowledge" }
 
               # Exercise a hot software breakpoint repeatedly. The target function runs every
               # frame, covering INT3 restore/single-step/re-arm, duplicate rejection and
@@ -1261,3 +1504,6 @@ jobs:
           path: staging/x64/CortexPreview
           if-no-files-found: error
           retention-days: 14
+
+
+

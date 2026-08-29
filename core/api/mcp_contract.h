@@ -67,7 +67,11 @@ inline ToolRisk ClassifyTool(const std::string& name,
         StartsWith(name, "watch_") || StartsWith(name, "window_") ||
         StartsWith(name, "project_") || StartsWith(name, "struct_") ||
         StartsWith(name, "pointermap_") || name == "network_capture" ||
-        name == "actions_clear" || name == "ghidra_import" || name == "snapshot_delete") {
+        name == "actions_clear" || name == "ghidra_import" || name == "ghidra_import_symbols" || name == "snapshot_delete" ||
+        name == "re_track_object" || name == "re_find_last_writer" || name == "re_trace_transition" ||
+        name == "re_session_fact_set" || name == "re_session_fact_delete" || name == "re_session_breakpoints" ||
+        name == "re_object_delete" || name == "re_test_run" || name == "re_experiment_run" ||
+        name == "re_session_apply_breakpoints") {
         return ToolRisk::Control;
     }
 
@@ -227,5 +231,10 @@ inline QuerySchemaResult BuildQuerySchema(const json& queryManifest) {
 }
 
 } // namespace api::mcp_contract
+
+
+
+
+
 
 

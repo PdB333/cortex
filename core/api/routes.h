@@ -41,6 +41,7 @@ void RegisterSessionRoutes(RouteRegistrar& svr);
 void RegisterMcpRoutes(RouteRegistrar& svr);
 void RegisterLuaRoutes(RouteRegistrar& svr);
 void RegisterOcrRoutes(RouteRegistrar& svr);
+void RegisterReRoutes(RouteRegistrar& svr);
 
 } // namespace api
 
@@ -54,4 +55,5 @@ void RegisterOcrRoutes(RouteRegistrar& svr);
 namespace httplib { using RouteRegistrar = ::api::RouteRegistrar; }
 #define Server RouteRegistrar
 #endif
+
 

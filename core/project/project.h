@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,4 +45,14 @@ void SetFreezes(const json& freezes);
 json GetStructDefs();
 void SetStructDefs(const json& defs);
 
+// Persistent reverse-engineering session knowledge.
+json GetReFacts();
+bool SetReFact(const std::string& key, const json& value);
+bool RemoveReFact(const std::string& key);
+json GetObjectTracks();
+bool SetObjectTracks(const json& tracks);
+json GetBreakpointTemplates();
+bool SetBreakpointTemplates(const json& templates);
+
 } // namespace project
+
