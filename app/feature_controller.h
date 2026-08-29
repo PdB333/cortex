@@ -53,6 +53,11 @@ class FeatureController final : public QObject {
     Q_PROPERTY(QVariantList structureReadFields READ structureReadFields NOTIFY structuresChanged)
     Q_PROPERTY(QVariantList structureInferenceFields READ structureInferenceFields NOTIFY structuresChanged)
     Q_PROPERTY(QString structureStatus READ structureStatus NOTIFY structuresChanged)
+    Q_PROPERTY(QVariantMap diagnosticStatus READ diagnosticStatus NOTIFY diagnosticsChanged)
+    Q_PROPERTY(QVariantMap diagnosticHealth READ diagnosticHealth NOTIFY diagnosticsChanged)
+    Q_PROPERTY(QVariantList diagnosticHooks READ diagnosticHooks NOTIFY diagnosticsChanged)
+    Q_PROPERTY(QVariantMap diagnosticToolStats READ diagnosticToolStats NOTIFY diagnosticsChanged)
+    Q_PROPERTY(QString diagnosticSummary READ diagnosticSummary NOTIFY diagnosticsChanged)
     Q_PROPERTY(QVariantList traceEvents READ traceEvents NOTIFY tracesChanged)
     Q_PROPERTY(int selectedTraceId READ selectedTraceId NOTIFY tracesChanged)
     Q_PROPERTY(QString sessionExportPath READ sessionExportPath NOTIFY sessionChanged)
@@ -105,6 +110,11 @@ public:
     const QVariantList& structureReadFields() const { return structureReadFields_; }
     const QVariantList& structureInferenceFields() const { return structureInferenceFields_; }
     QString structureStatus() const { return structureStatus_; }
+    const QVariantMap& diagnosticStatus() const { return diagnosticStatus_; }
+    const QVariantMap& diagnosticHealth() const { return diagnosticHealth_; }
+    const QVariantList& diagnosticHooks() const { return diagnosticHooks_; }
+    const QVariantMap& diagnosticToolStats() const { return diagnosticToolStats_; }
+    QString diagnosticSummary() const { return diagnosticSummary_; }
     const QVariantList& traceEvents() const { return traceEvents_; }
     int selectedTraceId() const { return selectedTraceId_; }
     QString sessionExportPath() const { return sessionExportPath_; }
@@ -174,6 +184,7 @@ public:
     Q_INVOKABLE bool readStructure(const QString& name, const QString& address);
     Q_INVOKABLE bool writeStructure(const QString& name, const QString& address, const QString& valuesJson);
     Q_INVOKABLE bool inferStructure(const QString& instancesJson, int size, bool define = false, const QString& name = QString());
+    Q_INVOKABLE bool refreshDiagnostics();
 
     Q_INVOKABLE bool refreshPatches();
     Q_INVOKABLE bool revertPatch(int patchId);
@@ -217,6 +228,7 @@ signals:
     void instrumentationChanged();
     void symbolsChanged();
     void structuresChanged();
+    void diagnosticsChanged();
     void sessionChanged();
     void errorChanged();
 
@@ -273,6 +285,11 @@ private:
     QVariantList structureReadFields_;
     QVariantList structureInferenceFields_;
     QString structureStatus_;
+    QVariantMap diagnosticStatus_;
+    QVariantMap diagnosticHealth_;
+    QVariantList diagnosticHooks_;
+    QVariantMap diagnosticToolStats_;
+    QString diagnosticSummary_;
     QVariantList traceEvents_;
     int selectedTraceId_ = -1;
     QString sessionExportPath_;

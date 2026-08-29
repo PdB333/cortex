@@ -1273,6 +1273,85 @@ bool FeatureController::inferStructure(const QString& instancesJson,
     emit structuresChanged();
     return true;
 }
+bool FeatureController::refreshDiagnostics() {
+    json statusOutput;
+    if (!callTool("status", json::object(), statusOutput, false)) return false;
+    json healthOutput;
+    if (!callTool("health", json::object(), healthOutput, false)) return false;
+    json toolsOutput;
+    if (!callTool("tools", json::object(), toolsOutput, false)) return false;
+
+    const json status = RouteResult(statusOutput);
+    const json health = RouteResult(healthOutput);
+    const json tools = RouteResult(toolsOutput);
+    if (!status.is_object() || !health.is_object() || !tools.is_array()) {
+        setError(QStringLiteral("diagnostics_payload_invalid"));
+        return false;
+    }
+
+    diagnosticStatus_.clear();
+    diagnosticStatus_.insert(QStringLiteral("status"), FromUtf8(status.value("status", std::string())));
+    diagnosticStatus_.insert(QStringLiteral("pid"), static_cast<qulonglong>(status.value("pid", uint64_t{0})));
+    diagnosticStatus_.insert(QStringLiteral("process"), FromUtf8(status.value("process_name", std::string())));
+    diagnosticStatus_.insert(QStringLiteral("port"), status.value("port", 0));
+    diagnosticStatus_.insert(QStringLiteral("uptimeMs"), static_cast<qulonglong>(status.value("uptime_ms", uint64_t{0})));
+
+    diagnosticHealth_.clear();
+    diagnosticHealth_.insert(QStringLiteral("ok"), health.value("ok", false));
+    diagnosticHealth_.insert(QStringLiteral("uptimeMs"), static_cast<qulonglong>(health.value("uptime_ms", uint64_t{0})));
+    const json process = health.value("process", json::object());
+    if (process.is_object()) {
+        diagnosticHealth_.insert(QStringLiteral("pid"), static_cast<qulonglong>(process.value("pid", uint64_t{0})));
+        diagnosticHealth_.insert(QStringLiteral("process"), FromUtf8(process.value("name", std::string())));
+        diagnosticHealth_.insert(QStringLiteral("bitness"), process.value("bitness", 0));
+    }
+    const json api = health.value("api", json::object());
+    if (api.is_object()) {
+        diagnosticHealth_.insert(QStringLiteral("apiRunning"), api.value("running", false));
+        diagnosticHealth_.insert(QStringLiteral("authentication"), FromUtf8(api.value("authentication", std::string())));
+        diagnosticHealth_.insert(QStringLiteral("tokenFile"), FromUtf8(api.value("token_file", std::string())));
+        diagnosticHealth_.insert(QStringLiteral("lastError"), FromUtf8(api.value("last_error", std::string())));
+    }
+
+    diagnosticHooks_.clear();
+    const json hooks = health.value("hooks", json::object());
+    if (hooks.is_object()) {
+        diagnosticHooks_.reserve(static_cast<qsizetype>(hooks.size()));
+        for (auto it = hooks.begin(); it != hooks.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            QVariantMap row;
+            row.insert(QStringLiteral("name"), FromUtf8(it.key()));
+            row.insert(QStringLiteral("installed"), it.value().value("installed", false));
+            row.insert(QStringLiteral("backend"), FromUtf8(it.value().value("backend", std::string())));
+            diagnosticHooks_.push_back(row);
+        }
+    }
+
+    int getCount = 0, postCount = 0, deleteCount = 0, publicCount = 0;
+    for (const auto& entry : tools) {
+        if (!entry.is_object()) continue;
+        const std::string method = entry.value("method", std::string());
+        if (method == "GET") ++getCount;
+        else if (method == "POST") ++postCount;
+        else if (method == "DELETE") ++deleteCount;
+        if (entry.value("public", false)) ++publicCount;
+    }
+    diagnosticToolStats_.clear();
+    diagnosticToolStats_.insert(QStringLiteral("total"), static_cast<int>(tools.size()));
+    diagnosticToolStats_.insert(QStringLiteral("get"), getCount);
+    diagnosticToolStats_.insert(QStringLiteral("post"), postCount);
+    diagnosticToolStats_.insert(QStringLiteral("delete"), deleteCount);
+    diagnosticToolStats_.insert(QStringLiteral("public"), publicCount);
+    diagnosticSummary_ = QStringLiteral("Runtime %1 | %2-bit | %3 tools | %4 hook(s)")
+        .arg(health.value("ok", false) ? QStringLiteral("healthy") : QStringLiteral("degraded"))
+        .arg(diagnosticHealth_.value(QStringLiteral("bitness")).toInt())
+        .arg(tools.size())
+        .arg(diagnosticHooks_.size());
+    setError(QString());
+    emit diagnosticsChanged();
+    return true;
+}
+
 bool FeatureController::resolveSymbol(const QString& addressValue) {
     const QString address = addressValue.trimmed();
     if (address.isEmpty()) {
@@ -1750,6 +1829,11 @@ void FeatureController::reset() {
     structureReadFields_.clear();
     structureInferenceFields_.clear();
     structureStatus_.clear();
+    diagnosticStatus_.clear();
+    diagnosticHealth_.clear();
+    diagnosticHooks_.clear();
+    diagnosticToolStats_.clear();
+    diagnosticSummary_.clear();
     traces_.clear();
     patches_.clear();
     snapshots_.clear();
@@ -1772,6 +1856,7 @@ void FeatureController::reset() {
     emit instrumentationChanged();
     emit symbolsChanged();
     emit structuresChanged();
+    emit diagnosticsChanged();
     emit tracesChanged();
     emit patchesChanged();
     emit snapshotsChanged();
