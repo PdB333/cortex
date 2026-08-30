@@ -58,7 +58,9 @@ Rectangle {
                 spacing: 6
                 Text {
                     Layout.fillWidth: true
-                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "Select target..."
+                    text: CortexApp.currentTargetIndex >= 0
+                          ? CortexApp.currentTargetName + (CortexApp.attachedTargetCount > 1 ? "  (+" + (CortexApp.attachedTargetCount - 1) + ")" : "")
+                          : (CortexApp.attachedTargetCount > 0 ? "Select target...  (" + CortexApp.attachedTargetCount + " attached)" : "Select target...")
                     color: CortexApp.currentTargetIndex >= 0 ? Theme.textBright : Theme.textMuted
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter

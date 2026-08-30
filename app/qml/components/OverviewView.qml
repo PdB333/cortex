@@ -67,6 +67,8 @@ CortexFlickable {
             Label { text: CortexApp.sessionStatus; color: CortexApp.sessionActive ? Theme.success : Theme.text; font.pixelSize: 12 }
             Label { text: "Processes"; color: Theme.textMuted; font.pixelSize: 12 }
             Label { text: String(CortexApp.targetCount); color: Theme.text; font.pixelSize: 12 }
+            Label { text: "Attached"; color: Theme.textMuted; font.pixelSize: 12 }
+            Label { text: String(CortexApp.attachedTargetCount); color: CortexApp.attachedTargetCount > 0 ? Theme.success : Theme.text; font.pixelSize: 12 }
             Label { text: "Mutation"; color: Theme.textMuted; font.pixelSize: 12 }
             Label { text: CortexApp.mutationPermission ? "Enabled" : "Disabled"; color: CortexApp.mutationPermission ? Theme.mutation : Theme.text; font.pixelSize: 12 }
         }
@@ -87,6 +89,7 @@ CortexFlickable {
 
             Button { text: "Refresh targets"; onClicked: CortexApp.refreshTargets(); font.pixelSize: 12 }
             Button { text: "Detach"; visible: CortexApp.sessionActive; onClicked: CortexApp.detachTarget(); font.pixelSize: 12 }
+            Button { text: "Detach all"; visible: CortexApp.attachedTargetCount > 1; onClicked: CortexApp.detachAllTargets(); font.pixelSize: 12 }
             Button {
                 text: CortexApp.mutationPermission ? "Disable mutation" : "Enable mutation"
                 enabled: CortexApp.sessionActive

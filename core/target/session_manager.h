@@ -3,7 +3,10 @@
 #include "catalog.h"
 #include "session.h"
 
+#include <cstddef>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace cortex::target {
 
@@ -12,16 +15,26 @@ public:
     explicit SessionManager(Catalog& catalog) : catalog_(catalog) {}
 
     bool Attach(const TargetDescriptor& target, std::string* error = nullptr);
+    bool Activate(const std::string& targetId);
+    bool Detach(const std::string& targetId);
     void Detach();
+    void DetachAll();
+    void PruneDeadSessions();
 
-    bool HasActiveSession() const { return static_cast<bool>(active_); }
-    SessionPtr Active() const { return active_; }
-    const TargetDescriptor* ActiveTarget() const { return active_ ? &active_->Target() : nullptr; }
-    const CapabilitySet* ActiveCapabilities() const { return active_ ? &active_->Capabilities() : nullptr; }
+    bool HasActiveSession() const { return static_cast<bool>(Active()); }
+    bool HasSession(const std::string& targetId) const;
+    std::size_t SessionCount() const;
+    SessionPtr Active() const;
+    SessionPtr Find(const std::string& targetId) const;
+    std::vector<TargetDescriptor> AttachedTargets() const;
+    const std::string& ActiveTargetId() const { return activeTargetId_; }
+    const TargetDescriptor* ActiveTarget() const;
+    const CapabilitySet* ActiveCapabilities() const;
 
 private:
     Catalog& catalog_;
-    SessionPtr active_;
+    std::unordered_map<std::string, SessionPtr> sessions_;
+    std::string activeTargetId_;
 };
 
 } // namespace cortex::target

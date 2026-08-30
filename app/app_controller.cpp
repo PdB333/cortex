@@ -204,6 +204,18 @@ AppController::~AppController() {
     scanWatcher_.waitForFinished();
 }
 
+void AppController::rebuildTargetVariants() {
+    targets_.clear();
+    targets_.reserve(static_cast<qsizetype>(targetDescriptors_.size()));
+    const std::string activeId = sessionManager_.ActiveTargetId();
+    for (const auto& target : targetDescriptors_) {
+        QVariantMap row = TargetToVariant(target);
+        const bool attached = sessionManager_.HasSession(target.id);
+        row.insert(QStringLiteral("attached"), attached);
+        row.insert(QStringLiteral("active"), attached && target.id == activeId);
+        targets_.push_back(std::move(row));
+    }
+}
 QString AppController::currentTargetName() const {
     if (currentTargetIndex_ < 0 || currentTargetIndex_ >= static_cast<int>(targetDescriptors_.size()))
         return QStringLiteral("No target selected");
@@ -219,7 +231,7 @@ QString AppController::currentTargetMeta() const {
         .arg(static_cast<qulonglong>(target.processId))
         .arg(PlatformLabel(target.platform))
         .arg(ArchitectureLabel(target.architecture))
-        .arg(sessionActive() ? QStringLiteral("  |  attached") : QStringLiteral("  |  not attached"));
+        .arg(sessionManager_.HasSession(target.id) ? QStringLiteral("  |  attached") : QStringLiteral("  |  not attached"));
 }
 
 QString AppController::currentPlatform() const {
@@ -245,72 +257,76 @@ QString AppController::sessionStatus() const {
 }
 
 void AppController::refreshTargets() {
-    std::string previousId;
-    if (auto active = sessionManager_.Active()) previousId = active->Target().id;
-    else if (currentTargetIndex_ >= 0 && currentTargetIndex_ < static_cast<int>(targetDescriptors_.size()))
-        previousId = targetDescriptors_[static_cast<size_t>(currentTargetIndex_)].id;
+    const std::string previousActiveId = sessionManager_.ActiveTargetId();
+    sessionManager_.PruneDeadSessions();
 
     targetDescriptors_ = targetCatalog_.Targets();
-    targets_.clear();
-    targets_.reserve(static_cast<qsizetype>(targetDescriptors_.size()));
-    for (const auto& target : targetDescriptors_) targets_.push_back(TargetToVariant(target));
+    for (auto& target : targetDescriptors_) {
+        if (auto session = sessionManager_.Find(target.id)) target = session->Target();
+    }
 
     currentTargetIndex_ = -1;
-    if (!previousId.empty()) {
+    const std::string activeId = sessionManager_.ActiveTargetId();
+    if (!activeId.empty()) {
         const auto found = std::find_if(targetDescriptors_.begin(), targetDescriptors_.end(), [&](const auto& target) {
-            return target.id == previousId;
+            return target.id == activeId;
         });
         if (found != targetDescriptors_.end()) {
             currentTargetIndex_ = static_cast<int>(std::distance(targetDescriptors_.begin(), found));
-            if (auto active = sessionManager_.Active()) {
-                targetDescriptors_[static_cast<size_t>(currentTargetIndex_)] = active->Target();
-                targets_[currentTargetIndex_] = TargetToVariant(active->Target());
-            }
-        } else if (sessionManager_.HasActiveSession()) {
-            cancelScan();
-            ++sessionGeneration_;
-            sessionManager_.Detach();
-            mutationPermission_ = false;
-            modules_.clear();
-            resetScanState();
-            emit sessionChanged();
-            emit mutationPermissionChanged();
-            emit modulesChanged();
+        } else {
+            sessionManager_.Detach(activeId);
         }
+    }
+
+    rebuildTargetVariants();
+
+    if (!previousActiveId.empty() && sessionManager_.ActiveTargetId() != previousActiveId) {
+        cancelScan();
+        ++sessionGeneration_;
+        mutationPermission_ = false;
+        memoryRows_.clear();
+        modules_.clear();
+        resetScanState();
+        emit sessionChanged();
+        emit mutationPermissionChanged();
+        emit memoryRowsChanged();
+        emit modulesChanged();
     }
 
     emit targetsChanged();
     emit currentTargetChanged();
 }
-
 void AppController::selectTarget(int index) {
     if (index < -1 || index >= static_cast<int>(targetDescriptors_.size())) return;
     if (index == -1) {
         detachTarget();
         return;
     }
-    if (index == currentTargetIndex_ && sessionManager_.HasActiveSession()) return;
+
+    const auto& requested = targetDescriptors_[static_cast<size_t>(index)];
+    if (index == currentTargetIndex_ && sessionManager_.ActiveTargetId() == requested.id &&
+        sessionManager_.HasSession(requested.id)) return;
 
     cancelScan();
     ++sessionGeneration_;
-    sessionManager_.Detach();
+
+    std::string error;
+    if (!sessionManager_.Activate(requested.id) && !sessionManager_.Attach(requested, &error)) {
+        setLastError(FromUtf8(error.empty() ? std::string("attach_failed") : error));
+        return;
+    }
+
     currentTargetIndex_ = index;
     mutationPermission_ = false;
     memoryRows_.clear();
     modules_.clear();
     resetScanState();
 
-    std::string error;
-    if (sessionManager_.Attach(targetDescriptors_[static_cast<size_t>(index)], &error)) {
-        auto session = sessionManager_.Active();
-        if (session) {
-            targetDescriptors_[static_cast<size_t>(index)] = session->Target();
-            targets_[index] = TargetToVariant(session->Target());
-        }
-        setLastError(QString());
-    } else {
-        setLastError(FromUtf8(error.empty() ? std::string("attach_failed") : error));
+    if (auto session = sessionManager_.Active()) {
+        targetDescriptors_[static_cast<size_t>(index)] = session->Target();
     }
+    rebuildTargetVariants();
+    setLastError(QString());
 
     emit targetsChanged();
     emit currentTargetChanged();
@@ -319,7 +335,6 @@ void AppController::selectTarget(int index) {
     emit memoryRowsChanged();
     emit modulesChanged();
 }
-
 void AppController::detachTarget() {
     if (!sessionManager_.HasActiveSession() && currentTargetIndex_ < 0) return;
     cancelScan();
@@ -330,7 +345,9 @@ void AppController::detachTarget() {
     memoryRows_.clear();
     modules_.clear();
     resetScanState();
+    rebuildTargetVariants();
     setLastError(QString());
+    emit targetsChanged();
     emit currentTargetChanged();
     emit mutationPermissionChanged();
     emit sessionChanged();
@@ -338,6 +355,38 @@ void AppController::detachTarget() {
     emit modulesChanged();
 }
 
+void AppController::detachTargetAt(int index) {
+    if (index < 0 || index >= static_cast<int>(targetDescriptors_.size())) return;
+    const std::string targetId = targetDescriptors_[static_cast<size_t>(index)].id;
+    if (!sessionManager_.HasSession(targetId)) return;
+    if (sessionManager_.ActiveTargetId() == targetId) {
+        detachTarget();
+        return;
+    }
+    sessionManager_.Detach(targetId);
+    rebuildTargetVariants();
+    emit targetsChanged();
+}
+
+void AppController::detachAllTargets() {
+    if (sessionManager_.SessionCount() == 0) return;
+    cancelScan();
+    ++sessionGeneration_;
+    sessionManager_.DetachAll();
+    currentTargetIndex_ = -1;
+    mutationPermission_ = false;
+    memoryRows_.clear();
+    modules_.clear();
+    resetScanState();
+    rebuildTargetVariants();
+    setLastError(QString());
+    emit targetsChanged();
+    emit currentTargetChanged();
+    emit mutationPermissionChanged();
+    emit sessionChanged();
+    emit memoryRowsChanged();
+    emit modulesChanged();
+}
 void AppController::selectSection(const QString& section) {
     if (!IsKnownWorkspaceSection(section) || section == selectedSection_) return;
     selectedSection_ = section;

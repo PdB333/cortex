@@ -104,6 +104,7 @@ Popup {
 
                 property bool accepted: root.matches(modelData)
                 property bool selected: CortexApp.currentTargetIndex === index
+                property bool attached: !!modelData.attached
 
                 width: Math.max(0, ListView.view.width - 10)
                 height: accepted ? 64 : 0
@@ -111,19 +112,19 @@ Popup {
                 color: selected ? Theme.selection : (rowMouse.containsMouse ? Theme.hover : "transparent")
 
                 Rectangle {
-                    visible: selected
+                    visible: attached
                     anchors.left: parent.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: 2
-                    color: Theme.accent
+                    color: selected ? Theme.accent : Theme.success
                 }
 
                 Column {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
                     anchors.right: parent.right
-                    anchors.rightMargin: 12
+                    anchors.rightMargin: attached ? 42 : 12
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 4
 
@@ -142,10 +143,19 @@ Popup {
                         }
 
                         Text {
+                            visible: attached
+                            text: selected ? "ACTIVE" : "ATTACHED"
+                            color: selected ? Theme.accent : Theme.success
+                            font.family: Theme.uiFont
+                            font.pixelSize: 9
+                            font.bold: true
+                        }
+
+                        Text {
                             Layout.preferredWidth: 168
                             Layout.minimumWidth: 168
                             horizontalAlignment: Text.AlignRight
-                            text: "PID " + modelData.pid + "  ·  " + modelData.architecture
+                            text: "PID " + modelData.pid + "  |  " + modelData.architecture
                             color: Theme.textMuted
                             elide: Text.ElideLeft
                             font.family: Theme.monoFont
@@ -184,6 +194,37 @@ Popup {
                         root.close()
                     }
                 }
+
+                Rectangle {
+                    visible: attached
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 26
+                    height: 26
+                    z: 3
+                    radius: Theme.radius
+                    color: detachMouse.containsMouse ? Theme.hover : "transparent"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "x"
+                        color: detachMouse.containsMouse ? Theme.textBright : Theme.textMuted
+                        font.pixelSize: 15
+                    }
+
+                    MouseArea {
+                        id: detachMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            const wasActive = selected
+                            CortexApp.detachTargetAt(index)
+                            if (wasActive) root.close()
+                        }
+                    }
+                }
             }
         }
 
@@ -198,14 +239,14 @@ Popup {
                 anchors.rightMargin: 11
 
                 Text {
-                    text: CortexApp.targetCount + " processes"
+                    text: CortexApp.attachedTargetCount + " attached  |  " + CortexApp.targetCount + " processes"
                     color: Theme.textMuted
                     font.family: Theme.uiFont
                     font.pixelSize: 10
                 }
                 Item { Layout.fillWidth: true }
                 Text {
-                    text: "Click a process to attach  ·  Esc to close"
+                    text: "Click to attach/switch  |  x detach  |  Esc to close"
                     color: Theme.textDisabled
                     font.family: Theme.uiFont
                     font.pixelSize: 10

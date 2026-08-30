@@ -28,6 +28,7 @@ class AppController final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList targets READ targets NOTIFY targetsChanged)
     Q_PROPERTY(int targetCount READ targetCount NOTIFY targetsChanged)
+    Q_PROPERTY(int attachedTargetCount READ attachedTargetCount NOTIFY targetsChanged)
     Q_PROPERTY(int currentTargetIndex READ currentTargetIndex NOTIFY currentTargetChanged)
     Q_PROPERTY(QString currentTargetName READ currentTargetName NOTIFY currentTargetChanged)
     Q_PROPERTY(QString currentTargetMeta READ currentTargetMeta NOTIFY currentTargetChanged)
@@ -51,6 +52,7 @@ public:
 
     const QVariantList& targets() const { return targets_; }
     int targetCount() const { return static_cast<int>(targetDescriptors_.size()); }
+    int attachedTargetCount() const { return static_cast<int>(sessionManager_.SessionCount()); }
     int currentTargetIndex() const { return currentTargetIndex_; }
     QString currentTargetName() const;
     QString currentTargetMeta() const;
@@ -72,6 +74,8 @@ public:
     Q_INVOKABLE void refreshTargets();
     Q_INVOKABLE void selectTarget(int index);
     Q_INVOKABLE void detachTarget();
+    Q_INVOKABLE void detachTargetAt(int index);
+    Q_INVOKABLE void detachAllTargets();
     Q_INVOKABLE void selectSection(const QString& section);
     Q_INVOKABLE void openAddress(const QString& section, const QString& address);
     Q_INVOKABLE QString resolveAddressExpression(const QString& expression);
@@ -104,6 +108,7 @@ private:
     void setLastError(const QString& error);
     void finishScan();
     void resetScanState();
+    void rebuildTargetVariants();
 
     cortex::target::Catalog targetCatalog_;
     cortex::target::SessionManager sessionManager_;
