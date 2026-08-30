@@ -49,6 +49,8 @@ Rectangle {
         ToolButton {
             id: targetButton
             Layout.preferredWidth: 330
+            Layout.minimumWidth: 180
+            Layout.maximumWidth: 330
             Layout.preferredHeight: 32
             onClicked: processPicker.open()
 
@@ -64,7 +66,7 @@ Rectangle {
                     font.pixelSize: 12
                 }
                 Text {
-                    text: "⌄"
+                    text: "v"
                     color: Theme.textMuted
                     font.pixelSize: 13
                 }
@@ -98,7 +100,8 @@ Rectangle {
         }
 
         Text {
-            Layout.maximumWidth: 330
+            visible: root.width >= 1180
+            Layout.maximumWidth: 260
             text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetMeta : ""
             color: Theme.textDisabled
             elide: Text.ElideRight
@@ -130,7 +133,7 @@ Rectangle {
                 radius: Theme.radius
             }
             ToolTip.visible: hovered
-            ToolTip.text: "Execution paused — open Debugger"
+            ToolTip.text: "Execution paused - open Debugger"
         }
 
         ToolButton {

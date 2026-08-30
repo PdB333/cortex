@@ -81,7 +81,7 @@ Rectangle {
                 contentHeight: content.implicitHeight + 24
                 ColumnLayout {
                     id: content
-                    width: parent.width
+                    width: Math.max(0, parent.width - 24)
                     spacing: 10
                     anchors.margins: 12
                     x: 12
@@ -97,10 +97,14 @@ Rectangle {
                             RowLayout {
                                 Layout.fillWidth: true
                                 TextField { id: analysisAddress; Layout.fillWidth: true; placeholderText: "Address / object" }
-                                TextField { id: analysisSize; Layout.preferredWidth: 72; text: "1"; placeholderText: "Size" }
-                                Button { text: "Last writer"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.findLastWriter(analysisAddress.text, Number(analysisSize.text || 1), 10000) }
-                                Button { text: "C++ subobjects"; onClicked: CortexRe.detectSubobjects(analysisAddress.text, Math.max(8, Number(analysisSize.text || 256))) }
+                                TextField { id: analysisSize; Layout.preferredWidth: 84; Layout.minimumWidth: 72; text: "1"; placeholderText: "Size" }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Button { text: "Last writer"; enabled: CortexApp.mutationPermission && analysisAddress.text.length > 0; onClicked: CortexRe.findLastWriter(analysisAddress.text, Number(analysisSize.text || 1), 10000) }
+                                Button { text: "C++ subobjects"; enabled: analysisAddress.text.length > 0; onClicked: CortexRe.detectSubobjects(analysisAddress.text, Math.max(8, Number(analysisSize.text || 256))) }
                                 Button { text: "Trace writes"; enabled: CortexApp.mutationPermission && analysisAddress.text.length > 0; onClicked: CortexRe.traceTransition(JSON.stringify({"watches":[{"address":analysisAddress.text,"size":Math.max(1, Number(analysisSize.text || 1)),"label":"state"}],"probes":[],"timeout_ms":10000})) }
+                                Item { Layout.fillWidth: true }
                             }
                         }
                     }
@@ -154,18 +158,22 @@ Rectangle {
                     }
 
                     Rectangle {
-                        Layout.fillWidth: true; implicitHeight: 116; color: Theme.surface; border.color: Theme.border; radius: 3
+                        Layout.fillWidth: true; implicitHeight: 142; color: Theme.surface; border.color: Theme.border; radius: 3
                         ColumnLayout {
                             anchors.fill: parent; anchors.margins: 10; spacing: 6
                             Label { text: "PERSISTENT RE FACT"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
                             RowLayout {
                                 Layout.fillWidth: true
-                                TextField { id: factKey; Layout.preferredWidth: 220; placeholderText: "e.g. GameManager.B9" }
-                                TextField { id: factValue; Layout.fillWidth: true; placeholderText: 'JSON or text, e.g. {"meaning":"open","offset":"0xB9"}' }
+                                TextField { id: factKey; Layout.preferredWidth: 220; Layout.minimumWidth: 150; placeholderText: "e.g. GameManager.B9" }
+                                TextField { id: factValue; Layout.fillWidth: true; Layout.minimumWidth: 180; placeholderText: 'JSON or text, e.g. {"meaning":"open","offset":"0xB9"}' }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
                                 Button { text: "Save fact"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.saveFact(factKey.text, factValue.text) }
                                 Button { text: "Apply saved BPs"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.applyBreakpointTemplates() }
+                                Item { Layout.fillWidth: true }
+                                Label { text: "Saved facts: " + Object.keys(CortexRe.session.facts || {}).length + "  |  suggested breakpoints: " + ((CortexRe.session.suggested_breakpoints || []).length); color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
                             }
-                            Label { text: "Saved facts: " + Object.keys(CortexRe.session.facts || {}).length + "  |  suggested breakpoints: " + ((CortexRe.session.suggested_breakpoints || []).length); color: Theme.textMuted; font.pixelSize: 10 }
                         }
                     }
 

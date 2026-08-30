@@ -4,6 +4,7 @@ import Cortex 1.0
 
 T.ToolButton {
     id: control
+    implicitWidth: Math.max(CortexSettings.compactUi ? 28 : 32, implicitContentWidth + leftPadding + rightPadding)
     implicitHeight: CortexSettings.compactUi ? 26 : 30
     leftPadding: CortexSettings.compactUi ? 6 : 8
     rightPadding: CortexSettings.compactUi ? 6 : 8
