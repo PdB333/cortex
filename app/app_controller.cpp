@@ -15,7 +15,7 @@ namespace {
 
 bool IsKnownWorkspaceSection(const QString& section) {
     static const QStringList sections = {
-        QStringLiteral("Overview"), QStringLiteral("Project"), QStringLiteral("Memory"),
+        QStringLiteral("Overview"), QStringLiteral("Project"), QStringLiteral("RE"), QStringLiteral("Memory"),
         QStringLiteral("Scanner"), QStringLiteral("Pointers"), QStringLiteral("Disassembly"),
         QStringLiteral("Structures"), QStringLiteral("Modules"), QStringLiteral("Symbols"),
         QStringLiteral("Snapshots"), QStringLiteral("Debugger"), QStringLiteral("Breakpoints"),
