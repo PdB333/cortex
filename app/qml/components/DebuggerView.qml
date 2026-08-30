@@ -138,6 +138,7 @@ ColumnLayout {
 
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: disasmList.width
                         height: 25
                         color: index % 2 ? Theme.background : Theme.surface
@@ -212,6 +213,7 @@ ColumnLayout {
 
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: threadList.width
                         height: 26
                         color: Number(modelData.id) === Number(CortexDebugger.currentThreadId) ? Theme.selection : (index % 2 ? Theme.surface : Theme.background)
@@ -260,6 +262,7 @@ ColumnLayout {
 
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: breakpointList.width
                         height: 26
                         color: index % 2 ? Theme.surface : Theme.background
@@ -307,6 +310,7 @@ ColumnLayout {
 
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: registerList.width
                         height: 24
                         color: index % 2 ? Theme.surface : Theme.background

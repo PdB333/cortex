@@ -139,6 +139,7 @@ Rectangle {
 
                         delegate: Rectangle {
                             required property string toolName
+                            required property int index
                             required property string description
                             required property string method
                             required property string path

@@ -152,10 +152,6 @@ Target-control actions require Mutation permission.
 
 > Current UI limitation: **Pause** and **Step Over** are visible but disabled in this Qt UI version. They should not be treated as completed interactive controls yet.
 
-### Screenshot note
-
-The Debugger screenshot above is captured from the actual displayed Windows framebuffer. Earlier `PrintWindow`-based captures could incorrectly produce a white debugger area even though the live UI itself was dark; the documentation no longer uses that capture path for this view.
-
 ## 9. Continue into RE
 
 For deeper runtime reverse engineering, open the current address in **RE**.

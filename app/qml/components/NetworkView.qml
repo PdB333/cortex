@@ -67,6 +67,7 @@ ColumnLayout {
         model: CortexFeatures.networkEvents
         delegate: Rectangle {
             required property var modelData
+            required property int index
             width: ListView.view.width
             height: 32
             color: index % 2 ? Theme.background : Theme.surface

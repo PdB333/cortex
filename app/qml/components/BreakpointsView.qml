@@ -89,6 +89,7 @@ ColumnLayout {
         model: CortexDebugger.breakpoints
         delegate: Rectangle {
             required property var modelData
+            required property int index
             width: ListView.view.width
             height: 34
             color: index % 2 ? Theme.background : Theme.surface

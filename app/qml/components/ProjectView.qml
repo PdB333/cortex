@@ -92,6 +92,7 @@ ColumnLayout {
                         model: CortexFeatures.projectAddresses
                         delegate: Rectangle {
                             required property var modelData
+                            required property int index
                             width: ListView.view.width
                             height: 32
                             color: index % 2 ? Theme.background : Theme.surface
@@ -165,6 +166,7 @@ ColumnLayout {
                         model: CortexFeatures.projectPointerPaths
                         delegate: Rectangle {
                             required property var modelData
+                            required property int index
                             width: ListView.view.width
                             height: 42
                             color: index % 2 ? Theme.background : Theme.surface
@@ -253,6 +255,7 @@ ColumnLayout {
                     model: CortexFeatures.projectNotes
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 34
                         color: index % 2 ? Theme.background : Theme.surface

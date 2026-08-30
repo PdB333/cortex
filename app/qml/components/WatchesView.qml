@@ -110,6 +110,7 @@ ColumnLayout {
                     model: CortexFeatures.watches
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 31
                         color: index % 2 ? Theme.background : Theme.surface
@@ -156,6 +157,7 @@ ColumnLayout {
                     model: CortexFeatures.freezes
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 31
                         color: index % 2 ? Theme.background : Theme.surface

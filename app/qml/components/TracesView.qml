@@ -94,6 +94,7 @@ ColumnLayout {
                     model: CortexFeatures.traces
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 31
                         color: CortexFeatures.selectedTraceId === modelData.id ? Theme.selection : (mouse.containsMouse ? Theme.hover : Theme.background)
@@ -141,6 +142,7 @@ ColumnLayout {
                     model: CortexFeatures.traceEvents
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 31
                         color: index % 2 ? Theme.background : Theme.surface

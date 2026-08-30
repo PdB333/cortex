@@ -188,6 +188,7 @@ ColumnLayout {
                     model: CortexFeatures.structureDefinitions
                     delegate: Rectangle {
                         required property var modelData
+                        required property int index
                         width: ListView.view.width
                         height: 34
                         color: CortexFeatures.selectedStructureName === modelData.name
@@ -347,6 +348,7 @@ ColumnLayout {
                             model: CortexFeatures.structureReadFields
                             delegate: Rectangle {
                                 required property var modelData
+                                required property int index
                                 width: ListView.view.width
                                 height: 30
                                 color: index % 2 ? Theme.background : Theme.surface
@@ -462,6 +464,7 @@ ColumnLayout {
                             model: CortexFeatures.structureInferenceFields
                             delegate: Rectangle {
                                 required property var modelData
+                                required property int index
                                 width: ListView.view.width
                                 height: 30
                                 color: index % 2 ? Theme.background : Theme.surface
