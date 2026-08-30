@@ -4,7 +4,6 @@ import Cortex 1.0
 Rectangle {
     id: control
     property bool checked: false
-    property bool enabled: true
     signal toggled(bool checked)
 
     implicitWidth: 38

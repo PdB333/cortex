@@ -18,7 +18,6 @@
 #include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QQuickStyle>
 #include <QRect>
 #include <QScreen>
 #include <QSettings>
@@ -265,7 +264,6 @@ int main(int argc, char* argv[]) {
     const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
     if (smokeTest) cortex::appdiag::Enable();
 
-    QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
     ConfigureApplicationIdentity();
 
