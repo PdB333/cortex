@@ -9,6 +9,13 @@ ColumnLayout {
     spacing: 0
     property var selectedResult: null
 
+    function focusSearch() {
+        valueField.forceActiveFocus()
+        valueField.selectAll()
+    }
+
+    Component.onCompleted: Qt.callLater(root.focusSearch)
+
     function addressType() {
         const t = valueType.currentText
         if (t === "f32") return "float"

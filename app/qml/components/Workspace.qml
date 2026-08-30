@@ -4,7 +4,15 @@ import QtQuick.Layouts
 import Cortex 1.0
 
 Rectangle {
+    id: root
     color: Theme.background
+
+    function focusScanner() {
+        if (CortexApp.selectedSection !== "Scanner") CortexApp.selectSection("Scanner")
+        Qt.callLater(function() {
+            if (pageLoader.item && pageLoader.item.focusSearch) pageLoader.item.focusSearch()
+        })
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -54,6 +62,7 @@ Rectangle {
         }
 
         Loader {
+            id: pageLoader
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent

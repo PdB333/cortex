@@ -102,6 +102,31 @@ Rectangle {
     function editorFocused() {
         return nameField.activeFocus || addressField.activeFocus || notesField.activeFocus || typeBox.activeFocus
     }
+    function selectNavigationAddress(address) {
+        const needle = String(address || "").trim().toLowerCase()
+        if (needle.length === 0) return
+        for (var i = 0; i < CortexFeatures.projectAddresses.length; ++i) {
+            const entry = CortexFeatures.projectAddresses[i]
+            const raw = String(entry.address || "").trim()
+            var matches = raw.toLowerCase() === needle
+            if (!matches) {
+                const resolved = CortexApp.resolveAddressExpression(raw)
+                matches = resolved.length > 0 && resolved.toLowerCase() === needle
+            }
+            if (matches) {
+                root.selectedEntry = entry
+                table.currentIndex = i
+                table.positionViewAtIndex(i, ListView.Contain)
+                root.resetEditor()
+                return
+            }
+        }
+        root.selectedEntry = null
+        table.currentIndex = -1
+        root.resetEditor()
+        addressField.text = address
+        nameField.forceActiveFocus()
+    }
     function openContextFor(item, sourceItem, x, y) {
         selectedEntry = item
         contextMenu.address = String(item.address || "")
@@ -117,9 +142,7 @@ Rectangle {
         target: CortexApp
         function onNavigationAddressChanged() {
             if (CortexApp.selectedSection !== "Addresses" || CortexApp.navigationAddress.length === 0) return
-            addressField.text = CortexApp.navigationAddress
-            addressField.forceActiveFocus()
-            addressField.selectAll()
+            Qt.callLater(function() { root.selectNavigationAddress(CortexApp.navigationAddress) })
         }
     }
 
@@ -128,7 +151,11 @@ Rectangle {
     Shortcut { sequence: "Delete"; enabled: root.selectedEntry !== null && !root.editorFocused() && CortexApp.mutationPermission; onActivated: root.removeSelected() }
     Shortcut { sequence: "Ctrl+B"; enabled: root.selectedEntry !== null && !root.editorFocused() && CortexApp.mutationPermission && CortexPayload.ready; onActivated: root.addBreakpoint() }
 
-    Component.onCompleted: refreshAll()
+    Component.onCompleted: {
+        refreshAll()
+        if (CortexApp.selectedSection === "Addresses" && CortexApp.navigationAddress.length > 0)
+            Qt.callLater(function() { root.selectNavigationAddress(CortexApp.navigationAddress) })
+    }
 
     Timer {
         interval: CortexSettings.autoRefreshMs

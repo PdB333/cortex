@@ -46,6 +46,11 @@ ApplicationWindow {
         enabled: !CortexPrompt.active && CortexApp.sessionActive
         onActivated: goToPopup.show()
     }
+    Shortcut {
+        sequence: "Ctrl+F"
+        enabled: !CortexPrompt.active && CortexApp.sessionActive
+        onActivated: workspace.focusScanner()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -74,6 +79,7 @@ ApplicationWindow {
                 spacing: 0
 
                 Workspace {
+                    id: workspace
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                 }
