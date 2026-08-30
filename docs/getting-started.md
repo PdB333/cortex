@@ -2,6 +2,8 @@
 
 This guide describes the current unified Qt/QML application on `next/unified-cortex-ui`.
 
+For a screenshot-based French walkthrough, see [Procédure illustrée FR](ui-walkthrough-fr.md).
+
 ## 1. Get a testable build
 
 For the migration branch, use the artifact produced by the latest green **Unified Cortex UI Preview** workflow.

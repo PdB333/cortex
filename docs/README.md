@@ -5,6 +5,7 @@ This directory contains both user-facing documentation for the unified Cortex ap
 ## User documentation
 
 - [Getting started](getting-started.md) — download/extract the preview, attach a target, scan, use Addresses, understand Mutation and run the manual validation checklist.
+- [Procédure illustrée FR](ui-walkthrough-fr.md) - guide pas à pas avec de vraies captures de Cortex : cible, Scanner, Addresses, Memory, Disassembly, RE et Settings.
 - [Cortex UI guide](ui-guide.md) — complete workspace map, address context menu, shortcuts, Settings and Mutation behavior.
 
 ## Product architecture
