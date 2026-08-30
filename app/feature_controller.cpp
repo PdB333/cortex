@@ -774,6 +774,8 @@ bool FeatureController::refreshWatches() {
             row.insert(QStringLiteral("address"), FromUtf8(entry.value("address", std::string())));
             row.insert(QStringLiteral("type"), FromUtf8(entry.value("type", std::string())));
             row.insert(QStringLiteral("label"), FromUtf8(entry.value("label", std::string())));
+            row.insert(QStringLiteral("value"), FromUtf8(entry.value("value", std::string())));
+            row.insert(QStringLiteral("hasValue"), entry.value("has_value", false));
             watches_.push_back(row);
         }
     }

@@ -572,6 +572,28 @@ jobs:
                 throw "$label experiment rollback did not restore target memory"
               }
 
+              # Address-table live values reuse the regular watch engine. Verify the
+              # list surface exposes a sampled value on both x86 and x64.
+              $watchAdd = @{ jsonrpc="2.0"; id=430; method="tools/call"; params=@{ name="watch_add"; arguments=@{
+                address=[string]$fixture.fake_state; type="u32"; label="preview-live-value"; mutation_permission=$true
+              } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($watchAdd); $mcp.StandardInput.Flush()
+              $watchAddResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $watchId = [int]$watchAddResponse.result.structuredContent.result.id
+              if ($watchAddResponse.id -ne 430 -or $watchId -le 0) { throw "$label could not create live-value watch" }
+              Start-Sleep -Milliseconds 250
+
+              $watchList = @{ jsonrpc="2.0"; id=431; method="tools/call"; params=@{ name="watch_list"; arguments=@{} } } | ConvertTo-Json -Depth 6 -Compress
+              $mcp.StandardInput.WriteLine($watchList); $mcp.StandardInput.Flush()
+              $watchListResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $watchRow = @($watchListResponse.result.structuredContent.result.watches | Where-Object { [int]$_.id -eq $watchId })
+              if ($watchListResponse.id -ne 431 -or $watchRow.Count -ne 1 -or -not $watchRow[0].has_value -or [string]::IsNullOrWhiteSpace([string]$watchRow[0].value)) {
+                throw "$label watch list did not expose the sampled live value"
+              }
+
+              $watchDelete = @{ jsonrpc="2.0"; id=432; method="tools/call"; params=@{ name="watch_delete"; arguments=@{ _path=@{ id=$watchId }; mutation_permission=$true } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($watchDelete); $mcp.StandardInput.Flush()
+              [void]((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
               # Explicit RE checkpoint combines the Actions journal with raw memory
               # ranges so aggressive experiments can be rolled back later in one call.
               $checkpointCreate = @{ jsonrpc="2.0"; id=418; method="tools/call"; params=@{ name="re_checkpoint_create"; arguments=@{

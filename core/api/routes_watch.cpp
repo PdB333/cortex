@@ -84,7 +84,8 @@ void RegisterWatchRoutes(httplib::Server& svr) {
     svr.Get("/watch/list", [](const httplib::Request&, httplib::Response& res) {
         json arr = json::array();
         for (const auto& w : watch::List()) {
-            arr.push_back({{"id", w.id}, {"address", HexAddr(w.address)}, {"type", w.type}, {"label", w.label}});
+            arr.push_back({{"id", w.id}, {"address", HexAddr(w.address)}, {"type", w.type}, {"label", w.label},
+                           {"value", w.value}, {"has_value", w.has_value}});
         }
         res.set_content(json{{"ok", true}, {"watches", arr}}.dump(), "application/json");
     });

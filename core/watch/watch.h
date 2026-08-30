@@ -11,6 +11,8 @@ struct WatchInfo {
     uintptr_t address;
     std::string type;
     std::string label;
+    std::string value;
+    bool has_value = false;
 };
 
 struct ChangeEvent {
@@ -72,6 +74,8 @@ struct PageWatchInfo {
     uintptr_t address;
     size_t size;
     std::string label;
+    std::string value;
+    bool has_value = false;
 };
 
 struct PageAccessEvent {
