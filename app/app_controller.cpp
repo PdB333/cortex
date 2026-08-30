@@ -3,6 +3,8 @@
 #include "target/local_backend.h"
 
 #include <QtConcurrent/QtConcurrentRun>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QVariantMap>
 #include <QSettings>
 #include <QStringList>
@@ -10,6 +12,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <limits>
 
 namespace {
 
@@ -351,6 +354,40 @@ void AppController::openAddress(const QString& section, const QString& address) 
     selectSection(section);
     emit navigationAddressChanged();
 }
+
+QString AppController::resolveAddressExpression(const QString& expression) {
+    const QString value = expression.trimmed();
+    if (value.isEmpty()) return QString();
+
+    uint64_t address = 0;
+    if (ParseAddress(value, address)) return HexAddress(address);
+
+    const qsizetype plus = value.lastIndexOf(QLatin1Char('+'));
+    if (plus <= 0 || plus >= value.size() - 1) return QString();
+
+    const QString moduleName = value.left(plus).trimmed();
+    const QString offsetText = value.mid(plus + 1).trimmed();
+    bool offsetOk = false;
+    const uint64_t offset = offsetText.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)
+        ? offsetText.toULongLong(&offsetOk, 0)
+        : offsetText.toULongLong(&offsetOk, 16);
+    if (!offsetOk) return QString();
+
+    std::string error;
+    const auto modules = moduleService_.List(&error);
+    for (const auto& module : modules) {
+        const QString candidate = FromUtf8(module.name);
+        if (candidate.compare(moduleName, Qt::CaseInsensitive) != 0) continue;
+        if (offset > std::numeric_limits<uint64_t>::max() - module.base) return QString();
+        return HexAddress(module.base + offset);
+    }
+    return QString();
+}
+
+void AppController::copyText(const QString& text) {
+    if (auto* clipboard = QGuiApplication::clipboard()) clipboard->setText(text);
+}
+
 QString AppController::capabilitySummary() const {
     auto active = sessionManager_.Active();
     const cortex::target::CapabilitySet* capabilitySet = nullptr;

@@ -110,6 +110,8 @@ qt_add_qml_module(cortex
         qml/components/Workspace.qml
         qml/components/OverviewView.qml
         qml/components/AddressTableView.qml
+        qml/components/AddressContextMenu.qml
+        qml/components/GoToPopup.qml
         qml/components/ProjectView.qml
         qml/components/ReView.qml
         qml/components/SettingsView.qml

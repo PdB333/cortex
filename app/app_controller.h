@@ -74,6 +74,8 @@ public:
     Q_INVOKABLE void detachTarget();
     Q_INVOKABLE void selectSection(const QString& section);
     Q_INVOKABLE void openAddress(const QString& section, const QString& address);
+    Q_INVOKABLE QString resolveAddressExpression(const QString& expression);
+    Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE QString capabilitySummary() const;
     Q_INVOKABLE bool readMemory(const QString& address, int size = 256);
     Q_INVOKABLE bool writeMemoryHex(const QString& address, const QString& hexBytes);

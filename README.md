@@ -63,7 +63,7 @@ See [docs/unified-app-architecture.md](docs/unified-app-architecture.md) for the
 
 The official Cortex UI is Qt/QML. It uses a dense IDE/debugger layout with explicit target context and a visible Observe/Mutation distinction.
 
-Dear ImGui is no longer the main Cortex interface. Only two injected failure/headless fallbacks remain temporarily: human prompts and paused-thread recovery. Renderer hooks remain independently because capture/instrumentation features still need them.
+Dear ImGui no longer provides any Cortex user interface. Human prompts are presented by the Qt desktop over the authenticated private channel, and paused-thread recovery is handled by the Qt debugger or explicit headless debugger APIs. Renderer hooks remain independently because capture/instrumentation features still need them; their shared backend plumbing may keep an empty ImGui frame/context, but no injected ImGui windows are shown.
 
 ## MCP
 

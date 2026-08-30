@@ -11,7 +11,7 @@ namespace overlay::detail {
 
 extern bool g_initialized;
 
-// Shared groundwork/frame-end bookkeeping for every backend's Init/OnFrame.
+// Shared renderer-hook groundwork/frame bookkeeping for every backend's Init/OnFrame.
 // Backend-specific device init/render calls run between CommonInitPre and
 // CommonInitPost, and around CommonFrameBegin.
 void CommonInitPre(HWND hwnd);

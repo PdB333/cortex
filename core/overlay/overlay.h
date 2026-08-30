@@ -29,8 +29,8 @@ struct IDirect3DDevice8;
 namespace overlay {
 
 #ifdef CORTEX_KIERO
-// One-time setup per backend: inits Dear ImGui (official backend for that
-// API + Win32 backend), subclasses the game's WndProc for input. Only the
+// One-time setup per backend: initializes the shared renderer backend and
+// Win32 frame plumbing. Cortex does not render injected UI or capture input. Only the
 // first backend to call its Init wins -- a process only ever drives one
 // render API, so there is no risk of double-init across backends.
 
@@ -68,8 +68,8 @@ void PreResetD3D12();
 void PostResetD3D12();
 #endif
 #ifdef CORTEX_D3D8
-// First-time setup: inits Dear ImGui (custom D3D8 backend + Win32 backend),
-// subclasses the game's WndProc for input. Safe to call once; subsequent
+// First-time setup: initializes the custom D3D8 renderer backend plus Win32
+// frame plumbing. Cortex does not render injected UI. Safe to call once; subsequent
 // calls are ignored.
 void Init(IDirect3DDevice8* device, HWND hwnd);
 
@@ -83,8 +83,7 @@ void PostReset(IDirect3DDevice8* device);
 
 void Shutdown();
 
-// Appends a line to the small in-overlay log of recent API activity, so a
-// human watching the screen can see what the AI is doing.
+// Appends a line to the small runtime API activity log consumed by Cortex Desktop.
 void LogApiCall(const std::string& line);
 std::vector<std::string> ApiLogSnapshot();
 

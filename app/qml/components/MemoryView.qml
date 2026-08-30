@@ -4,16 +4,37 @@ import QtQuick.Layouts
 import Cortex 1.0
 
 ColumnLayout {
+    id: root
+    anchors.fill: parent
+    spacing: 0
+    property string selectedAddress: ""
+
     Connections {
         target: CortexApp
         function onNavigationAddressChanged() {
             if (CortexApp.selectedSection !== "Memory" || CortexApp.navigationAddress.length === 0) return
             addressField.text = CortexApp.navigationAddress
             CortexApp.readMemory(CortexApp.navigationAddress, 256)
+            root.selectedAddress = CortexApp.navigationAddress
         }
     }
-    anchors.fill: parent
-    spacing: 0
+
+    function openContext(address, sourceItem, x, y) {
+        root.selectedAddress = address
+        contextMenu.address = address
+        contextMenu.label = "Memory " + address
+        contextMenu.valueType = "i32"
+        const p = sourceItem.mapToItem(root, x, y)
+        contextMenu.x = Math.max(0, Math.min(root.width - contextMenu.implicitWidth, p.x))
+        contextMenu.y = Math.max(0, Math.min(root.height - 320, p.y))
+        contextMenu.open()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+B"
+        enabled: root.selectedAddress.length > 0 && CortexPayload.ready && CortexApp.mutationPermission && !addressField.activeFocus && !writeAddress.activeFocus && !writeBytes.activeFocus
+        onActivated: CortexDebugger.addBreakpoint(root.selectedAddress, "software", CortexSettings.breakpointDefaultAction, true, 0)
+    }
 
     Rectangle {
         Layout.fillWidth: true
@@ -35,13 +56,15 @@ ColumnLayout {
                 font.family: Theme.monoFont
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive
-                Keys.onReturnPressed: CortexApp.readMemory(text, 256)
+                Keys.onReturnPressed: {
+                    if (CortexApp.readMemory(text, 256)) root.selectedAddress = text
+                }
             }
             Button {
                 text: "Go"
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive && addressField.text.length > 0
-                onClicked: CortexApp.readMemory(addressField.text, 256)
+                onClicked: if (CortexApp.readMemory(addressField.text, 256)) root.selectedAddress = addressField.text
             }
             Button {
                 text: "Refresh"
@@ -50,7 +73,7 @@ ColumnLayout {
                 onClicked: CortexApp.readMemory(addressField.text, 256)
             }
             Item { Layout.fillWidth: true }
-            Label { text: "16 bytes / row"; color: Theme.textDisabled; font.pixelSize: 10 }
+            Label { text: "16 bytes / row | Right-click for address actions"; color: Theme.textDisabled; font.pixelSize: 10 }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
@@ -89,6 +112,7 @@ ColumnLayout {
                     const destination = writeAddress.text.length > 0 ? writeAddress.text : addressField.text
                     if (CortexApp.writeMemoryHex(destination, writeBytes.text)) {
                         addressField.text = destination
+                        root.selectedAddress = destination
                         CortexApp.readMemory(destination, 256)
                     }
                 }
@@ -124,16 +148,20 @@ ColumnLayout {
         color: Theme.background
 
         CortexListView {
+            id: memoryList
             anchors.fill: parent
             clip: true
             model: CortexApp.memoryRows
             boundsBehavior: Flickable.StopAtBounds
+            currentIndex: -1
 
             delegate: Rectangle {
+                id: memoryRow
                 required property var modelData
+                required property int index
                 width: ListView.view.width
                 height: 28
-                color: index % 2 ? Theme.background : Theme.surface
+                color: memoryList.currentIndex === index ? Theme.selection : (mouse.containsMouse ? Theme.hover : (index % 2 ? Theme.background : Theme.surface))
 
                 RowLayout {
                     anchors.fill: parent
@@ -143,6 +171,21 @@ ColumnLayout {
                     Text { Layout.preferredWidth: 190; text: modelData.address; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 11 }
                     Text { Layout.fillWidth: true; text: modelData.hex; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight }
                     Text { Layout.preferredWidth: 190; text: modelData.ascii; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight }
+                }
+
+                MouseArea {
+                    id: mouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onPressed: function(event) {
+                        memoryList.currentIndex = index
+                        root.selectedAddress = String(modelData.address || "")
+                        if (event.button === Qt.RightButton) root.openContext(root.selectedAddress, mouse, event.x, event.y)
+                    }
+                    onDoubleClicked: function(event) {
+                        if (event.button === Qt.LeftButton) CortexApp.openAddress("Disassembly", modelData.address)
+                    }
                 }
             }
         }
@@ -158,5 +201,10 @@ ColumnLayout {
             font.family: CortexApp.lastError.length ? Theme.monoFont : Theme.uiFont
             font.pixelSize: 11
         }
+    }
+
+    AddressContextMenu {
+        id: contextMenu
+        allowSave: true
     }
 }

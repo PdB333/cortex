@@ -37,6 +37,13 @@ ColumnLayout {
             fieldsEdit.text = JSON.stringify(fields, null, 2)
     }
 
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "Structures" || CortexApp.navigationAddress.length === 0) return
+            addressField.text = CortexApp.navigationAddress
+        }
+    }
     Component.onCompleted: {
         if (CortexApp.sessionActive)
             CortexFeatures.refreshStructures()

@@ -13,6 +13,15 @@ ColumnLayout {
             CortexDisasm.disassemble(CortexDebugger.instructionPointer, 64)
     }
 
+    function openAddressContext(address, sourceItem, x, y) {
+        debuggerContext.address = address
+        debuggerContext.label = "Debugger " + address
+        debuggerContext.valueType = "i32"
+        const p = sourceItem.mapToItem(root, x, y)
+        debuggerContext.x = Math.max(0, Math.min(root.width - debuggerContext.implicitWidth, p.x))
+        debuggerContext.y = Math.max(0, Math.min(root.height - 320, p.y))
+        debuggerContext.open()
+    }
     Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 44
@@ -142,11 +151,17 @@ ColumnLayout {
                             Text { Layout.fillWidth: true; text: modelData.text; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 10; elide: Text.ElideRight }
                         }
                         MouseArea {
+                            id: debuggerDisasmMouse
                             anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            onDoubleClicked: {
-                                if (CortexPayload.ready && CortexApp.mutationPermission)
-                                    CortexDebugger.addBreakpoint(modelData.address, "software", "pause")
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onPressed: function(event) {
+                                if (event.button === Qt.RightButton)
+                                    root.openAddressContext(modelData.address, debuggerDisasmMouse, event.x, event.y)
+                            }
+                            onDoubleClicked: function(event) {
+                                if (event.button === Qt.LeftButton && CortexPayload.ready && CortexApp.mutationPermission)
+                                    CortexDebugger.addBreakpoint(modelData.address, "software", CortexSettings.breakpointDefaultAction)
                             }
                         }
                     }
@@ -306,5 +321,10 @@ ColumnLayout {
                 }
             }
         }
+    }
+
+    AddressContextMenu {
+        id: debuggerContext
+        allowSave: true
     }
 }

@@ -41,6 +41,11 @@ ApplicationWindow {
         enabled: !CortexPrompt.active
         onActivated: root.bottomPanelVisible = !root.bottomPanelVisible
     }
+    Shortcut {
+        sequence: "Ctrl+G"
+        enabled: !CortexPrompt.active && CortexApp.sessionActive
+        onActivated: goToPopup.show()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -140,6 +145,10 @@ ApplicationWindow {
     CommandPalette {
         id: commandPalette
         anchors.centerIn: parent
+    }
+    GoToPopup {
+        id: goToPopup
+        parent: root.contentItem
     }
 
     PromptSurface {

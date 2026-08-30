@@ -7,6 +7,7 @@ Rectangle {
     id: root
     color: Theme.background
     property var selectedEntry: null
+    property string editingOriginalName: ""
 
     function normalizedType(entry) {
         if (!entry) return "i32"
@@ -45,14 +46,87 @@ Rectangle {
         CortexFeatures.refreshProject()
         CortexFeatures.refreshWatches()
     }
+    function resetEditor() {
+        editingOriginalName = ""
+        nameField.text = ""
+        addressField.text = ""
+        notesField.text = ""
+    }
+    function beginEdit(entry) {
+        if (!entry) return
+        editingOriginalName = String(entry.name || "")
+        nameField.text = editingOriginalName
+        addressField.text = String(entry.address || "")
+        notesField.text = String(entry.notes || "")
+        const wanted = normalizedType(entry)
+        for (var i = 0; i < typeBox.model.length; ++i) {
+            if (String(typeBox.model[i]) === wanted) {
+                typeBox.currentIndex = i
+                break
+            }
+        }
+        nameField.forceActiveFocus()
+        nameField.selectAll()
+    }
     function addEntry() {
         if (!CortexPayload.ready || !CortexApp.mutationPermission || nameField.text.trim().length === 0 || addressField.text.trim().length === 0) return
-        if (CortexFeatures.setProjectAddress(nameField.text.trim(), addressField.text.trim(), typeBox.currentText, notesField.text.trim())) {
-            nameField.text = ""
-            addressField.text = ""
-            notesField.text = ""
+        const newName = nameField.text.trim()
+        const previousName = editingOriginalName
+        if (CortexFeatures.setProjectAddress(newName, addressField.text.trim(), typeBox.currentText, notesField.text.trim())) {
+            if (previousName.length > 0 && previousName !== newName)
+                CortexFeatures.deleteProjectAddress(previousName)
+            selectedEntry = null
+            resetEditor()
         }
     }
+    function removeSelected() {
+        if (!selectedEntry || !CortexApp.mutationPermission) return
+        if (CortexFeatures.deleteProjectAddress(selectedEntry.name)) {
+            if (editingOriginalName === selectedEntry.name) resetEditor()
+            selectedEntry = null
+            table.currentIndex = -1
+        }
+    }
+    function toggleFreeze() {
+        if (!selectedEntry || !CortexApp.mutationPermission) return
+        const currentFreeze = freezeFor(selectedEntry)
+        const currentWatch = watchFor(selectedEntry)
+        if (currentFreeze) CortexFeatures.deleteFreeze(currentFreeze.id)
+        else if (currentWatch && currentWatch.hasValue)
+            CortexFeatures.addFreeze(selectedEntry.address, normalizedType(selectedEntry), currentWatch.value, selectedEntry.name, 0)
+    }
+    function addBreakpoint() {
+        if (!selectedEntry || !CortexApp.mutationPermission || !CortexPayload.ready) return
+        CortexDebugger.addBreakpoint(selectedEntry.address, "software", CortexSettings.breakpointDefaultAction, true, 0)
+    }
+    function editorFocused() {
+        return nameField.activeFocus || addressField.activeFocus || notesField.activeFocus || typeBox.activeFocus
+    }
+    function openContextFor(item, sourceItem, x, y) {
+        selectedEntry = item
+        contextMenu.address = String(item.address || "")
+        contextMenu.label = String(item.name || "")
+        contextMenu.valueType = normalizedType(item)
+        const p = sourceItem.mapToItem(root, x, y)
+        contextMenu.x = Math.max(0, Math.min(root.width - contextMenu.implicitWidth, p.x))
+        contextMenu.y = Math.max(0, Math.min(root.height - 320, p.y))
+        contextMenu.open()
+    }
+
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "Addresses" || CortexApp.navigationAddress.length === 0) return
+            addressField.text = CortexApp.navigationAddress
+            addressField.forceActiveFocus()
+            addressField.selectAll()
+        }
+    }
+
+    Shortcut { sequence: "Space"; enabled: root.selectedEntry !== null && !root.editorFocused(); onActivated: root.toggleFreeze() }
+    Shortcut { sequence: "F2"; enabled: root.selectedEntry !== null && !root.editorFocused(); onActivated: root.beginEdit(root.selectedEntry) }
+    Shortcut { sequence: "Delete"; enabled: root.selectedEntry !== null && !root.editorFocused() && CortexApp.mutationPermission; onActivated: root.removeSelected() }
+    Shortcut { sequence: "Ctrl+B"; enabled: root.selectedEntry !== null && !root.editorFocused() && CortexApp.mutationPermission && CortexPayload.ready; onActivated: root.addBreakpoint() }
 
     Component.onCompleted: refreshAll()
 
@@ -87,7 +161,8 @@ Rectangle {
                     TextField { id: addressField; Layout.preferredWidth: 210; placeholderText: "Address / module+RVA"; font.family: Theme.monoFont; onAccepted: root.addEntry() }
                     ComboBox { id: typeBox; Layout.preferredWidth: 105; model: ["i32","float","double","i8","u8","i16","u16","u32","i64","u64"] }
                     TextField { id: notesField; Layout.fillWidth: true; placeholderText: "Notes (optional)"; onAccepted: root.addEntry() }
-                    Button { text: "Add"; enabled: CortexPayload.ready && CortexApp.mutationPermission && nameField.text.trim().length > 0 && addressField.text.trim().length > 0; onClicked: root.addEntry() }
+                    Button { text: root.editingOriginalName.length > 0 ? "Update" : "Add"; enabled: CortexPayload.ready && CortexApp.mutationPermission && nameField.text.trim().length > 0 && addressField.text.trim().length > 0; onClicked: root.addEntry() }
+                    Button { visible: root.editingOriginalName.length > 0; text: "Cancel"; onClicked: root.resetEditor() }
                     Button { text: "Refresh"; enabled: CortexPayload.ready; onClicked: root.refreshAll() }
                 }
 
@@ -118,10 +193,7 @@ Rectangle {
                         property var currentFreeze: root.freezeFor(root.selectedEntry)
                         text: currentFreeze ? "Unfreeze" : "Freeze value"
                         enabled: root.selectedEntry !== null && CortexApp.mutationPermission && (currentFreeze !== null || (currentWatch !== null && currentWatch.hasValue))
-                        onClicked: {
-                            if (currentFreeze) CortexFeatures.deleteFreeze(currentFreeze.id)
-                            else CortexFeatures.addFreeze(root.selectedEntry.address, root.normalizedType(root.selectedEntry), currentWatch.value, root.selectedEntry.name, 0)
-                        }
+                        onClicked: root.toggleFreeze()
                     }
                     Button {
                         text: "Find writer"
@@ -132,16 +204,9 @@ Rectangle {
                             CortexRe.findLastWriter(root.selectedEntry.address, root.typeSize(t), 10000)
                         }
                     }
-                    Button {
-                        text: "C++ layout"
-                        enabled: root.selectedEntry !== null
-                        onClicked: {
-                            CortexApp.openAddress("RE", root.selectedEntry.address)
-                            CortexRe.detectSubobjects(root.selectedEntry.address, 256)
-                        }
-                    }
+                    Button { text: "Edit"; enabled: root.selectedEntry !== null; onClicked: root.beginEdit(root.selectedEntry) }
                     Item { Layout.fillWidth: true }
-                    Button { text: "Remove"; enabled: root.selectedEntry !== null && CortexApp.mutationPermission; onClicked: { CortexFeatures.deleteProjectAddress(root.selectedEntry.name); root.selectedEntry = null } }
+                    Button { text: "Remove"; enabled: root.selectedEntry !== null && CortexApp.mutationPermission; onClicked: root.removeSelected() }
                 }
             }
             Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
@@ -174,6 +239,7 @@ Rectangle {
             currentIndex: -1
 
             delegate: Rectangle {
+                id: row
                 required property var modelData
                 required property int index
                 width: table.width
@@ -211,16 +277,26 @@ Rectangle {
                     id: mouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: { table.currentIndex = index; root.selectedEntry = modelData }
-                    onDoubleClicked: { table.currentIndex = index; root.selectedEntry = modelData; CortexApp.openAddress("Memory", modelData.address) }
+                    onPressed: function(event) {
+                        table.currentIndex = index
+                        root.selectedEntry = modelData
+                        if (event.button === Qt.RightButton) root.openContextFor(modelData, mouse, event.x, event.y)
+                    }
+                    onDoubleClicked: function(event) {
+                        if (event.button !== Qt.LeftButton) return
+                        table.currentIndex = index
+                        root.selectedEntry = modelData
+                        CortexApp.openAddress("Memory", modelData.address)
+                    }
                 }
             }
 
             Text {
                 anchors.centerIn: parent
                 visible: table.count === 0
-                text: "No addresses yet. Add one above or keep using Project / Scanner / RE as before."
+                text: "No addresses yet. Double-click a Scanner result or add one above."
                 color: Theme.textDisabled
                 font.pixelSize: 11
             }
@@ -234,11 +310,18 @@ Rectangle {
                 anchors.fill: parent
                 anchors.leftMargin: 10
                 anchors.rightMargin: 10
-                Label { text: "Double-click: memory viewer"; color: Theme.textDisabled; font.pixelSize: 9 }
-                Label { text: "Live values reuse Cortex Watches"; color: Theme.textDisabled; font.pixelSize: 9 }
+                Label { text: "Double-click: memory | Right-click: address actions"; color: Theme.textDisabled; font.pixelSize: 9 }
+                Label { text: "Space freeze | F2 edit | Delete remove | Ctrl+B breakpoint"; color: Theme.textDisabled; font.pixelSize: 9 }
                 Item { Layout.fillWidth: true }
                 Label { text: CortexFeatures.projectAddresses.length + " saved"; color: Theme.textMuted; font.pixelSize: 9 }
             }
         }
+    }
+
+    AddressContextMenu {
+        id: contextMenu
+        allowSave: false
+        allowRemove: true
+        onRemoveRequested: root.removeSelected()
     }
 }

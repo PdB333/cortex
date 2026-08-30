@@ -48,10 +48,10 @@ bool CanAnswer(const PromptRequest& request);
 // particular, a TimedTest is rejected until its duration has elapsed.
 bool Answer(int id, const std::string& value, std::string* error = nullptr);
 
-// The injected ImGui prompt remains a temporary headless fallback while the
-// product moves to Qt. Cortex Desktop renews this short lease while polling;
-// the in-process popup stays hidden during the lease and automatically comes
-// back if the desktop presenter disappears.
+// Cortex Desktop is the human presenter. It renews this short lease while
+// polling the authenticated private prompt channel. The injected runtime no
+// longer renders any prompt UI; the lease is retained only so tests and
+// diagnostics can verify that a desktop presenter is actually connected.
 void NoteExternalPresenter();
 bool ExternalPresenterActive();
 

@@ -22,6 +22,22 @@ ColumnLayout {
         return selectedAddress.length > 0 ? selectedAddress : addressField.text
     }
 
+    function openContext(address, sourceItem, x, y) {
+        root.selectedAddress = address
+        contextMenu.address = address
+        contextMenu.label = "Code " + address
+        contextMenu.valueType = "i32"
+        const p = sourceItem.mapToItem(root, x, y)
+        contextMenu.x = Math.max(0, Math.min(root.width - contextMenu.implicitWidth, p.x))
+        contextMenu.y = Math.max(0, Math.min(root.height - 320, p.y))
+        contextMenu.open()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+B"
+        enabled: root.analysisAddress().length > 0 && CortexPayload.ready && CortexApp.mutationPermission && !addressField.activeFocus
+        onActivated: CortexDebugger.addBreakpoint(root.analysisAddress(), "software", CortexSettings.breakpointDefaultAction, true, 0)
+    }
     Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 78
@@ -135,12 +151,17 @@ ColumnLayout {
                         Text { Layout.fillWidth: true; text: modelData.text; color: Theme.text; font.family: Theme.monoFont; font.pixelSize: 11; elide: Text.ElideRight }
                     }
                     MouseArea {
+                        id: instructionMouse
                         anchors.fill: parent
-                        onClicked: {
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onPressed: function(event) {
                             list.currentIndex = index
                             root.selectedAddress = modelData.address
+                            if (event.button === Qt.RightButton) root.openContext(modelData.address, instructionMouse, event.x, event.y)
                         }
-                        onDoubleClicked: {
+                        onDoubleClicked: function(event) {
+                            if (event.button !== Qt.LeftButton) return
                             addressField.text = modelData.address
                             if (CortexDisasm.disassemble(modelData.address, 160)) root.selectedAddress = CortexDisasm.currentAddress
                         }
@@ -201,4 +222,8 @@ ColumnLayout {
             }
         }
     }
-}
+
+    AddressContextMenu {
+        id: contextMenu
+        allowSave: true
+    }}

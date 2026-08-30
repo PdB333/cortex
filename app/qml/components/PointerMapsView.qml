@@ -9,6 +9,14 @@ ColumnLayout {
     spacing: 0
 
     Component.onCompleted: if (CortexPayload.ready) CortexFeatures.refreshPointerMaps()
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "Pointers" || CortexApp.navigationAddress.length === 0) return
+            targetField.text = CortexApp.navigationAddress
+            if (nameField.text.length === 0) nameField.text = "Pointer " + CortexApp.navigationAddress
+        }
+    }
 
     Rectangle {
         Layout.fillWidth: true

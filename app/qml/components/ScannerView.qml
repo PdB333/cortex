@@ -4,8 +4,43 @@ import QtQuick.Layouts
 import Cortex 1.0
 
 ColumnLayout {
+    id: root
     anchors.fill: parent
     spacing: 0
+    property var selectedResult: null
+
+    function addressType() {
+        const t = valueType.currentText
+        if (t === "f32") return "float"
+        if (t === "f64") return "double"
+        if (t === "i64") return "i64"
+        return "i32"
+    }
+
+    function addResultToAddresses(result) {
+        if (!result) return
+        const address = String(result.address || "")
+        if (address.length === 0) return
+        if (!CortexApp.mutationPermission) {
+            CortexApp.openAddress("Addresses", address)
+            return
+        }
+        const name = "Scan " + address
+        const notes = "Scanner value: " + String(result.value || "")
+        if (CortexFeatures.setProjectAddress(name, address, root.addressType(), notes))
+            CortexApp.selectSection("Addresses")
+    }
+
+    function openContextFor(item, sourceItem, x, y) {
+        selectedResult = item
+        contextMenu.address = String(item.address || "")
+        contextMenu.label = "Scan " + contextMenu.address
+        contextMenu.valueType = root.addressType()
+        const p = sourceItem.mapToItem(root, x, y)
+        contextMenu.x = Math.max(0, Math.min(root.width - contextMenu.implicitWidth, p.x))
+        contextMenu.y = Math.max(0, Math.min(root.height - 320, p.y))
+        contextMenu.open()
+    }
 
     Rectangle {
         Layout.fillWidth: true
@@ -112,10 +147,12 @@ ColumnLayout {
         color: Theme.background
 
         CortexListView {
+            id: resultList
             anchors.fill: parent
             clip: true
             model: CortexApp.scanResults
             boundsBehavior: Flickable.StopAtBounds
+            currentIndex: -1
 
             delegate: Rectangle {
                 id: resultRow
@@ -123,7 +160,7 @@ ColumnLayout {
                 required property int index
                 width: ListView.view.width
                 height: 28
-                color: resultMouse.containsMouse ? Theme.hover : (index % 2 ? Theme.background : Theme.surface)
+                color: resultList.currentIndex === index ? Theme.selection : (resultMouse.containsMouse ? Theme.hover : (index % 2 ? Theme.background : Theme.surface))
 
                 RowLayout {
                     anchors.fill: parent
@@ -139,9 +176,14 @@ ColumnLayout {
                     id: resultMouse
                     anchors.fill: parent
                     hoverEnabled: true
-                    onDoubleClicked: {
-                        if (CortexApp.readMemory(resultRow.modelData.address, 256))
-                            CortexApp.selectSection("Memory")
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onPressed: function(event) {
+                        resultList.currentIndex = index
+                        root.selectedResult = modelData
+                        if (event.button === Qt.RightButton) root.openContextFor(modelData, resultMouse, event.x, event.y)
+                    }
+                    onDoubleClicked: function(event) {
+                        if (event.button === Qt.LeftButton) root.addResultToAddresses(modelData)
                     }
                 }
             }
@@ -158,5 +200,23 @@ ColumnLayout {
             font.family: CortexApp.lastError.length ? Theme.monoFont : Theme.uiFont
             font.pixelSize: 11
         }
+    }
+
+    Rectangle {
+        Layout.fillWidth: true
+        Layout.preferredHeight: 24
+        color: Theme.panel
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            Label { text: "Double-click: add to Addresses | Right-click: address actions"; color: Theme.textDisabled; font.pixelSize: 9 }
+            Item { Layout.fillWidth: true }
+        }
+    }
+
+    AddressContextMenu {
+        id: contextMenu
+        allowSave: true
     }
 }
