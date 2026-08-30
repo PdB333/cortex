@@ -34,6 +34,7 @@ class AppController final : public QObject {
     Q_PROPERTY(QString currentPlatform READ currentPlatform NOTIFY currentTargetChanged)
     Q_PROPERTY(QString currentArchitecture READ currentArchitecture NOTIFY currentTargetChanged)
     Q_PROPERTY(QString selectedSection READ selectedSection NOTIFY selectedSectionChanged)
+    Q_PROPERTY(QString navigationAddress READ navigationAddress NOTIFY navigationAddressChanged)
     Q_PROPERTY(bool mutationPermission READ mutationPermission WRITE setMutationPermission NOTIFY mutationPermissionChanged)
     Q_PROPERTY(bool sessionActive READ sessionActive NOTIFY sessionChanged)
     Q_PROPERTY(QString sessionStatus READ sessionStatus NOTIFY sessionChanged)
@@ -56,6 +57,7 @@ public:
     QString currentPlatform() const;
     QString currentArchitecture() const;
     QString selectedSection() const { return selectedSection_; }
+    QString navigationAddress() const { return navigationAddress_; }
     bool mutationPermission() const { return mutationPermission_; }
     bool sessionActive() const { return sessionManager_.HasActiveSession(); }
     QString sessionStatus() const;
@@ -71,6 +73,7 @@ public:
     Q_INVOKABLE void selectTarget(int index);
     Q_INVOKABLE void detachTarget();
     Q_INVOKABLE void selectSection(const QString& section);
+    Q_INVOKABLE void openAddress(const QString& section, const QString& address);
     Q_INVOKABLE QString capabilitySummary() const;
     Q_INVOKABLE bool readMemory(const QString& address, int size = 256);
     Q_INVOKABLE bool writeMemoryHex(const QString& address, const QString& hexBytes);
@@ -86,6 +89,7 @@ signals:
     void targetsChanged();
     void currentTargetChanged();
     void selectedSectionChanged();
+    void navigationAddressChanged();
     void mutationPermissionChanged();
     void sessionChanged();
     void lastErrorChanged();
@@ -115,6 +119,7 @@ private:
     uint64_t sessionGeneration_ = 0;
     int currentTargetIndex_ = -1;
     QString selectedSection_ = QStringLiteral("Overview");
+    QString navigationAddress_;
     QString lastError_;
     QString scanStatus_;
     bool mutationPermission_ = false;

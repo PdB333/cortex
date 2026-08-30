@@ -9,6 +9,15 @@ ColumnLayout {
     spacing: 0
     property string selectedAddress: ""
 
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "Disassembly" || CortexApp.navigationAddress.length === 0) return
+            addressField.text = CortexApp.navigationAddress
+            if (CortexDisasm.disassemble(CortexApp.navigationAddress, 160)) root.selectedAddress = CortexDisasm.currentAddress
+        }
+    }
+
     function analysisAddress() {
         return selectedAddress.length > 0 ? selectedAddress : addressField.text
     }

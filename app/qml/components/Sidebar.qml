@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import Cortex 1.0
 
@@ -9,6 +9,7 @@ Rectangle {
     ListModel {
         id: navigation
         ListElement { group: "TARGET"; label: "Overview" }
+        ListElement { group: "TARGET"; label: "Addresses" }
         ListElement { group: "TARGET"; label: "Project" }
         ListElement { group: "TARGET"; label: "RE" }
         ListElement { group: "INSPECT"; label: "Memory" }
@@ -31,6 +32,7 @@ Rectangle {
         ListElement { group: "AUTOMATE"; label: "Scripts" }
         ListElement { group: "AUTOMATE"; label: "Input" }
         ListElement { group: "AUTOMATE"; label: "Actions" }
+        ListElement { group: "APP"; label: "Settings" }
         ListElement { group: "AI"; label: "MCP" }
         ListElement { group: "AI"; label: "Semantic" }
         ListElement { group: "AI"; label: "Sessions" }
@@ -70,7 +72,7 @@ Rectangle {
         delegate: Rectangle {
             required property string label
             width: list.width - 9
-            height: Theme.navRowHeight
+            height: CortexSettings.compactUi ? 28 : Theme.navRowHeight
             color: CortexApp.selectedSection === label ? Theme.selection : (mouse.containsMouse ? Theme.hover : "transparent")
 
             Rectangle {

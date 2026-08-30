@@ -7,13 +7,13 @@ T.Button {
 
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
                             implicitContentWidth + leftPadding + rightPadding)
-    implicitHeight: Math.max(28, implicitBackgroundHeight + topInset + bottomInset,
+    implicitHeight: Math.max(CortexSettings.compactUi ? 24 : 28, implicitBackgroundHeight + topInset + bottomInset,
                              implicitContentHeight + topPadding + bottomPadding)
 
-    leftPadding: 9
-    rightPadding: 9
-    topPadding: 5
-    bottomPadding: 5
+    leftPadding: CortexSettings.compactUi ? 7 : 9
+    rightPadding: CortexSettings.compactUi ? 7 : 9
+    topPadding: CortexSettings.compactUi ? 3 : 5
+    bottomPadding: CortexSettings.compactUi ? 3 : 5
 
     font.family: Theme.uiFont
     font.pixelSize: Theme.smallSize

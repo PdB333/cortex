@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -32,10 +32,10 @@ ColumnLayout {
             }
             TextField { id: addressField; Layout.preferredWidth: 180; placeholderText: "Address (0x...)" }
             ComboBox { id: kindBox; Layout.preferredWidth: 125; model: ["software", "hw_execute", "hw_write", "hw_readwrite"] }
-            ComboBox { id: actionBox; Layout.preferredWidth: 90; model: ["pause", "log"] }
+            ComboBox { id: actionBox; Layout.preferredWidth: 90; model: ["pause", "log"]; currentIndex: CortexSettings.breakpointDefaultAction === "log" ? 1 : 0 }
             Rectangle {
                 id: globalToggle
-                property bool checked: true
+                property bool checked: CortexSettings.hardwareBreakpointsGlobal
                 Layout.preferredWidth: 82
                 Layout.preferredHeight: 28
                 radius: 3

@@ -4,6 +4,14 @@ import QtQuick.Layouts
 import Cortex 1.0
 
 ColumnLayout {
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "Memory" || CortexApp.navigationAddress.length === 0) return
+            addressField.text = CortexApp.navigationAddress
+            CortexApp.readMemory(CortexApp.navigationAddress, 256)
+        }
+    }
     anchors.fill: parent
     spacing: 0
 

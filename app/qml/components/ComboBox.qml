@@ -6,12 +6,12 @@ C.ComboBox {
     id: control
 
     implicitWidth: 120
-    implicitHeight: 30
+    implicitHeight: CortexSettings.compactUi ? 26 : 30
 
-    leftPadding: 9
+    leftPadding: CortexSettings.compactUi ? 7 : 9
     rightPadding: 30
-    topPadding: 5
-    bottomPadding: 5
+    topPadding: CortexSettings.compactUi ? 3 : 5
+    bottomPadding: CortexSettings.compactUi ? 3 : 5
 
     font.family: Theme.uiFont
     font.pixelSize: Theme.smallSize

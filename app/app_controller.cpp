@@ -15,14 +15,14 @@ namespace {
 
 bool IsKnownWorkspaceSection(const QString& section) {
     static const QStringList sections = {
-        QStringLiteral("Overview"), QStringLiteral("Project"), QStringLiteral("RE"), QStringLiteral("Memory"),
+        QStringLiteral("Overview"), QStringLiteral("Addresses"), QStringLiteral("Project"), QStringLiteral("RE"), QStringLiteral("Memory"),
         QStringLiteral("Scanner"), QStringLiteral("Pointers"), QStringLiteral("Disassembly"),
         QStringLiteral("Structures"), QStringLiteral("Modules"), QStringLiteral("Symbols"),
         QStringLiteral("Snapshots"), QStringLiteral("Debugger"), QStringLiteral("Breakpoints"),
         QStringLiteral("Traces"), QStringLiteral("Patches"), QStringLiteral("Watches"),
         QStringLiteral("Hooks"), QStringLiteral("Network"), QStringLiteral("Screenshots"),
         QStringLiteral("Diagnostics"), QStringLiteral("Scripts"), QStringLiteral("Input"),
-        QStringLiteral("Actions"), QStringLiteral("MCP"), QStringLiteral("Semantic"),
+        QStringLiteral("Actions"), QStringLiteral("Settings"), QStringLiteral("MCP"), QStringLiteral("Semantic"),
         QStringLiteral("Sessions")
     };
     return sections.contains(section);
@@ -188,7 +188,8 @@ AppController::AppController(QObject* parent)
       moduleService_(sessionManager_) {
     QSettings settings;
     const QString restoredSection = settings.value(QStringLiteral("workspace/selectedSection")).toString();
-    if (IsKnownWorkspaceSection(restoredSection)) selectedSection_ = restoredSection;
+    const bool restoreLastSection = settings.value(QStringLiteral("preferences/restoreLastSection"), true).toBool();
+    if (restoreLastSection && IsKnownWorkspaceSection(restoredSection)) selectedSection_ = restoredSection;
 
     targetCatalog_.AddBackend(std::make_shared<cortex::target::LocalBackend>());
     connect(&scanWatcher_, &QFutureWatcher<ScanTaskResult>::finished, this, &AppController::finishScan);
@@ -342,6 +343,14 @@ void AppController::selectSection(const QString& section) {
     emit selectedSectionChanged();
 }
 
+void AppController::openAddress(const QString& section, const QString& address) {
+    if (!IsKnownWorkspaceSection(section)) return;
+    const QString normalized = address.trimmed();
+    if (normalized.isEmpty()) return;
+    navigationAddress_ = normalized;
+    selectSection(section);
+    emit navigationAddressChanged();
+}
 QString AppController::capabilitySummary() const {
     auto active = sessionManager_.Active();
     const cortex::target::CapabilitySet* capabilitySet = nullptr;

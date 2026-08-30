@@ -10,7 +10,7 @@ ColumnLayout {
     Component.onCompleted: if (CortexPayload.ready) CortexFeatures.refreshWatches()
 
     Timer {
-        interval: 750
+        interval: CortexSettings.autoRefreshMs
         repeat: true
         running: CortexPayload.ready && CortexApp.selectedSection === "Watches"
         onTriggered: CortexFeatures.refreshWatches()

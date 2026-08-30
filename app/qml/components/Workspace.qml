@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -57,6 +57,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
+                           : CortexApp.selectedSection === "Addresses" ? addressesComponent
                            : CortexApp.selectedSection === "Project" ? projectComponent
                            : CortexApp.selectedSection === "RE" ? reComponent
                            : CortexApp.selectedSection === "Memory" ? memoryComponent
@@ -79,6 +80,7 @@ Rectangle {
                            : CortexApp.selectedSection === "Scripts" ? scriptsComponent
                            : CortexApp.selectedSection === "Input" ? inputComponent
                            : CortexApp.selectedSection === "Actions" ? actionsComponent
+                           : CortexApp.selectedSection === "Settings" ? settingsComponent
                            : CortexApp.selectedSection === "MCP" ? mcpComponent
                            : CortexApp.selectedSection === "Semantic" ? semanticComponent
                            : CortexApp.selectedSection === "Sessions" ? sessionsComponent
@@ -87,6 +89,7 @@ Rectangle {
     }
 
     Component { id: overviewComponent; OverviewView {} }
+    Component { id: addressesComponent; AddressTableView {} }
     Component { id: projectComponent; ProjectView {} }
     Component { id: reComponent; ReView {} }
     Component { id: memoryComponent; MemoryView {} }
@@ -109,6 +112,7 @@ Rectangle {
     Component { id: scriptsComponent; ScriptsView {} }
     Component { id: inputComponent; InputView {} }
     Component { id: actionsComponent; ActionsView {} }
+    Component { id: settingsComponent; SettingsView {} }
     Component { id: mcpComponent; McpView { semanticOnly: false } }
     Component { id: semanticComponent; McpView { semanticOnly: true } }
     Component { id: sessionsComponent; SessionsView {} }

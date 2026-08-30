@@ -62,6 +62,8 @@ qt_add_executable(cortex WIN32
     runtime_controller.h
     re_controller.cpp
     re_controller.h
+    settings_controller.cpp
+    settings_controller.h
     ../core/target/local_backend.cpp
     ../core/target/local_backend.h
     ../core/target/module_provider.cpp
@@ -93,6 +95,10 @@ qt_add_qml_module(cortex
         qml/Theme.qml
         qml/components/Button.qml
         qml/components/TextField.qml
+        qml/components/TextArea.qml
+        qml/components/ScrollView.qml
+        qml/components/ToolButton.qml
+        qml/components/SettingsToggle.qml
         qml/components/ComboBox.qml
         qml/components/CortexScrollBar.qml
         qml/components/CortexListView.qml
@@ -103,8 +109,10 @@ qt_add_qml_module(cortex
         qml/components/Sidebar.qml
         qml/components/Workspace.qml
         qml/components/OverviewView.qml
+        qml/components/AddressTableView.qml
         qml/components/ProjectView.qml
         qml/components/ReView.qml
+        qml/components/SettingsView.qml
         qml/components/PatchesView.qml
         qml/components/SnapshotsView.qml
         qml/components/MemoryView.qml

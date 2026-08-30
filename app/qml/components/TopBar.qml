@@ -153,6 +153,24 @@ Rectangle {
         }
 
         ToolButton {
+            id: settingsButton
+            Layout.preferredHeight: 32
+            text: "Settings"
+            onClicked: CortexApp.selectSection("Settings")
+            contentItem: Text {
+                text: settingsButton.text
+                color: settingsButton.hovered ? Theme.textBright : Theme.textMuted
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.family: Theme.uiFont
+                font.pixelSize: 11
+            }
+            background: Rectangle {
+                color: settingsButton.hovered ? Theme.hover : "transparent"
+                radius: Theme.radius
+            }
+        }
+        ToolButton {
             id: commandButton
             Layout.preferredHeight: 32
             text: "Command"

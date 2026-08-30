@@ -4,7 +4,7 @@ import Cortex 1.0
 
 ScrollBar {
     id: control
-    policy: size < 0.999 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+    policy: size < 0.999 ? (CortexSettings.persistentScrollbars ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded) : ScrollBar.AlwaysOff
     interactive: true
     hoverEnabled: true
     implicitWidth: 11

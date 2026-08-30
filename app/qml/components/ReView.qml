@@ -6,6 +6,16 @@ import Cortex 1.0
 Rectangle {
     id: root
     color: Theme.background
+    property bool advancedVisible: CortexSettings.showAdvancedByDefault
+
+    Connections {
+        target: CortexApp
+        function onNavigationAddressChanged() {
+            if (CortexApp.selectedSection !== "RE" || CortexApp.navigationAddress.length === 0) return
+            analysisAddress.text = CortexApp.navigationAddress
+            if (trackAddress.text.length === 0) trackAddress.text = CortexApp.navigationAddress
+        }
+    }
 
     function editor(parentItem, initialText) { return initialText }
 
@@ -27,16 +37,17 @@ Rectangle {
                     Layout.fillWidth: true
                     Label { text: "RE OBJECTS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
                     Item { Layout.fillWidth: true }
+                    Button { text: root.advancedVisible ? "Simple view" : "Advanced tools"; onClicked: root.advancedVisible = !root.advancedVisible }
                     Button { text: "Refresh"; onClicked: { CortexRe.refresh(); CortexRe.refreshSessions(); CortexRe.refreshCheckpoints() } }
                 }
-                TextField { id: trackName; Layout.fillWidth: true; placeholderText: "Track name" }
+                TextField { id: trackName; Layout.fillWidth: true; placeholderText: "Name (optional)" }
                 TextField { id: trackAddress; Layout.fillWidth: true; placeholderText: "Address (0x..., module+RVA)" }
-                TextField { id: trackPath; Layout.fillWidth: true; placeholderText: "Pointer path (optional)" }
-                TextField { id: trackStruct; Layout.fillWidth: true; placeholderText: "Struct definition (optional, e.g. GameRequest)" }
+                TextField { id: trackPath; Layout.fillWidth: true; visible: root.advancedVisible; placeholderText: "Pointer path (optional)" }
+                TextField { id: trackStruct; Layout.fillWidth: true; visible: root.advancedVisible; placeholderText: "Struct definition (optional, e.g. GameRequest)" }
                 RowLayout {
                     Layout.fillWidth: true
                     TextField { id: trackSize; Layout.fillWidth: true; text: "256"; placeholderText: "Size" }
-                    Button { text: "Track"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.trackObject(trackName.text, trackAddress.text, trackPath.text, Number(trackSize.text || 256), true, trackStruct.text) }
+                    Button { text: "Track"; enabled: CortexApp.mutationPermission && trackAddress.text.length > 0; onClicked: CortexRe.trackObject(trackName.text.length ? trackName.text : ("Object " + trackAddress.text), trackAddress.text, trackPath.text, Number(trackSize.text || 256), true, trackStruct.text) }
                 }
                 CortexListView {
                     id: tracks
@@ -54,7 +65,7 @@ Rectangle {
                             Text { text: modelData.address + "  |  " + modelData.size + " bytes"; color: Theme.textMuted; font.family: Theme.monoFont; font.pixelSize: 10 }
                             Text { text: (modelData.pointer_path ? ("path: " + modelData.pointer_path) : "direct") + (modelData.struct_name ? ("  |  struct: " + modelData.struct_name) : ""); color: Theme.textDisabled; font.pixelSize: 9 }
                         }
-                        MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: CortexRe.selectTrack(modelData.id) }
+                        MouseArea { id: mouse; anchors.fill: parent; hoverEnabled: true; onClicked: { CortexRe.selectTrack(modelData.id); analysisAddress.text = modelData.address } }
                     }
                 }
                 Button { Layout.fillWidth: true; text: "Remove selected"; enabled: CortexApp.mutationPermission && CortexRe.selectedTrack.id > 0; onClicked: CortexRe.deleteTrack(CortexRe.selectedTrack.id) }
@@ -89,11 +100,13 @@ Rectangle {
                                 TextField { id: analysisSize; Layout.preferredWidth: 72; text: "1"; placeholderText: "Size" }
                                 Button { text: "Last writer"; enabled: CortexApp.mutationPermission; onClicked: CortexRe.findLastWriter(analysisAddress.text, Number(analysisSize.text || 1), 10000) }
                                 Button { text: "C++ subobjects"; onClicked: CortexRe.detectSubobjects(analysisAddress.text, Math.max(8, Number(analysisSize.text || 256))) }
+                                Button { text: "Trace writes"; enabled: CortexApp.mutationPermission && analysisAddress.text.length > 0; onClicked: CortexRe.traceTransition(JSON.stringify({"watches":[{"address":analysisAddress.text,"size":Math.max(1, Number(analysisSize.text || 1)),"label":"state"}],"probes":[],"timeout_ms":10000})) }
                             }
                         }
                     }
 
                     RowLayout {
+                        visible: root.advancedVisible
                         Layout.fillWidth: true; spacing: 10
                         Rectangle {
                             Layout.fillWidth: true; Layout.preferredHeight: 270; color: Theme.surface; border.color: Theme.border; radius: 3
@@ -190,13 +203,14 @@ Rectangle {
                                 ComboBox { id: sessionB; Layout.preferredWidth: 205; model: CortexRe.sessions; textRole: "id" }
                                 Button { text: "Diff runs"; onClicked: CortexRe.diffSessions(sessionA.currentText, sessionB.currentText) }
                                 Item { Layout.fillWidth: true }
-                                Button { text: "Export Ghidra"; onClicked: CortexRe.ghidraExport("") }
+                                Button { visible: root.advancedVisible; text: "Export Ghidra"; onClicked: CortexRe.ghidraExport("") }
                             }
                             Label { text: "Run exports include executed functions/order, tracked objects/vtables, network call origins and allocation events."; color: Theme.textMuted; font.pixelSize: 10 }
                         }
                     }
 
                     Rectangle {
+                        visible: root.advancedVisible
                         Layout.fillWidth: true; Layout.preferredHeight: 240; color: Theme.surface; border.color: Theme.border; radius: 3
                         RowLayout {
                             anchors.fill: parent; anchors.margins: 10; spacing: 10

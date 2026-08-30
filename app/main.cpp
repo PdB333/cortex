@@ -6,6 +6,7 @@
 #include "payload_controller.h"
 #include "prompt_controller.h"
 #include "runtime_controller.h"
+#include "settings_controller.h"
 #include "re_controller.h"
 #include "startup_diagnostics.h"
 
@@ -17,6 +18,7 @@
 #include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 #include <QRect>
 #include <QScreen>
 #include <QSettings>
@@ -53,6 +55,7 @@ void RestoreWorkspaceWindow(QWindow* window, QObject* rootObject) {
     if (!window || !rootObject) return;
 
     QSettings settings;
+    if (!settings.value(QStringLiteral("preferences/rememberWindowLayout"), true).toBool()) return;
     rootObject->setProperty("bottomPanelVisible",
                             settings.value(QStringLiteral("workspace/bottomPanelVisible"), true).toBool());
 
@@ -75,6 +78,7 @@ void SaveWorkspaceWindow(QWindow* window, QObject* rootObject) {
     if (!window || !rootObject) return;
 
     QSettings settings;
+    if (!settings.value(QStringLiteral("preferences/rememberWindowLayout"), true).toBool()) return;
     const Qt::WindowState state = window->windowState();
     if (state != Qt::WindowMaximized && state != Qt::WindowFullScreen)
         settings.setValue(QStringLiteral("workspace/windowGeometry"), window->geometry());
@@ -261,6 +265,7 @@ int main(int argc, char* argv[]) {
     const bool smokeTest = cortex::appdiag::HasArgument(argc, argv, "--smoke-test");
     if (smokeTest) cortex::appdiag::Enable();
 
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
     QGuiApplication app(argc, argv);
     ConfigureApplicationIdentity();
 
@@ -274,11 +279,23 @@ int main(int argc, char* argv[]) {
     palette.setColor(QPalette::ButtonText, QColor("#cccccc"));
     palette.setColor(QPalette::Highlight, QColor("#37373d"));
     palette.setColor(QPalette::HighlightedText, QColor("#f0f0f0"));
+    palette.setColor(QPalette::BrightText, QColor("#f0f0f0"));
+    palette.setColor(QPalette::ToolTipBase, QColor("#252526"));
+    palette.setColor(QPalette::ToolTipText, QColor("#cccccc"));
+    palette.setColor(QPalette::PlaceholderText, QColor("#b8b8b8"));
+    palette.setColor(QPalette::Link, QColor("#3794ff"));
+    palette.setColor(QPalette::LinkVisited, QColor("#9cdcfe"));
+    palette.setColor(QPalette::Light, QColor("#303030"));
+    palette.setColor(QPalette::Midlight, QColor("#303030"));
+    palette.setColor(QPalette::Mid, QColor("#444444"));
+    palette.setColor(QPalette::Dark, QColor("#181818"));
+    palette.setColor(QPalette::Shadow, QColor("#101010"));
     palette.setColor(QPalette::Disabled, QPalette::Button, QColor("#202020"));
     palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#666666"));
     palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#666666"));
     app.setPalette(palette);
 
+    SettingsController settings;
     AppController controller;
     PayloadController payload(controller.sessionManager(), QCoreApplication::applicationDirPath());
     PromptController prompt(payload);
@@ -300,6 +317,7 @@ int main(int argc, char* argv[]) {
     QQmlApplicationEngine engine;
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
     engine.rootContext()->setContextProperty("CortexApp", &controller);
+    engine.rootContext()->setContextProperty("CortexSettings", &settings);
     engine.rootContext()->setContextProperty("CortexPayload", &payload);
     engine.rootContext()->setContextProperty("CortexPrompt", &prompt);
     engine.rootContext()->setContextProperty("CortexRuntime", &runtime);
@@ -325,4 +343,3 @@ int main(int argc, char* argv[]) {
     if (smokeTest) QTimer::singleShot(750, &app, &QCoreApplication::quit);
     return app.exec();
 }
-

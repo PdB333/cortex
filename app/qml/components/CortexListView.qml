@@ -17,7 +17,7 @@ ListView {
                 event.accepted = false
                 return
             }
-            const step = Math.max(150, control.height * 0.28)
+            const step = Math.max(60, control.height * 0.10) * CortexSettings.scrollSpeed
             const notches = event.angleDelta.y / 120.0
             control.contentY = Math.max(0, Math.min(maxY, control.contentY - notches * step))
             event.accepted = true

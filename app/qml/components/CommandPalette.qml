@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Cortex 1.0
@@ -19,6 +19,7 @@ Popup {
         { label: "Session: Export runtime state", action: "exportSession" },
         { label: "Safety: Toggle mutation permission", action: "mutation" },
         { label: "View: Overview", section: "Overview", action: "view" },
+            { label: "View: Addresses", section: "Addresses", action: "view" },
         { label: "View: Project", section: "Project", action: "view" },
         { label: "View: RE", section: "RE", action: "view" },
         { label: "View: Memory", section: "Memory", action: "view" },
@@ -41,6 +42,7 @@ Popup {
         { label: "View: Scripts", section: "Scripts", action: "view" },
         { label: "View: Input", section: "Input", action: "view" },
         { label: "View: Actions", section: "Actions", action: "view" },
+            { label: "View: Settings", section: "Settings", action: "view" },
         { label: "View: MCP", section: "MCP", action: "view" },
         { label: "View: Semantic", section: "Semantic", action: "view" },
         { label: "View: Sessions", section: "Sessions", action: "view" }

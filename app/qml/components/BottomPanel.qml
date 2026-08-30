@@ -17,13 +17,13 @@ Rectangle {
     }
 
     Timer {
-        interval: 750
+        interval: CortexSettings.autoRefreshMs
         repeat: true
         running: root.activeTab === 0 && CortexPayload.ready
         onTriggered: CortexFeatures.refreshRuntimeEvents()
     }
     Timer {
-        interval: 1000
+        interval: Math.max(500, CortexSettings.autoRefreshMs)
         repeat: true
         running: root.activeTab === 1 && CortexPayload.ready
         onTriggered: CortexFeatures.refreshApiLog()
