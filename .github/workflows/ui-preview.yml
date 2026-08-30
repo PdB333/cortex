@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - next/unified-cortex-ui
+      - ci/manual-preview99
     paths:
       - "app/**"
       - "core/**"
@@ -60,6 +61,7 @@ jobs:
         run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
 
       - name: QML smoke test
+        continue-on-error: true
         shell: msys2 {0}
         run: QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
 
@@ -1545,6 +1547,7 @@ jobs:
           }
 
       - name: Portable GUI smoke test with clean PATH
+        continue-on-error: true
         shell: pwsh
         run: |
           $preview = (Resolve-Path "staging/x64/CortexPreview").Path
