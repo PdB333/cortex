@@ -2,7 +2,7 @@
 
 This guide describes the current unified Qt/QML application on `next/unified-cortex-ui`.
 
-For a screenshot-based French walkthrough, see [Procédure illustrée FR](ui-walkthrough-fr.md).
+For a screenshot-based walkthrough, see [Illustrated UI walkthrough](ui-walkthrough.md). A [French translation](ui-walkthrough-fr.md) is also available.
 
 ## 1. Get a testable build
 

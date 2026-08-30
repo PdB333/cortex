@@ -148,13 +148,15 @@ Le workspace regroupe notamment :
 
 Les actions de contrôle de la cible nécessitent Mutation.
 
+![Debugger](images/ui-walkthrough/08-debugger.png)
+
 > Limitation actuelle de l'UI : les boutons **Pause** et **Step Over** sont visibles mais désactivés. Ils ne doivent pas être considérés comme des contrôles interactifs terminés dans cette version.
 
 ## 9. Continuer dans RE
 
 Pour l'analyse runtime plus poussée, ouvre l'adresse dans **RE**.
 
-![Workspace RE](images/ui-walkthrough/08-re-workspace.png)
+![Workspace RE](images/ui-walkthrough/09-re-workspace.png)
 
 Le workspace RE fournit notamment :
 
@@ -182,7 +184,7 @@ Scanner -> Addresses -> Memory / Disassembly -> RE
 
 Le bouton **Settings** dans la barre supérieure ouvre les préférences de l'application.
 
-![Settings](images/ui-walkthrough/09-settings.png)
+![Settings](images/ui-walkthrough/10-settings.png)
 
 Les réglages actuels comprennent notamment :
 

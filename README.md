@@ -191,7 +191,8 @@ Automated validation does not replace manual testing against real authorized tar
 
 - [Documentation index](docs/README.md) — user guides, architecture and subsystem documentation.
 - [Getting started](docs/getting-started.md) — first run, attach, scan, Addresses, Mutation and manual test checklist.
-- [Procédure illustrée FR](docs/ui-walkthrough-fr.md) — guide pas à pas avec de vraies captures du Cortex UI.
+- [Illustrated UI walkthrough](docs/ui-walkthrough.md) — step-by-step product guide with real Cortex screenshots.
+- [French illustrated walkthrough](docs/ui-walkthrough-fr.md) — French translation of the screenshot-based guide.
 - [Cortex UI guide](docs/ui-guide.md) — every workspace, shared address actions, shortcuts and settings.
 - [Unified application architecture](docs/unified-app-architecture.md) — product/runtime architecture and platform boundaries.
 - [MCP internals](docs/mcp.md) — native MCP transport and compatibility notes.
