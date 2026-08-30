@@ -318,7 +318,10 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
     }
 
     const auto assetDirectory = RuntimeAssetDirectory(runtimeDirectory, target.architecture);
-    const std::string token = ReadTokenFile(assetDirectory / "cortex.token");
+    const auto privateTokenPath = assetDirectory /
+        ("cortex.mcp." + std::to_string(target.processId) + ".token");
+    std::string token = ReadTokenFile(privateTokenPath);
+    if (token.empty()) token = ReadTokenFile(assetDirectory / "cortex.token"); // pre-multi-target runtime compatibility
     if (token.empty()) {
         SetError(error, "payload_token_unavailable");
         return false;

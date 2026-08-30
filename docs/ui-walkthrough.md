@@ -14,6 +14,8 @@ Run `cortex.exe`, then open the process picker from the top bar. The search fiel
 
 Click the process you want to inspect. Cortex attaches to it and keeps the selected target visible in the top bar and status bar.
 
+You can reopen the picker and attach a second process. Cortex keeps both sessions open, marks the displayed target as **ACTIVE** and the other as **ATTACHED**, and switches back to an attached target without detaching the others.
+
 ## 2. Verify the attachment
 
 Open **Overview** and verify at least:

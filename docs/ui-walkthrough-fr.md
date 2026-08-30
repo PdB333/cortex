@@ -14,6 +14,8 @@ Lance `cortex.exe`, puis clique sur le sélecteur de processus dans la barre sup
 
 Clique sur le processus voulu. Cortex effectue l'attachement et conserve ensuite le nom de la cible dans la barre supérieure et dans la barre d'état.
 
+Tu peux ensuite rouvrir le sélecteur et attacher un second processus. Cortex garde les deux sessions ouvertes, marque la cible affichée comme **ACTIVE** et l'autre comme **ATTACHED**. Cliquer sur une cible déjà attachée la rend active sans détacher l'autre.
+
 ## 2. Vérifier l'attachement
 
 Dans **Overview**, vérifie au minimum :

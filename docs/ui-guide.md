@@ -8,7 +8,7 @@ Cortex keeps four areas visible: **top bar**, **sidebar**, **main workspace** an
 
 ### Top bar
 
-- **Select target...** opens process selection; Refresh updates discovery.
+- **Select target...** opens process selection; Refresh updates discovery. Selecting another process keeps existing sessions attached and makes the chosen process active. The picker marks `ACTIVE` / `ATTACHED` targets and can detach one session independently.
 - **Paused: N** appears when threads are paused and opens Debugger.
 - **Mutation** toggles state-changing permission.
 - **Settings** opens application settings.
@@ -52,7 +52,9 @@ Source-specific actions such as Remove appear only where applicable.
 
 ### Overview
 
-Shows platform, architecture, session state, process count and Mutation state. It also exposes Refresh targets, Detach and the Mutation toggle.
+Shows platform, architecture, active-session state, discovered process count, attached-target count and Mutation state. It also exposes Refresh targets, Detach, **Detach all** when several targets are attached, and the Mutation toggle.
+
+Memory, Scanner, Debugger, RE and the other workspaces always operate on the **active** target. Switching the active target resets target-specific UI/runtime state but does not detach the other sessions.
 
 ### Addresses
 

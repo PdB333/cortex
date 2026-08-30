@@ -24,6 +24,8 @@ Use **Select target...** in the top bar, refresh the process list if necessary, 
 
 After attach, **Overview** shows platform, architecture, session state and Mutation state. Cortex starts in observation mode; runtime instrumentation is enabled only when a feature needs it.
 
+You may attach another process from the same picker. Cortex keeps both sessions open and marks one as **ACTIVE**; selecting an already attached process switches the UI back to it without reattaching. Address, Scanner, Debugger and RE workspaces always follow the active target. Use the `x` action in the picker to detach one target, or **Detach all** from Overview.
+
 ## 4. Find a value with Scanner
 
 Press **`Ctrl+F`** to open Scanner and focus its value field.

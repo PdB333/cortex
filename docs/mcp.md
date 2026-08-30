@@ -1,60 +1,95 @@
 # Cortex MCP
 
-Cortex exposes Model Context Protocol (MCP) to local AI clients. The recommended transport is stdio, backed by an authenticated local Windows named pipe into the injected runtime. The loopback HTTP `/mcp` endpoint remains available as a compatibility and debugging transport.
+Cortex exposes Model Context Protocol (MCP) directly from the unified `cortex.exe` product. The recommended transport is stdio. On Windows, Cortex attaches the selected process, activates the architecture-matched runtime when required, and forwards MCP JSON-RPC over the authenticated private named-pipe transport.
+
+There is no separate user-facing MCP executable in the unified product.
 
 ## Recommended stdio configuration
 
-The default stdio profile exposes the semantic Cortex tools rather than every low-level primitive. This keeps model context smaller while still allowing bounded server-side orchestration.
+The default profile is `compact`, which exposes the semantic Cortex tools rather than every low-level primitive.
 
 ```json
 {
   "mcpServers": {
     "cortex": {
-      "command": "C:/path/to/cortex_host.exe",
+      "command": "C:/path/to/cortex.exe",
       "args": ["mcp", "--process", "app.exe"]
     }
   }
 }
 ```
 
-`--process` (or `--pid`) uses the injector linked into `cortex_host.exe`, waits for the injected runtime and token to become available, then starts the stdio MCP session. Injector diagnostics are redirected to stderr so stdout remains MCP protocol data only.
+A PID can be used instead:
 
-To connect to a runtime that is already injected:
+```text
+cortex.exe mcp --pid 1234
+```
+
+Diagnostics are written to stderr so stdout remains MCP protocol data only.
+
+## Multiple attached targets
+
+One Cortex MCP server can keep more than one process attached at the same time:
+
+```text
+cortex.exe mcp --pid 1234 --pid 5678
+cortex.exe mcp --process game.exe --process helper.exe
+cortex.exe mcp --pid 1234 --process helper.exe
+```
+
+Each target gets an independent runtime connection. Requests do **not** switch a shared global process behind the model's back.
+
+When more than one target is attached, Cortex augments every normal tool schema with the required `_cortex_target` argument. It accepts:
+
+- a PID integer;
+- a PID string;
+- the Cortex target id;
+- a unique attached process name.
+
+`tools/list` also exposes the local `cortex_targets` tool. Call it to retrieve the attached target ids, names, PIDs and current liveness before routing work.
+
+Example tool call:
 
 ```json
 {
-  "mcpServers": {
-    "cortex": {
-      "command": "C:/path/to/cortex_host.exe",
-      "args": ["mcp", "--token-file", "C:/path/to/cortex.token"]
+  "jsonrpc": "2.0",
+  "id": 21,
+  "method": "tools/call",
+  "params": {
+    "name": "capture_runtime_state",
+    "arguments": {
+      "_cortex_target": 1234,
+      "objective": "Capture the current runtime inventory"
     }
   }
 }
 ```
 
-Native IPC is the default. The previous loopback transport remains available explicitly:
+A second request can target PID `5678` concurrently. The `_cortex_target` field is consumed by the stdio router and is not forwarded as a primitive/semantic argument to the target runtime.
 
-```text
-cortex_host mcp --transport http --token-file C:/path/to/cortex.token
-```
+With only one attached target, `_cortex_target` remains optional for backwards compatibility.
+
+### Cancellation with multiple targets
+
+Lifecycle and cancellation notifications are broadcast to the attached runtime connections. This keeps `notifications/cancelled` responsive even while independent requests are running against different targets.
 
 ## Tool profiles
 
-`cortex_host mcp` defaults to:
+`cortex.exe mcp` defaults to:
 
 ```text
 --tools compact
 ```
 
-The compact profile exposes the 30 semantic tools and hides raw primitives from `tools/list`. Semantic execution may still call an explicitly allowlisted primitive internally when `execute=true` is requested.
+The compact profile exposes the semantic tools and hides raw primitives from `tools/list`. Semantic execution may still call an explicitly allowlisted primitive internally when `execute=true` is requested.
 
-Use the complete primitive surface when debugging Cortex itself or when an advanced client needs direct control:
+Use the complete primitive surface only when an advanced client needs it:
 
 ```text
-cortex_host mcp --tools all --token-file C:/path/to/cortex.token
+cortex.exe mcp --pid 1234 --tools all
 ```
 
-The HTTP `/mcp` compatibility endpoint uses the full profile unless `X-Cortex-MCP-Tools: compact` is supplied.
+The target-routing field is added to both compact and full tool catalogs.
 
 ## MCP protocol versions
 
@@ -63,73 +98,60 @@ Cortex supports both MCP lifecycle eras:
 - modern `2026-07-28`: stateless `server/discover`, per-request protocol metadata, cache hints on tool lists;
 - legacy initialize-based clients: `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
 
-JSON-RPC notifications never produce a response. `notifications/cancelled` is still delivered to the execution layer so an active semantic orchestration can observe cancellation.
+JSON-RPC notifications do not normally produce a response. Batch requests are supported; calls in the same batch may route to different `_cortex_target` values.
 
 ## Native architecture
 
-The MCP protocol parser and tool executor are transport-independent:
+Single target:
 
 ```text
 AI client
    |
  stdio
    |
-cortex_host mcp
+cortex.exe mcp
    |
 authenticated Named Pipe
    |
-cortex_core.dll
+cortex_core.dll in target
    |
-mcp_protocol::Handle
+mcp_protocol / mcp_tools
    |
-mcp_tools / semantic executor
-   |
-native route dispatcher
-   |
-Cortex runtime services
+native Cortex services
 ```
 
-The REST and MCP paths share the same route handlers:
+Multiple targets:
 
 ```text
-                 HTTP REST adapter
-                       |
-                       v
-                 RouteRegistrar
-                  /          \
-                 /            \
-        cpp-httplib route   native route registry
+                         +-> target A SessionManager -> PayloadClient -> target A runtime
+AI client -> cortex.exe -|
+                         +-> target B SessionManager -> PayloadClient -> target B runtime
+
+                    tools/call arguments._cortex_target
                                   |
-                                  v
-                             MCP ToolExecutor
+                                  +---- selects the route explicitly
 ```
 
-`RouteRegistrar` mirrors each business handler into both cpp-httplib and the in-process native registry. Primitive MCP calls therefore execute the existing route logic directly in memory rather than performing a loopback HTTP request.
-
-HTTP `/mcp` is now only a transport adapter:
-
-```text
-HTTP /mcp -> mcp_protocol -> mcp_tools -> native route dispatcher
-```
-
-There is no second HTTP call from the MCP executor back into Cortex REST.
+The runtime MCP executor and the REST-compatible route layer share the same business handlers. Primitive MCP calls therefore execute native route logic directly rather than making a second loopback HTTP request.
 
 ## Named-pipe security and framing
 
-The native endpoint is local Windows IPC:
+The Windows runtime endpoint is local IPC:
 
-- endpoint name is derived from a 64-bit hash of the existing random Cortex token;
-- the raw token is never embedded in the pipe name;
-- the complete token is still included in every native envelope and compared in constant time;
+- every injected target generates a private per-process token file named `cortex.mcp.<pid>.token`;
+- the endpoint name is derived from a 64-bit hash of that private MCP token, so two targets using the same runtime directory do not collide;
+- the raw token is not embedded in the pipe name;
+- the complete private MCP token is still included in every native envelope and compared in constant time;
+- `cortex.token` remains the separate REST/HTTP compatibility credential;
 - remote pipe clients are rejected when supported by the Windows SDK/runtime;
 - frames use a 32-bit length prefix and are capped at 16 MiB;
-- each stdio bridge creates a session identifier used to isolate cancellation request IDs.
+- each stdio connection uses a client session identifier so cancellation request IDs remain scoped.
 
-The endpoint hash is rendezvous information, not authentication.
+The endpoint hash is rendezvous information, not authentication. If a second target cannot bind the legacy loopback HTTP port because another Cortex runtime already owns it, its native MCP pipe remains available; native MCP is the primary transport for the unified product.
 
 ## Semantic server-side execution
 
-Semantic tools still support plan-only calls:
+Semantic tools support plan-only calls:
 
 ```json
 {
@@ -139,7 +161,7 @@ Semantic tools still support plan-only calls:
 
 A plan-only call returns `status: "plan_ready"` and does not change runtime state.
 
-To execute server-side, the client must provide `execute=true` and an explicit non-empty `steps` array. Cortex intentionally does not infer primitive arguments from the objective.
+To execute server-side, provide `execute=true` and an explicit non-empty `steps` array. Cortex intentionally does not infer primitive arguments from the objective.
 
 ```json
 {
@@ -152,6 +174,8 @@ To execute server-side, the client must provide `execute=true` and an explicit n
   ]
 }
 ```
+
+For multi-target MCP, `_cortex_target` belongs at the **top-level semantic tool arguments**, next to `objective`. The whole bounded semantic execution is then routed to that target.
 
 Execution rules:
 
@@ -167,7 +191,7 @@ Execution rules:
 - failure, observed cancellation, or observed timeout rolls that transaction back;
 - `rollback_on_success=true` can be used for reversible causal experiments that should leave no committed mutation.
 
-Example reference:
+Example evidence reference:
 
 ```json
 {
@@ -182,12 +206,16 @@ Example reference:
 
 ### Cancellation and timeout semantics
 
-Cancellation and deadlines are cooperative at orchestration boundaries. Cortex checks them before and after primitive calls. A primitive that is itself blocking cannot currently be pre-empted in the middle of that call unless that primitive has its own cancellation/timeout mechanism.
+Cancellation and deadlines are cooperative at orchestration boundaries. Cortex checks them before and after primitive calls. A primitive that is itself blocking cannot be pre-empted in the middle of that call unless that primitive has its own cancellation/timeout mechanism.
 
-Native stdio remains responsive to `notifications/cancelled` because normal requests use independent pipe instances and the bridge dispatches cancellation without waiting for an active request to complete.
+Native stdio remains responsive to `notifications/cancelled` because normal requests use independent pipe instances and cancellation is forwarded without waiting for an active request to finish.
 
-The HTTP compatibility transport should provide a stable `X-Cortex-MCP-Session` value when cancellation is required. `cortex_host mcp --transport http` does this automatically.
+## Mutation permission
+
+Attaching a target does not grant permission to modify it. Control, mutation, and native-call operations continue to require explicit `mutation_permission=true` in the relevant MCP call.
+
+This permission remains per operation; multi-target routing does not implicitly enable Mutation on either target.
 
 ## Compatibility
 
-REST remains loopback-only and unchanged as a public Cortex surface. Existing clients can continue to call REST or HTTP `/mcp`. The native stdio path is an additional local transport that removes HTTP from the normal MCP execution chain without duplicating route business logic.
+The injected runtime can still expose loopback REST and HTTP `/mcp` compatibility surfaces for diagnostics and older integrations. The normal unified-product path is `cortex.exe mcp` over stdio and native IPC.

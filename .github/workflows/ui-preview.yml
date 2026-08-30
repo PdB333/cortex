@@ -1536,10 +1536,102 @@ jobs:
             }
           }
 
+          function Test-CortexMcpMultiTarget([string]$targetPath) {
+            $targetA = $null
+            $targetB = $null
+            $mcp = $null
+            try {
+              Get-ChildItem (Join-Path $preview "runtime\x64") -Filter "cortex.mcp.*.token" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+              $manifestA = Join-Path $env:RUNNER_TEMP "cortex-multi-a.json"
+              $manifestB = Join-Path $env:RUNNER_TEMP "cortex-multi-b.json"
+              Remove-Item $manifestA,$manifestB -Force -ErrorAction SilentlyContinue
+              $targetA = Start-Process -FilePath $targetPath -ArgumentList @("--e2e-manifest", $manifestA) -PassThru
+              $targetB = Start-Process -FilePath $targetPath -ArgumentList @("--e2e-manifest", $manifestB) -PassThru
+              for ($attempt = 0; $attempt -lt 60 -and (-not (Test-Path $manifestA) -or -not (Test-Path $manifestB)); $attempt++) {
+                Start-Sleep -Milliseconds 100
+              }
+              if (-not (Test-Path $manifestA) -or -not (Test-Path $manifestB)) { throw "multi-target fixture manifests were not created" }
+
+              $start = [System.Diagnostics.ProcessStartInfo]::new()
+              $start.FileName = Join-Path $preview "cortex.exe"
+              $start.Arguments = "mcp --pid $($targetA.Id) --pid $($targetB.Id) --tools all"
+              $start.WorkingDirectory = $preview
+              $start.UseShellExecute = $false
+              $start.RedirectStandardInput = $true
+              $start.RedirectStandardOutput = $true
+              $start.RedirectStandardError = $true
+              $start.CreateNoWindow = $true
+              $mcp = [System.Diagnostics.Process]::new()
+              $mcp.StartInfo = $start
+              if (-not $mcp.Start()) { throw "Failed to start multi-target Cortex MCP" }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":101,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"preview-multi-ci","version":"1"}}}')
+              $mcp.StandardInput.Flush()
+              $init = (Read-McpLine $mcp.StandardOutput 25000) | ConvertFrom-Json
+              if ($init.id -ne 101 -or $init.result.protocolVersion -ne "2025-11-25") { throw "multi-target initialize failed" }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":102,"method":"tools/list","params":{}}')
+              $mcp.StandardInput.Flush()
+              $tools = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not ($tools.result.tools.name -contains "cortex_targets")) { throw "multi-target catalog does not expose cortex_targets" }
+              $statusTool = @($tools.result.tools | Where-Object { $_.name -eq "status" })
+              if ($statusTool.Count -ne 1 -or -not ($statusTool[0].inputSchema.required -contains "_cortex_target")) {
+                throw "multi-target catalog does not require _cortex_target"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":103,"method":"tools/call","params":{"name":"cortex_targets","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $targets = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $listedPids = @($targets.result.structuredContent.targets | ForEach-Object { [int64]$_.pid })
+              if ($targets.id -ne 103 -or [int]$targets.result.structuredContent.count -ne 2 -or
+                  -not ($listedPids -contains [int64]$targetA.Id) -or -not ($listedPids -contains [int64]$targetB.Id)) {
+                throw "cortex_targets did not list both attached processes"
+              }
+
+              $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":104,"method":"tools/call","params":{"name":"status","arguments":{}}}')
+              $mcp.StandardInput.Flush()
+              $missingTarget = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ($missingTarget.error.data.code -ne "cortex_target_required") { throw "multi-target call without selector was not rejected" }
+
+              $callA = @{ jsonrpc="2.0"; id=105; method="tools/call"; params=@{ name="status"; arguments=@{ _cortex_target=[int64]$targetA.Id } } } | ConvertTo-Json -Depth 8 -Compress
+              $callB = @{ jsonrpc="2.0"; id=106; method="tools/call"; params=@{ name="status"; arguments=@{ _cortex_target=[int64]$targetB.Id } } } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($callA); $mcp.StandardInput.Flush()
+              $resultA = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $mcp.StandardInput.WriteLine($callB); $mcp.StandardInput.Flush()
+              $resultB = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if ([int64]$resultA.result.structuredContent.result.pid -ne [int64]$targetA.Id) { throw "explicit route A reached the wrong process" }
+              if ([int64]$resultB.result.structuredContent.result.pid -ne [int64]$targetB.Id) { throw "explicit route B reached the wrong process" }
+
+              $batchCallA = @{ jsonrpc="2.0"; id=107; method="tools/call"; params=@{ name="status"; arguments=@{ _cortex_target=[int64]$targetA.Id } } } | ConvertTo-Json -Depth 8 -Compress
+              $batchCallB = @{ jsonrpc="2.0"; id=108; method="tools/call"; params=@{ name="status"; arguments=@{ _cortex_target=[int64]$targetB.Id } } } | ConvertTo-Json -Depth 8 -Compress
+              $batch = "[$batchCallA,$batchCallB]"
+              $mcp.StandardInput.WriteLine($batch); $mcp.StandardInput.Flush()
+              $batchResponse = @((Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json)
+              $batchA = @($batchResponse | Where-Object { $_.id -eq 107 })
+              $batchB = @($batchResponse | Where-Object { $_.id -eq 108 })
+              if ($batchA.Count -ne 1 -or [int64]$batchA[0].result.structuredContent.result.pid -ne [int64]$targetA.Id -or
+                  $batchB.Count -ne 1 -or [int64]$batchB[0].result.structuredContent.result.pid -ne [int64]$targetB.Id) {
+                throw "cross-target MCP batch routing failed"
+              }
+
+              $mcp.StandardInput.Close()
+              if (-not $mcp.WaitForExit(15000)) { $mcp.Kill($true); throw "multi-target MCP did not exit" }
+              if ($mcp.ExitCode -ne 0) { throw "multi-target MCP exited with $($mcp.ExitCode): $($mcp.StandardError.ReadToEnd())" }
+              Write-Host "multi-target integrated MCP E2E passed"
+            } finally {
+              if ($mcp -and -not $mcp.HasExited) { $mcp.Kill($true) }
+              foreach ($target in @($targetA,$targetB)) {
+                if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue }
+              }
+              Start-Sleep -Milliseconds 300
+            }
+          }
           try {
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
             Test-CortexMcp $x64Target (Join-Path $preview "runtime\x64") "x64 target"
             Test-CortexMcp $x86Target (Join-Path $preview "runtime\x86") "x86 target"
+            Test-CortexMcpMultiTarget $x64Target
           } finally {
             $env:PATH = $oldPath
           }

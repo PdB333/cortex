@@ -132,7 +132,11 @@ MCP is integrated directly into `cortex.exe`:
 ```powershell
 .\cortex.exe mcp --pid 1234
 .\cortex.exe mcp --pid 1234 --tools all
+# Keep two targets attached to the same AI connection:
+.\cortex.exe mcp --pid 1234 --pid 5678
 ```
+
+With multiple targets, `tools/list` exposes a local `cortex_targets` tool and adds a required `_cortex_target` selector to normal tool calls. The selector accepts a PID, target id, or unique attached process name, so concurrent AI requests can address different processes without racing on a shared global target.
 
 The normal Windows path is:
 

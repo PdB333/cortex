@@ -445,4 +445,11 @@ if(BUILD_TESTING)
     target_link_options(cortex_core_tests PRIVATE -static -static-libgcc -static-libstdc++)
     target_link_libraries(cortex_core_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_core_tests COMMAND cortex_core_tests)
+
+    add_executable(cortex_session_manager_tests
+        tests/session_manager_tests.cpp
+        core/target/session_manager.cpp
+    )
+    target_include_directories(cortex_session_manager_tests PRIVATE core)
+    add_test(NAME cortex_session_manager_tests COMMAND cortex_session_manager_tests)
 endif()
