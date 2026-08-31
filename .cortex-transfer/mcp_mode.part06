@@ -1,0 +1,122 @@
+["result"].is_object()) {
+-        std::string instructions = response["result"].value("instructions", std::string());
+-        if (!instructions.empty()) instructions += " ";
+-        instructions += "Multiple Cortex targets are attached. Use cortex_targets and pass _cortex_target on every tools/call request.";
+-        response["result"]["instructions"] = std::move(instructions);
+-    }
+-    return true;
++    if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
++    return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
+ }
+ 
+-bool RouteMessage(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+-                  const std::string& toolProfile,
++bool RouteMessage(const std::shared_ptr<RunState>& state,
+                   const json& message,
+                   json& response,
+                   bool& hasResponse,
+                   std::string* error) {
+     if (!message.is_array() || message.empty())
+-        return ForwardOne(runtimes, toolProfile, message, response, hasResponse, error);
++        return ForwardOne(state, message, response, hasResponse, error);
+ 
+     json responses = json::array();
+     for (const auto& item : message) {
+         json itemResponse;
+         bool itemHasResponse = false;
+         std::string itemError;
+-        if (!ForwardOne(runtimes, toolProfile, item, itemResponse, itemHasResponse, &itemError)) {
++        if (!ForwardOne(state, item, itemResponse, itemHasResponse, &itemError)) {
+             responses.push_back(TransportError(MessageId(item), "cortex_unreachable",
+                                                itemError.empty() ? "Cortex target runtime is unreachable" : itemError));
+             continue;
+@@ -491,21 +911,17 @@ bool RouteMessage(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+     return true;
+ }
+ 
+-void ForwardRequest(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+-                    const std::string& toolProfile,
+-                    const json& message,
+-                    const std::shared_ptr<RunState>& state) {
++void ForwardRequest(const json& message, const std::shared_ptr<RunState>& state) {
+     json response;
+     bool hasResponse = false;
+     std::string error;
+-    if (!RouteMessage(runtimes, toolProfile, message, response, hasResponse, &error)) {
++    if (!RouteMessage(state, message, response, hasResponse, &error)) {
+         WriteOutput(state, TransportError(MessageId(message), "cortex_unreachable",
+                                           error.empty() ? "Cortex target runtime is unreachable" : error));
+         return;
+     }
+     if (hasResponse) WriteOutput(state, response);
+ }
+-
+ } // namespace
+ 
+ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
+@@ -527,43 +943,42 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
+         return 3;
+     }
+ 
++    auto state = std::make_shared<RunState>();
++    state->catalog = &catalog;
++    state->runtimeDirectory = runtimeDirectory;
++    state->toolProfile = options.toolProfile;
++
+     const auto availableTargets = catalog.Targets();
+-    std::vector<std::unique_ptr<TargetRuntime>> runtimes;
+-    runtimes.reserve(options.targets.size());
+     for (const auto& selector : options.targets) {
+         const auto target = ResolveUniqueTarget(selector, availableTargets, error);
+         if (!target) {
+             std::cerr << "cortex mcp: " << error << '\n';
+             return 3;
+         }
+-        const bool duplicate = std::any_of(runtimes.begin(), runtimes.end(), [&](const auto& runtime) {
+-            return runtime->target.id == target->id;
++        const auto current = RuntimeSnapshot(state);
++        const bool duplicate = std::any_of(current.begin(), current.end(), [&](const TargetRuntimePtr& runtime) {
++            return runtime && runtime->target.id == target->id;
+         });
+         if (duplicate) {
+             std::cerr << "cortex mcp: target requested more than once: PID " << target->processId << '\n';
+             return 3;
+         }
+ 
+-        auto runtime = std::make_unique<TargetRuntime>();
+-        runtime->target = *target;
+-        runtime->sessions = std::make_unique<cortex::target::SessionManager>(catalog);
+-        if (!runtime->sessions->Attach(*target, &error)) {
+-            std::cerr << "cortex mcp: target attach failed for PID " << target->processId << ": "
+-                      << (error.empty() ? "attach_failed" : error) << '\n';
+-            return 4;
+-        }
+-        runtime->payload = std::make_unique<cortex::services::PayloadClient>(*runtime->sessions, runtimeDirectory);
+-        if (!runtime->payload->EnsureReady(&error)) {
+-            std::cerr << "cortex mcp: target runtime unavailable for PID " << target->processId << ": "
+-                      << (error.empty() ? "payload_unavailable" : error) << '\n';
+-            return 5;
++        std::string errorCode;
++        std::string errorMessage;
++        auto runtime = CreateRuntime(catalog, *target, runtimeDirectory, errorCode, errorMessage);
++        if (!runtime) {
++            std::cerr << "cortex mcp: target setup failed for PID " << target->processId << ": "
++                      << (errorMessage.empty() ? errorCode : errorMessage) << '\n';
++            return errorCode == "target_attach_failed" ? 4 : 5;
+         }
+-        runtimes.push_back(std::move(runtime));
++        std::lock_guard<std::mutex> lock(state->runtimeMutex);
++        state->runtimes.push_back(std::move(runtime));
+     }
++
+     // stdout is MCP protocol data only from this point onward.
+     std::ios::sync_with_stdio(false);
+     std::cin.tie(nullptr);
+-    auto state = std::make_shared<RunState>();
+ 
+     std::string line;
+     while (std::getline(std::cin, line)) {
+@@ -593,7 +1008,7 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
+             json response;
+             bool hasResponse = false;
+             std::

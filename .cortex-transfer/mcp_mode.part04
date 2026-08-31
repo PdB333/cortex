@@ -1,0 +1,123 @@
+   return runtime && runtime->target.id == target->id;
++            });
++            if (existing != current.end()) {
++                response = LocalToolResponse(MessageId(message), {
++                    {"ok", true}, {"status", "already_attached"},
++                    {"target", TargetDescriptorJson((*existing)->target, true)}, {"count", current.size()}
++                });
++                return true;
++            }
++        }
++
++        std::string errorCode;
++        std::string errorMessage;
++        auto runtime = CreateRuntime(*state->catalog, *target, state->runtimeDirectory, errorCode, errorMessage);
++        if (!runtime) {
++            response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
++            return true;
++        }
++        if (!PrimeRuntimeProtocol(state, runtime, errorMessage)) {
++            response = LocalToolResponse(MessageId(message),
++                                         LocalToolFailure("target_protocol_init_failed",
++                                                          errorMessage.empty() ? "Could not initialize the attached runtime MCP session"
++                                                                               : errorMessage),
++                                         true);
++            return true;
++        }
++        std::size_t count = 0;
++        {
++            std::lock_guard<std::mutex> lock(state->runtimeMutex);
++            state->runtimes.push_back(runtime);
++            count = state->runtimes.size();
++        }
++        response = LocalToolResponse(MessageId(message), {
++            {"ok", true}, {"status", "attached"}, {"target", TargetDescriptorJson(runtime->target, true)}, {"count", count}
++        });
++        EmitToolsListChanged(state);
++        return true;
++    }
++
++    const auto current = RuntimeSnapshot(state);
++    std::string errorCode;
++    std::string errorMessage;
++    auto runtime = ResolveRuntime(current, arguments, errorCode, errorMessage);
++    if (!runtime) {
++        response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
++        return true;
++    }
++    std::size_t count = 0;
++    {
++        std::lock_guard<std::mutex> lock(state->runtimeMutex);
++        state->runtimes.erase(std::remove_if(state->runtimes.begin(), state->runtimes.end(), [&](const TargetRuntimePtr& candidate) {
++            return candidate && candidate->target.id == runtime->target.id;
++        }), state->runtimes.end());
++        count = state->runtimes.size();
++    }
++    response = LocalToolResponse(MessageId(message), {
++        {"ok", true}, {"status", "detached"}, {"target", TargetDescriptorJson(runtime->target, false)}, {"count", count}
++    });
++    EmitToolsListChanged(state);
++    return true;
++}
++void AugmentToolsList(json& response, const RuntimeList& runtimes) {
+     if (!response.is_object() || !response.contains("result") || !response["result"].is_object()) return;
+     auto& result = response["result"];
+     if (!result.contains("tools") || !result["tools"].is_array()) return;
+@@ -335,13 +717,7 @@ void AugmentToolsList(json& response, const std::vector<std::unique_ptr<TargetRu
+         "Select the attached Cortex target for this call by PID, target id, or unique process name. Available: " +
+         TargetSummaryText(runtimes);
+ 
+-    json augmented = json::array();
+-    augmented.push_back({
+-        {"name", "cortex_targets"},
+-        {"description", "List the processes attached to this Cortex MCP server and the selectors accepted by _cortex_target."},
+-        {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}}},
+-        {"_cortex", {{"multi_target_router", true}}}
+-    });
++    json augmented = LocalTools(requireTarget);
+ 
+     for (auto tool : result["tools"]) {
+         if (!tool.is_object()) {
+@@ -374,8 +750,7 @@ void AugmentToolsList(json& response, const std::vector<std::unique_ptr<TargetRu
+     result["tools"] = std::move(augmented);
+ }
+ 
+-bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+-                const std::string& toolProfile,
++bool ForwardOne(const std::shared_ptr<RunState>& state,
+                 const json& message,
+                 json& response,
+                 bool& hasResponse,
+@@ -383,21 +758,34 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+     response = json();
+     hasResponse = false;
+     if (error) error->clear();
+-    if (runtimes.empty()) {
+-        if (error) *error = "no_attached_targets";
+-        return false;
+-    }
+ 
+-    if (!message.is_object())
+-        return runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error);
++    if (PruneDeadRuntimes(state)) EmitToolsListChanged(state);
++    const RuntimeList runtimes = RuntimeSnapshot(state);
++
++    if (!message.is_object()) {
++        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
++        return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
++    }
+ 
+     if (IsNotification(message)) {
++        const std::string notificationMethod = message.value("method", std::string());
++        std::unique_lock<std::mutex> lifecycleLock;
++        RuntimeList notificationRuntimes = runtimes;
++        if (notificationMethod == "notifications/initialized") {
++            // Serialize lifecycle changes with attach/detach. An attach that
++            // completes after this point will replay both initialize and the
++            // initialized notification before becoming routable.
++            lifecycleLock = std::unique_lock<std::mutex>(state->targetMutationMutex);
++            RememberInitializedNotification(state);
++            notificationRuntimes = RuntimeSnapshot(state);
++        }
++        if (notificationRuntimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
+         std::string firstErr

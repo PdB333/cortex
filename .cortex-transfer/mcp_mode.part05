@@ -1,0 +1,103 @@
+or;
+-        for (auto& runtime : runtimes) {
++        for (const auto& runtime : notificationRuntimes) {
+             json notificationResponse;
+             bool notificationHasResponse = false;
+             std::string notificationError;
+-            if (!runtime->payload->ForwardMcp(message, toolProfile, notificationResponse,
++            if (!runtime->payload->ForwardMcp(message, state->toolProfile, notificationResponse,
+                                               notificationHasResponse, &notificationError)) {
+                 if (firstError.empty()) firstError = notificationError;
+                 continue;
+@@ -415,27 +803,67 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+     }
+ 
+     const std::string method = message.value("method", std::string());
++    if (method == "initialize") {
++        // Keep host handshake semantics local while bringing every currently
++        // attached payload to the same legacy MCP lifecycle state. The same
++        // mutex is used by dynamic attach/detach, eliminating the window where
++        // a target could become routable without receiving initialize.
++        std::lock_guard<std::mutex> lifecycleLock(state->targetMutationMutex);
++        RememberInitialize(state, message);
++        PrimeExistingRuntimes(state, message);
++        return HandleLocalProtocol(state, message, response, hasResponse);
++    }
++    if (method == "server/discover" || method == "ping")
++        return HandleLocalProtocol(state, message, response, hasResponse);
++
+     if (method == "tools/list") {
+-        if (!runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error)) return false;
+-        if (hasResponse) AugmentToolsList(response, runtimes);
++        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
++
++        std::string firstError;
++        for (const auto& runtime : runtimes) {
++            std::string runtimeError;
++            if (runtime->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, &runtimeError)) {
++                if (hasResponse) AugmentToolsList(response, runtimes);
++                return true;
++            }
++            if (firstError.empty()) firstError = runtimeError;
++        }
++
++        // Keep host-control tools usable even when an attached payload is
++        // temporarily unreachable. A later cortex_detach/cortex_attach can
++        // recover the connection without restarting the MCP client.
++        HandleLocalProtocol(state, message, response, hasResponse);
++        if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object()) {
++            response["result"]["_cortex"] = {
++                {"runtime_catalog_available", false},
++                {"runtime_catalog_error", firstError.empty() ? "target_runtime_unreachable" : firstError}
++            };
++        }
+         return true;
+     }
+ 
+     if (method == "tools/call") {
+         const json params = message.value("params", json::object());
+-        if (params.is_object() && params.value("name", std::string()) == "cortex_targets") {
+-            response = LocalToolResponse(MessageId(message), TargetListResult(runtimes));
++        const std::string name = params.is_object() ? params.value("name", std::string()) : std::string();
++        const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
++
++        if (arguments.is_object() && HandleLocalTool(state, message, name, arguments, response)) {
++            hasResponse = true;
++            return true;
++        }
++        if (!arguments.is_object()) {
++            response = TransportError(MessageId(message), "invalid_arguments", "tools/call arguments must be an object");
+             hasResponse = true;
+             return true;
+         }
+-        const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
+-        if (!arguments.is_object())
+-            return runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error);
+ 
++        const RuntimeList current = RuntimeSnapshot(state);
+         std::string targetError;
+         std::string targetMessage;
+-        TargetRuntime* runtime = ResolveRuntime(runtimes, arguments, targetError, targetMessage);
++        auto runtime = ResolveRuntime(current, arguments, targetError, targetMessage);
+         if (!runtime) {
++            if (targetError == "no_attached_targets")
++                targetMessage += ". Use cortex_processes and cortex_attach on this same MCP connection.";
+             response = TransportError(MessageId(message), targetError, targetMessage);
+             hasResponse = true;
+             return true;
+@@ -446,7 +874,7 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+             routed["params"].contains("arguments") && routed["params"]["arguments"].is_object()) {
+             routed["params"]["arguments"].erase("_cortex_target");
+         }
+-        if (!runtime->payload->ForwardMcp(routed, toolProfile, response, hasResponse, error)) return false;
++        if (!runtime->payload->ForwardMcp(routed, state->toolProfile, response, hasResponse, error)) return false;
+         if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object() &&
+             response["result"].contains("structuredContent") && response["result"]["structuredContent"].is_object()) {
+             response["result"]["structuredContent"]["_cortex_target"] = runtime->target.id;
+@@ -454,32 +882,24 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
+         return true;
+     }
+ 
+-    if (!runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error)) return false;
+-    if (hasResponse && method == "initialize" && runtimes.size() > 1 && response.is_object() &&
+-        response.contains("result") && response

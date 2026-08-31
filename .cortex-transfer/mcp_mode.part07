@@ -1,0 +1,17 @@
+string notificationError;
+-            if (!RouteMessage(runtimes, options.toolProfile, message, response, hasResponse, &notificationError)) {
++            if (!RouteMessage(state, message, response, hasResponse, &notificationError)) {
+                 std::cerr << "cortex mcp: notification forwarding failed: " << notificationError << '\n';
+             } else if (hasResponse) {
+                 // Malformed no-id messages may legitimately be rejected by the
+@@ -610,8 +1025,8 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
+         }
+ 
+         try {
+-            std::thread([&runtimes, toolProfile = options.toolProfile, message, state] {
+-                ForwardRequest(runtimes, toolProfile, message, state);
++            std::thread([message, state] {
++                ForwardRequest(message, state);
+                 ReleaseWorker(state);
+             }).detach();
+         } catch (const std::exception& exception) {
