@@ -29,11 +29,17 @@ jobs:
       - name: Verify runtime has no Dear ImGui dependency
         shell: pwsh
         run: |
-          $matches = git grep -n -i "imgui" -- CMakeLists.txt core app/CMakeLists.txt 2>$null
-          if ($LASTEXITCODE -eq 0 -and $matches) {
+          $matches = @(git grep -n -i "imgui" -- CMakeLists.txt core app/CMakeLists.txt 2>$null)
+          $grepExit = $LASTEXITCODE
+          if ($grepExit -eq 0 -and $matches.Count -gt 0) {
             $matches | Write-Host
             throw "Dear ImGui is still referenced by the runtime/build"
           }
+          if ($grepExit -ne 0 -and $grepExit -ne 1) {
+            throw "git grep failed while checking Dear ImGui references: $grepExit"
+          }
+          Write-Host "Dear ImGui runtime/build references: none"
+          exit 0
 
       - name: Install x64 MinGW + Qt 6
         uses: msys2/setup-msys2@v2
