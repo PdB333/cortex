@@ -113,6 +113,35 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
+        Rectangle {
+            visible: CortexAi.connected
+            Layout.preferredHeight: 24
+            Layout.preferredWidth: aiStatusText.implicitWidth + 16
+            color: Theme.surfaceRaised
+            border.width: 1
+            border.color: Theme.success
+            radius: Theme.radius
+
+            Text {
+                id: aiStatusText
+                anchors.centerIn: parent
+                text: "● AI  " + CortexAi.activeTaskCount + " active"
+                color: Theme.success
+                font.family: Theme.uiFont
+                font.pixelSize: 10
+                font.bold: true
+            }
+
+            ToolTip.visible: aiStatusMouse.containsMouse
+            ToolTip.text: CortexAi.sessionCount + " MCP session" + (CortexAi.sessionCount === 1 ? "" : "s") + " connected"
+            MouseArea {
+                id: aiStatusMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.NoButton
+            }
+        }
+
         ToolButton {
             id: pausedButton
             visible: CortexDebugger.pausedThreads.length > 0

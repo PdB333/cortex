@@ -1,4 +1,5 @@
-﻿#include "app_controller.h"
+﻿#include "ai_activity_controller.h"
+#include "app_controller.h"
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
 #include "feature_controller.h"
@@ -11,6 +12,8 @@
 #include "startup_diagnostics.h"
 
 #include <QColor>
+#include <QElapsedTimer>
+#include <QProcess>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -210,6 +213,84 @@ int RunEventChannelSmoke(int argc, char* argv[], const QString& runtimeDirectory
     qCritical().noquote() << "event smoke did not observe" << expectedType << features.lastError();
     return 5;
 }
+int RunAiActivityChannelSmoke() {
+    cortex::app::AiActivityController activity;
+    if (!activity.listening()) {
+        qCritical("AI activity smoke could not own the local activity endpoint");
+        return 2;
+    }
+
+    QProcess mcp;
+    mcp.setProgram(QCoreApplication::applicationFilePath());
+    mcp.setArguments({QStringLiteral("mcp"), QStringLiteral("--tools"), QStringLiteral("all")});
+    mcp.setProcessChannelMode(QProcess::SeparateChannels);
+    mcp.start();
+    if (!mcp.waitForStarted(3000)) {
+        qCritical().noquote() << "AI activity smoke could not start MCP child:" << mcp.errorString();
+        return 3;
+    }
+
+    const QByteArray initialize = R"json({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ai-activity-smoke","version":"1"}}})json" "\n";
+    const QByteArray initialized = R"json({"jsonrpc":"2.0","method":"notifications/initialized"})json" "\n";
+    const QByteArray toolCall = R"json({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex_targets","arguments":{}}})json" "\n";
+    mcp.write(initialize);
+    mcp.write(initialized);
+    mcp.write(toolCall);
+    mcp.waitForBytesWritten(1000);
+
+    QByteArray stdoutBuffer;
+    bool sawToolResponse = false;
+    bool sawStarted = false;
+    bool sawCompleted = false;
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 6000 && !(sawToolResponse && sawStarted && sawCompleted)) {
+        QCoreApplication::processEvents();
+        mcp.waitForReadyRead(20);
+        stdoutBuffer += mcp.readAllStandardOutput();
+        if (stdoutBuffer.contains("\"id\":2")) sawToolResponse = true;
+        for (const auto& value : activity.activities()) {
+            const QVariantMap row = value.toMap();
+            if (row.value(QStringLiteral("tool")).toString() != QStringLiteral("cortex_targets")) continue;
+            const QString phase = row.value(QStringLiteral("phase")).toString();
+            if (phase == QStringLiteral("started")) sawStarted = true;
+            if (phase == QStringLiteral("completed")) sawCompleted = true;
+        }
+        if (!(sawToolResponse && sawStarted && sawCompleted)) QThread::msleep(5);
+    }
+
+    if (!sawToolResponse || !sawStarted || !sawCompleted || activity.activeTaskCount() != 0) {
+        qCritical().noquote() << "AI activity smoke missed MCP lifecycle"
+                              << "response" << sawToolResponse
+                              << "started" << sawStarted
+                              << "completed" << sawCompleted
+                              << "stderr" << QString::fromUtf8(mcp.readAllStandardError());
+        mcp.kill();
+        mcp.waitForFinished(1000);
+        return 4;
+    }
+
+    mcp.closeWriteChannel();
+    if (!mcp.waitForFinished(3000)) {
+        mcp.kill();
+        mcp.waitForFinished(1000);
+        qCritical("AI activity smoke MCP child did not exit after stdin close");
+        return 5;
+    }
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        QCoreApplication::processEvents();
+        if (!activity.connected()) break;
+        QThread::msleep(10);
+    }
+    if (activity.connected() || activity.activeTaskCount() != 0) {
+        qCritical("AI activity smoke did not observe MCP session shutdown");
+        return 6;
+    }
+
+    qInfo("PASS: AI activity observed a real cross-process MCP tool lifecycle");
+    return 0;
+}
+
 void LoadMainQml(QQmlApplicationEngine& engine) {
     // Always load the application root from the QML resource embedded in
     // cortex.exe. loadFromModule("Cortex", "Main") works from the build tree,
@@ -242,6 +323,11 @@ void LoadMainQml(QQmlApplicationEngine& engine) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    if (argc > 1 && argv[1] && std::string(argv[1]) == "--ai-activity-smoke") {
+        QCoreApplication app(argc, argv);
+        ConfigureApplicationIdentity();
+        return RunAiActivityChannelSmoke();
+    }
     if (argc > 1 && argv[1] && std::string(argv[1]) == "--event-channel-smoke") {
         QCoreApplication app(argc, argv);
         ConfigureApplicationIdentity();
@@ -294,6 +380,7 @@ int main(int argc, char* argv[]) {
     app.setPalette(palette);
 
     SettingsController settings;
+    cortex::app::AiActivityController aiActivity;
     AppController controller;
     PayloadController payload(controller.sessionManager(), QCoreApplication::applicationDirPath());
     PromptController prompt(payload);
@@ -314,6 +401,7 @@ int main(int argc, char* argv[]) {
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");
+    engine.rootContext()->setContextProperty("CortexAi", &aiActivity);
     engine.rootContext()->setContextProperty("CortexApp", &controller);
     engine.rootContext()->setContextProperty("CortexSettings", &settings);
     engine.rootContext()->setContextProperty("CortexPayload", &payload);

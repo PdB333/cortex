@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Quick QuickControls2 Concurrent)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Quick QuickControls2 Concurrent Network)
 qt_standard_project_setup(REQUIRES 6.4)
 
 include(FetchContent)
@@ -44,6 +44,8 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_executable(cortex WIN32
     main.cpp
+    ai_activity_controller.cpp
+    ai_activity_controller.h
     mcp_mode.cpp
     mcp_mode.h
     app_controller.cpp
@@ -151,6 +153,7 @@ target_link_libraries(cortex PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Concurrent
+    Qt6::Network
     nlohmann_json::nlohmann_json
     Zydis
 )

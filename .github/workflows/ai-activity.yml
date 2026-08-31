@@ -1,0 +1,54 @@
+name: Cortex AI Activity E2E
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - "app/**"
+      - ".github/workflows/ai-activity.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cortex-ai-activity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-ai-activity:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW + Qt 6
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-tools
+
+      - name: Configure Cortex application
+        shell: msys2 {0}
+        run: cmake -S app -B build/ai-activity -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build cortex.exe
+        shell: msys2 {0}
+        run: cmake --build build/ai-activity --parallel 2
+
+      - name: Real cross-process MCP activity smoke
+        shell: msys2 {0}
+        run: build/ai-activity/cortex.exe --ai-activity-smoke
+
+      - name: QML activity surface smoke
+        shell: msys2 {0}
+        run: QT_QPA_PLATFORM=offscreen build/ai-activity/cortex.exe --smoke-test

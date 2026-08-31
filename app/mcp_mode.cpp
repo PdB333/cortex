@@ -1,5 +1,6 @@
 #include "mcp_mode.h"
 
+#include "ai_activity_controller.h"
 #include "api/mcp_protocol.h"
 #include "services/payload_client.h"
 #include "target/catalog.h"
@@ -8,7 +9,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <QByteArray>
+#include <QUuid>
+
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cctype>
 #include <condition_variable>
 #include <cstdint>
@@ -70,6 +76,10 @@ struct RunState {
     cortex::target::Catalog* catalog = nullptr;
     std::string runtimeDirectory;
     std::string toolProfile;
+    std::atomic<std::uint64_t> activitySequence{1};
+    std::string activitySessionId;
+    std::string activityClientName = "MCP client";
+    std::string activityClientVersion;
 };
 
 std::string LowerAscii(std::string value) {
@@ -227,6 +237,96 @@ void WaitForWorkers(const std::shared_ptr<RunState>& state) {
     state->activeChanged.wait(lock, [&] { return state->active == 0; });
 }
 
+std::uint64_t ActivityTimestampMs() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+std::string ActivityScalarText(const json& value) {
+    if (value.is_string()) return value.get<std::string>();
+    if (value.is_number_unsigned()) return std::to_string(value.get<std::uint64_t>());
+    if (value.is_number_integer()) return std::to_string(value.get<std::int64_t>());
+    if (value.is_number_float()) return std::to_string(value.get<double>());
+    if (value.is_boolean()) return value.get<bool>() ? "true" : "false";
+    return {};
+}
+
+bool IsSensitiveActivityKey(const std::string& key) {
+    const std::string lowered = LowerAscii(key);
+    return lowered.find("token") != std::string::npos ||
+           lowered.find("password") != std::string::npos ||
+           lowered.find("secret") != std::string::npos ||
+           lowered.find("authorization") != std::string::npos ||
+           lowered.find("credential") != std::string::npos ||
+           lowered.find("api_key") != std::string::npos ||
+           lowered.find("apikey") != std::string::npos ||
+           lowered.find("cookie") != std::string::npos;
+}
+
+void SanitizeActivityJson(json& value, int depth = 0) {
+    if (depth > 4) {
+        value = "<nested>";
+        return;
+    }
+    if (value.is_object()) {
+        for (auto it = value.begin(); it != value.end(); ++it) {
+            if (IsSensitiveActivityKey(it.key())) it.value() = "<redacted>";
+            else SanitizeActivityJson(it.value(), depth + 1);
+        }
+        return;
+    }
+    if (value.is_array()) {
+        if (value.size() > 24) {
+            value = "<array: " + std::to_string(value.size()) + " items>";
+            return;
+        }
+        for (auto& item : value) SanitizeActivityJson(item, depth + 1);
+        return;
+    }
+    if (value.is_string()) {
+        std::string text = value.get<std::string>();
+        if (text.size() > 320) {
+            text.resize(320);
+            text += "...";
+            value = std::move(text);
+        }
+    }
+}
+
+std::string CompactActivityDetails(const json& source, std::size_t maxBytes = 1400) {
+    json sanitized = source;
+    SanitizeActivityJson(sanitized);
+    std::string text = sanitized.dump();
+    if (text.size() > maxBytes) {
+        text.resize(maxBytes);
+        text += "...";
+    }
+    return text;
+}
+
+void PublishActivity(const std::shared_ptr<RunState>& state, json event) {
+    if (!state || state->activitySessionId.empty()) return;
+    event["schema"] = "cortex.ai.activity.v1";
+    event["session_id"] = state->activitySessionId;
+    event["timestamp_ms"] = ActivityTimestampMs();
+    event["sequence"] = state->activitySequence.fetch_add(1, std::memory_order_relaxed);
+    {
+        std::lock_guard<std::mutex> lock(state->protocolMutex);
+        event["client"] = state->activityClientName;
+        if (!state->activityClientVersion.empty()) event["client_version"] = state->activityClientVersion;
+    }
+    cortex::app::PublishAiActivity(QByteArray::fromStdString(event.dump()), 5);
+}
+
+void PublishSessionActivity(const std::shared_ptr<RunState>& state,
+                            const std::string& phase,
+                            const std::string& summary,
+                            const std::string& details = {}) {
+    json event = {{"kind", "session"}, {"phase", phase}, {"summary", summary}};
+    if (!details.empty()) event["details"] = details;
+    PublishActivity(state, std::move(event));
+}
+
 json ToolPayload(const json& value, bool isError = false) {
     return {
         {"content", json::array({{{"type", "text"}, {"text", value.dump(2)}}})},
@@ -270,6 +370,119 @@ bool PruneDeadRuntimes(const std::shared_ptr<RunState>& state) {
 
 void EmitToolsListChanged(const std::shared_ptr<RunState>& state) {
     WriteOutput(state, {{"jsonrpc", "2.0"}, {"method", "notifications/tools/list_changed"}});
+}
+
+std::string ActivityTargetText(const std::shared_ptr<RunState>& state, const json& arguments) {
+    if (arguments.is_object()) {
+        if (arguments.contains("_cortex_target")) {
+            const std::string selected = ActivityScalarText(arguments.at("_cortex_target"));
+            if (!selected.empty()) return selected;
+        }
+        if (arguments.contains("pid")) {
+            const std::string pid = ActivityScalarText(arguments.at("pid"));
+            if (!pid.empty()) return "PID " + pid;
+        }
+        if (arguments.contains("process") && arguments.at("process").is_string())
+            return arguments.at("process").get<std::string>();
+    }
+
+    const auto runtimes = RuntimeSnapshot(state);
+    if (runtimes.size() == 1 && runtimes.front())
+        return runtimes.front()->target.name + " (PID " + std::to_string(runtimes.front()->target.processId) + ")";
+    return {};
+}
+
+std::string HumanizeToolSuffix(std::string text) {
+    std::replace(text.begin(), text.end(), '_', ' ');
+    return text;
+}
+
+std::string ToolStartSummary(const std::string& name) {
+    if (name == "cortex_processes") return "Searching processes";
+    if (name == "cortex_attach") return "Attaching target";
+    if (name == "cortex_detach") return "Detaching target";
+    if (name == "cortex_targets") return "Listing attached targets";
+    if (name == "modules") return "Listing modules";
+    if (name == "memory_read") return "Reading memory";
+    if (name.rfind("memory_write", 0) == 0 || name.rfind("patch", 0) == 0) return "Writing memory";
+    if (name.find("scan") != std::string::npos) return "Scanning memory";
+    if (name == "disasm" || name.find("disassembl") != std::string::npos) return "Disassembling";
+    if (name.rfind("debug_", 0) == 0) return "Debugger: " + HumanizeToolSuffix(name.substr(6));
+    if (name.find("symbol") != std::string::npos) return "Resolving symbols";
+    return "Running " + HumanizeToolSuffix(name);
+}
+
+json ActivityResponsePayload(const json& response) {
+    if (!response.is_object()) return response;
+    if (response.contains("result") && response.at("result").is_object()) {
+        const auto& result = response.at("result");
+        if (result.contains("structuredContent")) return result.at("structuredContent");
+    }
+    if (response.contains("error")) return response.at("error");
+    return response;
+}
+
+bool ActivityResponseFailed(const json& response) {
+    if (!response.is_object()) return false;
+    if (response.contains("error")) return true;
+    if (response.contains("result") && response.at("result").is_object()) {
+        const auto& result = response.at("result");
+        return result.value("isError", false);
+    }
+    return false;
+}
+
+std::string ActivityFailureText(const json& response, const std::string& transportError) {
+    if (!transportError.empty()) return transportError;
+    const json payload = ActivityResponsePayload(response);
+    if (payload.is_object()) {
+        if (payload.contains("message") && payload.at("message").is_string()) return payload.at("message").get<std::string>();
+        if (payload.contains("error")) {
+            const auto& error = payload.at("error");
+            if (error.is_string()) return error.get<std::string>();
+            if (error.is_object() && error.contains("message") && error.at("message").is_string())
+                return error.at("message").get<std::string>();
+        }
+    }
+    return "Tool call failed";
+}
+
+std::string ToolCompletionSummary(const std::string& name, const json& response, bool failed,
+                                  const std::string& transportError) {
+    if (failed) return "Failed: " + ActivityFailureText(response, transportError);
+    const json payload = ActivityResponsePayload(response);
+    if (payload.is_object()) {
+        if (payload.contains("status") && payload.at("status").is_string())
+            return HumanizeToolSuffix(payload.at("status").get<std::string>());
+        if (payload.contains("count") && payload.at("count").is_number_integer())
+            return std::to_string(payload.at("count").get<std::int64_t>()) + " result(s)";
+        for (const char* key : {"processes", "targets", "addresses", "instructions", "modules", "threads"}) {
+            if (payload.contains(key) && payload.at(key).is_array())
+                return std::to_string(payload.at(key).size()) + " " + std::string(key);
+        }
+        if (name == "memory_read" && payload.contains("value")) {
+            const std::string value = ActivityScalarText(payload.at("value"));
+            if (!value.empty()) return "Read " + value;
+        }
+    }
+    return "Completed";
+}
+
+void PublishToolActivity(const std::shared_ptr<RunState>& state,
+                         const json& requestId,
+                         const std::string& name,
+                         const std::string& target,
+                         const std::string& phase,
+                         const std::string& summary,
+                         const std::string& details,
+                         std::optional<std::uint64_t> durationMs = std::nullopt) {
+    json event = {
+        {"kind", "tool"}, {"phase", phase}, {"request_id", requestId},
+        {"tool", name}, {"target", target}, {"summary", summary}
+    };
+    if (!details.empty()) event["details"] = details;
+    if (durationMs) event["duration_ms"] = *durationMs;
+    PublishActivity(state, std::move(event));
 }
 
 json LocalTools(bool requireDetachTarget = false) {
@@ -341,9 +554,21 @@ bool HandleLocalProtocol(const std::shared_ptr<RunState>& state, const json& mes
     return true;
 }
 void RememberInitialize(const std::shared_ptr<RunState>& state, const json& message) {
+    std::string clientName;
+    std::string clientVersion;
+    if (message.is_object() && message.contains("params") && message.at("params").is_object()) {
+        const auto& params = message.at("params");
+        if (params.contains("clientInfo") && params.at("clientInfo").is_object()) {
+            const auto& clientInfo = params.at("clientInfo");
+            clientName = clientInfo.value("name", std::string());
+            clientVersion = clientInfo.value("version", std::string());
+        }
+    }
     std::lock_guard<std::mutex> lock(state->protocolMutex);
     state->initializeMessage = message;
     state->initializedNotificationSeen = false;
+    if (!clientName.empty()) state->activityClientName = clientName;
+    state->activityClientVersion = clientVersion;
 }
 
 void RememberInitializedNotification(const std::shared_ptr<RunState>& state) {
@@ -886,20 +1111,54 @@ bool ForwardOne(const std::shared_ptr<RunState>& state,
     return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
 }
 
+bool ForwardOneObserved(const std::shared_ptr<RunState>& state,
+                        const json& message,
+                        json& response,
+                        bool& hasResponse,
+                        std::string* error) {
+    if (!message.is_object() || message.value("method", std::string()) != "tools/call")
+        return ForwardOne(state, message, response, hasResponse, error);
+
+    const json params = message.value("params", json::object());
+    const std::string name = params.is_object() ? params.value("name", std::string()) : std::string();
+    if (name.empty()) return ForwardOne(state, message, response, hasResponse, error);
+
+    const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
+    const std::string target = ActivityTargetText(state, arguments);
+    const std::string startDetails = CompactActivityDetails(arguments);
+    const json requestId = MessageId(message);
+    PublishToolActivity(state, requestId, name, target, "started", ToolStartSummary(name), startDetails);
+
+    const auto startedAt = std::chrono::steady_clock::now();
+    std::string localError;
+    std::string* forwardedError = error ? error : &localError;
+    const bool ok = ForwardOne(state, message, response, hasResponse, forwardedError);
+    const auto duration = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - startedAt).count());
+    const std::string transportError = error ? *error : localError;
+    const bool failed = !ok || (hasResponse && ActivityResponseFailed(response));
+    const json detailPayload = hasResponse ? ActivityResponsePayload(response) : json::object();
+    const std::string details = hasResponse ? CompactActivityDetails(detailPayload)
+                                            : (transportError.empty() ? std::string() : transportError);
+    PublishToolActivity(state, requestId, name, target, failed ? "failed" : "completed",
+                        ToolCompletionSummary(name, response, failed, transportError), details, duration);
+    return ok;
+}
+
 bool RouteMessage(const std::shared_ptr<RunState>& state,
                   const json& message,
                   json& response,
                   bool& hasResponse,
                   std::string* error) {
     if (!message.is_array() || message.empty())
-        return ForwardOne(state, message, response, hasResponse, error);
+        return ForwardOneObserved(state, message, response, hasResponse, error);
 
     json responses = json::array();
     for (const auto& item : message) {
         json itemResponse;
         bool itemHasResponse = false;
         std::string itemError;
-        if (!ForwardOne(state, item, itemResponse, itemHasResponse, &itemError)) {
+        if (!ForwardOneObserved(state, item, itemResponse, itemHasResponse, &itemError)) {
             responses.push_back(TransportError(MessageId(item), "cortex_unreachable",
                                                itemError.empty() ? "Cortex target runtime is unreachable" : itemError));
             continue;
@@ -947,6 +1206,7 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
     state->catalog = &catalog;
     state->runtimeDirectory = runtimeDirectory;
     state->toolProfile = options.toolProfile;
+    state->activitySessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 
     const auto availableTargets = catalog.Targets();
     for (const auto& selector : options.targets) {
@@ -975,6 +1235,10 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
         std::lock_guard<std::mutex> lock(state->runtimeMutex);
         state->runtimes.push_back(std::move(runtime));
     }
+
+    PublishSessionActivity(state, "started", "AI/MCP session started",
+                           CompactActivityDetails(json{{"tool_profile", options.toolProfile},
+                                                       {"startup_targets", RuntimeSnapshot(state).size()}}));
 
     // stdout is MCP protocol data only from this point onward.
     std::ios::sync_with_stdio(false);
@@ -1036,5 +1300,6 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
     }
 
     WaitForWorkers(state);
+    PublishSessionActivity(state, "ended", "AI/MCP session ended");
     return 0;
 }
