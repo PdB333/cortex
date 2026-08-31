@@ -1,0 +1,68 @@
+name: Repair AssaultCube E2E Script
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - ".github/workflows/repair-assaultcube-e2e.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize AssaultCube command-line arguments
+        shell: pwsh
+        run: |
+          $path = "ci/assaultcube_offline_e2e.ps1"
+          $lines = @(Get-Content -LiteralPath $path)
+          $start = [Array]::IndexOf($lines, '    $serverArguments = @(')
+          if ($start -lt 0) { throw "serverArguments block start not found" }
+          $end = -1
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -eq '    )') { $end = $i; break }
+          }
+          if ($end -lt 0) { throw "serverArguments block end not found" }
+
+          $replacement = @(
+            '    $serverArguments = @(',
+            '        "-i127.0.0.1",',
+            '        "-f$serverPort",',
+            '        "-c2",',
+            '        "-LF5",',
+            '        "-LS5",',
+            '        "-V"',
+            '    )'
+          )
+
+          $updated = @()
+          if ($start -gt 0) { $updated += $lines[0..($start - 1)] }
+          $updated += $replacement
+          if ($end + 1 -lt $lines.Count) { $updated += $lines[($end + 1)..($lines.Count - 1)] }
+
+          $writeErrorIndex = [Array]::IndexOf($updated, '    Write-Error $_')
+          if ($writeErrorIndex -ge 0) {
+            $updated[$writeErrorIndex] = '    Write-Host ("AssaultCube offline E2E failure: " + $_.Exception.Message)'
+          }
+
+          $updated | Set-Content -LiteralPath $path -Encoding utf8
+          git diff --check
+          git diff -- $path
+
+      - name: Commit repaired script
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/assaultcube_offline_e2e.ps1
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "fix AssaultCube server CLI arguments"
+            git push origin HEAD:next/unified-cortex-ui
+          } else {
+            Write-Host "No repair needed"
+          }
