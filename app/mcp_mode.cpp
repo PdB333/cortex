@@ -1,5 +1,6 @@
 #include "mcp_mode.h"
 
+#include "api/mcp_protocol.h"
 #include "services/payload_client.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
@@ -40,17 +41,35 @@ struct Options {
     bool help = false;
 };
 
+struct TargetRuntime {
+    TargetDescriptor target;
+    std::unique_ptr<cortex::target::SessionManager> sessions;
+    std::unique_ptr<cortex::services::PayloadClient> payload;
+};
+
+using TargetRuntimePtr = std::shared_ptr<TargetRuntime>;
+using RuntimeList = std::vector<TargetRuntimePtr>;
+
 struct RunState {
     std::mutex outputMutex;
     std::mutex activeMutex;
     std::condition_variable activeChanged;
     std::size_t active = 0;
-};
 
-struct TargetRuntime {
-    TargetDescriptor target;
-    std::unique_ptr<cortex::target::SessionManager> sessions;
-    std::unique_ptr<cortex::services::PayloadClient> payload;
+    // shared_ptr snapshots keep a detached runtime alive until any in-flight
+    // request that already selected it has completed.
+    std::mutex runtimeMutex;
+    std::mutex targetMutationMutex;
+    // Dynamic targets can be attached after the MCP lifecycle handshake.
+    // Cache legacy initialize state so a newly attached runtime can be
+    // brought to the same protocol state before it becomes routable.
+    std::mutex protocolMutex;
+    std::optional<json> initializeMessage;
+    bool initializedNotificationSeen = false;
+    RuntimeList runtimes;
+    cortex::target::Catalog* catalog = nullptr;
+    std::string runtimeDirectory;
+    std::string toolProfile;
 };
 
 std::string LowerAscii(std::string value) {
@@ -63,12 +82,15 @@ std::string LowerAscii(std::string value) {
 void PrintUsage(std::ostream& stream) {
     stream << "Cortex MCP stdio mode\n\n"
            << "Usage:\n"
+           << "  cortex.exe mcp [--tools compact|all]\n"
            << "  cortex.exe mcp --pid <pid> [--pid <pid> ...] [--tools compact|all]\n"
            << "  cortex.exe mcp --process <name> [--process <name> ...] [--tools compact|all]\n"
            << "  cortex.exe mcp --pid <pid> --process <name> [--tools compact|all]\n\n"
-           << "One or more targets may be attached by the same MCP server. With multiple\n"
-           << "targets, tools/call requests select a target through the _cortex_target\n"
-           << "argument exposed in tools/list. Use cortex_targets to list attached targets.\n";
+           << "Without --pid/--process, Cortex starts targetless and exposes cortex_processes,\n"
+           << "cortex_attach, cortex_detach and cortex_targets so an MCP client can choose\n"
+           << "processes dynamically. --pid/--process remain startup auto-attach shortcuts.\n"
+           << "With multiple attached targets, normal tools/call requests select a target\n"
+           << "through the _cortex_target argument exposed in tools/list.\n";
 }
 
 bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
@@ -115,10 +137,6 @@ bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
         return false;
     }
 
-    if (!options.help && options.targets.empty()) {
-        error = "at least one target is required (--pid or --process)";
-        return false;
-    }
     return true;
 }
 
@@ -221,7 +239,166 @@ json LocalToolResponse(const json& id, const json& value, bool isError = false) 
     return {{"jsonrpc", "2.0"}, {"id", id}, {"result", ToolPayload(value, isError)}};
 }
 
-std::string TargetSummaryText(const std::vector<std::unique_ptr<TargetRuntime>>& runtimes) {
+json LocalToolFailure(const std::string& code, const std::string& message) {
+    return {{"ok", false}, {"error", {{"code", code}, {"message", message}}}};
+}
+
+json TargetDescriptorJson(const TargetDescriptor& target, bool attached, bool alive = true) {
+    return {
+        {"id", target.id}, {"name", target.name}, {"pid", target.processId},
+        {"selector", std::to_string(target.processId)},
+        {"platform", cortex::target::PlatformName(target.platform)},
+        {"architecture", cortex::target::ArchitectureName(target.architecture)},
+        {"executable_path", target.executablePath}, {"window_title", target.windowTitle},
+        {"attached", attached}, {"alive", alive}
+    };
+}
+
+RuntimeList RuntimeSnapshot(const std::shared_ptr<RunState>& state) {
+    std::lock_guard<std::mutex> lock(state->runtimeMutex);
+    return state->runtimes;
+}
+
+bool PruneDeadRuntimes(const std::shared_ptr<RunState>& state) {
+    std::lock_guard<std::mutex> lock(state->runtimeMutex);
+    const auto oldSize = state->runtimes.size();
+    state->runtimes.erase(std::remove_if(state->runtimes.begin(), state->runtimes.end(), [](const TargetRuntimePtr& runtime) {
+        return !runtime || !runtime->sessions || !runtime->sessions->Active() || !runtime->sessions->Active()->Alive();
+    }), state->runtimes.end());
+    return state->runtimes.size() != oldSize;
+}
+
+void EmitToolsListChanged(const std::shared_ptr<RunState>& state) {
+    WriteOutput(state, {{"jsonrpc", "2.0"}, {"method", "notifications/tools/list_changed"}});
+}
+
+json LocalTools(bool requireDetachTarget = false) {
+    json tools = json::array({
+        {{"name", "cortex_processes"},
+         {"description", "List local processes Cortex can discover before or after attaching. Optionally filter by process name, path, window title, or target id."},
+         {"inputSchema", {{"type", "object"}, {"properties", {
+             {"query", {{"type", "string"}, {"description", "Optional case-insensitive filter."}}},
+             {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2048}, {"default", 256}}}
+         }}, {"additionalProperties", false}}},
+         {"_cortex", {{"host_control", true}, {"read_only", true}}}},
+        {{"name", "cortex_attach"},
+         {"description", "Attach a newly selected local process to this existing Cortex MCP connection. Provide exactly one of pid or process."},
+         {"inputSchema", {{"type", "object"}, {"properties", {
+             {"pid", {{"type", "integer"}, {"minimum", 1}}},
+             {"process", {{"type", "string"}, {"minLength", 1}, {"description", "Unique process name; exact matches are preferred over partial matches."}}}
+         }}, {"oneOf", json::array({
+             {{"required", json::array({"pid"})}, {"not", {{"required", json::array({"process"})}}}},
+             {{"required", json::array({"process"})}, {"not", {{"required", json::array({"pid"})}}}}
+         })}, {"additionalProperties", false}}},
+         {"_cortex", {{"host_control", true}, {"dynamic_target", true}}}},
+        {{"name", "cortex_detach"},
+         {"description", "Detach one process from this Cortex MCP connection. If exactly one target is attached, _cortex_target may be omitted."},
+         {"inputSchema", {{"type", "object"}, {"properties", {
+             {"_cortex_target", {{"oneOf", json::array({{{"type", "integer"}}, {{"type", "string"}}})},
+                                  {"description", "Attached target PID, target id, or unique process name."}}}
+         }}, {"additionalProperties", false}}},
+         {"_cortex", {{"host_control", true}, {"dynamic_target", true}}}},
+        {{"name", "cortex_targets"},
+         {"description", "List the processes currently attached to this Cortex MCP server and the selectors accepted by _cortex_target."},
+         {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}}},
+         {"_cortex", {{"host_control", true}, {"multi_target_router", true}, {"read_only", true}}}}
+    });
+    if (requireDetachTarget)
+        tools[2]["inputSchema"]["required"] = json::array({"_cortex_target"});
+    return tools;
+}
+
+void PatchDynamicHandshake(json& response, std::size_t attachedCount) {
+    if (!response.is_object() || !response.contains("result") || !response["result"].is_object()) return;
+    auto& result = response["result"];
+    if (!result.contains("capabilities") || !result["capabilities"].is_object()) result["capabilities"] = json::object();
+    if (!result["capabilities"].contains("tools") || !result["capabilities"]["tools"].is_object()) result["capabilities"]["tools"] = json::object();
+    result["capabilities"]["tools"]["listChanged"] = true;
+    if (result.contains("instructions") && result["instructions"].is_string()) {
+        std::string instructions = result["instructions"].get<std::string>();
+        if (!instructions.empty()) instructions += " ";
+        instructions += "This MCP connection supports dynamic Cortex targets. Use cortex_processes, cortex_attach, cortex_detach and cortex_targets; tools/list changes after attach/detach.";
+        if (attachedCount == 0)
+            instructions += " No target is attached yet.";
+        else if (attachedCount > 1)
+            instructions += " Multiple Cortex targets are attached; pass _cortex_target on normal runtime tool calls.";
+        result["instructions"] = std::move(instructions);
+    }
+}
+
+bool HandleLocalProtocol(const std::shared_ptr<RunState>& state, const json& message, json& response, bool& hasResponse) {
+    api::mcp_protocol::Handler handler;
+    handler.profile = state->toolProfile == "compact" ? api::mcp_protocol::ToolProfile::Compact : api::mcp_protocol::ToolProfile::All;
+    handler.listTools = [](api::mcp_protocol::ToolProfile) { return LocalTools(); };
+    const auto result = api::mcp_protocol::Handle(message, handler);
+    response = result.response;
+    hasResponse = result.hasResponse;
+    if (hasResponse && message.is_object()) {
+        const std::string method = message.value("method", std::string());
+        if (method == "initialize" || method == "server/discover")
+            PatchDynamicHandshake(response, RuntimeSnapshot(state).size());
+    }
+    return true;
+}
+void RememberInitialize(const std::shared_ptr<RunState>& state, const json& message) {
+    std::lock_guard<std::mutex> lock(state->protocolMutex);
+    state->initializeMessage = message;
+    state->initializedNotificationSeen = false;
+}
+
+void RememberInitializedNotification(const std::shared_ptr<RunState>& state) {
+    std::lock_guard<std::mutex> lock(state->protocolMutex);
+    state->initializedNotificationSeen = true;
+}
+
+bool PrimeRuntimeProtocol(const std::shared_ptr<RunState>& state,
+                          const TargetRuntimePtr& runtime,
+                          std::string& error) {
+    error.clear();
+    if (!runtime || !runtime->payload) {
+        error = "target runtime payload is unavailable";
+        return false;
+    }
+
+    std::optional<json> initialize;
+    bool initialized = false;
+    {
+        std::lock_guard<std::mutex> lock(state->protocolMutex);
+        initialize = state->initializeMessage;
+        initialized = state->initializedNotificationSeen;
+    }
+    if (!initialize) return true;
+
+    json ignoredResponse;
+    bool ignoredHasResponse = false;
+    if (!runtime->payload->ForwardMcp(*initialize, state->toolProfile, ignoredResponse, ignoredHasResponse, &error))
+        return false;
+
+    if (initialized) {
+        const json notification = {
+            {"jsonrpc", "2.0"},
+            {"method", "notifications/initialized"}
+        };
+        ignoredResponse = json();
+        ignoredHasResponse = false;
+        if (!runtime->payload->ForwardMcp(notification, state->toolProfile, ignoredResponse, ignoredHasResponse, &error))
+            return false;
+    }
+    return true;
+}
+
+void PrimeExistingRuntimes(const std::shared_ptr<RunState>& state,
+                           const json& initializeMessage) {
+    const auto runtimes = RuntimeSnapshot(state);
+    for (const auto& runtime : runtimes) {
+        if (!runtime || !runtime->payload) continue;
+        json ignoredResponse;
+        bool ignoredHasResponse = false;
+        std::string ignoredError;
+        runtime->payload->ForwardMcp(initializeMessage, state->toolProfile, ignoredResponse, ignoredHasResponse, &ignoredError);
+    }
+}
+std::string TargetSummaryText(const RuntimeList& runtimes) {
     std::string result;
     for (std::size_t index = 0; index < runtimes.size(); ++index) {
         if (index != 0) result += ", ";
@@ -230,24 +407,19 @@ std::string TargetSummaryText(const std::vector<std::unique_ptr<TargetRuntime>>&
     return result;
 }
 
-json TargetListResult(const std::vector<std::unique_ptr<TargetRuntime>>& runtimes) {
+json TargetListResult(const RuntimeList& runtimes) {
     json targets = json::array();
     for (const auto& runtime : runtimes) {
-        targets.push_back({
-            {"id", runtime->target.id},
-            {"name", runtime->target.name},
-            {"pid", runtime->target.processId},
-            {"selector", std::to_string(runtime->target.processId)},
-            {"alive", runtime->sessions && runtime->sessions->Active() && runtime->sessions->Active()->Alive()}
-        });
+        const bool alive = runtime && runtime->sessions && runtime->sessions->Active() && runtime->sessions->Active()->Alive();
+        if (runtime) targets.push_back(TargetDescriptorJson(runtime->target, true, alive));
     }
     return {{"ok", true}, {"count", targets.size()}, {"targets", std::move(targets)}};
 }
 
-TargetRuntime* ResolveRuntime(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
-                              const json& arguments,
-                              std::string& errorCode,
-                              std::string& errorMessage) {
+TargetRuntimePtr ResolveRuntime(const RuntimeList& runtimes,
+                                const json& arguments,
+                                std::string& errorCode,
+                                std::string& errorMessage) {
     errorCode.clear();
     errorMessage.clear();
     if (runtimes.empty()) {
@@ -257,7 +429,7 @@ TargetRuntime* ResolveRuntime(std::vector<std::unique_ptr<TargetRuntime>>& runti
     }
 
     if (!arguments.contains("_cortex_target")) {
-        if (runtimes.size() == 1) return runtimes.front().get();
+        if (runtimes.size() == 1) return runtimes.front();
         errorCode = "cortex_target_required";
         errorMessage = "Multiple Cortex targets are attached; set _cortex_target to a PID, target id, or unique process name. Available: " + TargetSummaryText(runtimes);
         return nullptr;
@@ -271,8 +443,8 @@ TargetRuntime* ResolveRuntime(std::vector<std::unique_ptr<TargetRuntime>>& runti
             errorMessage = "_cortex_target PID must be positive";
             return nullptr;
         }
-        for (auto& runtime : runtimes) {
-            if (runtime->target.processId == pid) return runtime.get();
+        for (const auto& runtime : runtimes) {
+            if (runtime->target.processId == pid) return runtime;
         }
     } else if (selector.is_number_integer()) {
         const std::int64_t signedPid = selector.get<std::int64_t>();
@@ -282,36 +454,36 @@ TargetRuntime* ResolveRuntime(std::vector<std::unique_ptr<TargetRuntime>>& runti
             return nullptr;
         }
         const auto pid = static_cast<std::uint64_t>(signedPid);
-        for (auto& runtime : runtimes) {
-            if (runtime->target.processId == pid) return runtime.get();
+        for (const auto& runtime : runtimes) {
+            if (runtime->target.processId == pid) return runtime;
         }
     } else if (selector.is_string()) {
         const std::string wanted = selector.get<std::string>();
-        for (auto& runtime : runtimes) {
-            if (runtime->target.id == wanted) return runtime.get();
+        for (const auto& runtime : runtimes) {
+            if (runtime->target.id == wanted) return runtime;
         }
 
         try {
             std::size_t consumed = 0;
             const auto pid = std::stoull(wanted, &consumed, 10);
             if (consumed == wanted.size()) {
-                for (auto& runtime : runtimes) {
-                    if (runtime->target.processId == pid) return runtime.get();
+                for (const auto& runtime : runtimes) {
+                    if (runtime->target.processId == pid) return runtime;
                 }
             }
         } catch (...) {
         }
 
         const std::string lowered = LowerAscii(wanted);
-        TargetRuntime* exact = nullptr;
-        for (auto& runtime : runtimes) {
+        TargetRuntimePtr exact;
+        for (const auto& runtime : runtimes) {
             if (LowerAscii(runtime->target.name) != lowered) continue;
             if (exact) {
                 errorCode = "cortex_target_ambiguous";
                 errorMessage = "Process name matches more than one attached target; use PID or target id";
                 return nullptr;
             }
-            exact = runtime.get();
+            exact = runtime;
         }
         if (exact) return exact;
     } else {
@@ -325,7 +497,217 @@ TargetRuntime* ResolveRuntime(std::vector<std::unique_ptr<TargetRuntime>>& runti
     return nullptr;
 }
 
-void AugmentToolsList(json& response, const std::vector<std::unique_ptr<TargetRuntime>>& runtimes) {
+json ProcessListResult(const std::shared_ptr<RunState>& state, const json& arguments, std::string& errorCode, std::string& errorMessage) {
+    errorCode.clear();
+    errorMessage.clear();
+    if (!state->catalog) {
+        errorCode = "target_catalog_unavailable";
+        errorMessage = "Local target catalog is unavailable";
+        return {};
+    }
+
+    std::string query;
+    if (arguments.contains("query")) {
+        if (!arguments["query"].is_string()) {
+            errorCode = "invalid_query";
+            errorMessage = "query must be a string";
+            return {};
+        }
+        query = LowerAscii(arguments["query"].get<std::string>());
+    }
+
+    std::size_t limit = 256;
+    if (arguments.contains("limit")) {
+        if (!arguments["limit"].is_number_integer()) {
+            errorCode = "invalid_limit";
+            errorMessage = "limit must be an integer between 1 and 2048";
+            return {};
+        }
+        const auto requested = arguments["limit"].get<std::int64_t>();
+        if (requested < 1 || requested > 2048) {
+            errorCode = "invalid_limit";
+            errorMessage = "limit must be an integer between 1 and 2048";
+            return {};
+        }
+        limit = static_cast<std::size_t>(requested);
+    }
+
+    const auto attached = RuntimeSnapshot(state);
+    const auto discovered = state->catalog->Targets();
+    json processes = json::array();
+    std::size_t totalMatches = 0;
+    for (const auto& target : discovered) {
+        if (!query.empty()) {
+            const std::string searchable = LowerAscii(target.name + "\n" + target.executablePath + "\n" + target.windowTitle + "\n" + target.id);
+            if (searchable.find(query) == std::string::npos) continue;
+        }
+        ++totalMatches;
+        if (processes.size() >= limit) continue;
+        const bool isAttached = std::any_of(attached.begin(), attached.end(), [&](const TargetRuntimePtr& runtime) {
+            return runtime && runtime->target.id == target.id;
+        });
+        processes.push_back(TargetDescriptorJson(target, isAttached));
+    }
+    return {
+        {"ok", true}, {"count", processes.size()}, {"total_matches", totalMatches},
+        {"truncated", totalMatches > processes.size()}, {"processes", std::move(processes)}
+    };
+}
+
+TargetRuntimePtr CreateRuntime(cortex::target::Catalog& catalog,
+                               const TargetDescriptor& target,
+                               const std::string& runtimeDirectory,
+                               std::string& errorCode,
+                               std::string& errorMessage) {
+    errorCode.clear();
+    errorMessage.clear();
+    auto runtime = std::make_shared<TargetRuntime>();
+    runtime->target = target;
+    runtime->sessions = std::make_unique<cortex::target::SessionManager>(catalog);
+    std::string error;
+    if (!runtime->sessions->Attach(target, &error)) {
+        errorCode = "target_attach_failed";
+        errorMessage = error.empty() ? "Target attach failed" : error;
+        return {};
+    }
+    runtime->payload = std::make_unique<cortex::services::PayloadClient>(*runtime->sessions, runtimeDirectory);
+    if (!runtime->payload->EnsureReady(&error)) {
+        errorCode = "target_runtime_unavailable";
+        errorMessage = error.empty() ? "Target runtime is unavailable" : error;
+        return {};
+    }
+    return runtime;
+}
+
+bool HandleLocalTool(const std::shared_ptr<RunState>& state,
+                     const json& message,
+                     const std::string& name,
+                     const json& arguments,
+                     json& response) {
+    if (name != "cortex_processes" && name != "cortex_attach" &&
+        name != "cortex_detach" && name != "cortex_targets") return false;
+
+    if (PruneDeadRuntimes(state)) EmitToolsListChanged(state);
+
+    if (name == "cortex_targets") {
+        response = LocalToolResponse(MessageId(message), TargetListResult(RuntimeSnapshot(state)));
+        return true;
+    }
+
+    if (name == "cortex_processes") {
+        std::string errorCode;
+        std::string errorMessage;
+        const json result = ProcessListResult(state, arguments, errorCode, errorMessage);
+        if (!errorCode.empty()) response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
+        else response = LocalToolResponse(MessageId(message), result);
+        return true;
+    }
+
+    std::lock_guard<std::mutex> mutationLock(state->targetMutationMutex);
+    if (name == "cortex_attach") {
+        const bool hasPid = arguments.contains("pid");
+        const bool hasProcess = arguments.contains("process");
+        if (hasPid == hasProcess) {
+            response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_attach_selector", "Provide exactly one of pid or process"), true);
+            return true;
+        }
+
+        TargetSelector selector;
+        if (hasPid) {
+            if (!arguments["pid"].is_number_integer()) {
+                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_pid", "pid must be a positive integer"), true);
+                return true;
+            }
+            const auto pid = arguments["pid"].get<std::int64_t>();
+            if (pid <= 0) {
+                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_pid", "pid must be a positive integer"), true);
+                return true;
+            }
+            selector.pid = static_cast<std::uint64_t>(pid);
+        } else {
+            if (!arguments["process"].is_string() || arguments["process"].get<std::string>().empty()) {
+                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_process", "process must be a non-empty string"), true);
+                return true;
+            }
+            selector.process = arguments["process"].get<std::string>();
+        }
+
+        if (!state->catalog) {
+            response = LocalToolResponse(MessageId(message), LocalToolFailure("target_catalog_unavailable", "Local target catalog is unavailable"), true);
+            return true;
+        }
+        std::string resolveError;
+        const auto target = ResolveUniqueTarget(selector, state->catalog->Targets(), resolveError);
+        if (!target) {
+            response = LocalToolResponse(MessageId(message), LocalToolFailure("target_not_found", resolveError), true);
+            return true;
+        }
+
+        {
+            const auto current = RuntimeSnapshot(state);
+            const auto existing = std::find_if(current.begin(), current.end(), [&](const TargetRuntimePtr& runtime) {
+                return runtime && runtime->target.id == target->id;
+            });
+            if (existing != current.end()) {
+                response = LocalToolResponse(MessageId(message), {
+                    {"ok", true}, {"status", "already_attached"},
+                    {"target", TargetDescriptorJson((*existing)->target, true)}, {"count", current.size()}
+                });
+                return true;
+            }
+        }
+
+        std::string errorCode;
+        std::string errorMessage;
+        auto runtime = CreateRuntime(*state->catalog, *target, state->runtimeDirectory, errorCode, errorMessage);
+        if (!runtime) {
+            response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
+            return true;
+        }
+        if (!PrimeRuntimeProtocol(state, runtime, errorMessage)) {
+            response = LocalToolResponse(MessageId(message),
+                                         LocalToolFailure("target_protocol_init_failed",
+                                                          errorMessage.empty() ? "Could not initialize the attached runtime MCP session"
+                                                                               : errorMessage),
+                                         true);
+            return true;
+        }
+        std::size_t count = 0;
+        {
+            std::lock_guard<std::mutex> lock(state->runtimeMutex);
+            state->runtimes.push_back(runtime);
+            count = state->runtimes.size();
+        }
+        response = LocalToolResponse(MessageId(message), {
+            {"ok", true}, {"status", "attached"}, {"target", TargetDescriptorJson(runtime->target, true)}, {"count", count}
+        });
+        EmitToolsListChanged(state);
+        return true;
+    }
+
+    const auto current = RuntimeSnapshot(state);
+    std::string errorCode;
+    std::string errorMessage;
+    auto runtime = ResolveRuntime(current, arguments, errorCode, errorMessage);
+    if (!runtime) {
+        response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
+        return true;
+    }
+    std::size_t count = 0;
+    {
+        std::lock_guard<std::mutex> lock(state->runtimeMutex);
+        state->runtimes.erase(std::remove_if(state->runtimes.begin(), state->runtimes.end(), [&](const TargetRuntimePtr& candidate) {
+            return candidate && candidate->target.id == runtime->target.id;
+        }), state->runtimes.end());
+        count = state->runtimes.size();
+    }
+    response = LocalToolResponse(MessageId(message), {
+        {"ok", true}, {"status", "detached"}, {"target", TargetDescriptorJson(runtime->target, false)}, {"count", count}
+    });
+    EmitToolsListChanged(state);
+    return true;
+}
+void AugmentToolsList(json& response, const RuntimeList& runtimes) {
     if (!response.is_object() || !response.contains("result") || !response["result"].is_object()) return;
     auto& result = response["result"];
     if (!result.contains("tools") || !result["tools"].is_array()) return;
@@ -335,13 +717,7 @@ void AugmentToolsList(json& response, const std::vector<std::unique_ptr<TargetRu
         "Select the attached Cortex target for this call by PID, target id, or unique process name. Available: " +
         TargetSummaryText(runtimes);
 
-    json augmented = json::array();
-    augmented.push_back({
-        {"name", "cortex_targets"},
-        {"description", "List the processes attached to this Cortex MCP server and the selectors accepted by _cortex_target."},
-        {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}}},
-        {"_cortex", {{"multi_target_router", true}}}
-    });
+    json augmented = LocalTools(requireTarget);
 
     for (auto tool : result["tools"]) {
         if (!tool.is_object()) {
@@ -374,8 +750,7 @@ void AugmentToolsList(json& response, const std::vector<std::unique_ptr<TargetRu
     result["tools"] = std::move(augmented);
 }
 
-bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
-                const std::string& toolProfile,
+bool ForwardOne(const std::shared_ptr<RunState>& state,
                 const json& message,
                 json& response,
                 bool& hasResponse,
@@ -383,21 +758,34 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
     response = json();
     hasResponse = false;
     if (error) error->clear();
-    if (runtimes.empty()) {
-        if (error) *error = "no_attached_targets";
-        return false;
+
+    if (PruneDeadRuntimes(state)) EmitToolsListChanged(state);
+    const RuntimeList runtimes = RuntimeSnapshot(state);
+
+    if (!message.is_object()) {
+        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
+        return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
     }
 
-    if (!message.is_object())
-        return runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error);
-
     if (IsNotification(message)) {
+        const std::string notificationMethod = message.value("method", std::string());
+        std::unique_lock<std::mutex> lifecycleLock;
+        RuntimeList notificationRuntimes = runtimes;
+        if (notificationMethod == "notifications/initialized") {
+            // Serialize lifecycle changes with attach/detach. An attach that
+            // completes after this point will replay both initialize and the
+            // initialized notification before becoming routable.
+            lifecycleLock = std::unique_lock<std::mutex>(state->targetMutationMutex);
+            RememberInitializedNotification(state);
+            notificationRuntimes = RuntimeSnapshot(state);
+        }
+        if (notificationRuntimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
         std::string firstError;
-        for (auto& runtime : runtimes) {
+        for (const auto& runtime : notificationRuntimes) {
             json notificationResponse;
             bool notificationHasResponse = false;
             std::string notificationError;
-            if (!runtime->payload->ForwardMcp(message, toolProfile, notificationResponse,
+            if (!runtime->payload->ForwardMcp(message, state->toolProfile, notificationResponse,
                                               notificationHasResponse, &notificationError)) {
                 if (firstError.empty()) firstError = notificationError;
                 continue;
@@ -415,27 +803,67 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
     }
 
     const std::string method = message.value("method", std::string());
+    if (method == "initialize") {
+        // Keep host handshake semantics local while bringing every currently
+        // attached payload to the same legacy MCP lifecycle state. The same
+        // mutex is used by dynamic attach/detach, eliminating the window where
+        // a target could become routable without receiving initialize.
+        std::lock_guard<std::mutex> lifecycleLock(state->targetMutationMutex);
+        RememberInitialize(state, message);
+        PrimeExistingRuntimes(state, message);
+        return HandleLocalProtocol(state, message, response, hasResponse);
+    }
+    if (method == "server/discover" || method == "ping")
+        return HandleLocalProtocol(state, message, response, hasResponse);
+
     if (method == "tools/list") {
-        if (!runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error)) return false;
-        if (hasResponse) AugmentToolsList(response, runtimes);
+        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
+
+        std::string firstError;
+        for (const auto& runtime : runtimes) {
+            std::string runtimeError;
+            if (runtime->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, &runtimeError)) {
+                if (hasResponse) AugmentToolsList(response, runtimes);
+                return true;
+            }
+            if (firstError.empty()) firstError = runtimeError;
+        }
+
+        // Keep host-control tools usable even when an attached payload is
+        // temporarily unreachable. A later cortex_detach/cortex_attach can
+        // recover the connection without restarting the MCP client.
+        HandleLocalProtocol(state, message, response, hasResponse);
+        if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object()) {
+            response["result"]["_cortex"] = {
+                {"runtime_catalog_available", false},
+                {"runtime_catalog_error", firstError.empty() ? "target_runtime_unreachable" : firstError}
+            };
+        }
         return true;
     }
 
     if (method == "tools/call") {
         const json params = message.value("params", json::object());
-        if (params.is_object() && params.value("name", std::string()) == "cortex_targets") {
-            response = LocalToolResponse(MessageId(message), TargetListResult(runtimes));
+        const std::string name = params.is_object() ? params.value("name", std::string()) : std::string();
+        const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
+
+        if (arguments.is_object() && HandleLocalTool(state, message, name, arguments, response)) {
             hasResponse = true;
             return true;
         }
-        const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
-        if (!arguments.is_object())
-            return runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error);
+        if (!arguments.is_object()) {
+            response = TransportError(MessageId(message), "invalid_arguments", "tools/call arguments must be an object");
+            hasResponse = true;
+            return true;
+        }
 
+        const RuntimeList current = RuntimeSnapshot(state);
         std::string targetError;
         std::string targetMessage;
-        TargetRuntime* runtime = ResolveRuntime(runtimes, arguments, targetError, targetMessage);
+        auto runtime = ResolveRuntime(current, arguments, targetError, targetMessage);
         if (!runtime) {
+            if (targetError == "no_attached_targets")
+                targetMessage += ". Use cortex_processes and cortex_attach on this same MCP connection.";
             response = TransportError(MessageId(message), targetError, targetMessage);
             hasResponse = true;
             return true;
@@ -446,7 +874,7 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
             routed["params"].contains("arguments") && routed["params"]["arguments"].is_object()) {
             routed["params"]["arguments"].erase("_cortex_target");
         }
-        if (!runtime->payload->ForwardMcp(routed, toolProfile, response, hasResponse, error)) return false;
+        if (!runtime->payload->ForwardMcp(routed, state->toolProfile, response, hasResponse, error)) return false;
         if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object() &&
             response["result"].contains("structuredContent") && response["result"]["structuredContent"].is_object()) {
             response["result"]["structuredContent"]["_cortex_target"] = runtime->target.id;
@@ -454,32 +882,24 @@ bool ForwardOne(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
         return true;
     }
 
-    if (!runtimes.front()->payload->ForwardMcp(message, toolProfile, response, hasResponse, error)) return false;
-    if (hasResponse && method == "initialize" && runtimes.size() > 1 && response.is_object() &&
-        response.contains("result") && response["result"].is_object()) {
-        std::string instructions = response["result"].value("instructions", std::string());
-        if (!instructions.empty()) instructions += " ";
-        instructions += "Multiple Cortex targets are attached. Use cortex_targets and pass _cortex_target on every tools/call request.";
-        response["result"]["instructions"] = std::move(instructions);
-    }
-    return true;
+    if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
+    return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
 }
 
-bool RouteMessage(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
-                  const std::string& toolProfile,
+bool RouteMessage(const std::shared_ptr<RunState>& state,
                   const json& message,
                   json& response,
                   bool& hasResponse,
                   std::string* error) {
     if (!message.is_array() || message.empty())
-        return ForwardOne(runtimes, toolProfile, message, response, hasResponse, error);
+        return ForwardOne(state, message, response, hasResponse, error);
 
     json responses = json::array();
     for (const auto& item : message) {
         json itemResponse;
         bool itemHasResponse = false;
         std::string itemError;
-        if (!ForwardOne(runtimes, toolProfile, item, itemResponse, itemHasResponse, &itemError)) {
+        if (!ForwardOne(state, item, itemResponse, itemHasResponse, &itemError)) {
             responses.push_back(TransportError(MessageId(item), "cortex_unreachable",
                                                itemError.empty() ? "Cortex target runtime is unreachable" : itemError));
             continue;
@@ -491,21 +911,17 @@ bool RouteMessage(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
     return true;
 }
 
-void ForwardRequest(std::vector<std::unique_ptr<TargetRuntime>>& runtimes,
-                    const std::string& toolProfile,
-                    const json& message,
-                    const std::shared_ptr<RunState>& state) {
+void ForwardRequest(const json& message, const std::shared_ptr<RunState>& state) {
     json response;
     bool hasResponse = false;
     std::string error;
-    if (!RouteMessage(runtimes, toolProfile, message, response, hasResponse, &error)) {
+    if (!RouteMessage(state, message, response, hasResponse, &error)) {
         WriteOutput(state, TransportError(MessageId(message), "cortex_unreachable",
                                           error.empty() ? "Cortex target runtime is unreachable" : error));
         return;
     }
     if (hasResponse) WriteOutput(state, response);
 }
-
 } // namespace
 
 int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
@@ -527,43 +943,42 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
         return 3;
     }
 
+    auto state = std::make_shared<RunState>();
+    state->catalog = &catalog;
+    state->runtimeDirectory = runtimeDirectory;
+    state->toolProfile = options.toolProfile;
+
     const auto availableTargets = catalog.Targets();
-    std::vector<std::unique_ptr<TargetRuntime>> runtimes;
-    runtimes.reserve(options.targets.size());
     for (const auto& selector : options.targets) {
         const auto target = ResolveUniqueTarget(selector, availableTargets, error);
         if (!target) {
             std::cerr << "cortex mcp: " << error << '\n';
             return 3;
         }
-        const bool duplicate = std::any_of(runtimes.begin(), runtimes.end(), [&](const auto& runtime) {
-            return runtime->target.id == target->id;
+        const auto current = RuntimeSnapshot(state);
+        const bool duplicate = std::any_of(current.begin(), current.end(), [&](const TargetRuntimePtr& runtime) {
+            return runtime && runtime->target.id == target->id;
         });
         if (duplicate) {
             std::cerr << "cortex mcp: target requested more than once: PID " << target->processId << '\n';
             return 3;
         }
 
-        auto runtime = std::make_unique<TargetRuntime>();
-        runtime->target = *target;
-        runtime->sessions = std::make_unique<cortex::target::SessionManager>(catalog);
-        if (!runtime->sessions->Attach(*target, &error)) {
-            std::cerr << "cortex mcp: target attach failed for PID " << target->processId << ": "
-                      << (error.empty() ? "attach_failed" : error) << '\n';
-            return 4;
+        std::string errorCode;
+        std::string errorMessage;
+        auto runtime = CreateRuntime(catalog, *target, runtimeDirectory, errorCode, errorMessage);
+        if (!runtime) {
+            std::cerr << "cortex mcp: target setup failed for PID " << target->processId << ": "
+                      << (errorMessage.empty() ? errorCode : errorMessage) << '\n';
+            return errorCode == "target_attach_failed" ? 4 : 5;
         }
-        runtime->payload = std::make_unique<cortex::services::PayloadClient>(*runtime->sessions, runtimeDirectory);
-        if (!runtime->payload->EnsureReady(&error)) {
-            std::cerr << "cortex mcp: target runtime unavailable for PID " << target->processId << ": "
-                      << (error.empty() ? "payload_unavailable" : error) << '\n';
-            return 5;
-        }
-        runtimes.push_back(std::move(runtime));
+        std::lock_guard<std::mutex> lock(state->runtimeMutex);
+        state->runtimes.push_back(std::move(runtime));
     }
+
     // stdout is MCP protocol data only from this point onward.
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
-    auto state = std::make_shared<RunState>();
 
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -593,7 +1008,7 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
             json response;
             bool hasResponse = false;
             std::string notificationError;
-            if (!RouteMessage(runtimes, options.toolProfile, message, response, hasResponse, &notificationError)) {
+            if (!RouteMessage(state, message, response, hasResponse, &notificationError)) {
                 std::cerr << "cortex mcp: notification forwarding failed: " << notificationError << '\n';
             } else if (hasResponse) {
                 // Malformed no-id messages may legitimately be rejected by the
@@ -610,8 +1025,8 @@ int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
         }
 
         try {
-            std::thread([&runtimes, toolProfile = options.toolProfile, message, state] {
-                ForwardRequest(runtimes, toolProfile, message, state);
+            std::thread([message, state] {
+                ForwardRequest(message, state);
                 ReleaseWorker(state);
             }).detach();
         } catch (const std::exception& exception) {
