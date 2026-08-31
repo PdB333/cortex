@@ -1,0 +1,253 @@
+name: AssaultCube Offline E2E
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - "app/**"
+      - "core/**"
+      - "runtime_helper/**"
+      - "ci/assaultcube_offline_e2e.ps1"
+      - ".github/workflows/assaultcube-offline.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+concurrency:
+  group: assaultcube-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cortex-x64-host:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW and Qt 6
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-tools
+
+      - name: Configure Cortex application
+        shell: msys2 {0}
+        run: cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build cortex.exe
+        shell: msys2 {0}
+        run: cmake --build build/ui --parallel 2
+
+      - name: Stage portable Cortex host
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x64
+          mkdir -p stage/x64/CortexPreview
+          cp build/ui/cortex.exe stage/x64/CortexPreview/cortex.exe
+
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            DEPLOY=windeployqt6
+          else
+            DEPLOY=windeployqt
+          fi
+          "$DEPLOY" --release --qmldir app/qml --no-translations stage/x64/CortexPreview/cortex.exe
+
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/x64/CortexPreview/$base" ]; then
+                  cp "$dep" "stage/x64/CortexPreview/$base"
+                  echo "Bundled host dependency: $base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/x64/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+          test -f stage/x64/CortexPreview/cortex.exe
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved host dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find stage/x64/CortexPreview -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
+
+      - name: Upload Cortex host stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-assaultcube-x64-stage
+          path: stage/x64
+          if-no-files-found: error
+          retention-days: 1
+
+  cortex-x86-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Configure x86 Cortex runtime
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x86 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x86 payload
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x86 --target core --parallel 2
+
+      - name: Build private x86 bootstrap helper
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/runtime-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Stage x86 runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x86
+          mkdir -p stage/x86/runtime/x86
+          cp build/runtime-x86/cortex_core.dll stage/x86/runtime/x86/cortex_core.dll
+          cp build/runtime-x86/cortex_runtime_helper.exe stage/x86/runtime/x86/cortex_runtime_helper.exe
+          test -f stage/x86/runtime/x86/cortex_core.dll
+          test -f stage/x86/runtime/x86/cortex_runtime_helper.exe
+
+      - name: Upload x86 runtime stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-assaultcube-x86-stage
+          path: stage/x86
+          if-no-files-found: error
+          retention-days: 1
+
+  assaultcube-offline:
+    needs: [cortex-x64-host, cortex-x86-runtime]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Cortex host stage
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-assaultcube-x64-stage
+          path: staging/x64
+
+      - name: Download x86 runtime stage
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-assaultcube-x86-stage
+          path: staging/x86
+
+      - name: Assemble Cortex test bundle
+        shell: pwsh
+        run: |
+          $preview = (Resolve-Path "staging/x64/CortexPreview").Path
+          $runtime = (Resolve-Path "staging/x86/runtime/x86").Path
+          $destination = Join-Path $preview "runtime\x86"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Copy-Item (Join-Path $runtime "*") $destination -Force
+          foreach ($required in @("cortex.exe", "runtime\x86\cortex_core.dll", "runtime\x86\cortex_runtime_helper.exe")) {
+            if (-not (Test-Path (Join-Path $preview $required))) { throw "missing Cortex test asset: $required" }
+          }
+          "CORTEX_PREVIEW=$preview" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:RUNNER_TEMP "cortex-assaultcube-offline") | Out-Null
+
+      - name: Download and verify official AssaultCube 1.3.0.2
+        shell: pwsh
+        run: |
+          $url = "https://github.com/assaultcube/AC/releases/download/v1.3.0.2/AssaultCube_v1.3.0.2_LockdownEdition.exe"
+          $expected = "77EFF4497232562EEB1862F97D484777202E8AC42C411093A821234045EE61A5"
+          $installer = Join-Path $env:RUNNER_TEMP "AssaultCube_v1.3.0.2_LockdownEdition.exe"
+          & curl.exe -L --fail --retry 3 --retry-delay 2 -o $installer $url
+          if ($LASTEXITCODE -ne 0) { throw "failed to download the pinned official AssaultCube installer" }
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($actual -ne $expected) { throw "AssaultCube installer SHA256 mismatch: $actual" }
+          if ((Get-Item -LiteralPath $installer).Length -ne 48253246) { throw "AssaultCube installer size mismatch" }
+          @(
+            "version=1.3.0.2",
+            "url=$url",
+            "sha256=$actual",
+            "bytes=$((Get-Item -LiteralPath $installer).Length)"
+          ) | Set-Content -Encoding UTF8 (Join-Path $env:RUNNER_TEMP "cortex-assaultcube-offline\assaultcube-acquisition.txt")
+          "ASSAULTCUBE_INSTALLER=$installer" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install pinned AssaultCube silently
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "AssaultCube-1.3.0.2"
+          Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath $env:ASSAULTCUBE_INSTALLER -ArgumentList @("/S", "/D=$installDir") -PassThru
+          if (-not $process.WaitForExit(90000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "AssaultCube silent installer timed out"
+          }
+          if ($process.ExitCode -ne 0) { throw "AssaultCube silent installer failed with exit code $($process.ExitCode)" }
+
+          $server = Join-Path $installDir "bin_win32\ac_server.exe"
+          if (-not (Test-Path $server)) {
+            $fallback = @(
+              "C:\Program Files (x86)\AssaultCube 1.3.0.2",
+              "C:\Program Files\AssaultCube 1.3.0.2"
+            ) | Where-Object { Test-Path (Join-Path $_ "bin_win32\ac_server.exe") } | Select-Object -First 1
+            if ($fallback) { $installDir = $fallback }
+          }
+          $server = Join-Path $installDir "bin_win32\ac_server.exe"
+          if (-not (Test-Path $server)) {
+            Get-ChildItem $env:RUNNER_TEMP -Directory | Select-Object FullName | Format-Table -AutoSize
+            throw "official AssaultCube install does not contain bin_win32\ac_server.exe"
+          }
+          "ASSAULTCUBE_DIR=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "AssaultCube root: $installDir"
+
+      - name: Cortex real-target E2E against offline AssaultCube
+        shell: pwsh
+        run: >-
+          pwsh -NoProfile -File ci/assaultcube_offline_e2e.ps1
+          -CortexDir "$env:CORTEX_PREVIEW"
+          -AssaultCubeDir "$env:ASSAULTCUBE_DIR"
+          -ReportPath "$env:RUNNER_TEMP\cortex-assaultcube-offline\report.json"
+
+      - name: Upload AssaultCube offline validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-assaultcube-offline-evidence
+          path: ${{ runner.temp }}/cortex-assaultcube-offline
+          if-no-files-found: warn
+          retention-days: 14
