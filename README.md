@@ -127,16 +127,25 @@ Renderer hooks remain because capture/instrumentation features need them, but th
 
 ## MCP
 
-MCP is integrated directly into `cortex.exe`:
+MCP is integrated directly into `cortex.exe`. The recommended configuration is targetless, so an AI client can be configured once and choose processes later on the same MCP connection:
+
+```powershell
+.\cortex.exe mcp
+.\cortex.exe mcp --tools all
+```
+
+A targetless server always exposes `cortex_processes`, `cortex_attach`, `cortex_detach` and `cortex_targets`. After a successful attach or detach, Cortex announces `notifications/tools/list_changed`; the client can refresh `tools/list` and use the target runtime tools without restarting or editing its MCP configuration.
+
+`--pid` and `--process` remain optional startup auto-attach shortcuts:
 
 ```powershell
 .\cortex.exe mcp --pid 1234
-.\cortex.exe mcp --pid 1234 --tools all
-# Keep two targets attached to the same AI connection:
+.\cortex.exe mcp --process game.exe
+# Auto-attach two targets at startup:
 .\cortex.exe mcp --pid 1234 --pid 5678
 ```
 
-With multiple targets, `tools/list` exposes a local `cortex_targets` tool and adds a required `_cortex_target` selector to normal tool calls. The selector accepts a PID, target id, or unique attached process name, so concurrent AI requests can address different processes without racing on a shared global target.
+With multiple targets, Cortex adds a required `_cortex_target` selector to normal runtime tool calls. The selector accepts a PID, target id, or unique attached process name, so concurrent AI requests can address different processes without racing on shared global target state.
 
 The normal Windows path is:
 

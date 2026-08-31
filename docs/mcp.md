@@ -6,26 +6,52 @@ There is no separate user-facing MCP executable in the unified product.
 
 ## Recommended stdio configuration
 
-The default profile is `compact`, which exposes the semantic Cortex tools rather than every low-level primitive.
+The default profile is `compact`, which exposes the semantic Cortex tools rather than every low-level primitive. Configure the AI client once and start Cortex without a target selector:
 
 ```json
 {
   "mcpServers": {
     "cortex": {
       "command": "C:/path/to/cortex.exe",
-      "args": ["mcp", "--process", "app.exe"]
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-A PID can be used instead:
+This targetless MCP server remains useful before any process is attached. Its host-control catalog contains:
+
+- `cortex_processes` — refresh and filter the local process list;
+- `cortex_attach` — attach one process by PID or unique process name;
+- `cortex_detach` — remove one attached process from this MCP connection;
+- `cortex_targets` — list the processes currently attached to this MCP server.
+
+After attach or detach, Cortex emits `notifications/tools/list_changed` and advertises `capabilities.tools.listChanged=true`, so MCP clients can refresh the runtime tool catalog without restarting the server or editing their configuration.
+
+`--pid` and `--process` remain compatible startup auto-attach shortcuts:
 
 ```text
 cortex.exe mcp --pid 1234
+cortex.exe mcp --process app.exe
 ```
 
 Diagnostics are written to stderr so stdout remains MCP protocol data only.
+
+## Dynamic process selection
+
+A typical long-lived session is:
+
+```text
+AI client -> cortex.exe mcp
+                |
+                +-- cortex_processes
+                +-- cortex_attach(pid=1234)
+                +-- runtime tools
+                +-- cortex_detach(_cortex_target=1234)
+                +-- cortex_attach(pid=5678)
+```
+
+Attaching a target does not enable Mutation. State-changing runtime calls still require their existing explicit `mutation_permission=true` contract.
 
 ## Multiple attached targets
 
@@ -86,10 +112,10 @@ The compact profile exposes the semantic tools and hides raw primitives from `to
 Use the complete primitive surface only when an advanced client needs it:
 
 ```text
-cortex.exe mcp --pid 1234 --tools all
+cortex.exe mcp --tools all
 ```
 
-The target-routing field is added to both compact and full tool catalogs.
+A startup target can still be supplied, for example `cortex.exe mcp --pid 1234 --tools all`. The target-routing field is added to both compact and full runtime tool catalogs.
 
 ## MCP protocol versions
 
