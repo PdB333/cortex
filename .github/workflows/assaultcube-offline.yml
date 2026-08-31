@@ -8,7 +8,7 @@ on:
       - "app/**"
       - "core/**"
       - "runtime_helper/**"
-      - "ci/assaultcube_offline_e2e_v2.ps1"
+      - "ci/assaultcube_offline_e2e_v3.ps1"
       - ".github/workflows/assaultcube-offline.yml"
   workflow_dispatch:
   schedule:
@@ -22,6 +22,28 @@ permissions:
   contents: read
 
 jobs:
+  script-parse:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse AssaultCube E2E PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "ci/assaultcube_offline_e2e_v3.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            throw "AssaultCube E2E PowerShell parser reported $($errors.Count) error(s)"
+          }
+          Write-Host "AssaultCube E2E PowerShell parser: OK"
+
   cortex-x64-host:
     runs-on: windows-latest
     timeout-minutes: 35
@@ -156,7 +178,7 @@ jobs:
           retention-days: 1
 
   assaultcube-offline:
-    needs: [cortex-x64-host, cortex-x86-runtime]
+    needs: [script-parse, cortex-x64-host, cortex-x86-runtime]
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -238,7 +260,7 @@ jobs:
       - name: Cortex real-target E2E against offline AssaultCube
         shell: pwsh
         run: >-
-          pwsh -NoProfile -File ci/assaultcube_offline_e2e_v2.ps1
+          pwsh -NoProfile -File ci/assaultcube_offline_e2e_v3.ps1
           -CortexDir "$env:CORTEX_PREVIEW"
           -AssaultCubeDir "$env:ASSAULTCUBE_DIR"
           -ReportPath "$env:RUNNER_TEMP\cortex-assaultcube-offline\report.json"
