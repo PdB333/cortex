@@ -40,18 +40,30 @@ bool PublishAiActivity(const QByteArray& jsonPayload, int timeoutMs) {
     if (jsonPayload.isEmpty() || jsonPayload.size() > kMaxActivityPayloadBytes) return false;
     if (timeoutMs < 1) timeoutMs = 1;
 
-    QLocalSocket socket;
-    socket.connectToServer(AiActivityEndpointName(), QIODevice::WriteOnly);
-    if (!socket.waitForConnected(timeoutMs)) return false;
-
     QByteArray framed = jsonPayload;
     framed.append('\n');
-    const qint64 written = socket.write(framed);
-    if (written != framed.size()) return false;
-    socket.flush();
-    const bool flushed = socket.bytesToWrite() == 0 || socket.waitForBytesWritten(timeoutMs);
-    socket.disconnectFromServer();
-    return flushed;
+    const QString endpoint = AiActivityEndpointName();
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        QLocalSocket socket;
+        socket.connectToServer(endpoint, QIODevice::WriteOnly);
+        if (!socket.waitForConnected(timeoutMs)) {
+            const auto socketError = socket.error();
+            if (socketError == QLocalSocket::ServerNotFoundError ||
+                socketError == QLocalSocket::SocketAccessError ||
+                socketError == QLocalSocket::UnsupportedSocketOperationError) {
+                return false;
+            }
+            continue;
+        }
+
+        const qint64 written = socket.write(framed);
+        if (written != framed.size()) continue;
+        socket.flush();
+        const bool flushed = socket.bytesToWrite() == 0 || socket.waitForBytesWritten(timeoutMs);
+        socket.disconnectFromServer();
+        if (flushed) return true;
+    }
+    return false;
 }
 
 AiActivityController::AiActivityController(QObject* parent)
