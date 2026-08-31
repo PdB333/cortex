@@ -47,8 +47,32 @@ jobs:
 
       - name: Real cross-process MCP activity smoke
         shell: msys2 {0}
-        run: build/ai-activity/cortex.exe --ai-activity-smoke
+        run: |
+          set -u
+          report_posix="$PWD/ai-activity-smoke.json"
+          export CORTEX_AI_ACTIVITY_SMOKE_REPORT="$(cygpath -w "$report_posix")"
+          set +e
+          build/ai-activity/cortex.exe --ai-activity-smoke
+          code=$?
+          set -e
+          if [[ -f "$report_posix" ]]; then
+            echo "--- AI Activity smoke report ---"
+            cat "$report_posix"
+          else
+            echo "AI Activity smoke did not produce a report"
+          fi
+          exit "$code"
 
       - name: QML activity surface smoke
+        if: always()
         shell: msys2 {0}
         run: QT_QPA_PLATFORM=offscreen build/ai-activity/cortex.exe --smoke-test
+
+      - name: Upload AI Activity smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-ai-activity-smoke
+          path: ai-activity-smoke.json
+          if-no-files-found: warn
+          retention-days: 14

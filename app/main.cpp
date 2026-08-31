@@ -13,6 +13,9 @@
 
 #include <QColor>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QCoreApplication>
 #include <QDir>
@@ -214,8 +217,19 @@ int RunEventChannelSmoke(int argc, char* argv[], const QString& runtimeDirectory
     return 5;
 }
 int RunAiActivityChannelSmoke() {
+    const QString reportPath = qEnvironmentVariable("CORTEX_AI_ACTIVITY_SMOKE_REPORT");
+    auto writeReport = [&](const QString& status, const QVariantMap& fields) {
+        if (reportPath.isEmpty()) return;
+        QJsonObject object = QJsonObject::fromVariantMap(fields);
+        object.insert(QStringLiteral("status"), status);
+        QFile report(reportPath);
+        if (report.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            report.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    };
+
     cortex::app::AiActivityController activity;
     if (!activity.listening()) {
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("listen")}});
         qCritical("AI activity smoke could not own the local activity endpoint");
         return 2;
     }
@@ -226,6 +240,8 @@ int RunAiActivityChannelSmoke() {
     mcp.setProcessChannelMode(QProcess::SeparateChannels);
     mcp.start();
     if (!mcp.waitForStarted(3000)) {
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("start-child")},
+                                             {QStringLiteral("error"), mcp.errorString()}});
         qCritical().noquote() << "AI activity smoke could not start MCP child:" << mcp.errorString();
         return 3;
     }
@@ -233,12 +249,38 @@ int RunAiActivityChannelSmoke() {
     const QByteArray initialize = R"json({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ai-activity-smoke","version":"1"}}})json" "\n";
     const QByteArray initialized = R"json({"jsonrpc":"2.0","method":"notifications/initialized"})json" "\n";
     const QByteArray toolCall = R"json({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex_targets","arguments":{}}})json" "\n";
+
+    QByteArray stdoutBuffer;
+    auto waitForResponseId = [&](int expectedId, int timeoutMs) {
+        const QByteArray needle = QByteArrayLiteral("\"id\":") + QByteArray::number(expectedId);
+        QElapsedTimer responseTimer;
+        responseTimer.start();
+        while (responseTimer.elapsed() < timeoutMs) {
+            QCoreApplication::processEvents();
+            mcp.waitForReadyRead(20);
+            stdoutBuffer += mcp.readAllStandardOutput();
+            if (stdoutBuffer.contains(needle)) return true;
+            if (mcp.state() == QProcess::NotRunning) return false;
+            QThread::msleep(5);
+        }
+        return false;
+    };
+
     mcp.write(initialize);
+    if (!mcp.waitForBytesWritten(1000) || !waitForResponseId(1, 4000)) {
+        const QString stderrText = QString::fromUtf8(mcp.readAllStandardError());
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("initialize")},
+                                             {QStringLiteral("stdout"), QString::fromUtf8(stdoutBuffer)},
+                                             {QStringLiteral("stderr"), stderrText}});
+        mcp.kill();
+        mcp.waitForFinished(1000);
+        return 4;
+    }
+
     mcp.write(initialized);
     mcp.write(toolCall);
     mcp.waitForBytesWritten(1000);
 
-    QByteArray stdoutBuffer;
     bool sawToolResponse = false;
     bool sawStarted = false;
     bool sawCompleted = false;
@@ -260,6 +302,18 @@ int RunAiActivityChannelSmoke() {
     }
 
     if (!sawToolResponse || !sawStarted || !sawCompleted || activity.activeTaskCount() != 0) {
+        QVariantList rows;
+        for (const auto& value : activity.activities()) rows.push_back(value);
+        const QString stderrText = QString::fromUtf8(mcp.readAllStandardError());
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("tool-lifecycle")},
+                                             {QStringLiteral("tool_response"), sawToolResponse},
+                                             {QStringLiteral("started"), sawStarted},
+                                             {QStringLiteral("completed"), sawCompleted},
+                                             {QStringLiteral("active_tasks"), activity.activeTaskCount()},
+                                             {QStringLiteral("sessions"), activity.sessionCount()},
+                                             {QStringLiteral("stdout"), QString::fromUtf8(stdoutBuffer)},
+                                             {QStringLiteral("stderr"), stderrText},
+                                             {QStringLiteral("activities"), rows}});
         qCritical().noquote() << "AI activity smoke missed MCP lifecycle"
                               << "response" << sawToolResponse
                               << "started" << sawStarted
@@ -271,7 +325,15 @@ int RunAiActivityChannelSmoke() {
     }
 
     mcp.closeWriteChannel();
-    if (!mcp.waitForFinished(3000)) {
+    QElapsedTimer exitTimer;
+    exitTimer.start();
+    while (mcp.state() != QProcess::NotRunning && exitTimer.elapsed() < 3000) {
+        QCoreApplication::processEvents();
+        mcp.waitForFinished(20);
+        QThread::msleep(2);
+    }
+    if (mcp.state() != QProcess::NotRunning) {
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("child-exit")}});
         mcp.kill();
         mcp.waitForFinished(1000);
         qCritical("AI activity smoke MCP child did not exit after stdin close");
@@ -283,10 +345,15 @@ int RunAiActivityChannelSmoke() {
         QThread::msleep(10);
     }
     if (activity.connected() || activity.activeTaskCount() != 0) {
+        writeReport(QStringLiteral("FAIL"), {{QStringLiteral("stage"), QStringLiteral("session-shutdown")},
+                                             {QStringLiteral("active_tasks"), activity.activeTaskCount()},
+                                             {QStringLiteral("sessions"), activity.sessionCount()}});
         qCritical("AI activity smoke did not observe MCP session shutdown");
         return 6;
     }
 
+    writeReport(QStringLiteral("PASS"), {{QStringLiteral("tool"), QStringLiteral("cortex_targets")},
+                                         {QStringLiteral("activity_rows"), activity.activities().size()}});
     qInfo("PASS: AI activity observed a real cross-process MCP tool lifecycle");
     return 0;
 }
