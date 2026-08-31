@@ -196,11 +196,11 @@ try {
     $report.checks.firewall_outbound_block = $true
 
     $serverArguments = @(
-        "-i", "127.0.0.1",
-        "-f", [string]$serverPort,
-        "-c", "2",
-        "-LF", "5",
-        "-LS", "5",
+        "-i127.0.0.1",
+        "-f$serverPort",
+        "-c2",
+        "-LF5",
+        "-LS5",
         "-V"
     )
     $server = Start-Process -FilePath $serverExe -ArgumentList $serverArguments -WorkingDirectory $AssaultCubeDir `
@@ -438,7 +438,7 @@ try {
     $report.status = "FAIL"
     $report.failure = $_.Exception.Message
     $report.finished_at_utc = [DateTime]::UtcNow.ToString("o")
-    Write-Error $_
+    Write-Host ("AssaultCube offline E2E failure: " + $_.Exception.Message)
     throw
 } finally {
     if ($null -ne $script:Mcp -and -not $script:Mcp.HasExited) {
