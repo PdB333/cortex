@@ -1,5 +1,6 @@
 #include "debugger.h"
 #include "../memory/memory.h"
+#include "../disasm/disasm.h"
 
 #include <tlhelp32.h>
 #include <dbghelp.h>
@@ -94,8 +95,10 @@ struct HwEntry {
 struct ThreadCtl {
     HANDLE resumeEvent = nullptr;  // signaled by ContinueThread/StepThread to release the frozen thread
     HANDLE doneEvent = nullptr;    // signaled by the frozen thread once a requested step has landed
+    HANDLE suspendedHandle = nullptr; // owned while Cortex manually suspends a running target thread
     PCONTEXT ctx = nullptr;        // only valid while frozen==true (points into the VEH's stack frame)
     bool frozen = false;
+    bool manuallySuspended = false;
     bool stepArmed = false;
     int pausedBpId = -1;
     Registers regs;
@@ -770,6 +773,20 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
                     g_bpLogs.erase(failedId);
                 }
             }
+            // A user-requested Step Into from a paused software breakpoint
+            // must stop here, after the original instruction executed and the
+            // INT3 was safely re-armed. Consuming stepArmed later would miss
+            // this exception because the pending-restore path returns early.
+            bool requestedStep = false;
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                auto it = g_threadCtl.find(tid);
+                if (it != g_threadCtl.end() && it->second.stepArmed) {
+                    requestedStep = true;
+                    it->second.stepArmed = false;
+                }
+            }
+            if (requestedStep) { FreezeCurrentThread(tid, -1, ctx, true); return EXCEPTION_CONTINUE_EXECUTION; }
             if (traceActive) ctx->EFlags |= kTF; else ctx->EFlags &= ~kTF;
             return EXCEPTION_CONTINUE_EXECUTION;
         }
@@ -803,16 +820,46 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+void ApplyHwEntryToContext(PCONTEXT ctx, const HwEntry& entry) {
+    const int slot = entry.slot;
+    const ULONG_PTR rw = entry.kind == BpKind::HwExecute ? 0u :
+                         (entry.kind == BpKind::HwWrite ? 1u : 3u);
+    const ULONG_PTR len = entry.size == 1 ? 0u : (entry.size == 2 ? 1u : 3u);
+    (&ctx->Dr0)[slot] = static_cast<ULONG_PTR>(entry.address);
+    ctx->Dr7 |= (static_cast<ULONG_PTR>(1u) << (slot * 2));
+    ctx->Dr7 &= ~(static_cast<ULONG_PTR>(0x3u) << (16 + slot * 4));
+    ctx->Dr7 |= (rw << (16 + slot * 4));
+    ctx->Dr7 &= ~(static_cast<ULONG_PTR>(0x3u) << (18 + slot * 4));
+    ctx->Dr7 |= (len << (18 + slot * 4));
+}
+
+void ClearHwSlotInContext(PCONTEXT ctx, int slot) {
+    (&ctx->Dr0)[slot] = 0;
+    ctx->Dr7 &= ~(static_cast<ULONG_PTR>(1u) << (slot * 2));
+    ctx->Dr7 &= ~(static_cast<ULONG_PTR>(0xFu) << (16 + slot * 4));
+}
+
 void ClearHwSlotOnAllThreads(int slot) {
     for (DWORD tid : ListThreadIds()) {
         if (tid == GetCurrentThreadId()) continue;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            auto frozen = g_threadCtl.find(tid);
+            if (frozen != g_threadCtl.end() && frozen->second.frozen && frozen->second.ctx) {
+                // VEH-frozen threads resume from this saved exception context.
+                // Editing only GetThreadContext() would be overwritten when
+                // Windows restores the exception context on VEH return.
+                ClearHwSlotInContext(frozen->second.ctx, slot);
+                continue;
+            }
+        }
         HANDLE h = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, tid);
         if (!h) continue;
-        SuspendThread(h);
+        if (SuspendThread(h) == static_cast<DWORD>(-1)) { CloseHandle(h); continue; }
         CONTEXT ctx = {};
         ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
         if (GetThreadContext(h, &ctx)) {
-            ctx.Dr7 &= ~(static_cast<ULONG_PTR>(1u) << (slot * 2));
+            ClearHwSlotInContext(&ctx, slot);
             SetThreadContext(h, &ctx);
         }
         ResumeThread(h);
@@ -822,6 +869,17 @@ void ClearHwSlotOnAllThreads(int slot) {
 
 bool ApplyHwEntriesToThread(DWORD tid, const std::vector<HwEntry>& entries) {
     if (tid == GetCurrentThreadId() || entries.empty()) return false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto frozen = g_threadCtl.find(tid);
+        if (frozen != g_threadCtl.end() && frozen->second.frozen && frozen->second.ctx) {
+            // Keep DR state in the context Windows will actually restore when
+            // this paused VEH returns. This is what lets Step Over arm its
+            // temporary per-thread HW breakpoint while paused on an INT3.
+            for (const auto& entry : entries) ApplyHwEntryToContext(frozen->second.ctx, entry);
+            return true;
+        }
+    }
     HANDLE h = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, tid);
     if (!h) return false;
     if (SuspendThread(h) == static_cast<DWORD>(-1)) { CloseHandle(h); return false; }
@@ -830,16 +888,7 @@ bool ApplyHwEntriesToThread(DWORD tid, const std::vector<HwEntry>& entries) {
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
     if (GetThreadContext(h, &ctx)) {
         for (const auto& entry : entries) {
-            const int slot = entry.slot;
-            const ULONG_PTR rw = entry.kind == BpKind::HwExecute ? 0u :
-                                 (entry.kind == BpKind::HwWrite ? 1u : 3u);
-            const ULONG_PTR len = entry.size == 1 ? 0u : (entry.size == 2 ? 1u : 3u);
-            (&ctx.Dr0)[slot] = static_cast<ULONG_PTR>(entry.address);
-            ctx.Dr7 |= (static_cast<ULONG_PTR>(1u) << (slot * 2));
-            ctx.Dr7 &= ~(static_cast<ULONG_PTR>(0x3u) << (16 + slot * 4));
-            ctx.Dr7 |= (rw << (16 + slot * 4));
-            ctx.Dr7 &= ~(static_cast<ULONG_PTR>(0x3u) << (18 + slot * 4));
-            ctx.Dr7 |= (len << (18 + slot * 4));
+            ApplyHwEntryToContext(&ctx, entry);
         }
         applied = SetThreadContext(h, &ctx) != FALSE;
     }
@@ -927,18 +976,27 @@ bool Shutdown() {
     // handler or unloading this DLL. They must leave FreezeCurrentThread and
     // finish any pending INT3 single-step while our code is still resident.
     std::vector<HANDLE> resumeEvents;
+    std::vector<HANDLE> suspendedHandles;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        for (auto& [tid, ctl] : g_threadCtl) if (ctl.frozen && ctl.resumeEvent) resumeEvents.push_back(ctl.resumeEvent);
+        for (auto& [tid, ctl] : g_threadCtl) {
+            if (ctl.frozen && ctl.resumeEvent) resumeEvents.push_back(ctl.resumeEvent);
+            if (ctl.manuallySuspended && ctl.suspendedHandle) {
+                suspendedHandles.push_back(ctl.suspendedHandle);
+                ctl.suspendedHandle = nullptr;
+                ctl.manuallySuspended = false;
+            }
+        }
     }
     for (HANDLE event : resumeEvents) SetEvent(event);
+    for (HANDLE thread : suspendedHandles) { ResumeThread(thread); CloseHandle(thread); }
     const ULONGLONG deadline = GetTickCount64() + 2000;
     bool settled = false;
     while (GetTickCount64() < deadline) {
         settled = true;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            for (const auto& [tid, ctl] : g_threadCtl) settled = settled && !ctl.frozen;
+            for (const auto& [tid, ctl] : g_threadCtl) settled = settled && !ctl.frozen && !ctl.manuallySuspended;
             settled = settled && g_pendingSwRestore.empty();
         }
         if (settled) break;
@@ -953,24 +1011,33 @@ bool Shutdown() {
     }
     for (int id : activeTraceIds) StopTrace(id, "shutdown");
 
-    std::lock_guard<std::mutex> lock(g_mutex);
-    for (auto& [id, e] : g_swBps) {
-        memory::WriteBytes(e.address, {e.origByte});
+    // Remove breakpoints through the normal path *without* holding g_mutex.
+    // Hardware cleanup suspends target threads and also consults the paused
+    // context map; holding the debugger mutex here would deadlock that path.
+    std::vector<int> breakpointIds;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        breakpointIds.reserve(g_swBps.size() + g_hwBps.size());
+        for (const auto& [id, entry] : g_swBps) breakpointIds.push_back(id);
+        for (const auto& [id, entry] : g_hwBps) breakpointIds.push_back(id);
     }
-    g_swBps.clear();
-    g_retiredSwBps.clear();
-    for (auto& [id, e] : g_hwBps) {
-        ClearHwSlotOnAllThreads(e.slot);
+    for (int id : breakpointIds) {
+        if (!RemoveBreakpoint(id)) return false;
     }
-    g_hwBps.clear();
-    for (bool& used : g_hwSlotUsed) used = false;
-    for (auto& [tid, ctl] : g_threadCtl) {
-        if (ctl.resumeEvent) CloseHandle(ctl.resumeEvent);
-        if (ctl.doneEvent) CloseHandle(ctl.doneEvent);
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_retiredSwBps.clear();
+        for (bool& used : g_hwSlotUsed) used = false;
+        for (auto& [tid, ctl] : g_threadCtl) {
+            if (ctl.resumeEvent) CloseHandle(ctl.resumeEvent);
+            if (ctl.doneEvent) CloseHandle(ctl.doneEvent);
+            if (ctl.suspendedHandle) { ResumeThread(ctl.suspendedHandle); CloseHandle(ctl.suspendedHandle); }
+        }
+        g_threadCtl.clear();
+        g_pendingSwRestore.clear();
+        g_traces.clear();
     }
-    g_threadCtl.clear();
-    g_pendingSwRestore.clear();
-    g_traces.clear();
     if (g_vehHandle) {
         RemoveVectoredExceptionHandler(g_vehHandle);
         g_vehHandle = nullptr;
@@ -1145,7 +1212,7 @@ std::vector<PausedThread> ListPausedThreads() {
     std::vector<PausedThread> out;
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto& [tid, tc] : g_threadCtl) {
-        if (tc.frozen) out.push_back(PausedThread{tid, tc.pausedBpId, tc.regs});
+        if (tc.frozen || tc.manuallySuspended) out.push_back(PausedThread{tid, tc.pausedBpId, tc.regs});
     }
     return out;
 }
@@ -1153,7 +1220,7 @@ std::vector<PausedThread> ListPausedThreads() {
 bool GetPausedRegisters(DWORD threadId, Registers& out) {
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_threadCtl.find(threadId);
-    if (it == g_threadCtl.end() || !it->second.frozen) return false;
+    if (it == g_threadCtl.end() || (!it->second.frozen && !it->second.manuallySuspended)) return false;
     out = it->second.regs;
     return true;
 }
@@ -1184,44 +1251,235 @@ bool GetBreakpointLogPaged(int id, uint64_t sinceSeq, size_t limit,
     return true;
 }
 
-bool ContinueThread(DWORD threadId) {
-    HANDLE resumeEv;
+bool PauseThread(DWORD threadId, Registers& outRegs) {
+    if (threadId == 0 || threadId == GetCurrentThreadId()) return false;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         auto it = g_threadCtl.find(threadId);
-        if (it == g_threadCtl.end() || !it->second.frozen) return false;
-        it->second.stepArmed = false;
-        if (it->second.ctx) it->second.ctx->EFlags &= ~kTF;
-        resumeEv = it->second.resumeEvent;
+        if (it != g_threadCtl.end() && (it->second.frozen || it->second.manuallySuspended)) {
+            outRegs = it->second.regs;
+            return true;
+        }
     }
+
+    // Suspend + try_lock avoids a deadlock if the selected game thread happens
+    // to be inside Cortex code while holding g_mutex. In that rare case we
+    // immediately give the thread back and retry after it has made progress.
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME |
+                                   THREAD_QUERY_INFORMATION, FALSE, threadId);
+        if (!thread) return false;
+        const DWORD previousSuspendCount = SuspendThread(thread);
+        if (previousSuspendCount == static_cast<DWORD>(-1)) { CloseHandle(thread); return false; }
+        if (previousSuspendCount != 0) {
+            // Never take ownership of a suspension created by the game or another debugger.
+            ResumeThread(thread);
+            CloseHandle(thread);
+            return false;
+        }
+
+        CONTEXT ctx{};
+        ctx.ContextFlags = CONTEXT_FULL;
+        if (!GetThreadContext(thread, &ctx)) {
+            ResumeThread(thread);
+            CloseHandle(thread);
+            return false;
+        }
+        const Registers regs = CtxToRegs(&ctx);
+
+        std::unique_lock<std::mutex> lock(g_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            ResumeThread(thread);
+            CloseHandle(thread);
+            Sleep(1);
+            continue;
+        }
+
+        ThreadCtl& ctl = GetOrCreateThreadCtl(threadId);
+        if (ctl.frozen || ctl.manuallySuspended) {
+            outRegs = ctl.regs;
+            lock.unlock();
+            ResumeThread(thread);
+            CloseHandle(thread);
+            return true;
+        }
+        ctl.suspendedHandle = thread;
+        ctl.manuallySuspended = true;
+        ctl.ctx = nullptr;
+        ctl.pausedBpId = -1;
+        ctl.regs = regs;
+        outRegs = regs;
+        return true;
+    }
+    return false;
+}
+
+bool ContinueThread(DWORD threadId) {
+    HANDLE resumeEv = nullptr;
+    HANDLE suspended = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_threadCtl.find(threadId);
+        if (it == g_threadCtl.end()) return false;
+        it->second.stepArmed = false;
+        if (it->second.manuallySuspended && it->second.suspendedHandle) {
+            suspended = it->second.suspendedHandle;
+            it->second.suspendedHandle = nullptr;
+            it->second.manuallySuspended = false;
+            it->second.pausedBpId = -1;
+        } else if (it->second.frozen) {
+            // A paused software breakpoint still needs one TF step to execute
+            // the restored original byte and re-arm its INT3.
+            if (it->second.ctx && g_pendingSwRestore.find(threadId) == g_pendingSwRestore.end())
+                it->second.ctx->EFlags &= ~kTF;
+            resumeEv = it->second.resumeEvent;
+        } else {
+            return false;
+        }
+    }
+    if (suspended) {
+        const DWORD previous = ResumeThread(suspended);
+        CloseHandle(suspended);
+        return previous != static_cast<DWORD>(-1);
+    }
+    if (!resumeEv) return false;
     SetEvent(resumeEv);
     return true;
 }
 
 bool StepThread(DWORD threadId, DWORD timeoutMs, Registers& outRegs) {
-    HANDLE resumeEv, doneEv;
+    HANDLE resumeEv = nullptr;
+    HANDLE doneEv = nullptr;
+    HANDLE suspended = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         auto it = g_threadCtl.find(threadId);
-        if (it == g_threadCtl.end() || !it->second.frozen || !it->second.ctx) return false;
-        it->second.stepArmed = true;
-        it->second.ctx->EFlags |= kTF;
-        ResetEvent(it->second.doneEvent);
-        resumeEv = it->second.resumeEvent;
-        doneEv = it->second.doneEvent;
+        if (it == g_threadCtl.end()) return false;
+        ThreadCtl& ctl = it->second;
+        if (ctl.manuallySuspended && ctl.suspendedHandle) {
+            CONTEXT ctx{};
+            ctx.ContextFlags = CONTEXT_FULL;
+            if (!GetThreadContext(ctl.suspendedHandle, &ctx)) return false;
+            ctx.EFlags |= kTF;
+            if (!SetThreadContext(ctl.suspendedHandle, &ctx)) return false;
+            ctl.stepArmed = true;
+            ctl.regs = CtxToRegs(&ctx);
+            ResetEvent(ctl.doneEvent);
+            doneEv = ctl.doneEvent;
+            suspended = ctl.suspendedHandle;
+            ctl.suspendedHandle = nullptr;
+            ctl.manuallySuspended = false;
+        } else if (ctl.frozen && ctl.ctx) {
+            ctl.stepArmed = true;
+            ctl.ctx->EFlags |= kTF;
+            ResetEvent(ctl.doneEvent);
+            resumeEv = ctl.resumeEvent;
+            doneEv = ctl.doneEvent;
+        } else {
+            return false;
+        }
     }
-    SetEvent(resumeEv);
+
+    if (suspended) {
+        const DWORD previous = ResumeThread(suspended);
+        CloseHandle(suspended);
+        if (previous == static_cast<DWORD>(-1)) return false;
+    } else {
+        SetEvent(resumeEv);
+    }
     if (WaitForSingleObject(doneEv, timeoutMs) != WAIT_OBJECT_0) return false;
-    std::lock_guard<std::mutex> lock(g_mutex);
-    outRegs = g_threadCtl[threadId].regs;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = g_threadCtl.find(threadId);
+        if (it == g_threadCtl.end() || (!it->second.frozen && !it->second.manuallySuspended)) return false;
+        outRegs = it->second.regs;
+    }
     return true;
+}
+
+bool StepOverThread(DWORD threadId, DWORD timeoutMs, Registers& outRegs) {
+    Registers startRegs;
+    if (!GetPausedRegisters(threadId, startRegs)) return false;
+#ifdef _WIN64
+    const uintptr_t startIp = startRegs.rip;
+#else
+    const uintptr_t startIp = startRegs.eip;
+#endif
+
+    bool decoded = false;
+    const auto instructions = disasm::Disassemble(startIp, 1, decoded);
+    if (!decoded || instructions.empty() || instructions.front().mnemonic != "call")
+        return StepThread(threadId, timeoutMs, outRegs);
+
+    const uintptr_t nextIp = startIp + instructions.front().size;
+    const int temporaryBp = AddBreakpoint(BpKind::HwExecute, nextIp, 1, BpAction::Pause,
+                                          nullptr, nullptr, false, threadId);
+    if (temporaryBp < 0) {
+        // All DR slots can legitimately be occupied by user breakpoints. A
+        // bounded single-step fallback is slower but does not patch code or
+        // steal another breakpoint slot.
+        const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+        Registers regs = startRegs;
+        while (GetTickCount64() < deadline) {
+            const ULONGLONG now = GetTickCount64();
+            const DWORD remaining = static_cast<DWORD>((std::min)(ULONGLONG{2000}, deadline > now ? deadline - now : 0));
+            if (remaining == 0 || !StepThread(threadId, (std::max)(DWORD{100}, remaining), regs)) return false;
+#ifdef _WIN64
+            const uintptr_t ip = regs.rip;
+#else
+            const uintptr_t ip = regs.eip;
+#endif
+            if (ip == nextIp) { outRegs = regs; return true; }
+        }
+        return false;
+    }
+
+    if (!ContinueThread(threadId)) {
+        RemoveBreakpoint(temporaryBp);
+        return false;
+    }
+
+    // Wait for a *new* pause at the instruction after the CALL. Polling here
+    // avoids conflating Step Into's doneEvent with ordinary breakpoint stops.
+    // Immediately after ContinueThread the old frozen state can remain visible
+    // for a very short window, so the original IP is treated as stale.
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    while (GetTickCount64() < deadline) {
+        Registers regs;
+        if (GetPausedRegisters(threadId, regs)) {
+#ifdef _WIN64
+            const uintptr_t ip = regs.rip;
+#else
+            const uintptr_t ip = regs.eip;
+#endif
+            if (ip == nextIp) {
+                RemoveBreakpoint(temporaryBp);
+                outRegs = regs;
+                return true;
+            }
+            if (ip != startIp) {
+                // Another debugger stop won the race. Preserve that pause for
+                // the user instead of continuing through it implicitly.
+                RemoveBreakpoint(temporaryBp);
+                outRegs = regs;
+                return false;
+            }
+        }
+        Sleep(1);
+    }
+
+    RemoveBreakpoint(temporaryBp);
+    // Recover debugger control when the call does not return before the
+    // timeout instead of leaving a user-requested Step Over running free.
+    PauseThread(threadId, outRegs);
+    return false;
 }
 
 bool ReadThreadRegisters(DWORD threadId, Registers& out) {
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         auto it = g_threadCtl.find(threadId);
-        if (it != g_threadCtl.end() && it->second.frozen) {
+        if (it != g_threadCtl.end() && (it->second.frozen || it->second.manuallySuspended)) {
             out = it->second.regs;
             return true;
         }

@@ -21,14 +21,6 @@ if(CORTEX_OFFLINE)
     set(FETCHCONTENT_FULLY_DISCONNECTED ON)
 endif()
 
-# ---- Dear ImGui (no CMake support upstream, vendor sources directly) ----
-# v1.90.9, pinned to the immutable commit resolved from the release tag.
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        cb16be3a3fc1f9cd146ae24d52b615f8a05fa93d
-)
-FetchContent_MakeAvailable(imgui)
 
 # kiero (D3D9/10/11/12/OpenGL, engine auto-detected at runtime) is available
 # to every bitness; D3D8 is an extra, 32-bit-only backend kept around
@@ -43,41 +35,14 @@ else()
 endif()
 set(CORTEX_ENABLE_KIERO TRUE)
 
-# D3D12 support is 64-bit only: imgui's own D3D12 backend packs a GPU
-# descriptor handle (8 bytes) into ImTextureID, which is pointer-sized (4
-# bytes on 32-bit) -- a static_assert in imgui_impl_dx12.cpp rejects 32-bit
-# outright. Real-world D3D12 games are 64-bit anyway, so this costs nothing.
+# D3D12 support stays 64-bit only. The runtime capture path is primarily aimed
+# at modern 64-bit D3D12 titles, while the 32-bit build keeps D3D8-D3D11 and
+# OpenGL coverage without carrying an unused D3D12 hook surface.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(CORTEX_ENABLE_D3D12 TRUE)
 else()
     set(CORTEX_ENABLE_D3D12 FALSE)
 endif()
-
-set(IMGUI_BACKEND_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp)
-if(CORTEX_ENABLE_KIERO)
-    list(APPEND IMGUI_BACKEND_SOURCES
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx10.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-    )
-    if(CORTEX_ENABLE_D3D12)
-        list(APPEND IMGUI_BACKEND_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
-    endif()
-endif()
-
-add_library(imgui STATIC
-    ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
-    ${IMGUI_BACKEND_SOURCES}
-)
-target_include_directories(imgui PUBLIC
-    ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends
-)
 
 # ---- MinHook ----
 FetchContent_Declare(
@@ -177,7 +142,7 @@ if(CORTEX_ENABLE_KIERO)
     list(APPEND CORE_RENDER_SOURCES core/hook/kiero_hook.cpp third_party/kiero/kiero.cpp core/capture/capture.cpp)
 endif()
 if(CORTEX_ENABLE_D3D8)
-    list(APPEND CORE_RENDER_SOURCES core/hook/d3d8_hook.cpp core/overlay/imgui_impl_dx8.cpp
+    list(APPEND CORE_RENDER_SOURCES core/hook/d3d8_hook.cpp
         core/overlay/overlay_d3d8.cpp core/capture/capture_d3d8.cpp)
 endif()
 
@@ -279,7 +244,6 @@ if(CORTEX_ENABLE_D3D8)
 endif()
 
 target_link_libraries(core PRIVATE
-    imgui
     Zydis
     minhook
     nlohmann_json::nlohmann_json

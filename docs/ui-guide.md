@@ -108,11 +108,9 @@ Captures ranges, lists snapshots, diffs snapshot IDs, finds the last change for 
 
 ### Debugger
 
-Combines runtime enable/refresh, paused-thread selection, instruction pointer, nearby disassembly, registers, breakpoints, **Continue**, **Step Into** and **Breakpoint @ IP**.
+Combines runtime enable/refresh, paused-thread selection, instruction pointer, nearby disassembly, registers, breakpoints, **Pause**, **Continue**, **Step Into**, **Step Over** and **Breakpoint @ IP**.
 
 Target-control actions require Mutation permission.
-
-**Current UI limitation:** **Pause** and **Step Over** are visible but disabled in the current Qt UI. Paused-thread recovery itself is handled by the Qt debugger/headless debugger paths.
 
 ### Breakpoints
 

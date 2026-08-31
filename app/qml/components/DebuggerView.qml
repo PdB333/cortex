@@ -62,7 +62,14 @@ ColumnLayout {
                     root.reloadInstructionPointer()
                 }
             }
-            Button { text: "Pause"; font.pixelSize: 11; enabled: false }
+            Button {
+                text: "Pause"
+                font.pixelSize: 11
+                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                onClicked: {
+                    if (CortexDebugger.pauseCurrent()) root.reloadInstructionPointer()
+                }
+            }
             Button {
                 text: "Step Into"
                 font.pixelSize: 11
@@ -71,7 +78,14 @@ ColumnLayout {
                     if (CortexDebugger.stepCurrent(2000)) root.reloadInstructionPointer()
                 }
             }
-            Button { text: "Step Over"; font.pixelSize: 11; enabled: false }
+            Button {
+                text: "Step Over"
+                font.pixelSize: 11
+                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                onClicked: {
+                    if (CortexDebugger.stepOverCurrent(5000)) root.reloadInstructionPointer()
+                }
+            }
             Button {
                 text: "Breakpoint @ IP"
                 font.pixelSize: 11

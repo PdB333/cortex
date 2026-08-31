@@ -118,11 +118,11 @@ Mutation starts disabled after attach and is deliberately not an always-on setti
 
 ## 10. Debugger
 
-Debugger exposes runtime state, threads, paused-thread selection, registers, nearby disassembly, breakpoints, Continue and Step Into.
+Debugger exposes runtime state, threads, paused-thread selection, registers, nearby disassembly, breakpoints, **Pause**, **Continue**, **Step Into** and **Step Over**.
 
 If runtime instrumentation is not active, use **Enable Runtime**. Target-control actions require Mutation permission.
 
-**Current UI limitation:** the visible **Pause** and **Step Over** buttons are disabled in this Qt UI version. Do not treat those two buttons as active interactive controls yet.
+**Pause** takes ownership of one suspension only when the selected thread is running; it refuses to steal an existing external suspension. **Step Over** runs a `call` to its return site using a temporary per-thread hardware breakpoint, with a bounded single-step fallback if no debug-register slot is available.
 
 ## 11. Save useful knowledge
 

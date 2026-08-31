@@ -44,8 +44,10 @@ public:
                                    bool processGlobal = true,
                                    qulonglong threadId = 0);
     Q_INVOKABLE bool removeBreakpoint(int id);
+    Q_INVOKABLE bool pauseCurrent();
     Q_INVOKABLE bool continueCurrent();
     Q_INVOKABLE bool stepCurrent(int timeoutMs = 2000);
+    Q_INVOKABLE bool stepOverCurrent(int timeoutMs = 5000);
     Q_INVOKABLE void clear();
 
 signals:

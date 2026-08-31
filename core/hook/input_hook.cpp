@@ -79,10 +79,9 @@ void SetInputCaptureActive(bool active) {
     if (was == active) return;
     dbglog::Line("input: SetInputCaptureActive(%d)", (int)active);
     // ShowCursor's visibility is governed by a cumulative display counter,
-    // not a simple boolean -- ImGui's SetCursor() calls change the cursor
-    // *icon* but do nothing to that counter, so if the game's counter is
-    // already negative (hidden) from its own one-time startup hide, SetCursor
-    // alone can leave the cursor invisible even while we want it shown. Push
+    // not a simple boolean. If the game's counter is already negative (hidden)
+    // from its own one-time startup hide, changing the cursor icon alone can
+    // leave the cursor invisible even while we want it shown. Push
     // the counter up by one on entry and pop it back down by one on exit, so
     // visibility is deterministic regardless of whatever the game did to it.
     if (!was && active && oClipCursor) {

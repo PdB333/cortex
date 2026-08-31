@@ -23,6 +23,16 @@ extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_breakpoint_canary = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_hw_value = 0;
 extern "C" __declspec(dllexport) volatile DWORD g_cortex_hw_writer_tid = 0;
+extern "C" __declspec(dllexport) volatile uintptr_t g_cortex_step_over_sink = 0;
+
+extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexStepOverCallee(uintptr_t value) {
+    return value ^ static_cast<uintptr_t>(0x5A5A);
+}
+extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexStepOverCaller(uintptr_t value) {
+    const uintptr_t result = CortexStepOverCallee(value);
+    g_cortex_step_over_sink = result;
+    return result + 1;
+}
 
 extern "C" __declspec(dllexport) __declspec(noinline) void CortexBreakpointCanary() {
     ++g_cortex_breakpoint_canary;
@@ -214,6 +224,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
          << "  \"native_add\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeAdd) << "\",\n"
+         << "  \"step_over_function\": \"0x" << reinterpret_cast<uintptr_t>(&CortexStepOverCaller) << "\",\n"
          << "  \"native_increment_hw_value\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeIncrementHwValue) << "\",\n"
          << "  \"hw_value\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_value) << "\",\n"
          << "  \"hw_writer_tid\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_hw_writer_tid) << "\",\n"
@@ -322,6 +333,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
 
         ++g_cortex_frame;
         CortexBreakpointCanary();
+        g_cortex_step_over_sink = CortexStepOverCaller(g_cortex_frame);
         if (GetAsyncKeyState('W') & 0x8000) ++g_cortex_wpress;
         if (e2e.enabled && (g_cortex_frame % 15) == 0) ++g_cortex_health;
         InvalidateRect(window, nullptr, FALSE);

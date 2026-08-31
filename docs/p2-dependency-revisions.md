@@ -1,13 +1,14 @@
 # P2 dependency revision audit
 
-This file records the immutable commits currently referenced by Cortex's dependency versions.
-It is an audit baseline, not yet a replacement for the `GIT_TAG` values in the root CMake file.
+This file records the immutable commits audited during P2. Entries marked removed are historical
+and are no longer dependencies of the unified branch.
+It is an audit baseline, not a replacement for the `GIT_TAG` values in the root CMake file.
 A future CMake cleanup can switch the remaining version tags to these commits without guessing which
 revision a release tag resolved to during the P2 hardening pass.
 
 | Dependency | Declared version | Verified commit |
 | --- | --- | --- |
-| Dear ImGui | v1.90.9 | `cb16be3a3fc1f9cd146ae24d52b615f8a05fa93d` |
+| Dear ImGui (removed) | v1.90.9 | `cb16be3a3fc1f9cd146ae24d52b615f8a05fa93d` |
 | MinHook | commit | `d94c64d32ea37bc4f5ee47d580709f70c6fb6080` |
 | cpp-httplib | v0.15.3 | `5c00bbf36ba8ff47b4fb97712fc38cb2884e5b98` |
 | nlohmann/json | v3.11.3 | `9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03` |

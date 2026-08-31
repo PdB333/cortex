@@ -147,12 +147,9 @@ The Debugger workspace combines:
 - nearby disassembly;
 - registers;
 - breakpoints;
-- **Continue**;
-- **Step Into**.
+- **Pause**, **Continue**, **Step Into** and **Step Over**.
 
 Target-control actions require Mutation permission.
-
-> Current UI limitation: **Pause** and **Step Over** are visible but disabled in this Qt UI version. They should not be treated as completed interactive controls yet.
 
 ## 9. Continue into RE
 

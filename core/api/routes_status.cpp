@@ -205,7 +205,7 @@ json BuildToolsManifest() {
                       {"description", "Lists active breakpoints with their hit count."}});
 
         j.push_back({{"name", "debug_paused"}, {"method", "GET"}, {"path", "/debug/paused"},
-                      {"description", "Lists threads currently frozen on a 'pause' breakpoint, with their registers."}});
+                      {"description", "Lists threads currently paused by Cortex, either manually or on a pause breakpoint, with their registers."}});
 
         j.push_back({{"name", "debug_threads"}, {"method", "GET"}, {"path", "/debug/threads"},
                       {"description", "Lists the thread IDs of the target process."}});
@@ -221,6 +221,10 @@ json BuildToolsManifest() {
         j.push_back({{"name", "debug_breakpoint_log"}, {"method", "GET"}, {"path", "/debug/breakpoint/{id}/log"},
                       {"description", "History of hits for a breakpoint set with action=log (registers captured at each hit, up to the 500 most recent entries -- older ones are overwritten). For a 'pause' breakpoint, check /debug/paused instead."}});
 
+        j.push_back({{"name", "debug_pause"}, {"method", "POST"}, {"path", "/debug/pause"},
+                      {"description", "Pauses a running target thread while preserving external suspend ownership."},
+                      {"body", {{"thread_id", "required"}}}});
+
         j.push_back({{"name", "debug_continue"}, {"method", "POST"}, {"path", "/debug/continue"},
                       {"description", "Releases a thread frozen on a breakpoint."},
                       {"body", {{"thread_id", "required"}}}});
@@ -228,6 +232,10 @@ json BuildToolsManifest() {
         j.push_back({{"name", "debug_step"}, {"method", "POST"}, {"path", "/debug/step"},
                       {"description", "Executes exactly one instruction on a frozen thread then re-freezes it; blocks the response until the step completes or times out."},
                       {"body", {{"thread_id", "required"}, {"timeout_ms", "optional, default 2000"}}}});
+
+        j.push_back({{"name", "debug_step_over"}, {"method", "POST"}, {"path", "/debug/step_over"},
+                      {"description", "Steps over a CALL on a paused thread, stopping at its return site or an earlier debugger stop."},
+                      {"body", {{"thread_id", "required"}, {"timeout_ms", "optional, default 5000"}}}});
 
         j.push_back({{"name", "symbols_resolve"}, {"method", "GET"}, {"path", "/symbols/resolve"}, {"ok_false_is_error", false},
                       {"description", "Resolves an address to a symbol (name + offset) and file/line if a PDB is present. Most games (especially older ones without a public PDB) won't have any symbols -- returns ok=false in that case, which is not an error, just an absence of info."},
@@ -284,9 +292,8 @@ json BuildToolsManifest() {
 
         j.push_back({{"name", "prompt_timed_test"}, {"method", "POST"}, {"path", "/prompt/timed_test"},
                       {"description", "Asks the player to play/test something for a given duration, "
-                                      "then report a result. The answer widget stays hidden in "
-                                      "the overlay until the timer runs out -- impossible to answer before "
-                                      "actually testing."},
+                                      "then report a result. The Qt Desktop answer control stays unavailable "
+                                      "until the timer runs out -- impossible to answer before actually testing."},
                       {"body", {{"message", "string, e.g. 'Shoot yourself and count the damage'"},
                                 {"duration_seconds", "number, required, > 0"},
                                 {"answer_type", "text|number, default number"}}}});
@@ -666,8 +673,7 @@ json BuildToolsManifest() {
         j.push_back({{"name","re_checkpoint_rollback"},{"method","POST"},{"path","/re/checkpoint/{id}/rollback"},
                      {"description","Rolls Actions back to the saved checkpoint and restores all explicitly captured memory ranges."},
                      {"body",{{"keep",{{"type","boolean"},{"description","Keep checkpoint after a successful rollback; default false."}}}}}});
-        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},
-                     {"description","Deletes a saved RE checkpoint without modifying the target."}});
+        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},{"description","Deletes a saved RE checkpoint without modifying the target."}});
         j.push_back({{"name","re_cpp_subobjects"},{"method","POST"},{"path","/re/cpp/subobjects"},
                      {"description","Detects multiple vtables/C++ subobjects and common this-adjustment thunks inside an object."},
                      {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});

@@ -50,6 +50,16 @@ int main() {
     check(api::mcp_contract::RequiresMutationPermission(traceStopRisk),
           "trace_stop requires explicit mutation permission");
 
+    const auto debugPauseRisk = api::mcp_contract::ClassifyTool("debug_pause", "POST", "/debug/pause");
+    check(debugPauseRisk == api::mcp_contract::ToolRisk::Control,
+          "debug_pause is classified as a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(debugPauseRisk),
+          "debug_pause requires explicit mutation permission");
+    const auto debugStepOverRisk = api::mcp_contract::ClassifyTool("debug_step_over", "POST", "/debug/step_over");
+    check(debugStepOverRisk == api::mcp_contract::ToolRisk::Control,
+          "debug_step_over is classified as a control operation");
+    check(api::mcp_contract::RequiresMutationPermission(debugStepOverRisk),
+          "debug_step_over requires explicit mutation permission");
     const auto traceDeleteRisk = api::mcp_contract::ClassifyTool("trace_delete", "DELETE", "/trace/{id}");
     check(traceDeleteRisk == api::mcp_contract::ToolRisk::Control,
           "trace_delete is classified as a control operation");

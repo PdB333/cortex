@@ -241,6 +241,29 @@ bool DebuggerController::removeBreakpoint(int id) {
     return refreshRuntime();
 }
 
+bool DebuggerController::pauseCurrent() {
+    if (!requireMutation()) return false;
+    if (currentThreadId_ == 0) {
+        setLastError(QStringLiteral("no_thread_selected"));
+        return false;
+    }
+
+    json output;
+    QString error;
+    if (!payload_.CallTool("debug_pause",
+                           {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"mutation_permission", true}},
+                           output, &error)) {
+        setLastError(error);
+        return false;
+    }
+    const json route = RouteResult(output);
+    if (route.is_object() && route.contains("registers") && route["registers"].is_object())
+        applyPayloadRegisters(route["registers"], currentThreadId_);
+    refreshRuntime();
+    setLastError(QString());
+    return true;
+}
+
 bool DebuggerController::continueCurrent() {
     if (!requireMutation()) return false;
     if (currentThreadId_ == 0) {
@@ -273,6 +296,32 @@ bool DebuggerController::stepCurrent(int timeoutMs) {
                            {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"timeout_ms", timeoutMs}, {"mutation_permission", true}},
                            output, &error)) {
         setLastError(error);
+        return false;
+    }
+    const json route = RouteResult(output);
+    if (route.is_object() && route.contains("registers") && route["registers"].is_object())
+        applyPayloadRegisters(route["registers"], currentThreadId_);
+    refreshRuntime();
+    setLastError(QString());
+    return true;
+}
+
+bool DebuggerController::stepOverCurrent(int timeoutMs) {
+    if (!requireMutation()) return false;
+    if (currentThreadId_ == 0) {
+        setLastError(QStringLiteral("no_thread_selected"));
+        return false;
+    }
+    if (timeoutMs < 100) timeoutMs = 100;
+    if (timeoutMs > 120000) timeoutMs = 120000;
+
+    json output;
+    QString error;
+    if (!payload_.CallTool("debug_step_over",
+                           {{"thread_id", static_cast<uint64_t>(currentThreadId_)}, {"timeout_ms", timeoutMs}, {"mutation_permission", true}},
+                           output, &error)) {
+        setLastError(error);
+        refreshRuntime();
         return false;
     }
     const json route = RouteResult(output);

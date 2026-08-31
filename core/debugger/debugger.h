@@ -162,11 +162,17 @@ bool GetBreakpointLogPaged(int id, uint64_t sinceSeq, size_t limit,
                            std::vector<BpLogEntry>& out,
                            uint64_t& outDropped, uint64_t& outTotal);
 
+// Pauses a currently running target thread by owning exactly one suspend
+// count. Refuses to steal a suspension that already belongs to another actor.
+bool PauseThread(DWORD threadId, Registers& outRegs);
 // Resumes a paused thread normally.
 bool ContinueThread(DWORD threadId);
 // Resumes a paused thread for exactly one instruction, then re-freezes it;
 // blocks the calling (API) thread until the step completes or times out.
 bool StepThread(DWORD threadId, DWORD timeoutMs, Registers& outRegs);
+// Steps over a CALL using a temporary per-thread hardware breakpoint, with a
+// bounded single-step fallback when no DR slot is available.
+bool StepOverThread(DWORD threadId, DWORD timeoutMs, Registers& outRegs);
 
 // Live registers/stack for any thread of the process, paused or not (via
 // Suspend/GetThreadContext/Resume) -- useful for a quick look without

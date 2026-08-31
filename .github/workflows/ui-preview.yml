@@ -364,6 +364,105 @@ jobs:
                 throw "$label call_on_thread did not execute on the requested target TID"
               }
 
+              # Exercise the human-debugger control path on a real CALL. Resolve
+              # the CALL dynamically so the test is stable across x86/x64 codegen.
+              $stepDisasm = @{
+                jsonrpc="2.0"; id=70; method="tools/call"
+                params=@{ name="disasm"; arguments=@{ _query=@{ address=[string]$fixture.step_over_function; count=32 } } }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($stepDisasm); $mcp.StandardInput.Flush()
+              $stepDisasmResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $callInstruction = @($stepDisasmResponse.result.structuredContent.result.instructions |
+                Where-Object { [string]$_.mnemonic -eq "call" } | Select-Object -First 1)
+              if ($callInstruction.Count -ne 1) { throw "$label step-over fixture has no CALL instruction" }
+              $callAddress = [string]$callInstruction[0].address
+              $callNumeric = [Convert]::ToUInt64(($callAddress -replace '^0x',''), 16)
+              $callNext = "0x{0:x}" -f ($callNumeric + [uint64]$callInstruction[0].size)
+
+              $pauseBreakpoint = @{
+                jsonrpc="2.0"; id=71; method="tools/call"
+                params=@{ name="debug_breakpoint_add"; arguments=@{
+                  address=$callAddress; kind="software"; action="pause"; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($pauseBreakpoint); $mcp.StandardInput.Flush()
+              $pauseBreakpointResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              $pauseBreakpointId = [int]$pauseBreakpointResponse.result.structuredContent.result.id
+              if ($pauseBreakpointId -le 0) { throw "$label failed to arm the step-over pause breakpoint" }
+
+              $pausedRow = $null
+              for ($attempt = 0; $attempt -lt 80 -and -not $pausedRow; $attempt++) {
+                Start-Sleep -Milliseconds 25
+                $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":72,"method":"tools/call","params":{"name":"debug_paused","arguments":{}}}')
+                $mcp.StandardInput.Flush()
+                $pausedResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+                $pausedRow = @($pausedResponse.result.structuredContent.result.threads |
+                  Where-Object { [uint64]$_.thread_id -eq [uint64]$fixture.main_thread_id -and [int]$_.breakpoint_id -eq $pauseBreakpointId } |
+                  Select-Object -First 1)
+              }
+              if (-not $pausedRow) { throw "$label debugger did not pause on the controlled CALL" }
+
+              $stepOver = @{
+                jsonrpc="2.0"; id=73; method="tools/call"
+                params=@{ name="debug_step_over"; arguments=@{
+                  thread_id=[uint64]$fixture.main_thread_id; timeout_ms=4000; mutation_permission=$true
+                } }
+              } | ConvertTo-Json -Depth 10 -Compress
+              $mcp.StandardInput.WriteLine($stepOver); $mcp.StandardInput.Flush()
+              $stepOverResponse = (Read-McpLine $mcp.StandardOutput 10000) | ConvertFrom-Json
+              $stepOverResult = $stepOverResponse.result.structuredContent.result
+              if (-not $stepOverResult.ok) { throw "$label Step Over failed on a real CALL" }
+              $ipName = if ([int]$fixture.pointer_size -eq 8) { "rip" } else { "eip" }
+              $stepIp = [string]$stepOverResult.registers.$ipName
+              if ($stepIp.ToLowerInvariant() -ne $callNext.ToLowerInvariant()) {
+                throw "$label Step Over stopped at $stepIp instead of $callNext"
+              }
+
+              $deletePauseBreakpoint = @{
+                jsonrpc="2.0"; id=74; method="tools/call"
+                params=@{ name="debug_breakpoint_delete"; arguments=@{ _path=@{ id=$pauseBreakpointId }; mutation_permission=$true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($deletePauseBreakpoint); $mcp.StandardInput.Flush()
+              $deletePauseResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $deletePauseResponse.result.structuredContent.result.ok) { throw "$label failed to remove Step Over fixture breakpoint" }
+
+              $continueAfterStepOver = @{
+                jsonrpc="2.0"; id=75; method="tools/call"
+                params=@{ name="debug_continue"; arguments=@{ thread_id=[uint64]$fixture.main_thread_id; mutation_permission=$true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($continueAfterStepOver); $mcp.StandardInput.Flush()
+              $continueAfterStepOverResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $continueAfterStepOverResponse.result.structuredContent.result.ok) { throw "$label could not continue after Step Over" }
+
+              # Manual Pause must also work on a running thread, and Step Into
+              # must safely convert that owned suspension into a VEH debugger stop.
+              Start-Sleep -Milliseconds 40
+              $manualPause = @{
+                jsonrpc="2.0"; id=76; method="tools/call"
+                params=@{ name="debug_pause"; arguments=@{ thread_id=[uint64]$fixture.main_thread_id; mutation_permission=$true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($manualPause); $mcp.StandardInput.Flush()
+              $manualPauseResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $manualPauseResponse.result.structuredContent.result.ok) { throw "$label manual Pause failed" }
+
+              $manualStep = @{
+                jsonrpc="2.0"; id=77; method="tools/call"
+                params=@{ name="debug_step"; arguments=@{ thread_id=[uint64]$fixture.main_thread_id; timeout_ms=3000; mutation_permission=$true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($manualStep); $mcp.StandardInput.Flush()
+              $manualStepResponse = (Read-McpLine $mcp.StandardOutput 8000) | ConvertFrom-Json
+              if (-not $manualStepResponse.result.structuredContent.result.ok) { throw "$label Step Into from manual Pause failed" }
+
+              $manualContinue = @{
+                jsonrpc="2.0"; id=78; method="tools/call"
+                params=@{ name="debug_continue"; arguments=@{ thread_id=[uint64]$fixture.main_thread_id; mutation_permission=$true } }
+              } | ConvertTo-Json -Depth 8 -Compress
+              $mcp.StandardInput.WriteLine($manualContinue); $mcp.StandardInput.Flush()
+              $manualContinueResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
+              if (-not $manualContinueResponse.result.structuredContent.result.ok) { throw "$label Continue after manual Pause/Step failed" }
+              $target.Refresh()
+              if ($target.HasExited) { throw "$label target crashed during Pause/Step Over regression" }
+
               # Install a process-global HW write breakpoint *before* a new writer
               # thread exists. The new thread must inherit DR state automatically.
               $hwAdd = @{
@@ -465,7 +564,7 @@ jobs:
               if (-not $mutateTrackedResponse.result.structuredContent.result.ok) { throw "$label could not mutate tracked object" }
               Start-Sleep -Milliseconds 400
 
-              $trackEvents = @{ jsonrpc="2.0"; id=404; method="tools/call"; params=@{ name="re_object_events"; arguments=@{ _path=@{ id=$trackId } } } } | ConvertTo-Json -Depth 8 -Compress
+              $trackEvents = @{ jsonrpc="2.0"; id=404; method="tools/call"; params=@{ name="re_object_events"; arguments=@{ _path=@{ id=$trackId } } } | ConvertTo-Json -Depth 8 -Compress
               $mcp.StandardInput.WriteLine($trackEvents); $mcp.StandardInput.Flush()
               $trackEventsResponse = (Read-McpLine $mcp.StandardOutput) | ConvertFrom-Json
               $changedEvents = @($trackEventsResponse.result.structuredContent.result.events | Where-Object { $_.type -eq "fields_changed" })
@@ -1536,17 +1635,18 @@ jobs:
             }
           }
 
-          function Test-CortexMcpMultiTarget([string]$targetPath) {
+          function Test-CortexMcpMultiTarget([string]$targetAPath, [string]$targetBPath) {
             $targetA = $null
             $targetB = $null
             $mcp = $null
             try {
               Get-ChildItem (Join-Path $preview "runtime\x64") -Filter "cortex.mcp.*.token" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+              Get-ChildItem (Join-Path $preview "runtime\x86") -Filter "cortex.mcp.*.token" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
               $manifestA = Join-Path $env:RUNNER_TEMP "cortex-multi-a.json"
               $manifestB = Join-Path $env:RUNNER_TEMP "cortex-multi-b.json"
               Remove-Item $manifestA,$manifestB -Force -ErrorAction SilentlyContinue
-              $targetA = Start-Process -FilePath $targetPath -ArgumentList @("--e2e-manifest", $manifestA) -PassThru
-              $targetB = Start-Process -FilePath $targetPath -ArgumentList @("--e2e-manifest", $manifestB) -PassThru
+              $targetA = Start-Process -FilePath $targetAPath -ArgumentList @("--e2e-manifest", $manifestA) -PassThru
+              $targetB = Start-Process -FilePath $targetBPath -ArgumentList @("--e2e-manifest", $manifestB) -PassThru
               for ($attempt = 0; $attempt -lt 60 -and (-not (Test-Path $manifestA) -or -not (Test-Path $manifestB)); $attempt++) {
                 Start-Sleep -Milliseconds 100
               }
@@ -1618,7 +1718,7 @@ jobs:
               $mcp.StandardInput.Close()
               if (-not $mcp.WaitForExit(15000)) { $mcp.Kill($true); throw "multi-target MCP did not exit" }
               if ($mcp.ExitCode -ne 0) { throw "multi-target MCP exited with $($mcp.ExitCode): $($mcp.StandardError.ReadToEnd())" }
-              Write-Host "multi-target integrated MCP E2E passed"
+              Write-Host "multi-target mixed-bitness integrated MCP E2E passed"
             } finally {
               if ($mcp -and -not $mcp.HasExited) { $mcp.Kill($true) }
               foreach ($target in @($targetA,$targetB)) {
@@ -1631,7 +1731,7 @@ jobs:
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
             Test-CortexMcp $x64Target (Join-Path $preview "runtime\x64") "x64 target"
             Test-CortexMcp $x86Target (Join-Path $preview "runtime\x86") "x86 target"
-            Test-CortexMcpMultiTarget $x64Target
+            Test-CortexMcpMultiTarget $x64Target $x86Target
           } finally {
             $env:PATH = $oldPath
           }

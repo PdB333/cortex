@@ -145,14 +145,11 @@ Le workspace regroupe notamment :
 - registres ;
 - désassemblage autour de l'IP ;
 - breakpoints ;
-- Continue ;
-- Step Into.
+- **Pause**, **Continue**, **Step Into** et **Step Over**.
 
 Les actions de contrôle de la cible nécessitent Mutation.
 
 ![Debugger](images/ui-walkthrough/08-debugger.png)
-
-> Limitation actuelle de l'UI : les boutons **Pause** et **Step Over** sont visibles mais désactivés. Ils ne doivent pas être considérés comme des contrôles interactifs terminés dans cette version.
 
 ## 9. Continuer dans RE
 

@@ -310,6 +310,23 @@ void RegisterDebugRoutes(httplib::Server& svr) {
         overlay::LogApiCall("GET /debug/breakpoint/" + std::to_string(id) + "/log");
     });
 
+    svr.Post("/debug/pause", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto mutation = action::LockMutations();
+            json body = json::parse(req.body);
+            DWORD tid = static_cast<DWORD>(body.at("thread_id").get<uint32_t>());
+            dbg::Registers regs;
+            const bool ok = dbg::PauseThread(tid, regs);
+            json out{{"ok", ok}};
+            if (ok) out["registers"] = RegsToJson(regs); else out["error"] = "pause_failed_or_already_suspended";
+            res.set_content(out.dump(), "application/json");
+            overlay::LogApiCall("POST /debug/pause thread=" + std::to_string(tid));
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
     svr.Post("/debug/continue", [](const httplib::Request& req, httplib::Response& res) {
         try {
             auto mutation = action::LockMutations();
@@ -338,6 +355,24 @@ void RegisterDebugRoutes(httplib::Server& svr) {
             if (ok) out["registers"] = RegsToJson(regs); else out["error"] = "step_timeout_or_not_paused";
             res.set_content(out.dump(), "application/json");
             overlay::LogApiCall("POST /debug/step thread=" + std::to_string(tid));
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Post("/debug/step_over", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto mutation = action::LockMutations();
+            json body = json::parse(req.body);
+            DWORD tid = static_cast<DWORD>(body.at("thread_id").get<uint32_t>());
+            DWORD timeoutMs = body.value("timeout_ms", 5000);
+            dbg::Registers regs;
+            const bool ok = dbg::StepOverThread(tid, timeoutMs, regs);
+            json out{{"ok", ok}};
+            if (ok) out["registers"] = RegsToJson(regs); else out["error"] = "step_over_timeout_or_not_paused";
+            res.set_content(out.dump(), "application/json");
+            overlay::LogApiCall("POST /debug/step_over thread=" + std::to_string(tid));
         } catch (const std::exception& e) {
             res.status = 400;
             res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");

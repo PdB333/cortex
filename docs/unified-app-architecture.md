@@ -54,9 +54,9 @@ Human prompt answering is kept off the public MCP tool surface. The Desktop comm
 
 Renderer/input/debug hooks remain only for capabilities that need in-process execution. The payload is not a second application.
 
-Dear ImGui no longer provides a Cortex user interface. Human prompts are presented by the Qt Desktop over the authenticated private channel. If no Desktop presenter is available, prompt creation fails explicitly instead of opening an injected fallback window. Paused-thread recovery is handled by the Qt debugger or explicit headless debugger APIs.
+Dear ImGui is no longer a Cortex dependency. Human prompts are presented by the Qt Desktop over the authenticated private channel. If no Desktop presenter is available, prompt creation fails explicitly instead of opening an injected fallback window. Paused-thread recovery is handled by the Qt debugger or explicit headless debugger APIs.
 
-Renderer/capture instrumentation remains independent from the human UI. Its shared backend plumbing may still keep an empty ImGui frame/context internally, but no injected Cortex windows or input capture are exposed to the user. Removing that empty plumbing is optional cleanup and must not regress capture or renderer instrumentation.
+Renderer/capture instrumentation remains independent from the human UI. Present/SwapBuffers hooks only provide capture points, target-window discovery and game-thread work pumping; they do not create or render an injected UI context and do not subclass the target WndProc for Cortex UI input.
 
 ## Persistence and safety
 
@@ -78,7 +78,7 @@ The preview workflow produces a testable portable Cortex artifact but does not p
 
 ## Current completion state
 
-The unified Windows product surface, Qt/QML workspaces, native MCP integration, x64/x86 portable packaging and removal of injected ImGui user-facing fallbacks are complete on the migration branch and covered by automated gates.
+The unified Windows product surface, Qt/QML workspaces, native MCP integration, x64/x86 portable packaging and removal of the historical Dear ImGui dependency are complete on the migration branch and covered by automated gates.
 
 Remaining work is release/validation work rather than a second application migration:
 
@@ -86,7 +86,6 @@ Remaining work is release/validation work rather than a second application migra
 2. Fix runtime/UX defects found by real-target validation.
 3. Continue Linux runtime parity through the common target/backend contracts.
 4. Implement the future PS4 backend through the same product architecture rather than creating a separate UI/product.
-5. Optionally remove empty ImGui renderer plumbing only if capture/instrumentation behavior remains unchanged.
-6. Only after explicit manual approval: merge to `master`, update release packaging and publish a unified release.
+5. Only after explicit manual approval: merge to `master`, update release packaging and publish a unified release.
 
 No merge to `master` and no release publication is part of the migration branch workflow before that approval.

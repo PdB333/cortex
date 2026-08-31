@@ -110,7 +110,7 @@ For every workspace and context-menu action, see the [Cortex UI guide](docs/ui-g
 | Targets | process discovery, attach/detach, architecture/capability-aware sessions |
 | Memory | typed reads/writes, regions, exact/comparative scans, watches/freezes |
 | Reverse engineering | x86/x64 disassembly, CFG, xrefs, structured CFG, structures, symbols, pointer maps, runtime RE evidence |
-| Debugger | software/hardware breakpoints, paused threads, registers, Continue, Step Into, traces |
+| Debugger | software/hardware breakpoints, paused threads, registers, Pause, Continue, Step Into, Step Over, traces |
 | Patching | raw bytes, NOP, assembly, detours, trampolines, code caves, tracked revert |
 | Snapshots | capture, list, diff, last-change analysis and rewind |
 | Automation | Lua scripts, input send/record/replay jobs, screenshots |
@@ -121,9 +121,9 @@ For every workspace and context-menu action, see the [Cortex UI guide](docs/ui-g
 
 ## Human UI and instrumentation
 
-The official Cortex UI is **Qt 6 + Qt Quick/QML**. Dear ImGui no longer provides any Cortex user interface. Human prompts are presented by the Qt desktop over the authenticated private channel, and paused-thread recovery is handled by the Qt debugger or explicit headless debugger APIs.
+The official Cortex UI is **Qt 6 + Qt Quick/QML**. Dear ImGui is no longer a Cortex dependency. Human prompts are presented by the Qt desktop over the authenticated private channel, and paused-thread recovery is handled by the Qt debugger or explicit headless debugger APIs.
 
-Renderer hooks remain because capture/instrumentation features need them. Their backend plumbing may keep an empty ImGui frame/context internally, but no injected ImGui windows are shown to the user.
+Renderer hooks remain because capture/instrumentation features need them, but they no longer create an injected UI context, render UI draw data, or subclass the target window for Cortex UI input.
 
 ## MCP
 
