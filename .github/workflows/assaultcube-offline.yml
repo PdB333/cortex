@@ -8,7 +8,7 @@ on:
       - "app/**"
       - "core/**"
       - "runtime_helper/**"
-      - "ci/assaultcube_offline_e2e.ps1"
+      - "ci/assaultcube_offline_e2e_v2.ps1"
       - ".github/workflows/assaultcube-offline.yml"
   workflow_dispatch:
   schedule:
@@ -238,7 +238,7 @@ jobs:
       - name: Cortex real-target E2E against offline AssaultCube
         shell: pwsh
         run: >-
-          pwsh -NoProfile -File ci/assaultcube_offline_e2e.ps1
+          pwsh -NoProfile -File ci/assaultcube_offline_e2e_v2.ps1
           -CortexDir "$env:CORTEX_PREVIEW"
           -AssaultCubeDir "$env:ASSAULTCUBE_DIR"
           -ReportPath "$env:RUNNER_TEMP\cortex-assaultcube-offline\report.json"
