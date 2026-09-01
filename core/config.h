@@ -6,7 +6,9 @@ namespace config {
 struct Config {
     int port = 6969;
     int toggle_key = 0x7B; // VK_F12
-    bool log_console = true;
+    // Product builds stay silent by default. Set log_console=true in cortex.ini
+    // only when an explicit in-target debug console is useful.
+    bool log_console = false;
     std::string api_token; // optional fixed token; empty = load/create cortex.token
 
     bool diagnostics_enabled = true;
