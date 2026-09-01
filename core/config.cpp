@@ -65,6 +65,8 @@ Config Load() {
             cfg.toggle_key = std::stoi(val, nullptr, 0); // supports 0x.. hex
         } else if (key == "log_console") {
             cfg.log_console = ParseBool(val);
+        } else if (key == "http_api_enabled") {
+            cfg.http_api_enabled = ParseBool(val);
         } else if (key == "api_token") {
             cfg.api_token = val;
         } else if (key == "diagnostics_enabled") {
@@ -80,7 +82,13 @@ Config Load() {
         } else if (key == "diagnostics_external_symbolizer") {
             cfg.diagnostics_external_symbolizer = val;
         } else if (key == "diagnostics_max_stack_frames") {
-            cfg.diagnostics_max_stack_frames = (std::max)(1, (std::min)(128, std::atoi(val.c_str())));
+            cfg.diagnostics_max_stack_frames = (std::max)(1, (std::min)(256, std::atoi(val.c_str())));
+        } else if (key == "project_directory") {
+            cfg.project_directory = val;
+        } else if (key == "session_directory") {
+            cfg.session_directory = val;
+        } else if (key == "session_history_limit") {
+            cfg.session_history_limit = (std::max)(0, (std::min)(500, std::atoi(val.c_str())));
         }
     }
     return cfg;

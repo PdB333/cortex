@@ -14,7 +14,7 @@ ColumnLayout {
         function onNavigationAddressChanged() {
             if (CortexApp.selectedSection !== "Memory" || CortexApp.navigationAddress.length === 0) return
             addressField.text = CortexApp.navigationAddress
-            CortexApp.readMemory(CortexApp.navigationAddress, 256)
+            CortexApp.readMemory(CortexApp.navigationAddress, CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow)
             root.selectedAddress = CortexApp.navigationAddress
         }
     }
@@ -57,23 +57,23 @@ ColumnLayout {
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive
                 Keys.onReturnPressed: {
-                    if (CortexApp.readMemory(text, 256)) root.selectedAddress = text
+                    if (CortexApp.readMemory(text, CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow)) root.selectedAddress = text
                 }
             }
             Button {
                 text: "Go"
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive && addressField.text.length > 0
-                onClicked: if (CortexApp.readMemory(addressField.text, 256)) root.selectedAddress = addressField.text
+                onClicked: if (CortexApp.readMemory(addressField.text, CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow)) root.selectedAddress = addressField.text
             }
             Button {
                 text: "Refresh"
                 font.pixelSize: 11
                 enabled: CortexApp.sessionActive && addressField.text.length > 0
-                onClicked: CortexApp.readMemory(addressField.text, 256)
+                onClicked: CortexApp.readMemory(addressField.text, CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow)
             }
             Item { Layout.fillWidth: true }
-            Label { text: "16 bytes / row | Right-click for address actions"; color: Theme.textDisabled; font.pixelSize: 10 }
+            Label { text: CortexSettings.memoryBytesPerRow + " bytes / row | Right-click for address actions"; color: Theme.textDisabled; font.pixelSize: 10 }
         }
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
     }
@@ -113,7 +113,7 @@ ColumnLayout {
                     if (CortexApp.writeMemoryHex(destination, writeBytes.text)) {
                         addressField.text = destination
                         root.selectedAddress = destination
-                        CortexApp.readMemory(destination, 256)
+                        CortexApp.readMemory(destination, CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow)
                     }
                 }
             }

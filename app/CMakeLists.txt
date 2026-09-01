@@ -149,6 +149,29 @@ target_include_directories(cortex PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../core
 )
 
+if(WIN32)
+    set_source_files_properties(../tools/diagnostics_host/main.cpp PROPERTIES
+        COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
+    set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
+        COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
+    target_sources(cortex PRIVATE
+        ../host/probe_cli.cpp
+        ../host/probe_cli.h
+        ../tools/diagnostics_host/main.cpp
+        ../tools/symbolize_main.cpp
+        ../host/diagnostics/external_host.cpp
+        ../host/diagnostics/analyzer.cpp
+        ../core/symbols/symbols.cpp
+        ../core/symbols/external.cpp
+        cortex.rc
+    )
+    qt_add_resources(cortex "cortex_branding"
+        PREFIX "/branding"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        FILES resources/cortex.ico
+    )
+endif()
+
 target_link_libraries(cortex PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
@@ -159,8 +182,8 @@ target_link_libraries(cortex PRIVATE
 )
 
 if(WIN32)
-    target_compile_definitions(cortex PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(cortex PRIVATE user32)
+    target_compile_definitions(cortex PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(cortex PRIVATE user32 dbghelp)
 endif()
 
 set_target_properties(cortex PROPERTIES

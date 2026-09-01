@@ -22,17 +22,19 @@ $HostExe = Join-Path $BuildRoot "cortex_host.exe"
 $CoreDll = Join-Path $BuildRoot "cortex_core.dll"
 $FakeModDll = Join-Path $BuildRoot "cortex_e2e_mod.dll"
 $TargetExe = Join-Path $BuildRoot "cortex_test_target_$Architecture.exe"
+$SilentGuiExe = Join-Path $BuildRoot "cortex_silent_gui_target_$Architecture.exe"
 $D3D9Exe = Join-Path $BuildRoot "cortex_test_target_d3d9_$Architecture.exe"
 $D3D11Exe = Join-Path $BuildRoot "cortex_test_target_d3d11_$Architecture.exe"
 $TokenPath = Join-Path $BuildRoot "cortex.token"
 $ConfigPath = Join-Path $BuildRoot "cortex.ini"
 $BaseUri = "http://127.0.0.1:6969"
 
-foreach ($path in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $D3D9Exe, $D3D11Exe)) {
+foreach ($path in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $SilentGuiExe, $D3D9Exe, $D3D11Exe)) {
     if (-not (Test-Path $path)) { throw "Missing E2E artifact: $path" }
 }
 
 @"
+http_api_enabled=true
 diagnostics_enabled=true
 diagnostics_write_minidump=true
 diagnostics_crash_directory=$CrashRoot
@@ -192,6 +194,33 @@ function Run-Scenario([string]$Name, [scriptblock]$Body) {
         $message = $_.Exception.Message
         $script:Results.Add([pscustomobject]@{ name = $Name; status = "failed"; duration_ms = $watch.ElapsedMilliseconds; error = $message })
         Write-Warning "FAIL $Name`: $message"
+    }
+}
+
+Run-Scenario "silent-runtime-gui-injection" {
+    $process = $null
+    $statePath = Join-Path $ResultsRoot "silent-runtime-state.json"
+    $previousState = $env:CORTEX_SILENT_STATE
+    try {
+        Remove-Item $statePath -ErrorAction SilentlyContinue
+        $env:CORTEX_SILENT_STATE = $statePath
+        $process = Start-Process -FilePath $SilentGuiExe -PassThru
+        Wait-For -TimeoutMs 10000 -Description "silent GUI state" -Condition { Test-Path $statePath }
+        $before = Get-Content $statePath -Raw | ConvertFrom-Json
+        Assert-That (-not [bool]$before.console_window) "GUI target unexpectedly started with a console"
+
+        Inject-Dll $process.Id $CoreDll
+        $mcpTokenPath = Join-Path $BuildRoot "cortex.mcp.$($process.Id).token"
+        Wait-For -TimeoutMs 15000 -Description "native MCP startup in silent GUI target" -Condition { Test-Path $mcpTokenPath }
+        Start-Sleep -Milliseconds 300
+
+        $after = Get-Content $statePath -Raw | ConvertFrom-Json
+        Assert-That (-not [bool]$after.console_window) "Cortex injection created a console window in a GUI target"
+        Assert-That ([string]$after.console_class -ne "ConsoleWindowClass") "Cortex injection created ConsoleWindowClass"
+    } finally {
+        Stop-ProcessSafe $process
+        if ($null -eq $previousState) { Remove-Item Env:CORTEX_SILENT_STATE -ErrorAction SilentlyContinue }
+        else { $env:CORTEX_SILENT_STATE = $previousState }
     }
 }
 

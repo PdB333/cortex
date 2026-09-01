@@ -191,8 +191,7 @@ AppController::AppController(QObject* parent)
       moduleService_(sessionManager_) {
     QSettings settings;
     const QString restoredSection = settings.value(QStringLiteral("workspace/selectedSection")).toString();
-    const bool restoreLastSection = settings.value(QStringLiteral("preferences/restoreLastSection"), true).toBool();
-    if (restoreLastSection && IsKnownWorkspaceSection(restoredSection)) selectedSection_ = restoredSection;
+    if (IsKnownWorkspaceSection(restoredSection)) selectedSection_ = restoredSection;
 
     targetCatalog_.AddBackend(std::make_shared<cortex::target::LocalBackend>());
     connect(&scanWatcher_, &QFutureWatcher<ScanTaskResult>::finished, this, &AppController::finishScan);
@@ -450,9 +449,10 @@ QString AppController::capabilitySummary() const {
     return capabilities.isEmpty() ? QStringLiteral("No advertised capabilities") : capabilities.join(QStringLiteral(", "));
 }
 
-bool AppController::readMemory(const QString& addressText, int size) {
+bool AppController::readMemory(const QString& addressText, int size, int bytesPerRow) {
     uint64_t address = 0;
-    if (!ParseAddress(addressText, address) || size <= 0 || size > 4096) {
+    if (!ParseAddress(addressText, address) || size <= 0 || size > 4096 ||
+        (bytesPerRow != 8 && bytesPerRow != 16 && bytesPerRow != 32)) {
         setLastError(QStringLiteral("invalid_address_or_size"));
         return false;
     }
@@ -465,9 +465,9 @@ bool AppController::readMemory(const QString& addressText, int size) {
     }
 
     memoryRows_.clear();
-    constexpr size_t kBytesPerRow = 16;
-    for (size_t offset = 0; offset < bytes.size(); offset += kBytesPerRow) {
-        const size_t count = std::min(kBytesPerRow, bytes.size() - offset);
+    const size_t rowWidth = static_cast<size_t>(bytesPerRow);
+    for (size_t offset = 0; offset < bytes.size(); offset += rowWidth) {
+        const size_t count = std::min(rowWidth, bytes.size() - offset);
         QVariantMap row;
         row.insert(QStringLiteral("address"), HexAddress(address + offset));
         row.insert(QStringLiteral("hex"), BytesToHex(bytes.data() + offset, count));
@@ -523,7 +523,7 @@ void AppController::refreshModules() {
 }
 
 bool AppController::startScan(const QString& value, const QString& type,
-                              const QString& comparisonText, bool refine) {
+                              const QString& comparisonText, bool refine, int maxResults) {
     if (scanBusy_) {
         setLastError(QStringLiteral("scan_in_progress"));
         return false;
@@ -532,6 +532,11 @@ bool AppController::startScan(const QString& value, const QString& type,
     auto session = sessionManager_.Active();
     if (!session || !session->Alive()) {
         setLastError(QStringLiteral("no_active_session"));
+        return false;
+    }
+
+    if (maxResults < 100 || maxResults > 50000) {
+        setLastError(QStringLiteral("invalid_scan_result_limit"));
         return false;
     }
 
@@ -580,7 +585,7 @@ bool AppController::startScan(const QString& value, const QString& type,
 
     auto future = QtConcurrent::run([session, pattern = std::move(pattern), previous,
                                      kind, comparison, refine, cancelToken,
-                                     generation, displayValue, scanType]() mutable {
+                                     generation, displayValue, scanType, maxResults]() mutable {
         ScanTaskResult task;
         task.generation = generation;
         task.displayValue = displayValue;
@@ -592,7 +597,7 @@ bool AppController::startScan(const QString& value, const QString& type,
                 task.results, &error, cancelToken.get());
         } else {
             task.ok = cortex::services::ScanService::Exact(
-                session, pattern, task.results, 5000, &error, cancelToken.get());
+                session, pattern, task.results, static_cast<size_t>(maxResults), &error, cancelToken.get());
         }
         task.error = FromUtf8(error);
         return task;

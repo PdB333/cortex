@@ -24,7 +24,7 @@ ColumnLayout {
                 text: CortexDebugger.currentThreadId > 0 ? CortexDebugger.currentThreadId.toString() : ""
                 placeholderText: "Thread ID"
             }
-            TextField { id: stepsField; Layout.preferredWidth: 100; text: "10000"; placeholderText: "Max steps" }
+            TextField { id: stepsField; Layout.preferredWidth: 100; text: String(CortexSettings.traceMaxSteps); placeholderText: "Max steps" }
             Button {
                 text: "Start trace"
                 enabled: CortexApp.sessionActive && CortexApp.mutationPermission && threadField.text.length > 0
@@ -34,7 +34,7 @@ ColumnLayout {
             Button {
                 text: "Load events"
                 enabled: CortexFeatures.selectedTraceId >= 0
-                onClicked: CortexFeatures.loadTraceEvents(CortexFeatures.selectedTraceId, 250)
+                onClicked: CortexFeatures.loadTraceEvents(CortexFeatures.selectedTraceId, CortexSettings.traceEventLoadLimit)
             }
             Button {
                 text: "Stop"

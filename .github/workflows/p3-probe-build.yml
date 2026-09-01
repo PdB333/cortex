@@ -47,6 +47,7 @@ jobs:
           cmake -S . -B build/p3-probe-${{ matrix.arch }} -G Ninja
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DBUILD_TESTING=OFF
+          -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
       - name: Build unified host with probe command
         shell: msys2 {0}

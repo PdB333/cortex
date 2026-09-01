@@ -81,11 +81,11 @@ public:
     Q_INVOKABLE QString resolveAddressExpression(const QString& expression);
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE QString capabilitySummary() const;
-    Q_INVOKABLE bool readMemory(const QString& address, int size = 256);
+    Q_INVOKABLE bool readMemory(const QString& address, int size = 256, int bytesPerRow = 16);
     Q_INVOKABLE bool writeMemoryHex(const QString& address, const QString& hexBytes);
     Q_INVOKABLE void refreshModules();
     Q_INVOKABLE bool startScan(const QString& value, const QString& type,
-                               const QString& comparison, bool refine);
+                               const QString& comparison, bool refine, int maxResults = 5000);
     Q_INVOKABLE void cancelScan();
     Q_INVOKABLE void clearScanResults();
 

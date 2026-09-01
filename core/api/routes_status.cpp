@@ -673,7 +673,8 @@ json BuildToolsManifest() {
         j.push_back({{"name","re_checkpoint_rollback"},{"method","POST"},{"path","/re/checkpoint/{id}/rollback"},
                      {"description","Rolls Actions back to the saved checkpoint and restores all explicitly captured memory ranges."},
                      {"body",{{"keep",{{"type","boolean"},{"description","Keep checkpoint after a successful rollback; default false."}}}}}});
-        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},{"description","Deletes a saved RE checkpoint without modifying the target."}});
+        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},
+                     {"description","Deletes a saved RE checkpoint without modifying the target."}});
         j.push_back({{"name","re_cpp_subobjects"},{"method","POST"},{"path","/re/cpp/subobjects"},
                      {"description","Detects multiple vtables/C++ subobjects and common this-adjustment thunks inside an object."},
                      {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});

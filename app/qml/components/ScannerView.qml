@@ -14,7 +14,11 @@ ColumnLayout {
         valueField.selectAll()
     }
 
-    Component.onCompleted: Qt.callLater(root.focusSearch)
+    Component.onCompleted: {
+        const index = valueType.model.indexOf(CortexSettings.defaultScanType)
+        if (index >= 0) valueType.currentIndex = index
+        Qt.callLater(root.focusSearch)
+    }
 
     function addressType() {
         const t = valueType.currentText
@@ -70,9 +74,9 @@ ColumnLayout {
                 Keys.onReturnPressed: {
                     if (scanMode.currentIndex === 0 && text.length) {
                         if (CortexApp.scanResults.length > 0)
-                            CortexApp.startScan(text, valueType.currentText, "Exact value", true)
+                            CortexApp.startScan(text, valueType.currentText, "Exact value", true, CortexSettings.maxScanResults)
                         else
-                            CortexApp.startScan(text, valueType.currentText, "Exact value", false)
+                            CortexApp.startScan(text, valueType.currentText, "Exact value", false, CortexSettings.maxScanResults)
                     }
                 }
             }
@@ -104,7 +108,7 @@ ColumnLayout {
                 onClicked: {
                     CortexApp.clearScanResults()
                     scanMode.currentIndex = 0
-                    CortexApp.startScan(valueField.text, valueType.currentText, "Exact value", false)
+                    CortexApp.startScan(valueField.text, valueType.currentText, "Exact value", false, CortexSettings.maxScanResults)
                 }
             }
             Button {
@@ -113,7 +117,7 @@ ColumnLayout {
                 enabled: CortexApp.sessionActive && !CortexApp.scanBusy && CortexApp.scanResults.length > 0 &&
                          (scanMode.currentIndex !== 0 || valueField.text.length > 0)
                 onClicked: CortexApp.startScan(scanMode.currentIndex === 0 ? valueField.text : "",
-                                               valueType.currentText, scanMode.currentText, true)
+                                               valueType.currentText, scanMode.currentText, true, CortexSettings.maxScanResults)
             }
             Button {
                 text: "Cancel"

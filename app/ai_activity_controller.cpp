@@ -9,21 +9,15 @@
 #include <QJsonParseError>
 #include <QLocalServer>
 #include <QLocalSocket>
-#include <QMutex>
 #include <QVariantMap>
+
+#include <algorithm>
 
 namespace cortex::app {
 namespace {
 
 constexpr qsizetype kMaxActivityPayloadBytes = 64 * 1024;
 constexpr qsizetype kMaxSocketBufferBytes = 256 * 1024;
-constexpr qsizetype kMaxActivityRows = 300;
-constexpr int kMinimumDeliveryTimeoutMs = 25;
-
-QMutex& ActivityPublishMutex() {
-    static QMutex mutex;
-    return mutex;
-}
 
 QString JsonValueText(const QJsonValue& value) {
     if (value.isString()) return value.toString();
@@ -45,15 +39,7 @@ QString AiActivityEndpointName() {
 
 bool PublishAiActivity(const QByteArray& jsonPayload, int timeoutMs) {
     if (jsonPayload.isEmpty() || jsonPayload.size() > kMaxActivityPayloadBytes) return false;
-    if (timeoutMs < kMinimumDeliveryTimeoutMs) timeoutMs = kMinimumDeliveryTimeoutMs;
-
-    // A tool can complete almost immediately after it starts, and MCP requests
-    // may run on different worker threads. Serializing the short local sends
-    // prevents a burst of one-shot named-pipe connections from overtaking or
-    // starving one another on Windows. When no UI listener exists,
-    // ServerNotFoundError still returns immediately so headless MCP is not
-    // penalized by this reliability path.
-    QMutexLocker<QMutex> publishLock(&ActivityPublishMutex());
+    if (timeoutMs < 1) timeoutMs = 1;
 
     QByteArray framed = jsonPayload;
     framed.append('\n');
@@ -72,25 +58,11 @@ bool PublishAiActivity(const QByteArray& jsonPayload, int timeoutMs) {
         }
 
         const qint64 written = socket.write(framed);
-        if (written != framed.size()) {
-            socket.abort();
-            continue;
-        }
-
+        if (written != framed.size()) continue;
         socket.flush();
         const bool flushed = socket.bytesToWrite() == 0 || socket.waitForBytesWritten(timeoutMs);
-        if (!flushed) {
-            socket.abort();
-            continue;
-        }
-
-        // Do not let the next event open another one-shot connection until the
-        // current frame has been handed off and this connection is closed. The
-        // receiver consumes remaining bytes again on disconnected().
         socket.disconnectFromServer();
-        if (socket.state() != QLocalSocket::UnconnectedState)
-            socket.waitForDisconnected(timeoutMs);
-        return true;
+        if (flushed) return true;
     }
     return false;
 }
@@ -211,11 +183,21 @@ void AiActivityController::consumeLine(const QByteArray& line) {
                    QDateTime::fromMSecsSinceEpoch(timestampMs).toString(QStringLiteral("HH:mm:ss.zzz")));
     }
     activities_.prepend(row);
-    while (activities_.size() > kMaxActivityRows) activities_.removeLast();
+    while (activities_.size() > historyLimit_) activities_.removeLast();
     emit activitiesChanged();
 
     if (wasConnected != connected() || previousActive != activeTaskCount() || previousSessions != sessionCount())
         emit stateChanged();
+}
+
+void AiActivityController::setHistoryLimit(int maxRows) {
+    historyLimit_ = std::clamp(maxRows, 50, 2000);
+    bool trimmed = false;
+    while (activities_.size() > historyLimit_) {
+        activities_.removeLast();
+        trimmed = true;
+    }
+    if (trimmed) emit activitiesChanged();
 }
 
 void AiActivityController::clear() {

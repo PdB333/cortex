@@ -79,7 +79,11 @@ Rectangle {
                     Layout.preferredWidth: 128
                     Layout.preferredHeight: 30
                     model: ["Primitives", "All tools"]
-                    onCurrentIndexChanged: root.rebuildTools()
+                    currentIndex: CortexSettings.mcpToolProfile === "all" ? 1 : 0
+                    onActivated: {
+                        CortexSettings.mcpToolProfile = currentIndex === 1 ? "all" : "compact"
+                        root.rebuildTools()
+                    }
                 }
                 TextField {
                     id: searchField

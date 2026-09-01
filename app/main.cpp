@@ -1,4 +1,4 @@
-﻿#include "ai_activity_controller.h"
+#include "ai_activity_controller.h"
 #include "app_controller.h"
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
@@ -21,6 +21,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -33,7 +34,16 @@
 #include <QUrl>
 #include <QWindow>
 
+#include <cstdio>
+#include <optional>
 #include <string>
+#include <vector>
+
+#ifdef Q_OS_WIN
+#include "../host/probe_cli.h"
+int CortexDiagnoseMain(int argc, char** argv);
+int CortexSymbolizeMain(int argc, char** argv);
+#endif
 
 namespace {
 
@@ -42,6 +52,55 @@ void ConfigureApplicationIdentity() {
     QCoreApplication::setOrganizationName("Cortex");
     QCoreApplication::setApplicationVersion("0.7.0-dev");
 }
+
+#ifdef Q_OS_WIN
+using CliEntryPoint = int (*)(int, char**);
+
+int ForwardCli(CliEntryPoint entry, const char* programName, int argc, char** argv,
+               int firstArgument, const std::vector<std::string>& injected = {}) {
+    std::vector<std::string> storage;
+    storage.emplace_back(programName ? programName : "cortex");
+    storage.insert(storage.end(), injected.begin(), injected.end());
+    for (int i = firstArgument; i < argc; ++i) storage.emplace_back(argv[i] ? argv[i] : "");
+    std::vector<char*> forwarded;
+    for (std::string& value : storage) forwarded.push_back(value.data());
+    forwarded.push_back(nullptr);
+    return entry(static_cast<int>(storage.size()), forwarded.data());
+}
+
+void PrintCliUsage(FILE* out = stdout) {
+    std::fputs(
+        "Cortex\n\n"
+        "Usage:\n"
+        "  cortex                         Launch the GUI\n"
+        "  cortex mcp [options]           Run MCP stdio mode\n"
+        "  cortex probe --pid <pid>       Inspect target/runtime health\n"
+        "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
+        "  cortex analyze <directory>     Analyze a crash directory\n"
+        "  cortex symbolize [options]     Resolve PE symbols offline\n", out);
+}
+
+std::optional<int> RunCliMode(int argc, char** argv) {
+    if (argc <= 1 || !argv[1]) return std::nullopt;
+    const std::string command = argv[1];
+    if (command == "help" || command == "--help" || command == "-h") {
+        PrintCliUsage(); return 0;
+    }
+    if (command == "version" || command == "--version") {
+        std::puts("cortex 0.7.0-dev"); return 0;
+    }
+    if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", argc, argv, 2);
+    if (command == "diagnose" || command == "diagnostics" || command == "watch")
+        return ForwardCli(CortexDiagnoseMain, "cortex diagnose", argc, argv, 2);
+    if (command == "analyze" || command == "analyse") {
+        if (argc < 3) { std::fputs("cortex analyze: missing crash directory\n", stderr); return 2; }
+        return ForwardCli(CortexDiagnoseMain, "cortex analyze", argc, argv, 2, {"--analyze"});
+    }
+    if (command == "symbolize" || command == "symbolise" || command == "symbols")
+        return ForwardCli(CortexSymbolizeMain, "cortex symbolize", argc, argv, 2);
+    return std::nullopt;
+}
+#endif
 
 QRect FitWindowGeometry(const QRect& requested, QScreen* screen, const QSize& minimumSize) {
     const QRect area = screen ? screen->availableGeometry() : QRect();
@@ -60,7 +119,6 @@ void RestoreWorkspaceWindow(QWindow* window, QObject* rootObject) {
     if (!window || !rootObject) return;
 
     QSettings settings;
-    if (!settings.value(QStringLiteral("preferences/rememberWindowLayout"), true).toBool()) return;
     rootObject->setProperty("bottomPanelVisible",
                             settings.value(QStringLiteral("workspace/bottomPanelVisible"), true).toBool());
 
@@ -83,7 +141,6 @@ void SaveWorkspaceWindow(QWindow* window, QObject* rootObject) {
     if (!window || !rootObject) return;
 
     QSettings settings;
-    if (!settings.value(QStringLiteral("preferences/rememberWindowLayout"), true).toBool()) return;
     const Qt::WindowState state = window->windowState();
     if (state != Qt::WindowMaximized && state != Qt::WindowFullScreen)
         settings.setValue(QStringLiteral("workspace/windowGeometry"), window->geometry());
@@ -390,6 +447,9 @@ void LoadMainQml(QQmlApplicationEngine& engine) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+#ifdef Q_OS_WIN
+    if (const auto cliResult = RunCliMode(argc, argv)) return *cliResult;
+#endif
     if (argc > 1 && argv[1] && std::string(argv[1]) == "--ai-activity-smoke") {
         QCoreApplication app(argc, argv);
         ConfigureApplicationIdentity();
@@ -420,6 +480,9 @@ int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     ConfigureApplicationIdentity();
 
+#ifdef Q_OS_WIN
+    app.setWindowIcon(QIcon(QStringLiteral(":/branding/cortex.ico")));
+#endif
     QPalette palette = app.palette();
     palette.setColor(QPalette::Window, QColor("#1e1e1e"));
     palette.setColor(QPalette::WindowText, QColor("#cccccc"));
@@ -448,6 +511,7 @@ int main(int argc, char* argv[]) {
 
     SettingsController settings;
     cortex::app::AiActivityController aiActivity;
+    aiActivity.setHistoryLimit(settings.aiActivityHistoryLimit());
     AppController controller;
     PayloadController payload(controller.sessionManager(), QCoreApplication::applicationDirPath());
     PromptController prompt(payload);
@@ -459,12 +523,18 @@ int main(int argc, char* argv[]) {
                                 [&controller] { return controller.mutationPermission(); });
 
     QObject::connect(&controller, &AppController::sessionChanged, &payload, &PayloadController::reset);
+    QObject::connect(&controller, &AppController::sessionChanged, &payload, [&controller, &payload, &settings] {
+        if (controller.sessionActive() && settings.autoLoadRuntimeOnAttach()) payload.ensureReady();
+    });
     QObject::connect(&controller, &AppController::sessionChanged, &prompt, &PromptController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &runtime, &RuntimeController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &features, &FeatureController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &re, &ReController::reset);
     QObject::connect(&controller, &AppController::sessionChanged, &disassembly, &DisassemblyController::clear);
     QObject::connect(&controller, &AppController::sessionChanged, &debugger, &DebuggerController::clear);
+    QObject::connect(&settings, &SettingsController::changed, &aiActivity, [&settings, &aiActivity] {
+        aiActivity.setHistoryLimit(settings.aiActivityHistoryLimit());
+    });
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QCoreApplication::applicationDirPath() + "/qml");

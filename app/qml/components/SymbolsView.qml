@@ -88,7 +88,7 @@ ColumnLayout {
                 text: "Memory"
                 enabled: CortexApp.sessionActive && root.field("address").length > 0
                 onClicked: {
-                    if (CortexApp.readMemory(root.field("address"), 256))
+                    if (CortexApp.readMemory(root.field("address"), CortexSettings.memoryReadSize, CortexSettings.memoryBytesPerRow))
                         CortexApp.selectSection("Memory")
                 }
             }

@@ -1,4 +1,4 @@
-﻿#include "project.h"
+#include "project.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
 
@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <filesystem>
 #include <string_view>
 #include <algorithm>
 
@@ -114,7 +115,7 @@ void MigrateAndRepair(json& data) {
 
 } // namespace
 
-void Init() {
+void Init(const std::string& directory) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_initialized) return;
 
@@ -123,10 +124,11 @@ void Init() {
     std::string dll(dllPath);
     size_t slash = dll.find_last_of("\\/");
     std::string dir = slash == std::string::npos ? "." : dll.substr(0, slash);
-    std::string projectsDir = dir + "\\cortex_projects";
-    CreateDirectoryA(projectsDir.c_str(), nullptr);
+    const std::string projectsDir = directory.empty() ? dir + "\\cortex_projects" : directory;
+    std::error_code directoryError;
+    std::filesystem::create_directories(std::filesystem::path(projectsDir), directoryError);
 
-    g_path = projectsDir + "\\" + ProcessBaseName() + ".json";
+    g_path = (std::filesystem::path(projectsDir) / (ProcessBaseName() + ".json")).string();
 
     if (!LoadJsonFile(g_path, g_data) && !LoadJsonFile(g_path + ".bak", g_data)) {
         g_data = DefaultSkeleton();

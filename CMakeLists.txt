@@ -3,6 +3,8 @@ project(cortex LANGUAGES C CXX)
 
 include(CTest)
 
+option(CORTEX_BUILD_LEGACY_COMPAT "Build the legacy cortex_host compatibility executable" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
@@ -300,6 +302,7 @@ target_link_options(core PRIVATE -static -static-libgcc -static-libstdc++)
 # =========================================================================
 # Preserve the existing, already-tested implementations by renaming each
 # source file's main() at compile time and dispatching from unified_main.cpp.
+if(CORTEX_BUILD_LEGACY_COMPAT)
 set_source_files_properties(host/main.cpp PROPERTIES
     COMPILE_DEFINITIONS "main=CortexServeMain")
 set_source_files_properties(injector/main.cpp PROPERTIES
@@ -313,6 +316,7 @@ set_source_files_properties(tools/symbolize_main.cpp PROPERTIES
 
 add_executable(cortex_host
     host/unified_main.cpp
+    host/probe_cli.cpp
     host/main.cpp
     injector/main.cpp
     mcp_bridge/main.cpp
@@ -343,6 +347,21 @@ target_link_libraries(cortex_host PRIVATE
     user32
 )
 target_link_options(cortex_host PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
+# =========================================================================
+# GUI-subsystem fixture used to prove that the injected runtime stays silent:
+# no AllocConsole/ConsoleWindowClass may appear with default configuration.
+add_executable(cortex_silent_gui_target WIN32 tests/e2e/silent_gui_target.cpp)
+target_compile_definitions(cortex_silent_gui_target PRIVATE
+    _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(cortex_silent_gui_target PRIVATE user32)
+target_link_options(cortex_silent_gui_target PRIVATE -static -static-libgcc -static-libstdc++)
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set_target_properties(cortex_silent_gui_target PROPERTIES OUTPUT_NAME "cortex_silent_gui_target_x86")
+else()
+    set_target_properties(cortex_silent_gui_target PROPERTIES OUTPUT_NAME "cortex_silent_gui_target_x64")
+endif()
 
 # =========================================================================
 # cortex_test_target -- fake game with known memory values / window / input
@@ -386,6 +405,10 @@ foreach(RENDERER 9 11)
 endforeach()
 
 if(BUILD_TESTING)
+    add_executable(cortex_config_defaults_tests tests/config_defaults_tests.cpp)
+    target_include_directories(cortex_config_defaults_tests PRIVATE core)
+    add_test(NAME cortex_config_defaults_tests COMMAND cortex_config_defaults_tests)
+
     add_executable(cortex_core_tests
         tests/core_tests.cpp
         tests/debugger_stub.cpp

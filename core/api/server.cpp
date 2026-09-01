@@ -157,20 +157,24 @@ namespace {
     }
 }
 
-bool Start(int port, const std::string& configuredToken) {
+bool Start(int port, const std::string& configuredToken, bool httpEnabled) {
     if (g_server) return true;
-    if (port <= 0 || port > 65535) {
+    if (httpEnabled && (port <= 0 || port > 65535)) {
         SetLastError("invalid_port");
         return false;
     }
-    g_port = port;
+    g_port = 0;
     g_startTimeMs = GetTickCount64();
     g_requestSequence.store(0, std::memory_order_relaxed);
     SetLastError({});
-    g_token = LoadOrCreateToken(configuredToken);
-    if (g_token.size() < 32) {
-        SetLastError("token_generation_failed");
-        return false;
+    g_token.clear();
+    g_tokenPath.clear();
+    if (httpEnabled) {
+        g_token = LoadOrCreateToken(configuredToken);
+        if (g_token.size() < 32) {
+            SetLastError("token_generation_failed");
+            return false;
+        }
     }
 
     g_server = std::make_unique<httplib::Server>();
@@ -295,7 +299,7 @@ bool Start(int port, const std::string& configuredToken) {
         return false;
     }
 
-    const bool httpBound = g_server->bind_to_port("127.0.0.1", port);
+    const bool httpBound = httpEnabled && g_server->bind_to_port("127.0.0.1", port);
     if (httpBound) {
         g_port = port;
         g_thread = std::thread([] {
@@ -306,9 +310,12 @@ bool Start(int port, const std::string& configuredToken) {
         // target may legitimately find the legacy loopback port already in use.
         // Keep its private pipe/runtime alive instead of failing the payload.
         g_port = 0;
-        dbglog::Line("HTTP compatibility port %d unavailable; native MCP remains active", port);
+        if (httpEnabled)
+            dbglog::Line("HTTP compatibility port %d unavailable; native MCP remains active", port);
+        else
+            dbglog::Line("HTTP compatibility API disabled; native MCP remains active");
     }
-    dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    if (httpEnabled) dbglog::Line("API token file: %s", g_tokenPath.c_str());
     dbglog::Line("MCP private token file: %s", g_mcpTokenPath.c_str());
     dbglog::Line("MCP native pipe: %s", mcp_pipe::GetPipeName().c_str());
     return true;

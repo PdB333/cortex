@@ -327,6 +327,7 @@ void PublishSessionActivity(const std::shared_ptr<RunState>& state,
     PublishActivity(state, std::move(event));
 }
 
+
 json ToolPayload(const json& value, bool isError = false) {
     return {
         {"content", json::array({{{"type", "text"}, {"text", value.dump(2)}}})},

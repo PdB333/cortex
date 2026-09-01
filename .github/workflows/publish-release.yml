@@ -100,7 +100,7 @@ jobs:
 
       - name: Configure Cortex
         shell: msys2 {0}
-        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
       - name: Build Cortex
         shell: msys2 {0}

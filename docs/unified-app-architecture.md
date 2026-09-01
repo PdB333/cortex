@@ -46,6 +46,8 @@ Core concepts are platform-neutral: `Target`, `Node`, `Backend`, `Catalog`, `Arc
 
 MCP is integrated into `cortex.exe`. The normal local path is stdio -> authenticated Named Pipe -> runtime executor; it does not loop back through HTTP.
 
+The injected runtime starts the authenticated native pipe and route registry without opening a TCP listener by default. The legacy loopback HTTP API is compatibility/debug-only and requires `http_api_enabled=true` in `cortex.ini`.
+
 Primitive and semantic execution share the same route/executor contracts used by the application. Mutating/control/native operations require explicit mutation permission. Semantic execution additionally supports bounded execution, cancellation, evidence and transactional rollback where a safe compensation contract exists.
 
 Human prompt answering is kept off the public MCP tool surface. The Desktop communicates with prompt state over a private local channel so an agent cannot answer its own human-verification prompt.
@@ -69,6 +71,7 @@ The branch `next/unified-cortex-ui` is validated through:
 - Windows x64 application build and QML smoke;
 - Windows x64 and x86 instrumentation/runtime builds;
 - integrated MCP E2E against x64 and x86 targets;
+- silent-runtime GUI injection E2E proving the default payload does not create a console window;
 - Qt private-channel E2E for human prompts and runtime events;
 - portable clean-PATH GUI smoke;
 - Linux Qt application build/QML smoke;
@@ -79,6 +82,8 @@ The preview workflow produces a testable portable Cortex artifact but does not p
 ## Current completion state
 
 The unified Windows product surface, Qt/QML workspaces, native MCP integration, x64/x86 portable packaging and removal of the historical Dear ImGui dependency are complete on the migration branch and covered by automated gates.
+
+`cortex.exe` also owns the migrated `probe`, `diagnose`, `analyze` and `symbolize` CLI paths. The historical `cortex_host.exe` remains available only when `CORTEX_BUILD_LEGACY_COMPAT=ON`; normal builds leave it out while `serve` and `inject` finish their migration.
 
 Remaining work is release/validation work rather than a second application migration:
 

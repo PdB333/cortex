@@ -32,6 +32,7 @@ public:
     int sessionCount() const { return sessions_.size(); }
     bool listening() const { return listening_; }
 
+    void setHistoryLimit(int maxRows);
     Q_INVOKABLE void clear();
 
 signals:
@@ -52,6 +53,7 @@ private:
     QSet<QString> activeTasks_;
     QHash<QString, quint64> taskSequences_;
     QHash<QString, quint64> sessionSequences_;
+    int historyLimit_ = 300;
     bool listening_ = false;
 };
 

@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include <windows.h>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -71,7 +72,10 @@ bool WriteBinary(const std::string& path, const std::vector<uint8_t>& data) {
     return f.good();
 }
 
-std::string SessionRoot() { return config::GetModuleDir() + "\\cortex_sessions"; }
+std::string SessionRoot() {
+    const config::Config cfg = config::Load();
+    return cfg.session_directory.empty() ? config::GetModuleDir() + "\\cortex_sessions" : cfg.session_directory;
+}
 
 bool SafeSessionId(const std::string& id) {
     if (id.size() < 9 || id.rfind("session_", 0) != 0) return false;
@@ -100,6 +104,17 @@ std::vector<std::string> ListSessionIds() {
     FindClose(h);
     std::sort(ids.rbegin(), ids.rend());
     return ids;
+}
+
+void PruneSessionHistory() {
+    const int limit = config::Load().session_history_limit;
+    if (limit <= 0) return;
+    const auto ids = ListSessionIds();
+    const std::string root = SessionRoot();
+    for (size_t index = static_cast<size_t>(limit); index < ids.size(); ++index) {
+        std::error_code error;
+        std::filesystem::remove_all(std::filesystem::path(root) / ids[index], error);
+    }
 }
 
 std::set<std::string> ExecutedFunctions(const json& session) {
@@ -169,18 +184,26 @@ json DiffSessions(const json& a, const json& b) {
 } // namespace
 
 void RegisterSessionRoutes(httplib::Server& svr) {
-    // Dumps the current runtime state into a self-contained folder under
-    // <module-dir>/cortex_sessions/session_<timestamp>/. Contains:
+    // Dumps the current runtime state into the configured session directory
+    // (runtime/cortex_sessions by default). Contains:
     //   session.json  - modules, breakpoints, hit logs (with captures),
     //                   traces (metadata only), project state, notes.
     //   screenshot.png - best-effort mode=auto capture at export time.
     // The folder path is returned so the caller can zip / copy it out.
     svr.Post("/session/export", [](const httplib::Request&, httplib::Response& res) {
         std::string root = SessionRoot();
-        CreateDirectoryA(root.c_str(), nullptr);
+        std::error_code directoryError;
+        std::filesystem::create_directories(std::filesystem::path(root), directoryError);
+        if (directoryError) {
+            res.status = 500;
+            res.set_content(json{{"ok", false}, {"error", "create_root_failed"}}.dump(), "application/json");
+            return;
+        }
         const std::string sessionId = "session_" + TimestampSlug();
-        std::string dir = root + "\\" + sessionId;
-        if (!CreateDirectoryA(dir.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS) {
+        std::string dir = (std::filesystem::path(root) / sessionId).string();
+        directoryError.clear();
+        std::filesystem::create_directories(std::filesystem::path(dir), directoryError);
+        if (directoryError) {
             res.status = 500;
             res.set_content(json{{"ok", false}, {"error", "create_dir_failed"}}.dump(), "application/json");
             return;
@@ -301,6 +324,7 @@ void RegisterSessionRoutes(httplib::Server& svr) {
             WriteBinary(dir + "\\screenshot.png", png);
         }
 
+        PruneSessionHistory();
         res.set_content(json{{"ok", true}, {"id", sessionId}, {"path", dir}}.dump(), "application/json");
         overlay::LogApiCall("POST /session/export");
     });

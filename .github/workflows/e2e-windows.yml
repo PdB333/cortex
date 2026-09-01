@@ -58,6 +58,7 @@ jobs:
           cmake -S . -B build/e2e-${{ matrix.arch }} -G Ninja
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DBUILD_TESTING=ON
+          -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
       - name: Build complete Cortex tree
         shell: msys2 {0}
