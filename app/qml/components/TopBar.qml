@@ -29,8 +29,53 @@ Rectangle {
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 11
+        anchors.leftMargin: 9
         spacing: 8
+
+        Item {
+            Layout.preferredWidth: 27
+            Layout.preferredHeight: 27
+
+            Canvas {
+                id: cortexMark
+                anchors.fill: parent
+                property color markColor: "#74777a"
+
+                onMarkColorChanged: requestPaint()
+                onWidthChanged: requestPaint()
+                onHeightChanged: requestPaint()
+                Component.onCompleted: requestPaint()
+
+                onPaint: {
+                    var ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.clearRect(0, 0, width, height)
+
+                    var cx = width * 0.53
+                    var cy = height * 0.5
+                    var radius = Math.min(width, height) * 0.31
+
+                    ctx.strokeStyle = markColor.toString()
+                    ctx.lineWidth = Math.max(3.5, width * 0.16)
+                    ctx.lineCap = "butt"
+                    ctx.beginPath()
+                    ctx.arc(cx, cy, radius, Math.PI * 0.24, Math.PI * 1.76, false)
+                    ctx.stroke()
+
+                    ctx.strokeStyle = markColor.toString()
+                    ctx.lineWidth = Math.max(1.5, width * 0.075)
+                    ctx.lineCap = "round"
+                    ctx.beginPath()
+                    ctx.moveTo(width * 0.05, cy)
+                    ctx.lineTo(cx - width * 0.08, cy)
+                    ctx.stroke()
+
+                    var square = Math.max(3.5, width * 0.16)
+                    ctx.fillStyle = markColor.toString()
+                    ctx.fillRect(cx - square * 0.5, cy - square * 0.5, square, square)
+                }
+            }
+        }
 
         Text {
             text: "Cortex"
@@ -335,7 +380,7 @@ Rectangle {
 
     ProcessPicker {
         id: processPicker
-        anchorX: 74
+        anchorX: 105
         anchorY: Theme.topBarHeight - 1
     }
 }
