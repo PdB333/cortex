@@ -2,14 +2,20 @@
 
 #include "ai_activity_controller.h"
 #include "api/mcp_protocol.h"
+#include "debug_provider.h"
+#include "services/crash_report_service.h"
+#include "services/operation_manager.h"
 #include "services/payload_client.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
 #include "target/session_manager.h"
+#include "veh_debug_provider.h"
+#include "windows_debug_provider.h"
 
 #include <nlohmann/json.hpp>
 
 #include <QByteArray>
+#include <QSettings>
 #include <QUuid>
 
 #include <algorithm>
@@ -18,6 +24,7 @@
 #include <cctype>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -25,1282 +32,213 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
-
 using json = nlohmann::json;
 using cortex::target::TargetDescriptor;
-
 constexpr std::size_t kMaxStdioMessageBytes = 4u * 1024u * 1024u;
 constexpr std::size_t kMaxConcurrentRequests = 64;
 
-struct TargetSelector {
-    std::optional<std::uint64_t> pid;
-    std::string process;
-};
-
-struct Options {
-    std::vector<TargetSelector> targets;
-    std::string toolProfile = "compact";
-    bool help = false;
-};
+struct TargetSelector { std::optional<uint64_t> pid; std::string process; };
+struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact"; bool help = false; };
 
 struct TargetRuntime {
     TargetDescriptor target;
     std::unique_ptr<cortex::target::SessionManager> sessions;
     std::unique_ptr<cortex::services::PayloadClient> payload;
+    std::string debuggerBackend;
+    std::unique_ptr<DebugProvider> debugger;
+    std::mutex debuggerMutex;
 };
-
 using TargetRuntimePtr = std::shared_ptr<TargetRuntime>;
 using RuntimeList = std::vector<TargetRuntimePtr>;
 
-struct RunState {
-    std::mutex outputMutex;
-    std::mutex activeMutex;
-    std::condition_variable activeChanged;
-    std::size_t active = 0;
+struct HostEvent {
+    uint64_t id = 0, timestampMs = 0;
+    std::string type, targetId;
+    uint64_t targetGeneration = 0;
+    json data = json::object();
+};
 
-    // shared_ptr snapshots keep a detached runtime alive until any in-flight
-    // request that already selected it has completed.
-    std::mutex runtimeMutex;
-    std::mutex targetMutationMutex;
-    // Dynamic targets can be attached after the MCP lifecycle handshake.
-    // Cache legacy initialize state so a newly attached runtime can be
-    // brought to the same protocol state before it becomes routable.
-    std::mutex protocolMutex;
+struct RunState {
+    std::mutex outputMutex, activeMutex, runtimeMutex, targetMutationMutex, protocolMutex;
+    std::condition_variable activeChanged;
+    size_t active = 0;
     std::optional<json> initializeMessage;
     bool initializedNotificationSeen = false;
     RuntimeList runtimes;
     cortex::target::Catalog* catalog = nullptr;
-    std::string runtimeDirectory;
-    std::string toolProfile;
-    std::atomic<std::uint64_t> activitySequence{1};
-    std::string activitySessionId;
-    std::string activityClientName = "MCP client";
-    std::string activityClientVersion;
+    std::string runtimeDirectory, toolProfile;
+
+    cortex::services::OperationManager operations;
+    std::mutex operationRouteMutex;
+    std::unordered_map<uint64_t, json> operationRequestIds;
+    std::unordered_map<std::string, uint64_t> requestOperations;
+    std::atomic<bool> watchdogRunning{false};
+    std::thread watchdog;
+
+    std::mutex eventMutex;
+    std::deque<HostEvent> events;
+    std::atomic<uint64_t> nextEventId{1};
+
+    std::atomic<uint64_t> activitySequence{1};
+    std::string activitySessionId, activityClientName = "MCP client", activityClientVersion;
 };
 
-std::string LowerAscii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
+std::string LowerAscii(std::string value) { std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c){return static_cast<char>(std::tolower(c));}); return value; }
+uint64_t NowMs() { return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()); }
+json MessageId(const json& message) { return message.is_object() && message.contains("id") ? message.at("id") : json(nullptr); }
+bool IsNotification(const json& message) { return message.is_object() && !message.contains("id"); }
+std::string RequestKey(const json& id) { return id.dump(); }
 
 void PrintUsage(std::ostream& stream) {
-    stream << "Cortex MCP stdio mode\n\n"
-           << "Usage:\n"
-           << "  cortex.exe mcp [--tools compact|all]\n"
+    stream << "Cortex MCP stdio mode\n\nUsage:\n  cortex.exe mcp [--tools compact|all]\n"
            << "  cortex.exe mcp --pid <pid> [--pid <pid> ...] [--tools compact|all]\n"
-           << "  cortex.exe mcp --process <name> [--process <name> ...] [--tools compact|all]\n"
-           << "  cortex.exe mcp --pid <pid> --process <name> [--tools compact|all]\n\n"
-           << "Without --pid/--process, Cortex starts targetless and exposes cortex_processes,\n"
-           << "cortex_attach, cortex_detach and cortex_targets so an MCP client can choose\n"
-           << "processes dynamically. --pid/--process remain startup auto-attach shortcuts.\n"
-           << "With multiple attached targets, normal tools/call requests select a target\n"
-           << "through the _cortex_target argument exposed in tools/list.\n";
+           << "  cortex.exe mcp --process <name> [--process <name> ...] [--tools compact|all]\n\n"
+           << "Without selectors Cortex starts targetless. Use cortex_processes/cortex_attach dynamically.\n";
 }
 
 bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
-    for (int index = 2; index < argc; ++index) {
-        const std::string argument = argv[index] ? argv[index] : "";
-        if (argument == "--help" || argument == "-h") {
-            options.help = true;
-            continue;
-        }
-        if (argument == "--pid" && index + 1 < argc) {
-            const std::string value = argv[++index] ? argv[index] : "";
-            try {
-                std::size_t consumed = 0;
-                const auto pid = std::stoull(value, &consumed, 10);
-                if (consumed != value.size() || pid == 0) throw std::invalid_argument("pid");
-                TargetSelector selector;
-                selector.pid = static_cast<std::uint64_t>(pid);
-                options.targets.push_back(std::move(selector));
-            } catch (...) {
-                error = "--pid must be a positive integer";
-                return false;
-            }
-            continue;
-        }
-        if (argument == "--process" && index + 1 < argc) {
-            TargetSelector selector;
-            selector.process = argv[++index] ? argv[index] : "";
-            if (selector.process.empty()) {
-                error = "--process requires a non-empty process name";
-                return false;
-            }
-            options.targets.push_back(std::move(selector));
-            continue;
-        }
-        if (argument == "--tools" && index + 1 < argc) {
-            options.toolProfile = argv[++index] ? argv[index] : "";
-            if (options.toolProfile != "compact" && options.toolProfile != "all") {
-                error = "--tools must be compact or all";
-                return false;
-            }
-            continue;
-        }
-        error = "unknown or incomplete argument: " + argument;
-        return false;
+    for (int i=2;i<argc;++i) {
+        const std::string a=argv[i]?argv[i]:"";
+        if (a=="--help"||a=="-h") { options.help=true; continue; }
+        if (a=="--pid"&&i+1<argc) { try { std::string v=argv[++i]?argv[i]:""; size_t used=0; auto pid=std::stoull(v,&used,10); if(used!=v.size()||pid==0)throw std::invalid_argument("pid"); TargetSelector s;s.pid=pid;options.targets.push_back(std::move(s)); } catch(...) { error="--pid must be a positive integer"; return false; } continue; }
+        if (a=="--process"&&i+1<argc) { TargetSelector s;s.process=argv[++i]?argv[i]:""; if(s.process.empty()){error="--process requires a non-empty process name";return false;} options.targets.push_back(std::move(s)); continue; }
+        if (a=="--tools"&&i+1<argc) { options.toolProfile=argv[++i]?argv[i]:""; if(options.toolProfile!="compact"&&options.toolProfile!="all"){error="--tools must be compact or all";return false;} continue; }
+        error="unknown or incomplete argument: "+a; return false;
     }
-
     return true;
 }
 
-std::optional<TargetDescriptor> ResolveUniqueTarget(const TargetSelector& selector,
-                                                     const std::vector<TargetDescriptor>& targets,
-                                                     std::string& error) {
-    if (selector.pid) {
-        const auto found = std::find_if(targets.begin(), targets.end(), [&](const TargetDescriptor& target) {
-            return target.processId == *selector.pid;
-        });
-        if (found == targets.end()) {
-            error = "target pid not found: " + std::to_string(*selector.pid);
-            return std::nullopt;
-        }
-        return *found;
-    }
-
-    const std::string wanted = LowerAscii(selector.process);
-    std::vector<TargetDescriptor> exact;
-    std::vector<TargetDescriptor> partial;
-    for (const auto& target : targets) {
-        const std::string name = LowerAscii(target.name);
-        if (name == wanted) exact.push_back(target);
-        else if (name.find(wanted) != std::string::npos) partial.push_back(target);
-    }
-
-    const auto& matches = exact.empty() ? partial : exact;
-    if (matches.empty()) {
-        error = "process not found: " + selector.process;
-        return std::nullopt;
-    }
-    if (matches.size() > 1) {
-        error = "process target is ambiguous: " + selector.process + " (matching pids";
-        const std::size_t shown = std::min<std::size_t>(matches.size(), 8);
-        for (std::size_t index = 0; index < shown; ++index)
-            error += (index == 0 ? " " : ", ") + std::to_string(matches[index].processId);
-        if (matches.size() > shown) error += ", ...";
-        error += "); use --pid";
-        return std::nullopt;
-    }
-    return matches.front();
+std::optional<TargetDescriptor> ResolveUniqueTarget(const TargetSelector& selector, const std::vector<TargetDescriptor>& targets, std::string& error) {
+    if (selector.pid) { for(const auto& t:targets) if(t.processId==*selector.pid) return t; error="target pid not found: "+std::to_string(*selector.pid); return std::nullopt; }
+    const std::string wanted=LowerAscii(selector.process); std::vector<TargetDescriptor> exact,partial;
+    for(const auto& t:targets){const std::string n=LowerAscii(t.name); if(n==wanted)exact.push_back(t); else if(n.find(wanted)!=std::string::npos)partial.push_back(t);} const auto& matches=exact.empty()?partial:exact;
+    if(matches.empty()){error="process not found: "+selector.process;return std::nullopt;} if(matches.size()>1){error="process target is ambiguous; use --pid";return std::nullopt;} return matches.front();
 }
 
-json MessageId(const json& message) {
-    if (message.is_object() && message.contains("id")) return message.at("id");
-    return nullptr;
-}
-
-bool IsNotification(const json& message) {
-    return message.is_object() && !message.contains("id");
-}
-
-json TransportError(const json& id, const std::string& code, const std::string& message) {
-    return {
-        {"jsonrpc", "2.0"},
-        {"id", id},
-        {"error", {
-            {"code", -32000},
-            {"message", message},
-            {"data", {{"code", code}}}
-        }}
-    };
-}
-
-void WriteOutput(const std::shared_ptr<RunState>& state, const json& response) {
-    std::lock_guard<std::mutex> lock(state->outputMutex);
-    std::cout << response.dump() << '\n';
-    std::cout.flush();
-}
-
-bool ReserveWorker(const std::shared_ptr<RunState>& state) {
-    std::lock_guard<std::mutex> lock(state->activeMutex);
-    if (state->active >= kMaxConcurrentRequests) return false;
-    ++state->active;
-    return true;
-}
-
-void ReleaseWorker(const std::shared_ptr<RunState>& state) {
-    {
-        std::lock_guard<std::mutex> lock(state->activeMutex);
-        if (state->active > 0) --state->active;
-    }
-    state->activeChanged.notify_all();
-}
-
-void WaitForWorkers(const std::shared_ptr<RunState>& state) {
-    std::unique_lock<std::mutex> lock(state->activeMutex);
-    state->activeChanged.wait(lock, [&] { return state->active == 0; });
-}
-
-std::uint64_t ActivityTimestampMs() {
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count());
-}
-
-std::string ActivityScalarText(const json& value) {
-    if (value.is_string()) return value.get<std::string>();
-    if (value.is_number_unsigned()) return std::to_string(value.get<std::uint64_t>());
-    if (value.is_number_integer()) return std::to_string(value.get<std::int64_t>());
-    if (value.is_number_float()) return std::to_string(value.get<double>());
-    if (value.is_boolean()) return value.get<bool>() ? "true" : "false";
-    return {};
-}
-
-bool IsSensitiveActivityKey(const std::string& key) {
-    const std::string lowered = LowerAscii(key);
-    return lowered.find("token") != std::string::npos ||
-           lowered.find("password") != std::string::npos ||
-           lowered.find("secret") != std::string::npos ||
-           lowered.find("authorization") != std::string::npos ||
-           lowered.find("credential") != std::string::npos ||
-           lowered.find("api_key") != std::string::npos ||
-           lowered.find("apikey") != std::string::npos ||
-           lowered.find("cookie") != std::string::npos;
-}
-
-void SanitizeActivityJson(json& value, int depth = 0) {
-    if (depth > 4) {
-        value = "<nested>";
-        return;
-    }
-    if (value.is_object()) {
-        for (auto it = value.begin(); it != value.end(); ++it) {
-            if (IsSensitiveActivityKey(it.key())) it.value() = "<redacted>";
-            else SanitizeActivityJson(it.value(), depth + 1);
-        }
-        return;
-    }
-    if (value.is_array()) {
-        if (value.size() > 24) {
-            value = "<array: " + std::to_string(value.size()) + " items>";
-            return;
-        }
-        for (auto& item : value) SanitizeActivityJson(item, depth + 1);
-        return;
-    }
-    if (value.is_string()) {
-        std::string text = value.get<std::string>();
-        if (text.size() > 320) {
-            text.resize(320);
-            text += "...";
-            value = std::move(text);
-        }
-    }
-}
-
-std::string CompactActivityDetails(const json& source, std::size_t maxBytes = 1400) {
-    json sanitized = source;
-    SanitizeActivityJson(sanitized);
-    std::string text = sanitized.dump();
-    if (text.size() > maxBytes) {
-        text.resize(maxBytes);
-        text += "...";
-    }
-    return text;
-}
+json TransportError(const json& id,const std::string& code,const std::string& message){return{{"jsonrpc","2.0"},{"id",id},{"error",{{"code",-32000},{"message",message},{"data",{{"code",code}}}}}};}
+void WriteOutput(const std::shared_ptr<RunState>& s,const json& r){std::lock_guard<std::mutex>l(s->outputMutex);std::cout<<r.dump()<<'\n';std::cout.flush();}
+bool ReserveWorker(const std::shared_ptr<RunState>&s){std::lock_guard<std::mutex>l(s->activeMutex);if(s->active>=kMaxConcurrentRequests)return false;++s->active;return true;}
+void ReleaseWorker(const std::shared_ptr<RunState>&s){{std::lock_guard<std::mutex>l(s->activeMutex);if(s->active)--s->active;}s->activeChanged.notify_all();}
+void WaitWorkers(const std::shared_ptr<RunState>&s){std::unique_lock<std::mutex>l(s->activeMutex);s->activeChanged.wait(l,[&]{return s->active==0;});}
 
 void PublishActivity(const std::shared_ptr<RunState>& state, json event) {
     if (!state || state->activitySessionId.empty()) return;
-    event["schema"] = "cortex.ai.activity.v1";
-    event["session_id"] = state->activitySessionId;
-    event["timestamp_ms"] = ActivityTimestampMs();
-    event["sequence"] = state->activitySequence.fetch_add(1, std::memory_order_relaxed);
-    {
-        std::lock_guard<std::mutex> lock(state->protocolMutex);
-        event["client"] = state->activityClientName;
-        if (!state->activityClientVersion.empty()) event["client_version"] = state->activityClientVersion;
-    }
-    cortex::app::PublishAiActivity(QByteArray::fromStdString(event.dump()), 5);
+    event["schema"]="cortex.ai.activity.v1"; event["session_id"]=state->activitySessionId; event["timestamp_ms"]=NowMs(); event["sequence"]=state->activitySequence.fetch_add(1);
+    {std::lock_guard<std::mutex>l(state->protocolMutex);event["client"]=state->activityClientName;if(!state->activityClientVersion.empty())event["client_version"]=state->activityClientVersion;}
+    cortex::app::PublishAiActivity(QByteArray::fromStdString(event.dump()),5);
 }
 
-void PublishSessionActivity(const std::shared_ptr<RunState>& state,
-                            const std::string& phase,
-                            const std::string& summary,
-                            const std::string& details = {}) {
-    json event = {{"kind", "session"}, {"phase", phase}, {"summary", summary}};
-    if (!details.empty()) event["details"] = details;
-    PublishActivity(state, std::move(event));
-}
+json ToolPayload(const json& value,bool isError=false){return{{"content",json::array({{{"type","text"},{"text",value.dump(2)}}})},{"structuredContent",value},{"isError",isError}};}
+json LocalToolResponse(const json&id,const json&value,bool isError=false){return{{"jsonrpc","2.0"},{"id",id},{"result",ToolPayload(value,isError)}};}
+json LocalToolFailure(const std::string&code,const std::string&message){return{{"ok",false},{"error",{{"code",code},{"message",message}}}};}
+
+RuntimeList RuntimeSnapshot(const std::shared_ptr<RunState>&s){std::lock_guard<std::mutex>l(s->runtimeMutex);return s->runtimes;}
+void RecordEvent(const std::shared_ptr<RunState>&s,const std::string&type,const TargetRuntimePtr&r,json data=json::object()) { HostEvent e;e.id=s->nextEventId.fetch_add(1);e.timestampMs=NowMs();e.type=type;if(r){e.targetId=r->target.id;e.targetGeneration=r->target.generation;}e.data=std::move(data);std::lock_guard<std::mutex>l(s->eventMutex);s->events.push_back(std::move(e));while(s->events.size()>2048)s->events.pop_front(); }
+json EventsJson(const std::shared_ptr<RunState>&s,uint64_t since,size_t limit,const TargetRuntimePtr&filter=nullptr){json out=json::array();std::lock_guard<std::mutex>l(s->eventMutex);for(const auto&e:s->events){if(e.id<=since)continue;if(filter&&(e.targetId!=filter->target.id||(filter->target.generation&&e.targetGeneration!=filter->target.generation)))continue;out.push_back({{"id",e.id},{"timestamp_ms",e.timestampMs},{"type",e.type},{"target_id",e.targetId},{"target_generation",e.targetGeneration},{"data",e.data}});if(out.size()>=limit)break;}return out;}
+
+bool PruneDeadRuntimes(const std::shared_ptr<RunState>&s){RuntimeList removed;{std::lock_guard<std::mutex>l(s->runtimeMutex);auto it=s->runtimes.begin();while(it!=s->runtimes.end()){auto r=*it;bool dead=!r||!r->sessions||!r->sessions->Active()||!r->sessions->Active()->Alive();if(!dead){++it;continue;}if(r)removed.push_back(r);it=s->runtimes.erase(it);}}for(auto&r:removed){if(r&&r->debugger){std::lock_guard<std::mutex>l(r->debuggerMutex);r->debugger->Detach();}RecordEvent(s,"target.exited",r,{{"reason","target_no_longer_alive"}});}return!removed.empty();}
+void EmitToolsChanged(const std::shared_ptr<RunState>&s){WriteOutput(s,{{"jsonrpc","2.0"},{"method","notifications/tools/list_changed"}});}
+
+json TargetJson(const TargetDescriptor&t,bool attached,bool alive=true){return{{"id",t.id},{"name",t.name},{"pid",t.processId},{"selector",std::to_string(t.processId)},{"platform",cortex::target::PlatformName(t.platform)},{"architecture",cortex::target::ArchitectureName(t.architecture)},{"generation",t.generation},{"executable_path",t.executablePath},{"window_title",t.windowTitle},{"attached",attached},{"alive",alive}};}
+std::string TargetSummary(const RuntimeList&rs){std::string out;for(size_t i=0;i<rs.size();++i){if(i)out+=", ";out+=rs[i]->target.name+" (PID "+std::to_string(rs[i]->target.processId)+")";}return out;}
+json TargetList(const RuntimeList&rs){json a=json::array();for(auto&r:rs)if(r)a.push_back(TargetJson(r->target,true,r->sessions&&r->sessions->Active()&&r->sessions->Active()->Alive()));return{{"ok",true},{"count",a.size()},{"targets",std::move(a)}};}
+
+TargetRuntimePtr ResolveRuntime(const RuntimeList&rs,const json&args,std::string&code,std::string&msg){code.clear();msg.clear();if(rs.empty()){code="no_attached_targets";msg="No Cortex targets are attached";return{};}if(!args.contains("_cortex_target")){if(rs.size()==1)return rs.front();code="cortex_target_required";msg="Multiple targets attached; set _cortex_target. Available: "+TargetSummary(rs);return{};}const json&s=args.at("_cortex_target");uint64_t pid=0;if(s.is_number_unsigned())pid=s.get<uint64_t>();else if(s.is_number_integer()&&s.get<int64_t>()>0)pid=static_cast<uint64_t>(s.get<int64_t>());if(pid)for(auto&r:rs)if(r->target.processId==pid)return r;if(s.is_string()){std::string wanted=s.get<std::string>();for(auto&r:rs)if(r->target.id==wanted)return r;try{size_t u=0;auto p=std::stoull(wanted,&u,10);if(u==wanted.size())for(auto&r:rs)if(r->target.processId==p)return r;}catch(...){}wanted=LowerAscii(wanted);TargetRuntimePtr exact;for(auto&r:rs)if(LowerAscii(r->target.name)==wanted){if(exact){code="cortex_target_ambiguous";msg="Process name matches more than one target";return{};}exact=r;}if(exact)return exact;}code="cortex_target_not_found";msg="Requested target is not attached. Available: "+TargetSummary(rs);return{};}
+
+uint64_t UnsignedArg(const json&a,const char*k,uint64_t fallback=0){const json*v=nullptr;if(a.contains(k))v=&a.at(k);else for(const char*c:{"_query","_path"})if(a.contains(c)&&a.at(c).is_object()&&a.at(c).contains(k)){v=&a.at(c).at(k);break;}if(!v)return fallback;if(v->is_number_unsigned())return v->get<uint64_t>();if(v->is_number_integer()){auto x=v->get<int64_t>();return x>0?static_cast<uint64_t>(x):fallback;}if(v->is_string())try{return std::stoull(v->get<std::string>(),nullptr,0);}catch(...){}return fallback;}
+bool ValidateGeneration(const TargetRuntimePtr&r,const json&a,std::string&code,std::string&msg){if(!r)return false;uint64_t wanted=UnsignedArg(a,"_cortex_generation");if(!wanted||!r->target.generation||wanted==r->target.generation)return true;code="stale_target_generation";msg="Target generation changed; reacquire cortex_targets before continuing";return false;}
+
+std::string ConfiguredDebuggerBackend(){QSettings s;QString v=s.value(QStringLiteral("preferences/debuggerBackend"),QStringLiteral("windows")).toString().trimmed().toLower();return v==QStringLiteral("veh")?"veh":"windows";}
+std::unique_ptr<DebugProvider>CreateDebugProvider(TargetRuntime&r,const std::string&b){if(!r.sessions||!r.payload)return{};if(b=="veh")return std::make_unique<VehDebugProvider>(*r.sessions,*r.payload);return std::make_unique<WindowsDebugProvider>(*r.sessions,r.payload.get());}
+
+json CapabilityDocument(const TargetRuntime&r){json tc=json::array();const auto caps=r.sessions&&r.sessions->Active()?r.sessions->Active()->Capabilities().Names():r.target.capabilities.Names();for(const auto&c:caps)tc.push_back(c);json dc=json::array();if(r.debugger)for(const auto&c:DebugCapabilityNames(r.debugger->Capabilities()))dc.push_back(c);return{{"schema","cortex.capabilities.v1"},{"target",{{"id",r.target.id},{"pid",r.target.processId},{"generation",r.target.generation},{"features",tc}}},{"debugger",{{"backend",r.debuggerBackend},{"in_process",r.debugger?r.debugger->UsesInjectedRuntime():false},{"ready",r.debugger?r.debugger->Ready():false},{"features",dc}}},{"runtime",{{"connected",r.payload&&r.payload->Ready()},{"features",json::array({"runtime.health","runtime.hooks.observe","runtime.crash_report"})}}},{"operations",{{"tracking",true},{"cancellation","cooperative"},{"timeouts",true}}}};}
+
+json LocalTools(bool requireTarget=false){json t=json::array({
+{{"name","cortex_processes"},{"description","List local processes Cortex can discover."},{"inputSchema",{{"type","object"},{"properties",{{"query",{{"type","string"}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",2048}}}}},{"additionalProperties",false}}},{"_cortex",{{"host_control",true},{"read_only",true}}}},
+{{"name","cortex_attach"},{"description","Attach one local process to this MCP connection."},{"inputSchema",{{"type","object"},{"properties",{{"pid",{{"type","integer"},{"minimum",1}}},{"process",{{"type","string"},{"minLength",1}}}}},{"oneOf",json::array({{{"required",json::array({"pid"})}},{{"required",json::array({"process"})}}})}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_detach"},{"description","Detach one target."},{"inputSchema",{{"type","object"},{"properties",{{"_cortex_target",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}},{"_cortex_generation",{{"type","integer"},{"minimum",1}}}}}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_targets"},{"description","List attached targets with process-lifetime generation ids."},{"inputSchema",{{"type","object"},{"properties",json::object()},{"additionalProperties",false}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_capabilities"},{"description","Return normalized target/debugger/runtime capabilities."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_debugger_backend"},{"description","Read or explicitly select the debugger backend for one target. Windows is external/recommended; VEH is in-process."},{"inputSchema",{{"type","object"},{"properties",{{"backend",{{"type","string"},{"enum",json::array({"windows","veh"})}}}}}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_operations"},{"description","List recent tracked Cortex operations and their state/progress/timeout."},{"inputSchema",{{"type","object"},{"properties",{{"limit",{{"type","integer"},{"minimum",1},{"maximum",512}}}}}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_operation_cancel"},{"description","Request cooperative cancellation of a running Cortex operation."},{"inputSchema",{{"type","object"},{"properties",{{"operation_id",{{"type","integer"},{"minimum",1}}}}},{"required",json::array({"operation_id"})}}}},
+{{"name","cortex_events"},{"description","Read bounded host target/debugger/operation event history."},{"inputSchema",{{"type","object"},{"properties",{{"since_id",{{"type","integer"},{"minimum",0}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",512}}},{"_cortex_target",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}}}}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_crash_report"},{"description","Load the latest Cortex diagnostics crash bundle for a target and recent host events."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_hooks"},{"description","Inspect the runtime HookManager registry, ownership, conflicts and hit/exception counters."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}}
+});
+const json selector={{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})},{"description","Attached target PID, id, or unique process name."}};
+for(size_t index:{size_t{2},size_t{4},size_t{5},size_t{8},size_t{9},size_t{10}}){auto&schema=t[index]["inputSchema"];if(!schema.contains("properties")||!schema["properties"].is_object())schema["properties"]=json::object();schema["properties"]["_cortex_target"]=selector;schema["properties"]["_cortex_generation"]={{"type","integer"},{"minimum",1},{"description","Optional process-lifetime generation from cortex_targets."}};if(requireTarget)schema["required"]=json::array({"_cortex_target"});}
+return t;}
+
+void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
+
+bool HandleLocalProtocol(const std::shared_ptr<RunState>&s,const json&m,json&r,bool&has){api::mcp_protocol::Handler h;h.profile=s->toolProfile=="compact"?api::mcp_protocol::ToolProfile::Compact:api::mcp_protocol::ToolProfile::All;h.listTools=[](auto){return LocalTools();};auto z=api::mcp_protocol::Handle(m,h);r=z.response;has=z.hasResponse;if(has&&m.is_object()&&(m.value("method",std::string())=="initialize"||m.value("method",std::string())=="server/discover"))PatchHandshake(r,RuntimeSnapshot(s).size());return true;}
+void RememberInitialize(const std::shared_ptr<RunState>&s,const json&m){std::lock_guard<std::mutex>l(s->protocolMutex);s->initializeMessage=m;s->initializedNotificationSeen=false;if(m.contains("params")&&m["params"].is_object()&&m["params"].contains("clientInfo")&&m["params"]["clientInfo"].is_object()){s->activityClientName=m["params"]["clientInfo"].value("name",s->activityClientName);s->activityClientVersion=m["params"]["clientInfo"].value("version",std::string());}}
+void RememberInitialized(const std::shared_ptr<RunState>&s){std::lock_guard<std::mutex>l(s->protocolMutex);s->initializedNotificationSeen=true;}
+
+bool PrimeRuntime(const std::shared_ptr<RunState>&s,const TargetRuntimePtr&r,std::string&error){std::optional<json>init;bool initialized=false;{std::lock_guard<std::mutex>l(s->protocolMutex);init=s->initializeMessage;initialized=s->initializedNotificationSeen;}if(!init)return true;json rr;bool has=false;if(!r->payload->ForwardMcp(*init,s->toolProfile,rr,has,&error))return false;if(initialized){json n={{"jsonrpc","2.0"},{"method","notifications/initialized"}};if(!r->payload->ForwardMcp(n,s->toolProfile,rr,has,&error))return false;}return true;}
+
+TargetRuntimePtr CreateRuntime(cortex::target::Catalog&catalog,const TargetDescriptor&t,const std::string&dir,std::string&code,std::string&msg){auto r=std::make_shared<TargetRuntime>();r->target=t;r->sessions=std::make_unique<cortex::target::SessionManager>(catalog);std::string e;if(!r->sessions->Attach(t,&e)){code="target_attach_failed";msg=e;return{};}r->payload=std::make_unique<cortex::services::PayloadClient>(*r->sessions,dir);if(!r->payload->EnsureReady(&e)){code="target_runtime_unavailable";msg=e;return{};}r->debuggerBackend=ConfiguredDebuggerBackend();r->debugger=CreateDebugProvider(*r,r->debuggerBackend);if(!r->debugger){code="debugger_provider_unavailable";msg="Could not create debugger provider";return{};}return r;}
+
+json ProcessList(const std::shared_ptr<RunState>&s,const json&a,std::string&code,std::string&msg){if(!s->catalog){code="target_catalog_unavailable";msg="Local target catalog unavailable";return{};}std::string q;if(a.contains("query")&&a["query"].is_string())q=LowerAscii(a["query"].get<std::string>());size_t limit=static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",256),1,2048));auto attached=RuntimeSnapshot(s);json rows=json::array();size_t total=0;for(const auto&t:s->catalog->Targets()){if(!q.empty()&&LowerAscii(t.name+"\n"+t.executablePath+"\n"+t.windowTitle+"\n"+t.id).find(q)==std::string::npos)continue;++total;if(rows.size()>=limit)continue;bool isAttached=false;for(auto&r:attached)if(r->target.id==t.id&&(!r->target.generation||!t.generation||r->target.generation==t.generation))isAttached=true;rows.push_back(TargetJson(t,isAttached));}return{{"ok",true},{"count",rows.size()},{"total_matches",total},{"truncated",total>rows.size()},{"processes",rows}};}
+
+json OperationJson(const cortex::services::OperationSnapshot&o){return{{"id",o.id},{"kind",o.kind},{"target_id",o.targetId},{"target_generation",o.targetGeneration},{"state",cortex::services::OperationStateName(o.state)},{"started_ms",o.startedMs},{"updated_ms",o.updatedMs},{"timeout_ms",o.timeoutMs},{"progress",o.progress},{"cancellable",o.cancellable},{"message",o.message},{"error",o.error}};}
+json RegistersJson(const cortex::target::ThreadRegisterSnapshot&s){json r=json::object();for(const auto&v:s.registers)r[LowerAscii(v.name)]=v.value;return r;}
+json BreakpointJson(const DebugBreakpointInfo&b){return{{"id",b.id},{"kind",b.kind},{"address",b.address},{"size",b.size},{"action",b.pauseOnHit?"pause":"log"},{"hit_count",b.hitCount},{"process_global",b.processGlobal},{"target_thread_id",b.targetThreadId},{"applied_threads",b.appliedThreads},{"total_threads",b.totalThreads},{"coverage_complete",b.totalThreads==0||b.appliedThreads>=b.totalThreads}};}
+
+bool IsProviderDebugTool(const std::string&n){return n=="debug_threads"||n=="debug_registers"||n=="debug_breakpoint_add"||n=="debug_breakpoint_delete"||n=="debug_breakpoint_list"||n=="debug_breakpoint_log"||n=="debug_paused"||n=="debug_pause"||n=="debug_continue"||n=="debug_step"||n=="debug_step_over";}
+std::string AddressExpr(const json&a){const json*v=nullptr;if(a.contains("address"))v=&a["address"];if(!v)return{};if(v->is_string())return v->get<std::string>();if(v->is_number_unsigned())return std::to_string(v->get<uint64_t>());if(v->is_number_integer())return std::to_string(v->get<int64_t>());return{};}
+json DebugEnvelope(json result,int status=200){return{{"status",status},{"result",std::move(result)}};}
+
+bool HandleProviderDebug(const TargetRuntimePtr&r,const json&m,const std::string&name,const json&a,json&response){if(!r||!r->debugger||!IsProviderDebugTool(name))return false;const bool mut=name=="debug_breakpoint_add"||name=="debug_breakpoint_delete"||name=="debug_pause"||name=="debug_continue"||name=="debug_step"||name=="debug_step_over";if(mut&&!a.value("mutation_permission",false)){response=LocalToolResponse(MessageId(m),DebugEnvelope({{"ok",false},{"error","mutation_permission_required"}},403),true);return true;}std::lock_guard<std::mutex>lock(r->debuggerMutex);std::string e;if(!r->debugger->Ready()&&!r->debugger->Attach(&e)){response=LocalToolResponse(MessageId(m),DebugEnvelope({{"ok",false},{"error",e.empty()?"debugger_attach_failed":e}},409),true);return true;}json result={{"ok",true},{"backend",r->debuggerBackend}};
+if(name=="debug_threads"){json ids=json::array();for(auto id:r->debugger->Threads(&e))ids.push_back(id);if(e.empty())result["thread_ids"]=ids;}
+else if(name=="debug_registers"){uint64_t tid=UnsignedArg(a,"thread_id");cortex::target::ThreadRegisterSnapshot s;if(!tid||!r->debugger->GetRegisters(tid,s,&e))result={{"ok",false},{"error",e.empty()?"thread_not_readable":e}};else result["registers"]=RegistersJson(s);}
+else if(name=="debug_breakpoint_add"){if(a.contains("condition")||a.contains("if")||a.contains("capture")||a.value("auto_capture",false))result={{"ok",false},{"error","debugger_capability_unsupported"},{"message","selected backend does not support conditional/capture breakpoints"}};else{std::string addr=AddressExpr(a);int id=addr.empty()?-1:r->debugger->SetBreakpoint(addr,a.value("kind",std::string("software")),a.value("size",4),a.value("action",std::string("pause"))=="pause",a.value("process_global",true),UnsignedArg(a,"thread_id"),&e);if(id<0)result={{"ok",false},{"error",e.empty()?"add_breakpoint_failed":e}};else result["id"]=id;}}
+else if(name=="debug_breakpoint_delete"){int id=static_cast<int>(UnsignedArg(a,"id"));if(id<=0||!r->debugger->RemoveBreakpoint(id,&e))result={{"ok",false},{"error",e.empty()?"remove_breakpoint_failed":e}};}
+else if(name=="debug_breakpoint_list"){json rows=json::array();for(const auto&b:r->debugger->Breakpoints(&e))rows.push_back(BreakpointJson(b));if(e.empty())result["breakpoints"]=rows;}
+else if(name=="debug_breakpoint_log"){int id=static_cast<int>(UnsignedArg(a,"id"));uint64_t since=UnsignedArg(a,"since_seq",0);size_t limit=static_cast<size_t>(std::min<uint64_t>(UnsignedArg(a,"limit",500),500));json rows=json::array();for(const auto&x:r->debugger->BreakpointLog(id,since,limit,&e))rows.push_back({{"seq",x.seq},{"thread_id",x.threadId},{"timestamp_ms",x.timestampMs},{"instruction",x.instruction},{"registers",RegistersJson(x.registers)}});uint64_t total=0;for(const auto&b:r->debugger->Breakpoints(nullptr))if(b.id==id)total=b.hitCount;if(e.empty())result.update({{"entries",rows},{"returned",rows.size()},{"dropped_entries",0},{"total_hits",total},{"next_seq",rows.empty()?since:rows.back().value("seq",since)+1}});}
+else if(name=="debug_paused"){json rows=json::array();for(const auto&p:r->debugger->PausedThreads(&e))rows.push_back({{"thread_id",p.threadId},{"breakpoint_id",p.breakpointId},{"registers",RegistersJson(p.registers)}});if(e.empty())result["threads"]=rows;}
+else{uint64_t tid=UnsignedArg(a,"thread_id");cortex::target::ThreadRegisterSnapshot s;bool ok=false;if(name=="debug_pause")ok=r->debugger->Pause(tid,s,&e);else if(name=="debug_continue")ok=r->debugger->Resume(tid,&e);else if(name=="debug_step")ok=r->debugger->Step(tid,static_cast<uint32_t>(std::clamp<uint64_t>(UnsignedArg(a,"timeout_ms",5000),100,120000)),s,&e);else ok=r->debugger->StepOver(tid,static_cast<uint32_t>(std::clamp<uint64_t>(UnsignedArg(a,"timeout_ms",5000),100,120000)),s,&e);if(!ok)result={{"ok",false},{"error",e.empty()?"debug_operation_failed":e}};else if(name!="debug_continue")result["registers"]=RegistersJson(s);}
+if(!e.empty()&&result.value("ok",true))result={{"ok",false},{"error",e}};bool failed=!result.value("ok",false);response=LocalToolResponse(MessageId(m),DebugEnvelope(std::move(result),failed?409:200),failed);return true;}
+
+void BroadcastCancel(const std::shared_ptr<RunState>&s,const json&id){json n={{"jsonrpc","2.0"},{"method","notifications/cancelled"},{"params",{{"requestId",id},{"reason","cancelled by Cortex operation manager"}}}};for(auto&r:RuntimeSnapshot(s)){if(!r||!r->payload||!r->payload->Ready())continue;json rr;bool has=false;std::string e;r->payload->ForwardMcp(n,s->toolProfile,rr,has,&e);}}
+void RegisterOpRoute(const std::shared_ptr<RunState>&s,uint64_t op,const json&id){if(!op||id.is_null())return;std::lock_guard<std::mutex>l(s->operationRouteMutex);s->operationRequestIds[op]=id;s->requestOperations[RequestKey(id)]=op;}
+void ForgetOpRoute(const std::shared_ptr<RunState>&s,uint64_t op){std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end()){s->requestOperations.erase(RequestKey(it->second));s->operationRequestIds.erase(it);}}
+
+bool HandleLocalTool(const std::shared_ptr<RunState>&s,const json&m,const std::string&name,const json&a,json&response){const bool local=name.rfind("cortex_",0)==0;if(!local)return false;if(PruneDeadRuntimes(s))EmitToolsChanged(s);
+if(name=="cortex_targets"){response=LocalToolResponse(MessageId(m),TargetList(RuntimeSnapshot(s)));return true;}
+if(name=="cortex_processes"){std::string c,x;auto r=ProcessList(s,a,c,x);response=c.empty()?LocalToolResponse(MessageId(m),r):LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
+if(name=="cortex_operations"){json rows=json::array();for(const auto&o:s->operations.List(static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",128),1,512))))rows.push_back(OperationJson(o));response=LocalToolResponse(MessageId(m),{{"ok",true},{"count",rows.size()},{"operations",rows}});return true;}
+if(name=="cortex_operation_cancel"){uint64_t op=UnsignedArg(a,"operation_id");std::string e;if(!op||!s->operations.RequestCancel(op,&e)){response=LocalToolResponse(MessageId(m),LocalToolFailure(e.empty()?"invalid_operation_id":e,e.empty()?"operation_id must identify a running operation":e),true);return true;}json id;{std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end())id=it->second;}if(!id.is_null())BroadcastCancel(s,id);RecordEvent(s,"operation.cancel_requested",nullptr,{{"operation_id",op}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"operation_id",op},{"state","cancel_requested"}});return true;}
+if(name=="cortex_attach"){std::lock_guard<std::mutex>ml(s->targetMutationMutex);bool hp=a.contains("pid"),hn=a.contains("process");if(hp==hn){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_attach_selector","Provide exactly one of pid or process"),true);return true;}TargetSelector sel;if(hp){auto p=UnsignedArg(a,"pid");if(!p){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_pid","pid must be positive"),true);return true;}sel.pid=p;}else{if(!a["process"].is_string()||a["process"].get<std::string>().empty()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_process","process must be non-empty"),true);return true;}sel.process=a["process"].get<std::string>();}std::string er;auto target=ResolveUniqueTarget(sel,s->catalog->Targets(),er);if(!target){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_not_found",er),true);return true;}for(auto&r:RuntimeSnapshot(s))if(r->target.id==target->id&&(!r->target.generation||!target->generation||r->target.generation==target->generation)){response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","already_attached"},{"target",TargetJson(r->target,true)}});return true;}std::string c,x;auto r=CreateRuntime(*s->catalog,*target,s->runtimeDirectory,c,x);if(!r){response=LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}if(!PrimeRuntime(s,r,x)){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_protocol_init_failed",x),true);return true;}{std::lock_guard<std::mutex>l(s->runtimeMutex);s->runtimes.erase(std::remove_if(s->runtimes.begin(),s->runtimes.end(),[&](auto&old){return old&&old->target.id==r->target.id&&old->target.generation!=r->target.generation;}),s->runtimes.end());s->runtimes.push_back(r);}RecordEvent(s,"target.attached",r,{{"debugger_backend",r->debuggerBackend}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","attached"},{"target",TargetJson(r->target,true)},{"debugger_backend",r->debuggerBackend},{"count",RuntimeSnapshot(s).size()}});EmitToolsChanged(s);return true;}
+
+std::string c,x;auto r=ResolveRuntime(RuntimeSnapshot(s),a,c,x);if(!r||!ValidateGeneration(r,a,c,x)){response=LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
+if(name=="cortex_capabilities"){response=LocalToolResponse(MessageId(m),{{"ok",true},{"capabilities",CapabilityDocument(*r)}});return true;}
+if(name=="cortex_debugger_backend"){if(a.contains("backend")){if(!a["backend"].is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_debugger_backend","backend must be windows or veh"),true);return true;}const std::string backend=LowerAscii(a["backend"].get<std::string>());if(backend!="windows"&&backend!="veh"){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_debugger_backend","backend must be windows or veh"),true);return true;}std::lock_guard<std::mutex>dl(r->debuggerMutex);if(r->debugger)r->debugger->Detach();r->debuggerBackend=backend;r->debugger=CreateDebugProvider(*r,backend);if(!r->debugger){response=LocalToolResponse(MessageId(m),LocalToolFailure("debugger_provider_unavailable","Could not create selected debugger provider"),true);return true;}RecordEvent(s,"debugger.backend_selected",r,{{"backend",backend}});}response=LocalToolResponse(MessageId(m),{{"ok",true},{"backend",r->debuggerBackend},{"capabilities",CapabilityDocument(*r)}});return true;}
+if(name=="cortex_events"){auto ev=EventsJson(s,UnsignedArg(a,"since_id"),static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",128),1,512)),r);response=LocalToolResponse(MessageId(m),{{"ok",true},{"count",ev.size()},{"events",ev}});return true;}
+if(name=="cortex_hooks"){std::string e;json out;if(!r->payload->Ready())r->payload->TryConnectExisting(&e);if(!r->payload->Ready()||!r->payload->CallRouteExisting("GET","/diagnostics/hooks",json::object(),out,&e)){response=LocalToolResponse(MessageId(m),LocalToolFailure("hook_registry_unavailable",e.empty()?"runtime hook registry not connected":e),true);return true;}response=LocalToolResponse(MessageId(m),{{"ok",true},{"target",TargetJson(r->target,true)},{"hook_manager",out}});return true;}
+if(name=="cortex_crash_report"){QSettings qs;std::string configured=qs.value(QStringLiteral("preferences/diagnosticsCrashDirectory"),QString()).toString().trimmed().toStdString();std::string e;auto bundle=cortex::services::CrashReportService::Latest(cortex::services::CrashReportService::DefaultRoots(s->runtimeDirectory,r->target.architecture,configured),r->target.processId,&e);json out={{"ok",e.empty()},{"found",bundle.found},{"target",TargetJson(r->target,true)},{"recent_events",EventsJson(s,0,64,r)}};if(bundle.found){out["directory"]=bundle.directory.u8string();out["report"]=bundle.report;out["symbolized"]=bundle.symbolized;out["hooks"]=bundle.hooks;out["breadcrumbs"]=bundle.breadcrumbs;}if(!e.empty())out["error"]=e;response=LocalToolResponse(MessageId(m),out,!e.empty());return true;}
+if(name=="cortex_detach"){{std::lock_guard<std::mutex>ml(s->targetMutationMutex);if(r->debugger){std::lock_guard<std::mutex>dl(r->debuggerMutex);r->debugger->Detach();}{std::lock_guard<std::mutex>l(s->runtimeMutex);s->runtimes.erase(std::remove_if(s->runtimes.begin(),s->runtimes.end(),[&](auto&v){return v&&v->target.id==r->target.id&&v->target.generation==r->target.generation;}),s->runtimes.end());}}RecordEvent(s,"target.detached",r);response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","detached"},{"target",TargetJson(r->target,false)},{"count",RuntimeSnapshot(s).size()}});EmitToolsChanged(s);return true;}
+response=LocalToolResponse(MessageId(m),LocalToolFailure("unknown_host_tool","Unknown Cortex host-control tool"),true);return true;}
+
+void AugmentTools(json&r,const RuntimeList&rs){if(!r.is_object()||!r.contains("result")||!r["result"].is_object()||!r["result"].contains("tools")||!r["result"]["tools"].is_array())return;bool req=rs.size()>1;json out=LocalTools(req);std::string d="Select target by PID/id/name. Available: "+TargetSummary(rs);for(auto tool:r["result"]["tools"]){if(!tool.is_object()){out.push_back(tool);continue;}auto&schema=tool["inputSchema"];if(!schema.is_object())schema={{"type","object"},{"properties",json::object()}};if(!schema.contains("properties")||!schema["properties"].is_object())schema["properties"]=json::object();schema["properties"]["_cortex_target"]={{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})},{"description",d}};schema["properties"]["_cortex_generation"]={{"type","integer"},{"minimum",1},{"description","Optional generation from cortex_targets; stale generations are rejected."}};schema["properties"]["_cortex_timeout_ms"]={{"type","integer"},{"minimum",100},{"maximum",120000},{"description","Optional cooperative operation timeout."}};if(req){if(!schema.contains("required")||!schema["required"].is_array())schema["required"]=json::array();if(std::find(schema["required"].begin(),schema["required"].end(),"_cortex_target")==schema["required"].end())schema["required"].push_back("_cortex_target");}tool["_cortex"]["target_routed"]=true;out.push_back(std::move(tool));}r["result"]["tools"]=std::move(out);}
+
+bool ForwardOne(const std::shared_ptr<RunState>&s,const json&m,json&r,bool&has,std::string*error){r=json();has=false;if(error)error->clear();if(PruneDeadRuntimes(s))EmitToolsChanged(s);auto rs=RuntimeSnapshot(s);if(!m.is_object()){if(rs.empty())return HandleLocalProtocol(s,m,r,has);return rs.front()->payload->ForwardMcp(m,s->toolProfile,r,has,error);}if(IsNotification(m)){std::string method=m.value("method",std::string());if(method=="notifications/initialized")RememberInitialized(s);if(method=="notifications/cancelled"&&m.contains("params")&&m["params"].is_object()&&m["params"].contains("requestId")){std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->requestOperations.find(RequestKey(m["params"]["requestId"]));if(it!=s->requestOperations.end())s->operations.RequestCancel(it->second,nullptr);}if(rs.empty())return HandleLocalProtocol(s,m,r,has);std::string first;for(auto&runtime:rs){json rr;bool h=false;std::string e;if(runtime->payload->ForwardMcp(m,s->toolProfile,rr,h,&e)){if(!has&&h){r=rr;has=true;}}else if(first.empty())first=e;}if(!first.empty()&&!has){if(error)*error=first;return false;}return true;}
+std::string method=m.value("method",std::string());if(method=="initialize"){std::lock_guard<std::mutex>ml(s->targetMutationMutex);RememberInitialize(s,m);for(auto&runtime:RuntimeSnapshot(s)){json rr;bool h=false;std::string e;runtime->payload->ForwardMcp(m,s->toolProfile,rr,h,&e);}return HandleLocalProtocol(s,m,r,has);}if(method=="server/discover"||method=="ping")return HandleLocalProtocol(s,m,r,has);if(method=="tools/list"){if(rs.empty())return HandleLocalProtocol(s,m,r,has);std::string first;for(auto&runtime:rs){std::string e;if(runtime->payload->ForwardMcp(m,s->toolProfile,r,has,&e)){if(has)AugmentTools(r,rs);return true;}if(first.empty())first=e;}HandleLocalProtocol(s,m,r,has);if(has)r["result"]["_cortex"]={{"runtime_catalog_available",false},{"runtime_catalog_error",first}};return true;}
+if(method=="tools/call"){json p=m.value("params",json::object());std::string name=p.is_object()?p.value("name",std::string()):std::string();json a=p.is_object()?p.value("arguments",json::object()):json::object();if(!a.is_object()){r=TransportError(MessageId(m),"invalid_arguments","tools/call arguments must be object");has=true;return true;}if(HandleLocalTool(s,m,name,a,r)){has=true;return true;}std::string c,x;auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,c,x);if(!runtime){if(c=="no_attached_targets")x+=". Use cortex_processes and cortex_attach.";r=TransportError(MessageId(m),c,x);has=true;return true;}if(!ValidateGeneration(runtime,a,c,x)){r=TransportError(MessageId(m),c,x);has=true;return true;}if(IsProviderDebugTool(name)&&HandleProviderDebug(runtime,m,name,a,r)){has=true;return true;}json routed=m;auto&ra=routed["params"]["arguments"];ra.erase("_cortex_target");ra.erase("_cortex_generation");ra.erase("_cortex_timeout_ms");if(!runtime->payload->ForwardMcp(routed,s->toolProfile,r,has,error))return false;if(has&&r.is_object()&&r.contains("result")&&r["result"].is_object()&&r["result"].contains("structuredContent")&&r["result"]["structuredContent"].is_object()){r["result"]["structuredContent"]["_cortex_target"]=runtime->target.id;r["result"]["structuredContent"]["_cortex_generation"]=runtime->target.generation;}return true;}
+if(rs.empty())return HandleLocalProtocol(s,m,r,has);return rs.front()->payload->ForwardMcp(m,s->toolProfile,r,has,error);}
+
+bool ResponseFailed(const json&r){return r.is_object()&&(r.contains("error")||(r.contains("result")&&r["result"].is_object()&&r["result"].value("isError",false)));}
+void ForwardObserved(const json&m,const std::shared_ptr<RunState>&s){json args=json::object();std::string name;if(m.is_object()&&m.value("method",std::string())=="tools/call"){auto p=m.value("params",json::object());name=p.value("name",std::string());args=p.value("arguments",json::object());}TargetRuntimePtr runtime;std::string c,x;if(!name.empty()&&args.is_object())runtime=ResolveRuntime(RuntimeSnapshot(s),args,c,x);uint64_t timeout=std::clamp<uint64_t>(UnsignedArg(args,"_cortex_timeout_ms",30000),100,120000);uint64_t op=s->operations.Start(name.empty()?m.value("method",std::string("request")):name,runtime?runtime->target.id:"",runtime?runtime->target.generation:0,timeout,true);RegisterOpRoute(s,op,MessageId(m));PublishActivity(s,{{"kind","tool"},{"phase","started"},{"tool",name},{"request_id",MessageId(m)},{"operation_id",op}});json r;bool has=false;std::string e;bool ok=ForwardOne(s,m,r,has,&e);auto snap=s->operations.Get(op);if(snap&&snap->state==cortex::services::OperationState::CancelRequested)s->operations.MarkCancelled(op);else if(!ok)s->operations.Fail(op,e);else if(has&&ResponseFailed(r))s->operations.Fail(op,"tool_failed");else s->operations.Complete(op);PublishActivity(s,{{"kind","tool"},{"phase",ok&&!ResponseFailed(r)?"completed":"failed"},{"tool",name},{"request_id",MessageId(m)},{"operation_id",op}});ForgetOpRoute(s,op);if(!ok)WriteOutput(s,TransportError(MessageId(m),"cortex_unreachable",e.empty()?"Cortex runtime unreachable":e));else if(has)WriteOutput(s,r);}
 
+void Watchdog(const std::shared_ptr<RunState>&s){while(s->watchdogRunning.load()){for(uint64_t op:s->operations.ExpiredRunning()){auto snap=s->operations.Get(op);if(!snap)continue;if(s->operations.MarkTimedOut(op,"operation exceeded requested timeout")){json id;{std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end())id=it->second;}if(!id.is_null())BroadcastCancel(s,id);RecordEvent(s,"operation.timed_out",nullptr,{{"operation_id",op}});}}s->operations.Prune();std::this_thread::sleep_for(std::chrono::milliseconds(100));}}
 
-json ToolPayload(const json& value, bool isError = false) {
-    return {
-        {"content", json::array({{{"type", "text"}, {"text", value.dump(2)}}})},
-        {"structuredContent", value},
-        {"isError", isError}
-    };
-}
-
-json LocalToolResponse(const json& id, const json& value, bool isError = false) {
-    return {{"jsonrpc", "2.0"}, {"id", id}, {"result", ToolPayload(value, isError)}};
-}
-
-json LocalToolFailure(const std::string& code, const std::string& message) {
-    return {{"ok", false}, {"error", {{"code", code}, {"message", message}}}};
-}
-
-json TargetDescriptorJson(const TargetDescriptor& target, bool attached, bool alive = true) {
-    return {
-        {"id", target.id}, {"name", target.name}, {"pid", target.processId},
-        {"selector", std::to_string(target.processId)},
-        {"platform", cortex::target::PlatformName(target.platform)},
-        {"architecture", cortex::target::ArchitectureName(target.architecture)},
-        {"executable_path", target.executablePath}, {"window_title", target.windowTitle},
-        {"attached", attached}, {"alive", alive}
-    };
-}
-
-RuntimeList RuntimeSnapshot(const std::shared_ptr<RunState>& state) {
-    std::lock_guard<std::mutex> lock(state->runtimeMutex);
-    return state->runtimes;
-}
-
-bool PruneDeadRuntimes(const std::shared_ptr<RunState>& state) {
-    std::lock_guard<std::mutex> lock(state->runtimeMutex);
-    const auto oldSize = state->runtimes.size();
-    state->runtimes.erase(std::remove_if(state->runtimes.begin(), state->runtimes.end(), [](const TargetRuntimePtr& runtime) {
-        return !runtime || !runtime->sessions || !runtime->sessions->Active() || !runtime->sessions->Active()->Alive();
-    }), state->runtimes.end());
-    return state->runtimes.size() != oldSize;
-}
-
-void EmitToolsListChanged(const std::shared_ptr<RunState>& state) {
-    WriteOutput(state, {{"jsonrpc", "2.0"}, {"method", "notifications/tools/list_changed"}});
-}
-
-std::string ActivityTargetText(const std::shared_ptr<RunState>& state, const json& arguments) {
-    if (arguments.is_object()) {
-        if (arguments.contains("_cortex_target")) {
-            const std::string selected = ActivityScalarText(arguments.at("_cortex_target"));
-            if (!selected.empty()) return selected;
-        }
-        if (arguments.contains("pid")) {
-            const std::string pid = ActivityScalarText(arguments.at("pid"));
-            if (!pid.empty()) return "PID " + pid;
-        }
-        if (arguments.contains("process") && arguments.at("process").is_string())
-            return arguments.at("process").get<std::string>();
-    }
-
-    const auto runtimes = RuntimeSnapshot(state);
-    if (runtimes.size() == 1 && runtimes.front())
-        return runtimes.front()->target.name + " (PID " + std::to_string(runtimes.front()->target.processId) + ")";
-    return {};
-}
-
-std::string HumanizeToolSuffix(std::string text) {
-    std::replace(text.begin(), text.end(), '_', ' ');
-    return text;
-}
-
-std::string ToolStartSummary(const std::string& name) {
-    if (name == "cortex_processes") return "Searching processes";
-    if (name == "cortex_attach") return "Attaching target";
-    if (name == "cortex_detach") return "Detaching target";
-    if (name == "cortex_targets") return "Listing attached targets";
-    if (name == "modules") return "Listing modules";
-    if (name == "memory_read") return "Reading memory";
-    if (name.rfind("memory_write", 0) == 0 || name.rfind("patch", 0) == 0) return "Writing memory";
-    if (name.find("scan") != std::string::npos) return "Scanning memory";
-    if (name == "disasm" || name.find("disassembl") != std::string::npos) return "Disassembling";
-    if (name.rfind("debug_", 0) == 0) return "Debugger: " + HumanizeToolSuffix(name.substr(6));
-    if (name.find("symbol") != std::string::npos) return "Resolving symbols";
-    return "Running " + HumanizeToolSuffix(name);
-}
-
-json ActivityResponsePayload(const json& response) {
-    if (!response.is_object()) return response;
-    if (response.contains("result") && response.at("result").is_object()) {
-        const auto& result = response.at("result");
-        if (result.contains("structuredContent")) return result.at("structuredContent");
-    }
-    if (response.contains("error")) return response.at("error");
-    return response;
-}
-
-bool ActivityResponseFailed(const json& response) {
-    if (!response.is_object()) return false;
-    if (response.contains("error")) return true;
-    if (response.contains("result") && response.at("result").is_object()) {
-        const auto& result = response.at("result");
-        return result.value("isError", false);
-    }
-    return false;
-}
-
-std::string ActivityFailureText(const json& response, const std::string& transportError) {
-    if (!transportError.empty()) return transportError;
-    const json payload = ActivityResponsePayload(response);
-    if (payload.is_object()) {
-        if (payload.contains("message") && payload.at("message").is_string()) return payload.at("message").get<std::string>();
-        if (payload.contains("error")) {
-            const auto& error = payload.at("error");
-            if (error.is_string()) return error.get<std::string>();
-            if (error.is_object() && error.contains("message") && error.at("message").is_string())
-                return error.at("message").get<std::string>();
-        }
-    }
-    return "Tool call failed";
-}
-
-std::string ToolCompletionSummary(const std::string& name, const json& response, bool failed,
-                                  const std::string& transportError) {
-    if (failed) return "Failed: " + ActivityFailureText(response, transportError);
-    const json payload = ActivityResponsePayload(response);
-    if (payload.is_object()) {
-        if (payload.contains("status") && payload.at("status").is_string())
-            return HumanizeToolSuffix(payload.at("status").get<std::string>());
-        if (payload.contains("count") && payload.at("count").is_number_integer())
-            return std::to_string(payload.at("count").get<std::int64_t>()) + " result(s)";
-        for (const char* key : {"processes", "targets", "addresses", "instructions", "modules", "threads"}) {
-            if (payload.contains(key) && payload.at(key).is_array())
-                return std::to_string(payload.at(key).size()) + " " + std::string(key);
-        }
-        if (name == "memory_read" && payload.contains("value")) {
-            const std::string value = ActivityScalarText(payload.at("value"));
-            if (!value.empty()) return "Read " + value;
-        }
-    }
-    return "Completed";
-}
-
-void PublishToolActivity(const std::shared_ptr<RunState>& state,
-                         const json& requestId,
-                         const std::string& name,
-                         const std::string& target,
-                         const std::string& phase,
-                         const std::string& summary,
-                         const std::string& details,
-                         std::optional<std::uint64_t> durationMs = std::nullopt) {
-    json event = {
-        {"kind", "tool"}, {"phase", phase}, {"request_id", requestId},
-        {"tool", name}, {"target", target}, {"summary", summary}
-    };
-    if (!details.empty()) event["details"] = details;
-    if (durationMs) event["duration_ms"] = *durationMs;
-    PublishActivity(state, std::move(event));
-}
-
-json LocalTools(bool requireDetachTarget = false) {
-    json tools = json::array({
-        {{"name", "cortex_processes"},
-         {"description", "List local processes Cortex can discover before or after attaching. Optionally filter by process name, path, window title, or target id."},
-         {"inputSchema", {{"type", "object"}, {"properties", {
-             {"query", {{"type", "string"}, {"description", "Optional case-insensitive filter."}}},
-             {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2048}, {"default", 256}}}
-         }}, {"additionalProperties", false}}},
-         {"_cortex", {{"host_control", true}, {"read_only", true}}}},
-        {{"name", "cortex_attach"},
-         {"description", "Attach a newly selected local process to this existing Cortex MCP connection. Provide exactly one of pid or process."},
-         {"inputSchema", {{"type", "object"}, {"properties", {
-             {"pid", {{"type", "integer"}, {"minimum", 1}}},
-             {"process", {{"type", "string"}, {"minLength", 1}, {"description", "Unique process name; exact matches are preferred over partial matches."}}}
-         }}, {"oneOf", json::array({
-             {{"required", json::array({"pid"})}, {"not", {{"required", json::array({"process"})}}}},
-             {{"required", json::array({"process"})}, {"not", {{"required", json::array({"pid"})}}}}
-         })}, {"additionalProperties", false}}},
-         {"_cortex", {{"host_control", true}, {"dynamic_target", true}}}},
-        {{"name", "cortex_detach"},
-         {"description", "Detach one process from this Cortex MCP connection. If exactly one target is attached, _cortex_target may be omitted."},
-         {"inputSchema", {{"type", "object"}, {"properties", {
-             {"_cortex_target", {{"oneOf", json::array({{{"type", "integer"}}, {{"type", "string"}}})},
-                                  {"description", "Attached target PID, target id, or unique process name."}}}
-         }}, {"additionalProperties", false}}},
-         {"_cortex", {{"host_control", true}, {"dynamic_target", true}}}},
-        {{"name", "cortex_targets"},
-         {"description", "List the processes currently attached to this Cortex MCP server and the selectors accepted by _cortex_target."},
-         {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}}},
-         {"_cortex", {{"host_control", true}, {"multi_target_router", true}, {"read_only", true}}}}
-    });
-    if (requireDetachTarget)
-        tools[2]["inputSchema"]["required"] = json::array({"_cortex_target"});
-    return tools;
-}
-
-void PatchDynamicHandshake(json& response, std::size_t attachedCount) {
-    if (!response.is_object() || !response.contains("result") || !response["result"].is_object()) return;
-    auto& result = response["result"];
-    if (!result.contains("capabilities") || !result["capabilities"].is_object()) result["capabilities"] = json::object();
-    if (!result["capabilities"].contains("tools") || !result["capabilities"]["tools"].is_object()) result["capabilities"]["tools"] = json::object();
-    result["capabilities"]["tools"]["listChanged"] = true;
-    if (result.contains("instructions") && result["instructions"].is_string()) {
-        std::string instructions = result["instructions"].get<std::string>();
-        if (!instructions.empty()) instructions += " ";
-        instructions += "This MCP connection supports dynamic Cortex targets. Use cortex_processes, cortex_attach, cortex_detach and cortex_targets; tools/list changes after attach/detach.";
-        if (attachedCount == 0)
-            instructions += " No target is attached yet.";
-        else if (attachedCount > 1)
-            instructions += " Multiple Cortex targets are attached; pass _cortex_target on normal runtime tool calls.";
-        result["instructions"] = std::move(instructions);
-    }
-}
-
-bool HandleLocalProtocol(const std::shared_ptr<RunState>& state, const json& message, json& response, bool& hasResponse) {
-    api::mcp_protocol::Handler handler;
-    handler.profile = state->toolProfile == "compact" ? api::mcp_protocol::ToolProfile::Compact : api::mcp_protocol::ToolProfile::All;
-    handler.listTools = [](api::mcp_protocol::ToolProfile) { return LocalTools(); };
-    const auto result = api::mcp_protocol::Handle(message, handler);
-    response = result.response;
-    hasResponse = result.hasResponse;
-    if (hasResponse && message.is_object()) {
-        const std::string method = message.value("method", std::string());
-        if (method == "initialize" || method == "server/discover")
-            PatchDynamicHandshake(response, RuntimeSnapshot(state).size());
-    }
-    return true;
-}
-void RememberInitialize(const std::shared_ptr<RunState>& state, const json& message) {
-    std::string clientName;
-    std::string clientVersion;
-    if (message.is_object() && message.contains("params") && message.at("params").is_object()) {
-        const auto& params = message.at("params");
-        if (params.contains("clientInfo") && params.at("clientInfo").is_object()) {
-            const auto& clientInfo = params.at("clientInfo");
-            clientName = clientInfo.value("name", std::string());
-            clientVersion = clientInfo.value("version", std::string());
-        }
-    }
-    std::lock_guard<std::mutex> lock(state->protocolMutex);
-    state->initializeMessage = message;
-    state->initializedNotificationSeen = false;
-    if (!clientName.empty()) state->activityClientName = clientName;
-    state->activityClientVersion = clientVersion;
-}
-
-void RememberInitializedNotification(const std::shared_ptr<RunState>& state) {
-    std::lock_guard<std::mutex> lock(state->protocolMutex);
-    state->initializedNotificationSeen = true;
-}
-
-bool PrimeRuntimeProtocol(const std::shared_ptr<RunState>& state,
-                          const TargetRuntimePtr& runtime,
-                          std::string& error) {
-    error.clear();
-    if (!runtime || !runtime->payload) {
-        error = "target runtime payload is unavailable";
-        return false;
-    }
-
-    std::optional<json> initialize;
-    bool initialized = false;
-    {
-        std::lock_guard<std::mutex> lock(state->protocolMutex);
-        initialize = state->initializeMessage;
-        initialized = state->initializedNotificationSeen;
-    }
-    if (!initialize) return true;
-
-    json ignoredResponse;
-    bool ignoredHasResponse = false;
-    if (!runtime->payload->ForwardMcp(*initialize, state->toolProfile, ignoredResponse, ignoredHasResponse, &error))
-        return false;
-
-    if (initialized) {
-        const json notification = {
-            {"jsonrpc", "2.0"},
-            {"method", "notifications/initialized"}
-        };
-        ignoredResponse = json();
-        ignoredHasResponse = false;
-        if (!runtime->payload->ForwardMcp(notification, state->toolProfile, ignoredResponse, ignoredHasResponse, &error))
-            return false;
-    }
-    return true;
-}
-
-void PrimeExistingRuntimes(const std::shared_ptr<RunState>& state,
-                           const json& initializeMessage) {
-    const auto runtimes = RuntimeSnapshot(state);
-    for (const auto& runtime : runtimes) {
-        if (!runtime || !runtime->payload) continue;
-        json ignoredResponse;
-        bool ignoredHasResponse = false;
-        std::string ignoredError;
-        runtime->payload->ForwardMcp(initializeMessage, state->toolProfile, ignoredResponse, ignoredHasResponse, &ignoredError);
-    }
-}
-std::string TargetSummaryText(const RuntimeList& runtimes) {
-    std::string result;
-    for (std::size_t index = 0; index < runtimes.size(); ++index) {
-        if (index != 0) result += ", ";
-        result += runtimes[index]->target.name + " (PID " + std::to_string(runtimes[index]->target.processId) + ")";
-    }
-    return result;
-}
-
-json TargetListResult(const RuntimeList& runtimes) {
-    json targets = json::array();
-    for (const auto& runtime : runtimes) {
-        const bool alive = runtime && runtime->sessions && runtime->sessions->Active() && runtime->sessions->Active()->Alive();
-        if (runtime) targets.push_back(TargetDescriptorJson(runtime->target, true, alive));
-    }
-    return {{"ok", true}, {"count", targets.size()}, {"targets", std::move(targets)}};
-}
-
-TargetRuntimePtr ResolveRuntime(const RuntimeList& runtimes,
-                                const json& arguments,
-                                std::string& errorCode,
-                                std::string& errorMessage) {
-    errorCode.clear();
-    errorMessage.clear();
-    if (runtimes.empty()) {
-        errorCode = "no_attached_targets";
-        errorMessage = "No Cortex targets are attached";
-        return nullptr;
-    }
-
-    if (!arguments.contains("_cortex_target")) {
-        if (runtimes.size() == 1) return runtimes.front();
-        errorCode = "cortex_target_required";
-        errorMessage = "Multiple Cortex targets are attached; set _cortex_target to a PID, target id, or unique process name. Available: " + TargetSummaryText(runtimes);
-        return nullptr;
-    }
-
-    const json& selector = arguments.at("_cortex_target");
-    if (selector.is_number_unsigned()) {
-        const std::uint64_t pid = selector.get<std::uint64_t>();
-        if (pid == 0) {
-            errorCode = "invalid_cortex_target";
-            errorMessage = "_cortex_target PID must be positive";
-            return nullptr;
-        }
-        for (const auto& runtime : runtimes) {
-            if (runtime->target.processId == pid) return runtime;
-        }
-    } else if (selector.is_number_integer()) {
-        const std::int64_t signedPid = selector.get<std::int64_t>();
-        if (signedPid <= 0) {
-            errorCode = "invalid_cortex_target";
-            errorMessage = "_cortex_target PID must be positive";
-            return nullptr;
-        }
-        const auto pid = static_cast<std::uint64_t>(signedPid);
-        for (const auto& runtime : runtimes) {
-            if (runtime->target.processId == pid) return runtime;
-        }
-    } else if (selector.is_string()) {
-        const std::string wanted = selector.get<std::string>();
-        for (const auto& runtime : runtimes) {
-            if (runtime->target.id == wanted) return runtime;
-        }
-
-        try {
-            std::size_t consumed = 0;
-            const auto pid = std::stoull(wanted, &consumed, 10);
-            if (consumed == wanted.size()) {
-                for (const auto& runtime : runtimes) {
-                    if (runtime->target.processId == pid) return runtime;
-                }
-            }
-        } catch (...) {
-        }
-
-        const std::string lowered = LowerAscii(wanted);
-        TargetRuntimePtr exact;
-        for (const auto& runtime : runtimes) {
-            if (LowerAscii(runtime->target.name) != lowered) continue;
-            if (exact) {
-                errorCode = "cortex_target_ambiguous";
-                errorMessage = "Process name matches more than one attached target; use PID or target id";
-                return nullptr;
-            }
-            exact = runtime;
-        }
-        if (exact) return exact;
-    } else {
-        errorCode = "invalid_cortex_target";
-        errorMessage = "_cortex_target must be a PID integer or a target id/name string";
-        return nullptr;
-    }
-
-    errorCode = "cortex_target_not_found";
-    errorMessage = "Requested Cortex target is not attached. Available: " + TargetSummaryText(runtimes);
-    return nullptr;
-}
-
-json ProcessListResult(const std::shared_ptr<RunState>& state, const json& arguments, std::string& errorCode, std::string& errorMessage) {
-    errorCode.clear();
-    errorMessage.clear();
-    if (!state->catalog) {
-        errorCode = "target_catalog_unavailable";
-        errorMessage = "Local target catalog is unavailable";
-        return {};
-    }
-
-    std::string query;
-    if (arguments.contains("query")) {
-        if (!arguments["query"].is_string()) {
-            errorCode = "invalid_query";
-            errorMessage = "query must be a string";
-            return {};
-        }
-        query = LowerAscii(arguments["query"].get<std::string>());
-    }
-
-    std::size_t limit = 256;
-    if (arguments.contains("limit")) {
-        if (!arguments["limit"].is_number_integer()) {
-            errorCode = "invalid_limit";
-            errorMessage = "limit must be an integer between 1 and 2048";
-            return {};
-        }
-        const auto requested = arguments["limit"].get<std::int64_t>();
-        if (requested < 1 || requested > 2048) {
-            errorCode = "invalid_limit";
-            errorMessage = "limit must be an integer between 1 and 2048";
-            return {};
-        }
-        limit = static_cast<std::size_t>(requested);
-    }
-
-    const auto attached = RuntimeSnapshot(state);
-    const auto discovered = state->catalog->Targets();
-    json processes = json::array();
-    std::size_t totalMatches = 0;
-    for (const auto& target : discovered) {
-        if (!query.empty()) {
-            const std::string searchable = LowerAscii(target.name + "\n" + target.executablePath + "\n" + target.windowTitle + "\n" + target.id);
-            if (searchable.find(query) == std::string::npos) continue;
-        }
-        ++totalMatches;
-        if (processes.size() >= limit) continue;
-        const bool isAttached = std::any_of(attached.begin(), attached.end(), [&](const TargetRuntimePtr& runtime) {
-            return runtime && runtime->target.id == target.id;
-        });
-        processes.push_back(TargetDescriptorJson(target, isAttached));
-    }
-    return {
-        {"ok", true}, {"count", processes.size()}, {"total_matches", totalMatches},
-        {"truncated", totalMatches > processes.size()}, {"processes", std::move(processes)}
-    };
-}
-
-TargetRuntimePtr CreateRuntime(cortex::target::Catalog& catalog,
-                               const TargetDescriptor& target,
-                               const std::string& runtimeDirectory,
-                               std::string& errorCode,
-                               std::string& errorMessage) {
-    errorCode.clear();
-    errorMessage.clear();
-    auto runtime = std::make_shared<TargetRuntime>();
-    runtime->target = target;
-    runtime->sessions = std::make_unique<cortex::target::SessionManager>(catalog);
-    std::string error;
-    if (!runtime->sessions->Attach(target, &error)) {
-        errorCode = "target_attach_failed";
-        errorMessage = error.empty() ? "Target attach failed" : error;
-        return {};
-    }
-    runtime->payload = std::make_unique<cortex::services::PayloadClient>(*runtime->sessions, runtimeDirectory);
-    if (!runtime->payload->EnsureReady(&error)) {
-        errorCode = "target_runtime_unavailable";
-        errorMessage = error.empty() ? "Target runtime is unavailable" : error;
-        return {};
-    }
-    return runtime;
-}
-
-bool HandleLocalTool(const std::shared_ptr<RunState>& state,
-                     const json& message,
-                     const std::string& name,
-                     const json& arguments,
-                     json& response) {
-    if (name != "cortex_processes" && name != "cortex_attach" &&
-        name != "cortex_detach" && name != "cortex_targets") return false;
-
-    if (PruneDeadRuntimes(state)) EmitToolsListChanged(state);
-
-    if (name == "cortex_targets") {
-        response = LocalToolResponse(MessageId(message), TargetListResult(RuntimeSnapshot(state)));
-        return true;
-    }
-
-    if (name == "cortex_processes") {
-        std::string errorCode;
-        std::string errorMessage;
-        const json result = ProcessListResult(state, arguments, errorCode, errorMessage);
-        if (!errorCode.empty()) response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
-        else response = LocalToolResponse(MessageId(message), result);
-        return true;
-    }
-
-    std::lock_guard<std::mutex> mutationLock(state->targetMutationMutex);
-    if (name == "cortex_attach") {
-        const bool hasPid = arguments.contains("pid");
-        const bool hasProcess = arguments.contains("process");
-        if (hasPid == hasProcess) {
-            response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_attach_selector", "Provide exactly one of pid or process"), true);
-            return true;
-        }
-
-        TargetSelector selector;
-        if (hasPid) {
-            if (!arguments["pid"].is_number_integer()) {
-                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_pid", "pid must be a positive integer"), true);
-                return true;
-            }
-            const auto pid = arguments["pid"].get<std::int64_t>();
-            if (pid <= 0) {
-                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_pid", "pid must be a positive integer"), true);
-                return true;
-            }
-            selector.pid = static_cast<std::uint64_t>(pid);
-        } else {
-            if (!arguments["process"].is_string() || arguments["process"].get<std::string>().empty()) {
-                response = LocalToolResponse(MessageId(message), LocalToolFailure("invalid_process", "process must be a non-empty string"), true);
-                return true;
-            }
-            selector.process = arguments["process"].get<std::string>();
-        }
-
-        if (!state->catalog) {
-            response = LocalToolResponse(MessageId(message), LocalToolFailure("target_catalog_unavailable", "Local target catalog is unavailable"), true);
-            return true;
-        }
-        std::string resolveError;
-        const auto target = ResolveUniqueTarget(selector, state->catalog->Targets(), resolveError);
-        if (!target) {
-            response = LocalToolResponse(MessageId(message), LocalToolFailure("target_not_found", resolveError), true);
-            return true;
-        }
-
-        {
-            const auto current = RuntimeSnapshot(state);
-            const auto existing = std::find_if(current.begin(), current.end(), [&](const TargetRuntimePtr& runtime) {
-                return runtime && runtime->target.id == target->id;
-            });
-            if (existing != current.end()) {
-                response = LocalToolResponse(MessageId(message), {
-                    {"ok", true}, {"status", "already_attached"},
-                    {"target", TargetDescriptorJson((*existing)->target, true)}, {"count", current.size()}
-                });
-                return true;
-            }
-        }
-
-        std::string errorCode;
-        std::string errorMessage;
-        auto runtime = CreateRuntime(*state->catalog, *target, state->runtimeDirectory, errorCode, errorMessage);
-        if (!runtime) {
-            response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
-            return true;
-        }
-        if (!PrimeRuntimeProtocol(state, runtime, errorMessage)) {
-            response = LocalToolResponse(MessageId(message),
-                                         LocalToolFailure("target_protocol_init_failed",
-                                                          errorMessage.empty() ? "Could not initialize the attached runtime MCP session"
-                                                                               : errorMessage),
-                                         true);
-            return true;
-        }
-        std::size_t count = 0;
-        {
-            std::lock_guard<std::mutex> lock(state->runtimeMutex);
-            state->runtimes.push_back(runtime);
-            count = state->runtimes.size();
-        }
-        response = LocalToolResponse(MessageId(message), {
-            {"ok", true}, {"status", "attached"}, {"target", TargetDescriptorJson(runtime->target, true)}, {"count", count}
-        });
-        EmitToolsListChanged(state);
-        return true;
-    }
-
-    const auto current = RuntimeSnapshot(state);
-    std::string errorCode;
-    std::string errorMessage;
-    auto runtime = ResolveRuntime(current, arguments, errorCode, errorMessage);
-    if (!runtime) {
-        response = LocalToolResponse(MessageId(message), LocalToolFailure(errorCode, errorMessage), true);
-        return true;
-    }
-    std::size_t count = 0;
-    {
-        std::lock_guard<std::mutex> lock(state->runtimeMutex);
-        state->runtimes.erase(std::remove_if(state->runtimes.begin(), state->runtimes.end(), [&](const TargetRuntimePtr& candidate) {
-            return candidate && candidate->target.id == runtime->target.id;
-        }), state->runtimes.end());
-        count = state->runtimes.size();
-    }
-    response = LocalToolResponse(MessageId(message), {
-        {"ok", true}, {"status", "detached"}, {"target", TargetDescriptorJson(runtime->target, false)}, {"count", count}
-    });
-    EmitToolsListChanged(state);
-    return true;
-}
-void AugmentToolsList(json& response, const RuntimeList& runtimes) {
-    if (!response.is_object() || !response.contains("result") || !response["result"].is_object()) return;
-    auto& result = response["result"];
-    if (!result.contains("tools") || !result["tools"].is_array()) return;
-
-    const bool requireTarget = runtimes.size() > 1;
-    const std::string description =
-        "Select the attached Cortex target for this call by PID, target id, or unique process name. Available: " +
-        TargetSummaryText(runtimes);
-
-    json augmented = LocalTools(requireTarget);
-
-    for (auto tool : result["tools"]) {
-        if (!tool.is_object()) {
-            augmented.push_back(std::move(tool));
-            continue;
-        }
-        if (!tool.contains("inputSchema") || !tool["inputSchema"].is_object())
-            tool["inputSchema"] = {{"type", "object"}, {"properties", json::object()}};
-        auto& schema = tool["inputSchema"];
-        if (!schema.contains("properties") || !schema["properties"].is_object()) schema["properties"] = json::object();
-        schema["properties"]["_cortex_target"] = {
-            {"oneOf", json::array({{{"type", "integer"}}, {{"type", "string"}}})},
-            {"description", description}
-        };
-        if (requireTarget) {
-            if (!schema.contains("required") || !schema["required"].is_array()) schema["required"] = json::array();
-            bool present = false;
-            for (const auto& entry : schema["required"]) {
-                if (entry.is_string() && entry.get<std::string>() == "_cortex_target") {
-                    present = true;
-                    break;
-                }
-            }
-            if (!present) schema["required"].push_back("_cortex_target");
-        }
-        if (!tool.contains("_cortex") || !tool["_cortex"].is_object()) tool["_cortex"] = json::object();
-        tool["_cortex"]["target_routed"] = true;
-        augmented.push_back(std::move(tool));
-    }
-    result["tools"] = std::move(augmented);
-}
-
-bool ForwardOne(const std::shared_ptr<RunState>& state,
-                const json& message,
-                json& response,
-                bool& hasResponse,
-                std::string* error) {
-    response = json();
-    hasResponse = false;
-    if (error) error->clear();
-
-    if (PruneDeadRuntimes(state)) EmitToolsListChanged(state);
-    const RuntimeList runtimes = RuntimeSnapshot(state);
-
-    if (!message.is_object()) {
-        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
-        return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
-    }
-
-    if (IsNotification(message)) {
-        const std::string notificationMethod = message.value("method", std::string());
-        std::unique_lock<std::mutex> lifecycleLock;
-        RuntimeList notificationRuntimes = runtimes;
-        if (notificationMethod == "notifications/initialized") {
-            // Serialize lifecycle changes with attach/detach. An attach that
-            // completes after this point will replay both initialize and the
-            // initialized notification before becoming routable.
-            lifecycleLock = std::unique_lock<std::mutex>(state->targetMutationMutex);
-            RememberInitializedNotification(state);
-            notificationRuntimes = RuntimeSnapshot(state);
-        }
-        if (notificationRuntimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
-        std::string firstError;
-        for (const auto& runtime : notificationRuntimes) {
-            json notificationResponse;
-            bool notificationHasResponse = false;
-            std::string notificationError;
-            if (!runtime->payload->ForwardMcp(message, state->toolProfile, notificationResponse,
-                                              notificationHasResponse, &notificationError)) {
-                if (firstError.empty()) firstError = notificationError;
-                continue;
-            }
-            if (!hasResponse && notificationHasResponse) {
-                response = std::move(notificationResponse);
-                hasResponse = true;
-            }
-        }
-        if (!firstError.empty() && !hasResponse) {
-            if (error) *error = firstError;
-            return false;
-        }
-        return true;
-    }
-
-    const std::string method = message.value("method", std::string());
-    if (method == "initialize") {
-        // Keep host handshake semantics local while bringing every currently
-        // attached payload to the same legacy MCP lifecycle state. The same
-        // mutex is used by dynamic attach/detach, eliminating the window where
-        // a target could become routable without receiving initialize.
-        std::lock_guard<std::mutex> lifecycleLock(state->targetMutationMutex);
-        RememberInitialize(state, message);
-        PrimeExistingRuntimes(state, message);
-        return HandleLocalProtocol(state, message, response, hasResponse);
-    }
-    if (method == "server/discover" || method == "ping")
-        return HandleLocalProtocol(state, message, response, hasResponse);
-
-    if (method == "tools/list") {
-        if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
-
-        std::string firstError;
-        for (const auto& runtime : runtimes) {
-            std::string runtimeError;
-            if (runtime->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, &runtimeError)) {
-                if (hasResponse) AugmentToolsList(response, runtimes);
-                return true;
-            }
-            if (firstError.empty()) firstError = runtimeError;
-        }
-
-        // Keep host-control tools usable even when an attached payload is
-        // temporarily unreachable. A later cortex_detach/cortex_attach can
-        // recover the connection without restarting the MCP client.
-        HandleLocalProtocol(state, message, response, hasResponse);
-        if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object()) {
-            response["result"]["_cortex"] = {
-                {"runtime_catalog_available", false},
-                {"runtime_catalog_error", firstError.empty() ? "target_runtime_unreachable" : firstError}
-            };
-        }
-        return true;
-    }
-
-    if (method == "tools/call") {
-        const json params = message.value("params", json::object());
-        const std::string name = params.is_object() ? params.value("name", std::string()) : std::string();
-        const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
-
-        if (arguments.is_object() && HandleLocalTool(state, message, name, arguments, response)) {
-            hasResponse = true;
-            return true;
-        }
-        if (!arguments.is_object()) {
-            response = TransportError(MessageId(message), "invalid_arguments", "tools/call arguments must be an object");
-            hasResponse = true;
-            return true;
-        }
-
-        const RuntimeList current = RuntimeSnapshot(state);
-        std::string targetError;
-        std::string targetMessage;
-        auto runtime = ResolveRuntime(current, arguments, targetError, targetMessage);
-        if (!runtime) {
-            if (targetError == "no_attached_targets")
-                targetMessage += ". Use cortex_processes and cortex_attach on this same MCP connection.";
-            response = TransportError(MessageId(message), targetError, targetMessage);
-            hasResponse = true;
-            return true;
-        }
-
-        json routed = message;
-        if (routed.contains("params") && routed["params"].is_object() &&
-            routed["params"].contains("arguments") && routed["params"]["arguments"].is_object()) {
-            routed["params"]["arguments"].erase("_cortex_target");
-        }
-        if (!runtime->payload->ForwardMcp(routed, state->toolProfile, response, hasResponse, error)) return false;
-        if (hasResponse && response.is_object() && response.contains("result") && response["result"].is_object() &&
-            response["result"].contains("structuredContent") && response["result"]["structuredContent"].is_object()) {
-            response["result"]["structuredContent"]["_cortex_target"] = runtime->target.id;
-        }
-        return true;
-    }
-
-    if (runtimes.empty()) return HandleLocalProtocol(state, message, response, hasResponse);
-    return runtimes.front()->payload->ForwardMcp(message, state->toolProfile, response, hasResponse, error);
-}
-
-bool ForwardOneObserved(const std::shared_ptr<RunState>& state,
-                        const json& message,
-                        json& response,
-                        bool& hasResponse,
-                        std::string* error) {
-    if (!message.is_object() || message.value("method", std::string()) != "tools/call")
-        return ForwardOne(state, message, response, hasResponse, error);
-
-    const json params = message.value("params", json::object());
-    const std::string name = params.is_object() ? params.value("name", std::string()) : std::string();
-    if (name.empty()) return ForwardOne(state, message, response, hasResponse, error);
-
-    const json arguments = params.is_object() ? params.value("arguments", json::object()) : json::object();
-    const std::string target = ActivityTargetText(state, arguments);
-    const std::string startDetails = CompactActivityDetails(arguments);
-    const json requestId = MessageId(message);
-    PublishToolActivity(state, requestId, name, target, "started", ToolStartSummary(name), startDetails);
-
-    const auto startedAt = std::chrono::steady_clock::now();
-    std::string localError;
-    std::string* forwardedError = error ? error : &localError;
-    const bool ok = ForwardOne(state, message, response, hasResponse, forwardedError);
-    const auto duration = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - startedAt).count());
-    const std::string transportError = error ? *error : localError;
-    const bool failed = !ok || (hasResponse && ActivityResponseFailed(response));
-    const json detailPayload = hasResponse ? ActivityResponsePayload(response) : json::object();
-    const std::string details = hasResponse ? CompactActivityDetails(detailPayload)
-                                            : (transportError.empty() ? std::string() : transportError);
-    PublishToolActivity(state, requestId, name, target, failed ? "failed" : "completed",
-                        ToolCompletionSummary(name, response, failed, transportError), details, duration);
-    return ok;
-}
-
-bool RouteMessage(const std::shared_ptr<RunState>& state,
-                  const json& message,
-                  json& response,
-                  bool& hasResponse,
-                  std::string* error) {
-    if (!message.is_array() || message.empty())
-        return ForwardOneObserved(state, message, response, hasResponse, error);
-
-    json responses = json::array();
-    for (const auto& item : message) {
-        json itemResponse;
-        bool itemHasResponse = false;
-        std::string itemError;
-        if (!ForwardOneObserved(state, item, itemResponse, itemHasResponse, &itemError)) {
-            responses.push_back(TransportError(MessageId(item), "cortex_unreachable",
-                                               itemError.empty() ? "Cortex target runtime is unreachable" : itemError));
-            continue;
-        }
-        if (itemHasResponse) responses.push_back(std::move(itemResponse));
-    }
-    response = std::move(responses);
-    hasResponse = !response.empty();
-    return true;
-}
-
-void ForwardRequest(const json& message, const std::shared_ptr<RunState>& state) {
-    json response;
-    bool hasResponse = false;
-    std::string error;
-    if (!RouteMessage(state, message, response, hasResponse, &error)) {
-        WriteOutput(state, TransportError(MessageId(message), "cortex_unreachable",
-                                          error.empty() ? "Cortex target runtime is unreachable" : error));
-        return;
-    }
-    if (hasResponse) WriteOutput(state, response);
-}
 } // namespace
 
-int RunMcpMode(int argc, char** argv, const std::string& runtimeDirectory) {
-    Options options;
-    std::string error;
-    if (!ParseOptions(argc, argv, options, error)) {
-        std::cerr << "cortex mcp: " << error << '\n';
-        PrintUsage(std::cerr);
-        return 2;
-    }
-    if (options.help) {
-        PrintUsage(std::cout);
-        return 0;
-    }
-
-    cortex::target::Catalog catalog;
-    if (!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())) {
-        std::cerr << "cortex mcp: local target backend unavailable\n";
-        return 3;
-    }
-
-    auto state = std::make_shared<RunState>();
-    state->catalog = &catalog;
-    state->runtimeDirectory = runtimeDirectory;
-    state->toolProfile = options.toolProfile;
-    state->activitySessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-
-    const auto availableTargets = catalog.Targets();
-    for (const auto& selector : options.targets) {
-        const auto target = ResolveUniqueTarget(selector, availableTargets, error);
-        if (!target) {
-            std::cerr << "cortex mcp: " << error << '\n';
-            return 3;
-        }
-        const auto current = RuntimeSnapshot(state);
-        const bool duplicate = std::any_of(current.begin(), current.end(), [&](const TargetRuntimePtr& runtime) {
-            return runtime && runtime->target.id == target->id;
-        });
-        if (duplicate) {
-            std::cerr << "cortex mcp: target requested more than once: PID " << target->processId << '\n';
-            return 3;
-        }
-
-        std::string errorCode;
-        std::string errorMessage;
-        auto runtime = CreateRuntime(catalog, *target, runtimeDirectory, errorCode, errorMessage);
-        if (!runtime) {
-            std::cerr << "cortex mcp: target setup failed for PID " << target->processId << ": "
-                      << (errorMessage.empty() ? errorCode : errorMessage) << '\n';
-            return errorCode == "target_attach_failed" ? 4 : 5;
-        }
-        std::lock_guard<std::mutex> lock(state->runtimeMutex);
-        state->runtimes.push_back(std::move(runtime));
-    }
-
-    PublishSessionActivity(state, "started", "AI/MCP session started",
-                           CompactActivityDetails(json{{"tool_profile", options.toolProfile},
-                                                       {"startup_targets", RuntimeSnapshot(state).size()}}));
-
-    // stdout is MCP protocol data only from this point onward.
-    std::ios::sync_with_stdio(false);
-    std::cin.tie(nullptr);
-
-    std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line.empty()) continue;
-        if (line.size() > kMaxStdioMessageBytes) {
-            WriteOutput(state, TransportError(nullptr, "message_too_large",
-                                              "MCP stdio message exceeds the 4 MiB limit"));
-            continue;
-        }
-
-        json message;
-        try {
-            message = json::parse(line);
-        } catch (const std::exception& exception) {
-            WriteOutput(state, {
-                {"jsonrpc", "2.0"},
-                {"id", nullptr},
-                {"error", {{"code", -32700}, {"message", exception.what()}}}
-            });
-            continue;
-        }
-
-        // Notifications, especially notifications/cancelled, bypass the worker
-        // limit. In multi-target mode they are broadcast so cancellation and
-        // lifecycle notifications reach whichever target owns the request.
-        if (IsNotification(message)) {
-            json response;
-            bool hasResponse = false;
-            std::string notificationError;
-            if (!RouteMessage(state, message, response, hasResponse, &notificationError)) {
-                std::cerr << "cortex mcp: notification forwarding failed: " << notificationError << '\n';
-            } else if (hasResponse) {
-                // Malformed no-id messages may legitimately be rejected by the
-                // runtime as invalid JSON-RPC requests; preserve one response.
-                WriteOutput(state, response);
-            }
-            continue;
-        }
-
-        if (!ReserveWorker(state)) {
-            WriteOutput(state, TransportError(MessageId(message), "too_many_requests",
-                                              "Cortex MCP concurrency limit reached"));
-            continue;
-        }
-
-        try {
-            std::thread([message, state] {
-                ForwardRequest(message, state);
-                ReleaseWorker(state);
-            }).detach();
-        } catch (const std::exception& exception) {
-            ReleaseWorker(state);
-            WriteOutput(state, TransportError(MessageId(message), "worker_start_failed", exception.what()));
-        }
-    }
-
-    WaitForWorkers(state);
-    PublishSessionActivity(state, "ended", "AI/MCP session ended");
-    return 0;
-}
+int RunMcpMode(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;state->activitySessionId=QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();auto available=catalog.Targets();for(const auto&selector:options.targets){auto target=ResolveUniqueTarget(selector,available,error);if(!target){std::cerr<<"cortex mcp: "<<error<<'\n';return 3;}std::string c,x;auto runtime=CreateRuntime(catalog,*target,runtimeDirectory,c,x);if(!runtime){std::cerr<<"cortex mcp: target setup failed: "<<(x.empty()?c:x)<<'\n';return 4;}state->runtimes.push_back(runtime);RecordEvent(state,"target.attached",runtime,{{"startup",true},{"debugger_backend",runtime->debuggerBackend}});}PublishActivity(state,{{"kind","session"},{"phase","started"},{"summary","AI/MCP session started"}});state->watchdogRunning=true;state->watchdog=std::thread([state]{Watchdog(state);});std::ios::sync_with_stdio(false);std::cin.tie(nullptr);std::string line;while(std::getline(std::cin,line)){if(line.empty())continue;if(line.size()>kMaxStdioMessageBytes){WriteOutput(state,TransportError(nullptr,"message_too_large","MCP stdio message exceeds 4 MiB"));continue;}json m;try{m=json::parse(line);}catch(const std::exception&e){WriteOutput(state,{{"jsonrpc","2.0"},{"id",nullptr},{"error",{{"code",-32700},{"message",e.what()}}}});continue;}if(IsNotification(m)){json r;bool has=false;std::string e;if(!ForwardOne(state,m,r,has,&e))std::cerr<<"cortex mcp: notification forwarding failed: "<<e<<'\n';else if(has)WriteOutput(state,r);continue;}if(!ReserveWorker(state)){WriteOutput(state,TransportError(MessageId(m),"too_many_requests","Cortex MCP concurrency limit reached"));continue;}try{std::thread([m,state]{ForwardObserved(m,state);ReleaseWorker(state);}).detach();}catch(const std::exception&e){ReleaseWorker(state);WriteOutput(state,TransportError(MessageId(m),"worker_start_failed",e.what()));}}
+WaitWorkers(state);state->watchdogRunning=false;if(state->watchdog.joinable())state->watchdog.join();for(auto&r:RuntimeSnapshot(state))if(r&&r->debugger){std::lock_guard<std::mutex>l(r->debuggerMutex);r->debugger->Detach();}PublishActivity(state,{{"kind","session"},{"phase","ended"},{"summary","AI/MCP session ended"}});return 0;}

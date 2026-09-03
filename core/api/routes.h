@@ -1,5 +1,8 @@
-﻿#pragma once
+#pragma once
 #include "native_routes.h"
+#ifndef CORTEX_ROUTE_REGISTRAR
+#include "runtime_control_routes.h"
+#endif
 #include <nlohmann/json.hpp>
 
 namespace api {
@@ -15,7 +18,13 @@ void RegisterModulesRoutes(RouteRegistrar& svr);
 void RegisterMemoryRoutes(RouteRegistrar& svr);
 void RegisterScanRoutes(RouteRegistrar& svr);
 void RegisterDisasmRoutes(RouteRegistrar& svr);
-void RegisterDebugRoutes(RouteRegistrar& svr);
+void RegisterDebugRoutesBase(RouteRegistrar& svr);
+#ifndef CORTEX_ROUTE_REGISTRAR
+inline void RegisterDebugRoutes(RouteRegistrar& svr) {
+    RegisterDebugRoutesBase(svr);
+    RegisterRuntimeControlRoutes(svr);
+}
+#endif
 void RegisterSymbolsRoutes(RouteRegistrar& svr);
 void RegisterProjectRoutes(RouteRegistrar& svr);
 void RegisterScreenshotRoutes(RouteRegistrar& svr);
@@ -54,6 +63,5 @@ void RegisterReRoutes(RouteRegistrar& svr);
 #ifdef CORTEX_ROUTE_REGISTRAR
 namespace httplib { using RouteRegistrar = ::api::RouteRegistrar; }
 #define Server RouteRegistrar
+#define RegisterDebugRoutes RegisterDebugRoutesBase
 #endif
-
-

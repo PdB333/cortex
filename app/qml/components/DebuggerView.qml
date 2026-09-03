@@ -22,6 +22,7 @@ ColumnLayout {
         debuggerContext.y = Math.max(0, Math.min(root.height - 320, p.y))
         debuggerContext.open()
     }
+
     Rectangle {
         Layout.fillWidth: true
         Layout.preferredHeight: 44
@@ -32,10 +33,27 @@ ColumnLayout {
             anchors.rightMargin: 10
             spacing: 4
 
+            ComboBox {
+                Layout.preferredWidth: 112
+                model: ["Windows", "VEH"]
+                currentIndex: CortexSettings.debuggerBackend === "veh" ? 1 : 0
+                enabled: CortexApp.sessionActive
+                onActivated: {
+                    CortexSettings.debuggerBackend = currentIndex === 1 ? "veh" : "windows"
+                    if (CortexDebugger.ready) CortexDebugger.clear()
+                    CortexDebugger.refreshThreads()
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: currentIndex === 0
+                    ? "External Windows debugger (recommended)"
+                    : "In-process VEH debugger (loads Cortex runtime)"
+            }
             Button {
-                text: CortexPayload.ready ? "Runtime On" : "Enable Runtime"
+                text: CortexDebugger.ready
+                    ? (CortexDebugger.backend.toUpperCase() + " On")
+                    : ("Enable " + (CortexSettings.debuggerBackend === "veh" ? "VEH" : "Windows"))
                 font.pixelSize: 11
-                enabled: CortexApp.sessionActive && !CortexPayload.ready
+                enabled: CortexApp.sessionActive && !CortexDebugger.ready
                 onClicked: {
                     if (CortexDebugger.enableRuntime()) {
                         CortexDebugger.refreshThreads()
@@ -49,14 +67,14 @@ ColumnLayout {
                 enabled: CortexApp.sessionActive
                 onClicked: {
                     CortexDebugger.refreshThreads()
-                    if (CortexPayload.ready) CortexDebugger.refreshRuntime()
+                    if (CortexDebugger.ready) CortexDebugger.refreshRuntime()
                     root.reloadInstructionPointer()
                 }
             }
             Button {
                 text: "Continue"
                 font.pixelSize: 11
-                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                enabled: CortexDebugger.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
                 onClicked: {
                     CortexDebugger.continueCurrent()
                     root.reloadInstructionPointer()
@@ -65,7 +83,7 @@ ColumnLayout {
             Button {
                 text: "Pause"
                 font.pixelSize: 11
-                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                enabled: CortexDebugger.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
                 onClicked: {
                     if (CortexDebugger.pauseCurrent()) root.reloadInstructionPointer()
                 }
@@ -73,7 +91,7 @@ ColumnLayout {
             Button {
                 text: "Step Into"
                 font.pixelSize: 11
-                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                enabled: CortexDebugger.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
                 onClicked: {
                     if (CortexDebugger.stepCurrent(2000)) root.reloadInstructionPointer()
                 }
@@ -81,7 +99,7 @@ ColumnLayout {
             Button {
                 text: "Step Over"
                 font.pixelSize: 11
-                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
+                enabled: CortexDebugger.ready && CortexApp.mutationPermission && CortexDebugger.currentThreadId > 0
                 onClicked: {
                     if (CortexDebugger.stepOverCurrent(5000)) root.reloadInstructionPointer()
                 }
@@ -89,17 +107,17 @@ ColumnLayout {
             Button {
                 text: "Breakpoint @ IP"
                 font.pixelSize: 11
-                enabled: CortexPayload.ready && CortexApp.mutationPermission && CortexDebugger.instructionPointer.length > 0
+                enabled: CortexDebugger.ready && CortexApp.mutationPermission && CortexDebugger.instructionPointer.length > 0
                 onClicked: CortexDebugger.addBreakpoint(CortexDebugger.instructionPointer, "software", "pause")
             }
             Item { Layout.fillWidth: true }
             Label {
                 text: CortexDebugger.lastError.length > 0
                     ? CortexDebugger.lastError
-                    : (CortexPayload.ready
+                    : (CortexDebugger.ready
                        ? (CortexDebugger.pausedThreads.length > 0
                           ? CortexDebugger.pausedThreads.length + " paused"
-                          : "Runtime connected")
+                          : CortexDebugger.backend.toUpperCase() + " debugger connected")
                        : (CortexApp.sessionActive ? "Inspect mode" : "No active session"))
                 color: CortexDebugger.lastError.length > 0 ? Theme.mutation : Theme.textMuted
                 font.pixelSize: 11
@@ -175,7 +193,7 @@ ColumnLayout {
                                     root.openAddressContext(modelData.address, debuggerDisasmMouse, event.x, event.y)
                             }
                             onDoubleClicked: function(event) {
-                                if (event.button === Qt.LeftButton && CortexPayload.ready && CortexApp.mutationPermission)
+                                if (event.button === Qt.LeftButton && CortexDebugger.ready && CortexApp.mutationPermission)
                                     CortexDebugger.addBreakpoint(modelData.address, "software", CortexSettings.breakpointDefaultAction)
                             }
                         }
@@ -269,7 +287,7 @@ ColumnLayout {
                 CortexListView {
                     id: breakpointList
                     Layout.fillWidth: true
-                    Layout.preferredHeight: CortexPayload.ready ? 118 : 42
+                    Layout.preferredHeight: CortexDebugger.ready ? 118 : 42
                     clip: true
                     model: CortexDebugger.breakpoints
                     boundsBehavior: Flickable.StopAtBounds

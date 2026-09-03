@@ -1,7 +1,7 @@
-﻿#pragma once
+#pragma once
 
+#include "debug_provider.h"
 #include "payload_controller.h"
-#include "services/debugger_service.h"
 #include "target/session_manager.h"
 
 #include <QObject>
@@ -9,6 +9,8 @@
 #include <QVariantList>
 
 #include <functional>
+#include <memory>
+#include <string>
 
 class DebuggerController final : public QObject {
     Q_OBJECT
@@ -18,6 +20,8 @@ class DebuggerController final : public QObject {
     Q_PROPERTY(QVariantList pausedThreads READ pausedThreads NOTIFY pausedThreadsChanged)
     Q_PROPERTY(qulonglong currentThreadId READ currentThreadId NOTIFY currentThreadChanged)
     Q_PROPERTY(QString instructionPointer READ instructionPointer NOTIFY registersChanged)
+    Q_PROPERTY(QString backend READ backend NOTIFY backendChanged)
+    Q_PROPERTY(bool ready READ ready NOTIFY stateChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
 
 public:
@@ -25,6 +29,7 @@ public:
                        PayloadController& payload,
                        std::function<bool()> mutationAllowed,
                        QObject* parent = nullptr);
+    ~DebuggerController() override;
 
     const QVariantList& threads() const { return threads_; }
     const QVariantList& registers() const { return registers_; }
@@ -32,6 +37,8 @@ public:
     const QVariantList& pausedThreads() const { return pausedThreads_; }
     qulonglong currentThreadId() const { return currentThreadId_; }
     QString instructionPointer() const { return instructionPointer_; }
+    QString backend() const { return QString::fromStdString(providerBackend_); }
+    bool ready() const { return provider_ && provider_->Ready(); }
     QString lastError() const { return lastError_; }
 
     Q_INVOKABLE void refreshThreads();
@@ -56,17 +63,22 @@ signals:
     void breakpointsChanged();
     void pausedThreadsChanged();
     void currentThreadChanged();
+    void backendChanged();
+    void stateChanged();
     void lastErrorChanged();
 
 private:
     bool requireMutation();
-    bool refreshRuntimeState(bool ensureRuntime, bool reportErrors);
-    void applyPayloadRegisters(const nlohmann::json& registers, qulonglong threadId);
+    bool ensureProvider(bool attach, bool reportErrors);
+    bool refreshRuntimeState(bool attachProvider, bool reportErrors);
+    void applySnapshot(const cortex::target::ThreadRegisterSnapshot& snapshot);
     void setLastError(const QString& error);
 
-    cortex::services::DebuggerService service_;
+    cortex::target::SessionManager& sessions_;
     PayloadController& payload_;
     std::function<bool()> mutationAllowed_;
+    std::unique_ptr<DebugProvider> provider_;
+    std::string providerBackend_;
     QTimer runtimePoll_;
     QVariantList threads_;
     QVariantList registers_;
@@ -76,4 +88,3 @@ private:
     QString instructionPointer_;
     QString lastError_;
 };
-

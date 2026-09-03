@@ -59,7 +59,8 @@ private:
     std::unordered_map<std::string, std::shared_ptr<bool>> alive_;
 };
 
-TargetDescriptor MakeTarget(const NodeDescriptor& node, std::uint64_t pid, const char* name) {
+TargetDescriptor MakeTarget(const NodeDescriptor& node, std::uint64_t pid,
+                            const char* name, std::uint64_t generation = 0) {
     TargetDescriptor target;
     target.id = MakeProcessTargetId(node.id, node.platform, pid);
     target.nodeId = node.id;
@@ -68,6 +69,7 @@ TargetDescriptor MakeTarget(const NodeDescriptor& node, std::uint64_t pid, const
     target.architecture = node.architecture;
     target.kind = TargetKind::Process;
     target.processId = pid;
+    target.generation = generation;
     target.capabilities = CapabilitySet{Capability::ProcessInfo, Capability::MemoryRead};
     return target;
 }
@@ -84,8 +86,8 @@ int main() {
     };
 
     const auto node = MakeLocalNode("session-test", "Session Test", Platform::Windows, Architecture::X64);
-    const auto first = MakeTarget(node, 101, "first.exe");
-    const auto second = MakeTarget(node, 202, "second.exe");
+    const auto first = MakeTarget(node, 101, "first.exe", 1001);
+    const auto second = MakeTarget(node, 202, "second.exe", 2001);
     auto backend = std::make_shared<FakeBackend>(node, std::vector<TargetDescriptor>{first, second});
 
     Catalog catalog;
@@ -118,11 +120,21 @@ int main() {
     check(sessions.ActiveTargetId().empty(), "active id cleared when active target dies");
     check(sessions.Activate(first.id), "retained live target can become active again");
 
+    // PID reuse must not alias an old live Session. Same target id + a different
+    // process-lifetime generation replaces the stale session atomically.
+    TargetDescriptor recycled = first;
+    recycled.generation = 1002;
+    check(sessions.Attach(recycled, &error), "attach recycled PID generation");
+    check(sessions.SessionCount() == 1, "recycled PID replaces instead of duplicating session");
+    const auto recycledSession = sessions.Active();
+    check(recycledSession && recycledSession->Target().generation == 1002,
+          "active session carries the new process generation");
+
     sessions.DetachAll();
     check(sessions.SessionCount() == 0, "detach all clears every target");
     check(!sessions.HasActiveSession(), "detach all clears active target");
 
     if (failures) return 1;
-    std::cout << "PASS: multi-target session manager\n";
+    std::cout << "PASS: multi-target session manager and generation replacement\n";
     return 0;
 }

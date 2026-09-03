@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21)
 project(cortex_app LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -52,6 +52,13 @@ qt_add_executable(cortex WIN32
     app_controller.h
     debugger_controller.cpp
     debugger_controller.h
+    debug_provider.h
+    windows_debug_provider.cpp
+    windows_debug_provider.h
+    veh_debug_provider.cpp
+    veh_debug_provider.h
+    windows_debugger_backend.cpp
+    windows_debugger_backend.h
     disassembly_controller.cpp
     disassembly_controller.h
     feature_controller.cpp
@@ -82,6 +89,10 @@ qt_add_executable(cortex WIN32
     ../core/services/memory_service.h
     ../core/services/module_service.cpp
     ../core/services/module_service.h
+    ../core/services/operation_manager.cpp
+    ../core/services/operation_manager.h
+    ../core/services/crash_report_service.cpp
+    ../core/services/crash_report_service.h
     ../core/services/payload_client.cpp
     ../core/services/payload_client.h
     ../core/services/scan_service.cpp
@@ -190,5 +201,3 @@ set_target_properties(cortex PROPERTIES
     OUTPUT_NAME "cortex"
     MACOSX_BUNDLE TRUE
 )
-
-
