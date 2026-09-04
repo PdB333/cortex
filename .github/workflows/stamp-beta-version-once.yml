@@ -1,0 +1,70 @@
+name: Stamp Beta Version Once
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - ".github/workflows/stamp-beta-version-once.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  stamp:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next/unified-cortex-ui
+          fetch-depth: 0
+
+      - name: Stamp application and MCP beta version
+        shell: pwsh
+        run: |
+          $mainPath = "app/main.cpp"
+          $main = [IO.File]::ReadAllText($mainPath)
+          $mainCount = ([regex]::Matches($main, [regex]::Escape('0.7.0-dev'))).Count
+          if ($mainCount -ne 2) { throw "Expected two app/main.cpp dev version strings, found $mainCount" }
+          $main = $main.Replace('0.7.0-dev', '0.7.0-beta.1')
+          [IO.File]::WriteAllText($mainPath, $main, [Text.UTF8Encoding]::new($false))
+
+          $qmlPath = "app/qml/Main.qml"
+          $qml = [IO.File]::ReadAllText($qmlPath)
+          $qmlCount = ([regex]::Matches($qml, [regex]::Escape('0.7.0-dev'))).Count
+          if ($qmlCount -ne 1) { throw "Expected one QML dev version string, found $qmlCount" }
+          $qml = $qml.Replace('0.7.0-dev', '0.7.0-beta.1')
+          [IO.File]::WriteAllText($qmlPath, $qml, [Text.UTF8Encoding]::new($false))
+
+          $mcpPath = "core/api/mcp_protocol.h"
+          $mcp = [IO.File]::ReadAllText($mcpPath)
+          $oldMcp = 'inline constexpr const char* kServerVersion = "0.6.0";'
+          $newMcp = 'inline constexpr const char* kServerVersion = "0.7.0-beta.1";'
+          $mcpCount = ([regex]::Matches($mcp, [regex]::Escape($oldMcp))).Count
+          if ($mcpCount -ne 1) { throw "Expected one MCP server version declaration, found $mcpCount" }
+          $mcp = $mcp.Replace($oldMcp, $newMcp)
+          [IO.File]::WriteAllText($mcpPath, $mcp, [Text.UTF8Encoding]::new($false))
+
+          git diff --check
+          git diff -- app/main.cpp app/qml/Main.qml core/api/mcp_protocol.h
+
+      - name: Commit beta stamp and remove one-shot workflow
+        shell: pwsh
+        run: |
+          git config user.name "Cortex Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -- .github/workflows/stamp-beta-version-once.yml
+          git add -- app/main.cpp app/qml/Main.qml core/api/mcp_protocol.h
+          git commit -m "stamp v0.7.0-beta.1"
+          git push origin HEAD:next/unified-cortex-ui
+
+      - name: Dispatch final beta gates
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ui-preview.yml --ref next/unified-cortex-ui
+          gh workflow run assaultcube-offline.yml --ref next/unified-cortex-ui
+          gh workflow run linux-app.yml --ref next/unified-cortex-ui
