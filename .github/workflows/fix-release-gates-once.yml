@@ -1,0 +1,105 @@
+name: Fix Release Gates Once
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - ".github/workflows/fix-release-gates-once.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next/unified-cortex-ui
+          fetch-depth: 0
+
+      - name: Fix AssaultCube permission probe envelope
+        shell: pwsh
+        run: |
+          $path = "ci/assaultcube_offline_e2e_v3.ps1"
+          $content = [IO.File]::ReadAllText($path)
+          $old = @'
+    $permissionProbeTid = [uint64]$candidateThreads[0]
+    $permissionProbe = Invoke-CortexTool "debug_pause" @{ thread_id = $permissionProbeTid }
+    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ([string]$permissionProbe.result.structuredContent.error -eq "mutation_permission_required")
+    if (-not $permissionDenied) {
+        $route = Get-RouteResult $permissionProbe
+        if ($null -ne $route -and $route.ok) { Resume-ThreadBestEffort $permissionProbeTid }
+        throw "debug_pause bypassed mutation_permission"
+    }
+'@
+          $new = @'
+    $permissionProbeTid = [uint64]$candidateThreads[0]
+    $permissionProbe = Invoke-CortexTool "debug_pause" @{ thread_id = $permissionProbeTid }
+    $permissionRoute = Get-RouteResult $permissionProbe
+    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ($null -ne $permissionRoute) -and (-not $permissionRoute.ok) -and ([string]$permissionRoute.error -eq "mutation_permission_required")
+    if (-not $permissionDenied) {
+        if ($null -ne $permissionRoute -and $permissionRoute.ok) { Resume-ThreadBestEffort $permissionProbeTid }
+        throw "debug_pause bypassed mutation_permission"
+    }
+'@
+          $count = ([regex]::Matches($content, [regex]::Escape($old))).Count
+          if ($count -ne 1) { throw "Expected one AssaultCube permission probe block, found $count" }
+          $patched = $content.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $patched, [Text.UTF8Encoding]::new($false))
+
+      - name: Complete Windows debugger pImpl on non-Windows builds
+        shell: pwsh
+        run: |
+          $path = "app/windows_debugger_backend.cpp"
+          $content = [IO.File]::ReadAllText($path)
+          $old = @'
+};
+
+#endif
+
+WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)
+'@
+          $new = @'
+};
+
+#else
+
+struct WindowsDebuggerBackend::Impl {};
+
+#endif
+
+WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)
+'@
+          $count = ([regex]::Matches($content, [regex]::Escape($old))).Count
+          if ($count -ne 1) { throw "Expected one debugger pImpl boundary, found $count" }
+          $patched = $content.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $patched, [Text.UTF8Encoding]::new($false))
+
+      - name: Review patch
+        shell: pwsh
+        run: |
+          git diff --check
+          git diff -- ci/assaultcube_offline_e2e_v3.ps1 app/windows_debugger_backend.cpp
+
+      - name: Commit fixes and remove one-shot workflow
+        shell: pwsh
+        run: |
+          git config user.name "Cortex Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -- .github/workflows/fix-release-gates-once.yml
+          git add -- ci/assaultcube_offline_e2e_v3.ps1 app/windows_debugger_backend.cpp
+          git commit -m "fix beta release gate regressions"
+          git push origin HEAD:next/unified-cortex-ui
+
+      - name: Dispatch all beta gates on final HEAD
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ui-preview.yml --ref next/unified-cortex-ui
+          gh workflow run assaultcube-offline.yml --ref next/unified-cortex-ui
+          gh workflow run linux-app.yml --ref next/unified-cortex-ui
