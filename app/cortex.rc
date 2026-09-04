@@ -1,1 +1,2 @@
+// Multi-DPI centered Windows icon used by Explorer, taskbar and the executable resource.
 IDI_CORTEX_ICON ICON DISCARDABLE "resources/cortex.ico"
