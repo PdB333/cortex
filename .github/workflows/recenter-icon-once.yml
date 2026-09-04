@@ -40,7 +40,7 @@ jobs:
           }
 
           function Load-Bitmap([byte[]]$png) {
-            $stream = [IO.MemoryStream]::new(,$png)
+            $stream = [IO.MemoryStream]::new([byte[]]$png)
             $source = [System.Drawing.Bitmap]::FromStream($stream)
             $copy = [System.Drawing.Bitmap]::new($source)
             $source.Dispose()
