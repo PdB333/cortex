@@ -1,0 +1,147 @@
+name: Recenter Cortex icon once
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - .github/workflows/recenter-icon-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  recenter-icon:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next/unified-cortex-ui
+
+      - name: Rebuild centered multi-DPI ICO
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $src = Join-Path $env:GITHUB_WORKSPACE 'app/resources/cortex.ico'
+          $tmp = Join-Path $env:RUNNER_TEMP 'cortex-centered.ico'
+          $bytes = [IO.File]::ReadAllBytes($src)
+          $count = [BitConverter]::ToUInt16($bytes, 4)
+          $frames = @{}
+
+          for ($i = 0; $i -lt $count; $i++) {
+            $entry = 6 + (16 * $i)
+            $w = [int]$bytes[$entry]
+            if ($w -eq 0) { $w = 256 }
+            $size = [int][BitConverter]::ToUInt32($bytes, $entry + 8)
+            $offset = [int][BitConverter]::ToUInt32($bytes, $entry + 12)
+            $png = New-Object byte[] $size
+            [Array]::Copy($bytes, $offset, $png, 0, $size)
+            $frames[$w] = $png
+          }
+
+          function Load-Bitmap([byte[]]$png) {
+            $stream = [IO.MemoryStream]::new(,$png)
+            $source = [System.Drawing.Bitmap]::FromStream($stream)
+            $copy = [System.Drawing.Bitmap]::new($source)
+            $source.Dispose()
+            $stream.Dispose()
+            return $copy
+          }
+
+          function Resize-Bitmap([System.Drawing.Bitmap]$source, [int]$size) {
+            $target = [System.Drawing.Bitmap]::new($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $graphics = [System.Drawing.Graphics]::FromImage($target)
+            $graphics.Clear([System.Drawing.Color]::Transparent)
+            $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $graphics.DrawImage($source, 0, 0, $size, $size)
+            $graphics.Dispose()
+            return $target
+          }
+
+          function Center-Bitmap([System.Drawing.Bitmap]$bitmap) {
+            [double]$sumX = 0
+            [double]$sumY = 0
+            [double]$sumAlpha = 0
+            for ($y = 0; $y -lt $bitmap.Height; $y++) {
+              for ($x = 0; $x -lt $bitmap.Width; $x++) {
+                $alpha = $bitmap.GetPixel($x, $y).A
+                if ($alpha -gt 0) {
+                  $sumX += $x * $alpha
+                  $sumY += $y * $alpha
+                  $sumAlpha += $alpha
+                }
+              }
+            }
+            if ($sumAlpha -le 0) { throw 'icon frame is fully transparent' }
+            $canvasCenter = ($bitmap.Width - 1) / 2.0
+            $dx = [int][Math]::Round($canvasCenter - ($sumX / $sumAlpha), [MidpointRounding]::AwayFromZero)
+            $dy = [int][Math]::Round($canvasCenter - ($sumY / $sumAlpha), [MidpointRounding]::AwayFromZero)
+            $target = [System.Drawing.Bitmap]::new($bitmap.Width, $bitmap.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $graphics = [System.Drawing.Graphics]::FromImage($target)
+            $graphics.Clear([System.Drawing.Color]::Transparent)
+            $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+            $graphics.DrawImageUnscaled($bitmap, $dx, $dy)
+            $graphics.Dispose()
+            return $target
+          }
+
+          $base64 = Load-Bitmap $frames[64]
+          $sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
+          $outputFrames = [System.Collections.Generic.List[object]]::new()
+
+          foreach ($size in $sizes) {
+            if ($frames.ContainsKey($size)) { $bitmap = Load-Bitmap $frames[$size] }
+            else { $bitmap = Resize-Bitmap $base64 $size }
+            $centered = Center-Bitmap $bitmap
+            $stream = [IO.MemoryStream]::new()
+            $centered.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+            $outputFrames.Add([pscustomobject]@{ Size = $size; Bytes = $stream.ToArray() })
+            $stream.Dispose()
+            $centered.Dispose()
+            $bitmap.Dispose()
+          }
+          $base64.Dispose()
+
+          $output = [IO.MemoryStream]::new()
+          $writer = [IO.BinaryWriter]::new($output)
+          $writer.Write([uint16]0)
+          $writer.Write([uint16]1)
+          $writer.Write([uint16]$outputFrames.Count)
+          $offset = 6 + (16 * $outputFrames.Count)
+          foreach ($frame in $outputFrames) {
+            $dimension = if ($frame.Size -ge 256) { 0 } else { $frame.Size }
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]$dimension)
+            $writer.Write([byte]0)
+            $writer.Write([byte]0)
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]32)
+            $writer.Write([uint32]$frame.Bytes.Length)
+            $writer.Write([uint32]$offset)
+            $offset += $frame.Bytes.Length
+          }
+          foreach ($frame in $outputFrames) { $writer.Write([byte[]]$frame.Bytes) }
+          $writer.Flush()
+          [IO.File]::WriteAllBytes($tmp, $output.ToArray())
+          $writer.Dispose()
+          $output.Dispose()
+          Copy-Item $tmp $src -Force
+
+          $rebuilt = [IO.File]::ReadAllBytes($src)
+          $rebuiltCount = [BitConverter]::ToUInt16($rebuilt, 4)
+          if ($rebuiltCount -ne 9) { throw "expected 9 icon frames, got $rebuiltCount" }
+          Write-Host "Rebuilt centered icon: $((Get-Item $src).Length) bytes, $rebuiltCount frames"
+
+      - name: Commit centered icon
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/resources/cortex.ico
+          if (git diff --cached --quiet) { throw 'icon generator produced no change' }
+          git commit -m "center Windows application icon"
+          git push origin HEAD:next/unified-cortex-ui

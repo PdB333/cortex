@@ -29,6 +29,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -188,7 +189,8 @@ TargetRuntimePtr CreateRuntime(cortex::target::Catalog&catalog,const TargetDescr
 json ProcessList(const std::shared_ptr<RunState>&s,const json&a,std::string&code,std::string&msg){if(!s->catalog){code="target_catalog_unavailable";msg="Local target catalog unavailable";return{};}std::string q;if(a.contains("query")&&a["query"].is_string())q=LowerAscii(a["query"].get<std::string>());size_t limit=static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",256),1,2048));auto attached=RuntimeSnapshot(s);json rows=json::array();size_t total=0;for(const auto&t:s->catalog->Targets()){if(!q.empty()&&LowerAscii(t.name+"\n"+t.executablePath+"\n"+t.windowTitle+"\n"+t.id).find(q)==std::string::npos)continue;++total;if(rows.size()>=limit)continue;bool isAttached=false;for(auto&r:attached)if(r->target.id==t.id&&(!r->target.generation||!t.generation||r->target.generation==t.generation))isAttached=true;rows.push_back(TargetJson(t,isAttached));}return{{"ok",true},{"count",rows.size()},{"total_matches",total},{"truncated",total>rows.size()},{"processes",rows}};}
 
 json OperationJson(const cortex::services::OperationSnapshot&o){return{{"id",o.id},{"kind",o.kind},{"target_id",o.targetId},{"target_generation",o.targetGeneration},{"state",cortex::services::OperationStateName(o.state)},{"started_ms",o.startedMs},{"updated_ms",o.updatedMs},{"timeout_ms",o.timeoutMs},{"progress",o.progress},{"cancellable",o.cancellable},{"message",o.message},{"error",o.error}};}
-json RegistersJson(const cortex::target::ThreadRegisterSnapshot&s){json r=json::object();for(const auto&v:s.registers)r[LowerAscii(v.name)]=v.value;return r;}
+std::string HexRegisterValue(uint64_t value){std::ostringstream s;s<<"0x"<<std::hex<<value;return s.str();}
+json RegistersJson(const cortex::target::ThreadRegisterSnapshot&s){json r=json::object();for(const auto&v:s.registers){const std::string name=LowerAscii(v.name);if(name=="rip"||name=="eip")r[name]=HexRegisterValue(v.value);else r[name]=v.value;}return r;}
 json BreakpointJson(const DebugBreakpointInfo&b){return{{"id",b.id},{"kind",b.kind},{"address",b.address},{"size",b.size},{"action",b.pauseOnHit?"pause":"log"},{"hit_count",b.hitCount},{"process_global",b.processGlobal},{"target_thread_id",b.targetThreadId},{"applied_threads",b.appliedThreads},{"total_threads",b.totalThreads},{"coverage_complete",b.totalThreads==0||b.appliedThreads>=b.totalThreads}};}
 
 bool IsProviderDebugTool(const std::string&n){return n=="debug_threads"||n=="debug_registers"||n=="debug_breakpoint_add"||n=="debug_breakpoint_delete"||n=="debug_breakpoint_list"||n=="debug_breakpoint_log"||n=="debug_paused"||n=="debug_pause"||n=="debug_continue"||n=="debug_step"||n=="debug_step_over";}
