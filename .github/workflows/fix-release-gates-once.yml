@@ -26,58 +26,37 @@ jobs:
         run: |
           $path = "ci/assaultcube_offline_e2e_v3.ps1"
           $content = [IO.File]::ReadAllText($path)
-          $old = @'
-    $permissionProbeTid = [uint64]$candidateThreads[0]
-    $permissionProbe = Invoke-CortexTool "debug_pause" @{ thread_id = $permissionProbeTid }
-    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ([string]$permissionProbe.result.structuredContent.error -eq "mutation_permission_required")
-    if (-not $permissionDenied) {
-        $route = Get-RouteResult $permissionProbe
-        if ($null -ne $route -and $route.ok) { Resume-ThreadBestEffort $permissionProbeTid }
-        throw "debug_pause bypassed mutation_permission"
-    }
-'@
-          $new = @'
-    $permissionProbeTid = [uint64]$candidateThreads[0]
-    $permissionProbe = Invoke-CortexTool "debug_pause" @{ thread_id = $permissionProbeTid }
-    $permissionRoute = Get-RouteResult $permissionProbe
-    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ($null -ne $permissionRoute) -and (-not $permissionRoute.ok) -and ([string]$permissionRoute.error -eq "mutation_permission_required")
-    if (-not $permissionDenied) {
-        if ($null -ne $permissionRoute -and $permissionRoute.ok) { Resume-ThreadBestEffort $permissionProbeTid }
-        throw "debug_pause bypassed mutation_permission"
-    }
-'@
+          $old = '    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ([string]$permissionProbe.result.structuredContent.error -eq "mutation_permission_required")'
+          $new = '    $permissionRoute = Get-RouteResult $permissionProbe' + [Environment]::NewLine + '    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ($null -ne $permissionRoute) -and (-not $permissionRoute.ok) -and ([string]$permissionRoute.error -eq "mutation_permission_required")'
           $count = ([regex]::Matches($content, [regex]::Escape($old))).Count
-          if ($count -ne 1) { throw "Expected one AssaultCube permission probe block, found $count" }
-          $patched = $content.Replace($old, $new)
-          [IO.File]::WriteAllText($path, $patched, [Text.UTF8Encoding]::new($false))
+          if ($count -ne 1) { throw "Expected one permissionDenied line, found $count" }
+          $content = $content.Replace($old, $new)
+          $oldRoute = '        $route = Get-RouteResult $permissionProbe'
+          $count = ([regex]::Matches($content, [regex]::Escape($oldRoute))).Count
+          if ($count -ne 1) { throw "Expected one obsolete route line, found $count" }
+          $content = $content.Replace($oldRoute, '')
+          $oldResume = '        if ($null -ne $route -and $route.ok) { Resume-ThreadBestEffort $permissionProbeTid }'
+          $newResume = '        if ($null -ne $permissionRoute -and $permissionRoute.ok) { Resume-ThreadBestEffort $permissionProbeTid }'
+          $count = ([regex]::Matches($content, [regex]::Escape($oldResume))).Count
+          if ($count -ne 1) { throw "Expected one obsolete resume line, found $count" }
+          $content = $content.Replace($oldResume, $newResume)
+          [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
 
       - name: Complete Windows debugger pImpl on non-Windows builds
         shell: pwsh
         run: |
           $path = "app/windows_debugger_backend.cpp"
-          $content = [IO.File]::ReadAllText($path)
-          $old = @'
-};
-
-#endif
-
-WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)
-'@
-          $new = @'
-};
-
-#else
-
-struct WindowsDebuggerBackend::Impl {};
-
-#endif
-
-WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)
-'@
-          $count = ([regex]::Matches($content, [regex]::Escape($old))).Count
-          if ($count -ne 1) { throw "Expected one debugger pImpl boundary, found $count" }
-          $patched = $content.Replace($old, $new)
-          [IO.File]::WriteAllText($path, $patched, [Text.UTF8Encoding]::new($false))
+          $lines = [Collections.Generic.List[string]]::new()
+          $lines.AddRange([string[]][IO.File]::ReadAllLines($path))
+          $ctor = 'WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)'
+          $index = $lines.IndexOf($ctor)
+          if ($index -lt 2 -or $lines[$index - 2] -ne '#endif') { throw "Could not locate non-Windows pImpl boundary" }
+          $lines[$index - 2] = '#else'
+          $lines.Insert($index - 1, '')
+          $lines.Insert($index, 'struct WindowsDebuggerBackend::Impl {};')
+          $lines.Insert($index + 1, '')
+          $lines.Insert($index + 2, '#endif')
+          [IO.File]::WriteAllLines($path, $lines, [Text.UTF8Encoding]::new($false))
 
       - name: Review patch
         shell: pwsh
