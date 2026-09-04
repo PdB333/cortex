@@ -139,7 +139,7 @@ ApplicationWindow {
                     font.pixelSize: 10
                 }
                 Label {
-                    text: "0.7.0-dev"
+                    text: "0.7.0-beta.1"
                     color: Theme.textDisabled
                     font.family: Theme.uiFont
                     font.pixelSize: 10

@@ -50,7 +50,7 @@ namespace {
 void ConfigureApplicationIdentity() {
     QCoreApplication::setApplicationName("Cortex");
     QCoreApplication::setOrganizationName("Cortex");
-    QCoreApplication::setApplicationVersion("0.7.0-dev");
+    QCoreApplication::setApplicationVersion("0.7.0-beta.1");
 }
 
 #ifdef Q_OS_WIN
@@ -87,7 +87,7 @@ std::optional<int> RunCliMode(int argc, char** argv) {
         PrintCliUsage(); return 0;
     }
     if (command == "version" || command == "--version") {
-        std::puts("cortex 0.7.0-dev"); return 0;
+        std::puts("cortex 0.7.0-beta.1"); return 0;
     }
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", argc, argv, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
