@@ -1143,7 +1143,7 @@ bool WindowsDebuggerBackend::pauseThread(uint64_t threadId,
             return false;
         }
     }
-    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
+    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
                                FALSE, static_cast<DWORD>(threadId));
     if (!thread) {
         if (error) *error = "thread_open_failed:" + std::to_string(GetLastError());
