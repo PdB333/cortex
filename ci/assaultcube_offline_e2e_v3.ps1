@@ -283,10 +283,11 @@ try {
 
     $permissionProbeTid = [uint64]$candidateThreads[0]
     $permissionProbe = Invoke-CortexTool "debug_pause" @{ thread_id = $permissionProbeTid }
-    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ([string]$permissionProbe.result.structuredContent.error -eq "mutation_permission_required")
+    $permissionRoute = Get-RouteResult $permissionProbe
+    $permissionDenied = ($permissionProbe.PSObject.Properties.Name -contains "result") -and ($permissionProbe.result.PSObject.Properties.Name -contains "isError") -and $permissionProbe.result.isError -and ($null -ne $permissionRoute) -and (-not $permissionRoute.ok) -and ([string]$permissionRoute.error -eq "mutation_permission_required")
     if (-not $permissionDenied) {
-        $route = Get-RouteResult $permissionProbe
-        if ($null -ne $route -and $route.ok) { Resume-ThreadBestEffort $permissionProbeTid }
+
+        if ($null -ne $permissionRoute -and $permissionRoute.ok) { Resume-ThreadBestEffort $permissionProbeTid }
         throw "debug_pause bypassed mutation_permission"
     }
     $report.checks.mutation_permission = $true

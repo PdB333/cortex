@@ -759,6 +759,10 @@ struct WindowsDebuggerBackend::Impl {
     }
 };
 
+#else
+
+struct WindowsDebuggerBackend::Impl {};
+
 #endif
 
 WindowsDebuggerBackend::WindowsDebuggerBackend(cortex::target::SessionManager& sessions)
