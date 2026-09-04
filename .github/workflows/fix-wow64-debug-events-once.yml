@@ -26,38 +26,16 @@ jobs:
         run: |
           $path = "app/windows_debugger_backend.cpp"
           $content = [IO.File]::ReadAllText($path)
-
-          $anchor = @'
-#if defined(_WIN32)
-
-struct WindowsDebuggerBackend::Impl {
-'@
-          $replacement = @'
-#if defined(_WIN32)
-
-namespace {
-constexpr DWORD kStatusWx86SingleStep = 0x4000001Eu;
-constexpr DWORD kStatusWx86Breakpoint = 0x4000001Fu;
-}
-
-struct WindowsDebuggerBackend::Impl {
-'@
-          $count = ([regex]::Matches($content, [regex]::Escape($anchor))).Count
-          if ($count -ne 1) { throw "Expected one Windows Impl anchor, found $count" }
-          $content = $content.Replace($anchor, $replacement)
-
           $oldBreakpoint = '        if (code == EXCEPTION_BREAKPOINT) {'
-          $newBreakpoint = '        if (code == EXCEPTION_BREAKPOINT || (targetIsWow64X86() && code == kStatusWx86Breakpoint)) {'
+          $newBreakpoint = '        if (code == EXCEPTION_BREAKPOINT || (targetIsWow64X86() && code == 0x4000001Fu)) {'
           $count = ([regex]::Matches($content, [regex]::Escape($oldBreakpoint))).Count
           if ($count -ne 1) { throw "Expected one breakpoint dispatch, found $count" }
           $content = $content.Replace($oldBreakpoint, $newBreakpoint)
-
           $oldStep = '        if (code == EXCEPTION_SINGLE_STEP) {'
-          $newStep = '        if (code == EXCEPTION_SINGLE_STEP || (targetIsWow64X86() && code == kStatusWx86SingleStep)) {'
+          $newStep = '        if (code == EXCEPTION_SINGLE_STEP || (targetIsWow64X86() && code == 0x4000001Eu)) {'
           $count = ([regex]::Matches($content, [regex]::Escape($oldStep))).Count
           if ($count -ne 1) { throw "Expected one single-step dispatch, found $count" }
           $content = $content.Replace($oldStep, $newStep)
-
           [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
           git diff --check
           git diff -- app/windows_debugger_backend.cpp
