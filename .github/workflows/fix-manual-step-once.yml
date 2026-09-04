@@ -1,0 +1,62 @@
+name: Fix Manual Step Once
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - ".github/workflows/fix-manual-step-once.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next/unified-cortex-ui
+          fetch-depth: 0
+
+      - name: Patch manual pause thread access
+        shell: pwsh
+        run: |
+          $path = "app/windows_debugger_backend.cpp"
+          $content = [IO.File]::ReadAllText($path)
+          $pattern = '(?s)(bool WindowsDebuggerBackend::pauseThread\(.*?HANDLE thread = OpenThread\()THREAD_GET_CONTEXT \| THREAD_SUSPEND_RESUME'
+          $matches = [regex]::Matches($content, $pattern)
+          if ($matches.Count -ne 1) {
+            throw "Expected exactly one pauseThread OpenThread access match, found $($matches.Count)"
+          }
+          $replacement = '${1}THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME'
+          $patched = [regex]::Replace($content, $pattern, $replacement, 1)
+          if ($patched -eq $content) {
+            throw "Manual Step access patch made no change"
+          }
+          [IO.File]::WriteAllText($path, $patched, [Text.UTF8Encoding]::new($false))
+          if (-not ([IO.File]::ReadAllText($path).Contains('THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION'))) {
+            throw "Patched thread access mask was not written"
+          }
+          git diff --check
+          git diff -- app/windows_debugger_backend.cpp
+
+      - name: Commit fix and remove one-shot workflow
+        shell: pwsh
+        run: |
+          git config user.name "Cortex Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm -- .github/workflows/fix-manual-step-once.yml
+          git add -- app/windows_debugger_backend.cpp
+          git commit -m "fix Step Into after manual debugger pause"
+          git push origin HEAD:next/unified-cortex-ui
+
+      - name: Dispatch release gates on fixed HEAD
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run ui-preview.yml --ref next/unified-cortex-ui
+          gh workflow run assaultcube-offline.yml --ref next/unified-cortex-ui
