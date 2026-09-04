@@ -512,7 +512,7 @@ struct WindowsDebuggerBackend::Impl {
         const DWORD code = ex.ExceptionCode;
         const uint64_t address = reinterpret_cast<uint64_t>(ex.ExceptionAddress);
 
-        if (code == EXCEPTION_BREAKPOINT) {
+        if (code == EXCEPTION_BREAKPOINT || (targetIsWow64X86() && code == 0x4000001Fu)) {
             if (handleTempStepOver(event, address, pauseEvent)) return DBG_CONTINUE;
 
             Breakpoint local;
@@ -564,7 +564,7 @@ struct WindowsDebuggerBackend::Impl {
             return DBG_CONTINUE;
         }
 
-        if (code == EXCEPTION_SINGLE_STEP) {
+        if (code == EXCEPTION_SINGLE_STEP || (targetIsWow64X86() && code == 0x4000001Eu)) {
             HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, event.dwThreadId);
             if (!thread) return DBG_EXCEPTION_NOT_HANDLED;
 
