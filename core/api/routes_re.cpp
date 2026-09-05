@@ -41,6 +41,12 @@ json DispatchAfterArm(const json& action) {
     if(path=="/re/last-writer"||path=="/re/transition/trace"||path=="/re/test/run"||path=="/re/experiment/run")
         return{{"ok",false},{"error","recursive_after_arm_forbidden"},{"path",path}};
     const json body=action.value("body",json::object());
+    // Process-global hardware breakpoints are installed on the current thread
+    // snapshot immediately and then kept complete by the 100 ms debugger thread
+    // monitor. Give that propagation two monitor ticks before executing a
+    // deterministic post-arm mutation, otherwise an existing target thread can
+    // perform the write in the narrow window before its DR state is refreshed.
+    Sleep(220);
     const auto native=DispatchNativeRoute(method,path,body.dump());
     json result{{"ok",native.found&&native.status>=200&&native.status<300},{"found",native.found},{"status",native.status},{"method",method},{"path",path}};
     if(!native.body.empty()){
