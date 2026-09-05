@@ -414,7 +414,13 @@ jobs:
               if (-not $stepOverResult.ok) { throw "$label Step Over failed on a real CALL" }
               $ipName = if ([int]$fixture.pointer_size -eq 8) { "rip" } else { "eip" }
               $stepIp = [string]$stepOverResult.registers.$ipName
-              if ($stepIp.ToLowerInvariant() -ne $callNext.ToLowerInvariant()) {
+              $stepIpNumeric = if ($stepIp -match '^0x') {
+                [Convert]::ToUInt64(($stepIp -replace '^0x',''), 16)
+              } else {
+                [Convert]::ToUInt64($stepIp, 10)
+              }
+              $callNextNumeric = [Convert]::ToUInt64(($callNext -replace '^0x',''), 16)
+              if ($stepIpNumeric -ne $callNextNumeric) {
                 throw "$label Step Over stopped at $stepIp instead of $callNext"
               }
 
@@ -1776,7 +1782,6 @@ jobs:
           path: staging/x64/CortexPreview
           if-no-files-found: error
           retention-days: 14
-
 
 
 
