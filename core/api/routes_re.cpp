@@ -6,6 +6,7 @@
 #include "../project/project.h"
 #include "../hook/input_inject.h"
 #include "../memory/memory.h"
+#include "../debugger/debugger.h"
 #include "native_routes.h"
 #include <nlohmann/json.hpp>
 #include <stdexcept>
@@ -33,6 +34,19 @@ void Reply(httplib::Response& res,const json& out,int missingStatus=404) {
     }
     res.set_content(out.dump(),"application/json");
 }
+bool WaitForHardwareBreakpointCoverage(uint32_t timeoutMs) {
+    const ULONGLONG deadline=GetTickCount64()+std::max<uint32_t>(1,timeoutMs);
+    do {
+        bool ready=true;
+        for(const auto& bp:dbg::ListBreakpoints()) {
+            if(bp.kind==dbg::BpKind::Software)continue;
+            if(bp.appliedThreads<bp.totalThreads){ready=false;break;}
+        }
+        if(ready)return true;
+        Sleep(5);
+    } while(GetTickCount64()<deadline);
+    return false;
+}
 json DispatchAfterArm(const json& action) {
     if(!action.is_object())return{{"ok",false},{"error","after_arm_object_required"}};
     const std::string method=action.value("method",std::string("POST"));
@@ -41,12 +55,12 @@ json DispatchAfterArm(const json& action) {
     if(path=="/re/last-writer"||path=="/re/transition/trace"||path=="/re/test/run"||path=="/re/experiment/run")
         return{{"ok",false},{"error","recursive_after_arm_forbidden"},{"path",path}};
     const json body=action.value("body",json::object());
-    // Process-global hardware breakpoints are installed on the current thread
-    // snapshot immediately and then kept complete by the 100 ms debugger thread
-    // monitor. Give that propagation two monitor ticks before executing a
-    // deterministic post-arm mutation, otherwise an existing target thread can
-    // perform the write in the narrow window before its DR state is refreshed.
-    Sleep(220);
+    // Deterministic post-arm mutations must not run until every live target
+    // thread that should carry a hardware breakpoint actually has its DR state.
+    // The debugger monitor publishes that coverage after SetThreadContext, so
+    // this is a real readiness barrier rather than a scheduler-dependent delay.
+    if(!WaitForHardwareBreakpointCoverage(1500))
+        return{{"ok",false},{"error","hardware_breakpoint_propagation_timeout"},{"method",method},{"path",path}};
     const auto native=DispatchNativeRoute(method,path,body.dump());
     json result{{"ok",native.found&&native.status>=200&&native.status<300},{"found",native.found},{"status",native.status},{"method",method},{"path",path}};
     if(!native.body.empty()){
@@ -227,7 +241,7 @@ void RegisterReRoutes(RouteRegistrar& svr) {
     svr.Delete("/re/session/fact",[](const httplib::Request& req,httplib::Response& res){
         try{auto mutation=action::LockMutations();json b=json::parse(req.body);std::string key=b.at("key").get<std::string>();json before=project::GetReFacts();if(!before.contains(key)){Reply(res,{{"ok",false},{"error","fact_not_found"}});return;}json previous=before[key];
             if(!project::RemoveReFact(key)){Reply(res,{{"ok",false},{"error","project_save_failed"}});return;}
-            action::Record("re/session/fact_delete "+key,[key,previous]{return project::SetReFact(key,previous);});Reply(res,{{"ok",true}});
+            action::Record("re/session/fact_delete "+key,[key,previous]{return project::SetReFact(key,previous):project::RemoveReFact(key);});Reply(res,{{"ok",true}});
         }catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
     });
     svr.Post("/re/session/breakpoints",[](const httplib::Request& req,httplib::Response& res){
