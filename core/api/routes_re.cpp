@@ -241,7 +241,7 @@ void RegisterReRoutes(RouteRegistrar& svr) {
     svr.Delete("/re/session/fact",[](const httplib::Request& req,httplib::Response& res){
         try{auto mutation=action::LockMutations();json b=json::parse(req.body);std::string key=b.at("key").get<std::string>();json before=project::GetReFacts();if(!before.contains(key)){Reply(res,{{"ok",false},{"error","fact_not_found"}});return;}json previous=before[key];
             if(!project::RemoveReFact(key)){Reply(res,{{"ok",false},{"error","project_save_failed"}});return;}
-            action::Record("re/session/fact_delete "+key,[key,previous]{return project::SetReFact(key,previous):project::RemoveReFact(key);});Reply(res,{{"ok",true}});
+            action::Record("re/session/fact_delete "+key,[key,previous]{return project::SetReFact(key,previous);});Reply(res,{{"ok",true}});
         }catch(const std::exception&e){Reply(res,{{"ok",false},{"error",e.what()}});}
     });
     svr.Post("/re/session/breakpoints",[](const httplib::Request& req,httplib::Response& res){
