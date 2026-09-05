@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: unified-cortex-ui-${{ github.ref }}
+  group: unified-cortex-ui-compact-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
