@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -30,12 +29,19 @@ std::string NumberToString(const std::vector<uint8_t>& bytes) {
     T value{};
     std::memcpy(&value, bytes.data(), sizeof(T));
     std::ostringstream out;
-    if constexpr (std::is_floating_point_v<T>) {
-        out << std::setprecision(7) << value;
-    } else {
-        out << value;
-    }
+    if constexpr (std::is_floating_point_v<T>) out << std::setprecision(7) << value;
+    else out << value;
     return out.str();
+}
+
+size_t FixedKindSize(services::ScanValueKind kind) {
+    switch (kind) {
+        case services::ScanValueKind::I32:
+        case services::ScanValueKind::F32: return 4;
+        case services::ScanValueKind::I64:
+        case services::ScanValueKind::F64: return 8;
+        default: return 0;
+    }
 }
 
 } // namespace
@@ -61,35 +67,37 @@ services::ScanComparison MemoryWorkspace::SelectedComparison() const {
     }
 }
 
-std::vector<uint8_t> MemoryWorkspace::EncodeValue(std::string& error) const {
+std::vector<uint8_t> MemoryWorkspace::EncodeText(
+        const char* raw, services::ScanValueKind kind, std::string& error) const {
     error.clear();
+    const std::string text = raw ? raw : "";
     try {
-        switch (SelectedKind()) {
+        switch (kind) {
             case services::ScanValueKind::I32: {
-                const long long parsed = std::stoll(scanValue_);
-                if (parsed < std::numeric_limits<int32_t>::min() || parsed > std::numeric_limits<int32_t>::max()) {
+                const long long parsed = std::stoll(text);
+                if (parsed < std::numeric_limits<int32_t>::min() ||
+                    parsed > std::numeric_limits<int32_t>::max()) {
                     error = "Value is outside the Int32 range";
                     return {};
                 }
                 return BytesOf(static_cast<int32_t>(parsed));
             }
             case services::ScanValueKind::I64:
-                return BytesOf(static_cast<int64_t>(std::stoll(scanValue_)));
+                return BytesOf(static_cast<int64_t>(std::stoll(text)));
             case services::ScanValueKind::F32:
-                return BytesOf(std::stof(scanValue_));
+                return BytesOf(std::stof(text));
             case services::ScanValueKind::F64:
-                return BytesOf(std::stod(scanValue_));
-            case services::ScanValueKind::String: {
-                const std::string text(scanValue_);
+                return BytesOf(std::stod(text));
+            case services::ScanValueKind::String:
                 if (text.empty()) {
-                    error = "Enter a string to scan for";
+                    error = "Enter a non-empty string";
                     return {};
+                } else {
+                    return std::vector<uint8_t>(text.begin(), text.end());
                 }
-                return std::vector<uint8_t>(text.begin(), text.end());
-            }
             case services::ScanValueKind::Bytes: {
                 std::vector<uint8_t> bytes;
-                std::istringstream stream(scanValue_);
+                std::istringstream stream(text);
                 std::string token;
                 while (stream >> token) {
                     size_t used = 0;
@@ -110,7 +118,12 @@ std::vector<uint8_t> MemoryWorkspace::EncodeValue(std::string& error) const {
     return {};
 }
 
-std::string MemoryWorkspace::FormatValue(const std::vector<uint8_t>& value, services::ScanValueKind kind) const {
+std::vector<uint8_t> MemoryWorkspace::EncodeValue(std::string& error) const {
+    return EncodeText(scanValue_, SelectedKind(), error);
+}
+
+std::string MemoryWorkspace::FormatValue(
+        const std::vector<uint8_t>& value, services::ScanValueKind kind) const {
     switch (kind) {
         case services::ScanValueKind::I32: return NumberToString<int32_t>(value);
         case services::ScanValueKind::I64: return NumberToString<int64_t>(value);
@@ -131,12 +144,28 @@ std::string MemoryWorkspace::FormatValue(const std::vector<uint8_t>& value, serv
     return {};
 }
 
+void MemoryWorkspace::NavigateAddress(UiContext& context, uint64_t address,
+                                      const char* workspace) {
+    context.navigationAddress = address;
+    context.navigationAddressPending = true;
+    context.requestWorkspace = workspace ? workspace : "memory-browser";
+}
+
+void MemoryWorkspace::FindWriter(UiContext& context, uint64_t address) {
+    context.runtimeToolPreset = "re_find_last_writer";
+    context.runtimeArgumentsPreset =
+        std::string("{\"address\":") + std::to_string(address) +
+        ",\"size\":1,\"timeout_ms\":5000,\"mutation_permission\":true}";
+    context.requestWorkspace = "runtime";
+}
+
 void MemoryWorkspace::ResetForTarget(const std::string& targetId) {
     if (scanRunning_ && scanCancel_) scanCancel_->store(true, std::memory_order_relaxed);
     scanResults_.clear();
     addresses_.clear();
     firstScanDone_ = false;
     comparisonIndex_ = 0;
+    editAddressIndex_ = -1;
     activeTargetId_ = targetId;
 }
 
@@ -176,7 +205,8 @@ void MemoryWorkspace::StartScan(UiContext& context) {
 
     std::string parseError;
     std::vector<uint8_t> exactValue;
-    const bool exactNeeded = !firstScanDone_ || SelectedComparison() == services::ScanComparison::Exact;
+    const bool exactNeeded =
+        !firstScanDone_ || SelectedComparison() == services::ScanComparison::Exact;
     if (exactNeeded) {
         exactValue = EncodeValue(parseError);
         if (!parseError.empty()) {
@@ -196,11 +226,13 @@ void MemoryWorkspace::StartScan(UiContext& context) {
     context.status = refine ? "Refining scan..." : "Scanning process memory...";
 
     scanFuture_ = std::async(std::launch::async,
-        [session, exactValue = std::move(exactValue), previous, kind, comparison, refine, cancel]() mutable {
+        [session, exactValue = std::move(exactValue), previous, kind, comparison,
+         refine, cancel]() mutable {
             ScanTaskResult result;
             if (refine) {
                 result.ok = services::ScanService::Refine(
-                    session, previous, kind, comparison, exactValue, result.results, &result.error, cancel.get());
+                    session, previous, kind, comparison, exactValue, result.results,
+                    &result.error, cancel.get());
             } else {
                 result.ok = services::ScanService::Exact(
                     session, exactValue, result.results, 5000, &result.error, cancel.get());
@@ -211,7 +243,9 @@ void MemoryWorkspace::StartScan(UiContext& context) {
 
 bool MemoryWorkspace::HasAddress(uint64_t address) const {
     return std::any_of(addresses_.begin(), addresses_.end(),
-                       [address](const AddressEntry& entry) { return entry.address == address; });
+                       [address](const AddressEntry& entry) {
+                           return entry.address == address;
+                       });
 }
 
 void MemoryWorkspace::AddAddress(const services::ScanResult& result) {
@@ -225,20 +259,106 @@ void MemoryWorkspace::AddAddress(const services::ScanResult& result) {
     addresses_.push_back(std::move(entry));
 }
 
+bool MemoryWorkspace::AddManualAddress(UiContext& context) {
+    if (!context.memory) return false;
+
+    uint64_t address = 0;
+    try {
+        size_t used = 0;
+        const std::string text(addAddress_);
+        address = std::stoull(text, &used, 0);
+        if (used != text.size() || address == 0) throw std::runtime_error("bad address");
+    } catch (...) {
+        context.status = "Invalid address";
+        return false;
+    }
+    if (HasAddress(address)) {
+        context.status = "Address is already in the list";
+        return false;
+    }
+
+    services::ScanValueKind kind = services::ScanValueKind::I32;
+    switch (addTypeIndex_) {
+        case 1: kind = services::ScanValueKind::I64; break;
+        case 2: kind = services::ScanValueKind::F32; break;
+        case 3: kind = services::ScanValueKind::F64; break;
+        default: break;
+    }
+
+    const size_t size = FixedKindSize(kind);
+    std::vector<uint8_t> value;
+    std::string error;
+    if (!context.memory->Read(address, size, value, &error)) {
+        context.status = "Unable to read address: " + error;
+        return false;
+    }
+
+    AddressEntry entry;
+    entry.address = address;
+    entry.kind = kind;
+    entry.description = *addDescription_
+        ? std::string(addDescription_)
+        : "Address " + std::to_string(addresses_.size() + 1);
+    entry.lastValue = value;
+    entry.frozenValue = value;
+    addresses_.push_back(std::move(entry));
+    context.status = "Address added";
+    return true;
+}
+
+void MemoryWorkspace::BeginValueEdit(size_t index) {
+    if (index >= addresses_.size()) return;
+    editAddressIndex_ = static_cast<int>(index);
+    const std::string current = FormatValue(addresses_[index].lastValue,
+                                             addresses_[index].kind);
+    std::snprintf(editValue_, sizeof(editValue_), "%s", current.c_str());
+    openEditValue_ = true;
+}
+
+bool MemoryWorkspace::CommitValueEdit(UiContext& context) {
+    if (!context.memory || !context.mutationAllowed ||
+        editAddressIndex_ < 0 ||
+        editAddressIndex_ >= static_cast<int>(addresses_.size())) {
+        context.status = "Enable writes before changing a value";
+        return false;
+    }
+
+    auto& entry = addresses_[static_cast<size_t>(editAddressIndex_)];
+    std::string parseError;
+    auto bytes = EncodeText(editValue_, entry.kind, parseError);
+    if (!parseError.empty()) {
+        context.status = parseError;
+        return false;
+    }
+
+    std::string error;
+    if (!context.memory->Write(entry.address, bytes, true, &error)) {
+        context.status = "Value write failed: " + error;
+        return false;
+    }
+
+    entry.lastValue = bytes;
+    entry.frozenValue = bytes;
+    context.status = "Value updated";
+    return true;
+}
+
 void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
     if (!context.memory) return;
     const auto now = std::chrono::steady_clock::now();
     if (lastAddressRefresh_.time_since_epoch().count() != 0 &&
-        now - lastAddressRefresh_ < std::chrono::milliseconds(180)) {
-        return;
-    }
+        now - lastAddressRefresh_ < std::chrono::milliseconds(180)) return;
     lastAddressRefresh_ = now;
 
     for (auto& entry : addresses_) {
-        const size_t size = entry.frozenValue.empty() ? 4 : entry.frozenValue.size();
+        const size_t size = entry.frozenValue.empty()
+            ? std::max<size_t>(1, FixedKindSize(entry.kind))
+            : entry.frozenValue.size();
         std::vector<uint8_t> value;
         std::string error;
-        if (context.memory->Read(entry.address, size, value, &error)) entry.lastValue = std::move(value);
+        if (context.memory->Read(entry.address, size, value, &error)) {
+            entry.lastValue = std::move(value);
+        }
 
         if (entry.freeze && context.mutationAllowed && !entry.frozenValue.empty()) {
             context.memory->Write(entry.address, entry.frozenValue, true, &error);
@@ -248,10 +368,12 @@ void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
 
 void MemoryWorkspace::DrawWelcome(UiContext& context) {
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float cardWidth = std::min(520.0f, available.x - 30.0f);
-    const float cardHeight = 210.0f;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (available.x - cardWidth) * 0.5f));
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(20.0f, (available.y - cardHeight) * 0.28f));
+    const float cardWidth = std::min(540.0f, available.x - 30.0f);
+    const float cardHeight = 220.0f;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                         std::max(0.0f, (available.x - cardWidth) * 0.5f));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() +
+                         std::max(20.0f, (available.y - cardHeight) * 0.28f));
 
     ImGui::BeginChild("WelcomeCard", ImVec2(cardWidth, cardHeight), ImGuiChildFlags_Borders);
     ImGui::Dummy(ImVec2(0, 10));
@@ -263,18 +385,18 @@ void MemoryWorkspace::DrawWelcome(UiContext& context) {
     ImGui::Dummy(ImVec2(0, 18));
 
     const float width = ImGui::GetContentRegionAvail().x;
-    const float buttonWidth = std::min(240.0f, width);
+    const float buttonWidth = std::min(250.0f, width);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - buttonWidth) * 0.5f);
     if (ImGui::Button("Select a process", ImVec2(buttonWidth, 42))) {
         context.requestProcessPicker = true;
     }
 
     ImGui::Dummy(ImVec2(0, 12));
-    ImGui::TextDisabled("Basic flow: Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
+    ImGui::TextDisabled("Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
     ImGui::EndChild();
 }
 
-void MemoryWorkspace::DrawResults(UiContext&, float height) {
+void MemoryWorkspace::DrawResults(UiContext& context, float height) {
     ImGui::BeginChild("ScanResults", ImVec2(0, height), ImGuiChildFlags_Borders);
     ImGui::TextUnformatted("Scan results");
     ImGui::SameLine();
@@ -283,7 +405,9 @@ void MemoryWorkspace::DrawResults(UiContext&, float height) {
 
     if (scanResults_.empty()) {
         ImGui::Dummy(ImVec2(0, 18));
-        ImGui::TextDisabled(firstScanDone_ ? "No matching values." : "Run a first scan to populate this list.");
+        ImGui::TextDisabled(firstScanDone_
+            ? "No matching values."
+            : "Run a first scan to populate this list.");
         ImGui::EndChild();
         return;
     }
@@ -312,10 +436,22 @@ void MemoryWorkspace::DrawResults(UiContext&, float height) {
                 if (ImGui::Selectable(address, false,
                                       ImGuiSelectableFlags_SpanAllColumns |
                                       ImGuiSelectableFlags_AllowDoubleClick)) {
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) AddAddress(result);
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                        AddAddress(result);
+                        context.status = "Address added to list";
+                    }
                 }
                 if (ImGui::BeginPopupContextItem("ResultMenu")) {
                     if (ImGui::MenuItem("Add to address list")) AddAddress(result);
+                    if (ImGui::MenuItem("Browse memory")) {
+                        NavigateAddress(context, result.address, "memory-browser");
+                    }
+                    if (ImGui::MenuItem("Disassemble here")) {
+                        NavigateAddress(context, result.address, "disassembly");
+                    }
+                    if (ImGui::MenuItem("Find what writes this")) {
+                        FindWriter(context, result.address);
+                    }
                     ImGui::EndPopup();
                 }
 
@@ -351,13 +487,19 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
         ImGui::Spacing();
         ImGui::TextDisabled("Compare");
         ImGui::SetNextItemWidth(-1);
-        const char* comparisons[] = {"Exact value", "Changed", "Unchanged", "Increased", "Decreased"};
-        ImGui::Combo("##ScanComparison", &comparisonIndex_, comparisons, IM_ARRAYSIZE(comparisons));
+        const char* comparisons[] = {
+            "Exact value", "Changed", "Unchanged", "Increased", "Decreased"
+        };
+        ImGui::Combo("##ScanComparison", &comparisonIndex_,
+                     comparisons, IM_ARRAYSIZE(comparisons));
     }
 
     ImGui::Dummy(ImVec2(0, 12));
     ImGui::BeginDisabled(scanRunning_);
-    if (ImGui::Button(firstScanDone_ ? "Next scan" : "First scan", ImVec2(-1, 40))) StartScan(context);
+    if (ImGui::Button(firstScanDone_ ? "Next scan" : "First scan",
+                      ImVec2(-1, 40))) {
+        StartScan(context);
+    }
     ImGui::EndDisabled();
 
     if (firstScanDone_) {
@@ -373,7 +515,8 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     }
 
     ImGui::Dummy(ImVec2(0, 10));
-    ImGui::TextWrapped("Double-click a result to add it to the address list.");
+    ImGui::TextWrapped("Double-click a result to add it. Right-click for Memory, "
+                       "Disassembler or Find what writes this.");
     ImGui::EndChild();
 }
 
@@ -384,11 +527,20 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
     ImGui::TextUnformatted("Address list");
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu)", addresses_.size());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("+ Add address")) openAddAddress_ = true;
+    if (!addresses_.empty()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear")) {
+            addresses_.clear();
+            context.status = "Address list cleared";
+        }
+    }
     ImGui::Separator();
 
     if (addresses_.empty()) {
         ImGui::Dummy(ImVec2(0, 12));
-        ImGui::TextDisabled("Useful addresses appear here. Double-click a scan result to add one.");
+        ImGui::TextDisabled("Double-click a scan result or use + Add address.");
         ImGui::EndChild();
         return;
     }
@@ -404,7 +556,9 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.30f);
         ImGui::TableHeadersRow();
 
-        static const char* kindNames[] = {"Bytes", "Int32", "Int64", "Float", "Double", "String"};
+        static const char* kindNames[] = {
+            "Bytes", "Int32", "Int64", "Float", "Double", "String"
+        };
 
         for (size_t i = 0; i < addresses_.size();) {
             auto& entry = addresses_[i];
@@ -414,30 +568,65 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
             ImGui::TableSetColumnIndex(0);
             ImGui::BeginDisabled(!context.mutationAllowed);
-            if (ImGui::Checkbox("##Freeze", &entry.freeze) && entry.freeze) entry.frozenValue = entry.lastValue;
+            if (ImGui::Checkbox("##Freeze", &entry.freeze) && entry.freeze) {
+                entry.frozenValue = entry.lastValue;
+            }
             ImGui::EndDisabled();
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(entry.description.c_str());
+            std::array<char, 160> description{};
+            std::snprintf(description.data(), description.size(), "%s",
+                          entry.description.c_str());
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##Description", description.data(),
+                                 description.size(),
+                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+                entry.description = description.data();
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                entry.description = description.data();
+            }
 
             ImGui::TableSetColumnIndex(2);
             ImGui::Text("0x%llX", static_cast<unsigned long long>(entry.address));
 
             ImGui::TableSetColumnIndex(3);
             const auto kindIndex = static_cast<int>(entry.kind);
-            ImGui::TextUnformatted(kindIndex >= 0 && kindIndex < IM_ARRAYSIZE(kindNames)
+            ImGui::TextUnformatted(kindIndex >= 0 &&
+                                   kindIndex < IM_ARRAYSIZE(kindNames)
                                        ? kindNames[kindIndex] : "?");
 
             ImGui::TableSetColumnIndex(4);
-            ImGui::TextUnformatted(FormatValue(entry.lastValue, entry.kind).c_str());
+            const std::string value = FormatValue(entry.lastValue, entry.kind);
+            if (ImGui::Selectable(value.c_str(), false,
+                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    if (context.mutationAllowed) BeginValueEdit(i);
+                    else context.status = "Enable writes to edit a value";
+                }
+            }
             if (ImGui::BeginPopupContextItem("AddressMenu")) {
+                ImGui::BeginDisabled(!context.mutationAllowed);
+                if (ImGui::MenuItem("Edit value")) BeginValueEdit(i);
+                ImGui::EndDisabled();
+                if (ImGui::MenuItem("Browse memory")) {
+                    NavigateAddress(context, entry.address, "memory-browser");
+                }
+                if (ImGui::MenuItem("Disassemble here")) {
+                    NavigateAddress(context, entry.address, "disassembly");
+                }
+                if (ImGui::MenuItem("Find what writes this")) {
+                    FindWriter(context, entry.address);
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Remove")) remove = true;
                 ImGui::EndPopup();
             }
 
             ImGui::PopID();
             if (remove) {
-                addresses_.erase(addresses_.begin() + static_cast<std::ptrdiff_t>(i));
+                addresses_.erase(addresses_.begin() +
+                                 static_cast<std::ptrdiff_t>(i));
             } else {
                 ++i;
             }
@@ -445,6 +634,67 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
         ImGui::EndTable();
     }
     ImGui::EndChild();
+}
+
+void MemoryWorkspace::DrawDialogs(UiContext& context) {
+    if (openAddAddress_) {
+        ImGui::OpenPopup("Add address");
+        openAddAddress_ = false;
+        addAddress_[0] = '\0';
+        addDescription_[0] = '\0';
+        addTypeIndex_ = 0;
+    }
+    ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Add address", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextDisabled("Address");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##ManualAddress", "0x7FF...",
+                                 addAddress_, sizeof(addAddress_));
+        ImGui::TextDisabled("Description");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##ManualDescription", "Health",
+                                 addDescription_, sizeof(addDescription_));
+        ImGui::TextDisabled("Type");
+        ImGui::SetNextItemWidth(-1);
+        const char* types[] = {"Int32", "Int64", "Float", "Double"};
+        ImGui::Combo("##ManualType", &addTypeIndex_, types, IM_ARRAYSIZE(types));
+        ImGui::Spacing();
+        if (ImGui::Button("Add", ImVec2(120, 34))) {
+            if (AddManualAddress(context)) ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100, 34))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if (openEditValue_) {
+        ImGui::OpenPopup("Edit value");
+        openEditValue_ = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Edit value", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (editAddressIndex_ >= 0 &&
+            editAddressIndex_ < static_cast<int>(addresses_.size())) {
+            const auto& entry = addresses_[static_cast<size_t>(editAddressIndex_)];
+            ImGui::Text("0x%llX", static_cast<unsigned long long>(entry.address));
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputText("##EditedValue", editValue_, sizeof(editValue_));
+            ImGui::Spacing();
+            ImGui::BeginDisabled(!context.mutationAllowed);
+            if (ImGui::Button("Write value", ImVec2(130, 34))) {
+                if (CommitValueEdit(context)) ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(100, 34))) ImGui::CloseCurrentPopup();
+        } else {
+            ImGui::TextDisabled("Address no longer exists.");
+            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 void MemoryWorkspace::Draw(UiContext& context) {
@@ -456,20 +706,21 @@ void MemoryWorkspace::Draw(UiContext& context) {
 
     if (!session) {
         DrawWelcome(context);
+        DrawDialogs(context);
         return;
     }
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float upperHeight = std::clamp(available.y * 0.56f, 260.0f, 520.0f);
     const float scanPanelWidth = std::clamp(available.x * 0.28f, 260.0f, 360.0f);
-    const float resultsWidth = std::max(300.0f, available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
+    const float resultsWidth = std::max(
+        300.0f, available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
 
     ImGui::BeginGroup();
-    ImGui::PushItemWidth(resultsWidth);
-    ImGui::BeginChild("ResultsColumn", ImVec2(resultsWidth, upperHeight), ImGuiChildFlags_None);
+    ImGui::BeginChild("ResultsColumn", ImVec2(resultsWidth, upperHeight),
+                      ImGuiChildFlags_None);
     DrawResults(context, upperHeight);
     ImGui::EndChild();
-    ImGui::PopItemWidth();
     ImGui::EndGroup();
 
     ImGui::SameLine();
@@ -482,6 +733,7 @@ void MemoryWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     DrawAddressList(context);
+    DrawDialogs(context);
 }
 
 } // namespace cortex::ui
