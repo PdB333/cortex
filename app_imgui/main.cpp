@@ -22,6 +22,8 @@
 #include <string>
 #include <vector>
 
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+
 namespace {
 
 ID3D11Device* gDevice = nullptr;
@@ -77,8 +79,6 @@ void CleanupDeviceD3D() {
     if (gDeviceContext) { gDeviceContext->Release(); gDeviceContext = nullptr; }
     if (gDevice) { gDevice->Release(); gDevice = nullptr; }
 }
-
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
 LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
