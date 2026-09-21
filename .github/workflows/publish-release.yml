@@ -3,249 +3,265 @@ name: Publish Release
 on:
   push:
     branches:
-      - master
+      - main
     paths:
-      - CHANGELOG.md
-      - README.md
-      - README_INSTALL.txt
-      - core/api/mcp_protocol.h
-      - core/api/mcp_contract.h
-      - core/api/mcp_pipe.cpp
-      - core/api/mcp_pipe.h
-      - core/api/mcp_pipe_protocol.h
-      - core/api/mcp_tools.cpp
-      - core/api/mcp_tools.h
-      - core/api/native_routes.cpp
-      - core/api/native_routes.h
-      - core/api/routes_mcp.cpp
-      - core/api/semantic_tools.h
-      - agent/semantic-tools.md
-      - docs/mcp.md
-      - mcp_bridge/main.cpp
-      - tests/mcp_protocol_tests.cpp
-      - tests/mcp_pipe_protocol_tests.cpp
-      - tests/semantic_tools_tests.cpp
-      - tests/semantic_mcp_e2e.ps1
-      - tests/native_mcp_stdio_e2e.ps1
-      - .github/workflows/publish-release.yml
+      - "app/**"
+      - "core/**"
+      - "runtime_helper/**"
+      - "docs/**"
+      - "CMakeLists.txt"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "LICENSE"
+      - ".github/workflows/publish-release.yml"
   pull_request:
     paths:
-      - CHANGELOG.md
-      - README.md
-      - README_INSTALL.txt
-      - core/api/mcp_protocol.h
-      - core/api/mcp_contract.h
-      - core/api/mcp_pipe.cpp
-      - core/api/mcp_pipe.h
-      - core/api/mcp_pipe_protocol.h
-      - core/api/mcp_tools.cpp
-      - core/api/mcp_tools.h
-      - core/api/native_routes.cpp
-      - core/api/native_routes.h
-      - core/api/routes_mcp.cpp
-      - core/api/semantic_tools.h
-      - agent/semantic-tools.md
-      - docs/mcp.md
-      - mcp_bridge/main.cpp
-      - tests/mcp_protocol_tests.cpp
-      - tests/mcp_pipe_protocol_tests.cpp
-      - tests/semantic_tools_tests.cpp
-      - tests/semantic_mcp_e2e.ps1
-      - tests/native_mcp_stdio_e2e.ps1
-      - injector/**
-      - .github/workflows/publish-release.yml
+      - "app/**"
+      - "core/**"
+      - "runtime_helper/**"
+      - "docs/**"
+      - "CMakeLists.txt"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "LICENSE"
+      - ".github/workflows/publish-release.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.6.0-${{ github.ref }}
+  group: publish-v0.7.0-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: v0.6.0
+  RELEASE_TAG: v0.7.0
 
 jobs:
-  build:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.6.0')
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86
-            msystem: MINGW32
-            prefix: mingw-w64-i686
-            target_name: cortex_test_target_x86.exe
-          - arch: x64
-            msystem: MINGW64
-            prefix: mingw-w64-x86_64
-            target_name: cortex_test_target_x64.exe
+  windows-x64-stage:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
     runs-on: windows-2025
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
-      - name: Checkout release commit
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install MinGW toolchain
+      - name: Install x64 MinGW and Qt 6
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.msystem }}
+          msystem: MINGW64
           update: true
           install: >-
             git
-            ${{ matrix.prefix }}-gcc
-            ${{ matrix.prefix }}-cmake
-            ${{ matrix.prefix }}-ninja
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-tools
 
-      - name: Configure Cortex
+      - name: Build unified application
         shell: msys2 {0}
-        run: cmake -S . -B build/release-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCORTEX_BUILD_LEGACY_COMPAT=ON
-
-      - name: Build Cortex
-        shell: msys2 {0}
-        run: cmake --build build/release-${{ matrix.arch }} --parallel 2
-
-      - name: Build semantic catalog tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
-          -Ibuild/release-${{ matrix.arch }}/_deps/json-src/include
-          -o build/release-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
-          -static -static-libgcc -static-libstdc++
-
-      - name: Run semantic catalog tests
-        shell: msys2 {0}
-        run: >-
-          build/release-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
-          core/api/routes_status.cpp
-
-      - name: Run existing CTest suite
-        shell: msys2 {0}
-        run: ctest --test-dir build/release-${{ matrix.arch }} --output-on-failure
-
-      - name: Build standalone compatibility injector
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 injector/main.cpp
-          -o build/release-${{ matrix.arch }}/injector.exe
-          -static -static-libgcc -static-libstdc++
-
-      - name: Inject Cortex and test HTTP + native MCP
-        shell: pwsh
         run: |
-          $root = Resolve-Path "build/release-${{ matrix.arch }}"
-          $targetPath = Join-Path $root "${{ matrix.target_name }}"
-          $injectorPath = Join-Path $root "injector.exe"
-          $hostPath = Join-Path $root "cortex_host.exe"
-          $corePath = Join-Path $root "cortex_core.dll"
-          $tokenPath = Join-Path $root "cortex.token"
-          $semanticTests = (Resolve-Path "tests/semantic_mcp_e2e.ps1").Path
-          $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
-          $target = Start-Process -FilePath $targetPath -PassThru
-          try {
-            Start-Sleep -Seconds 2
-            & $injectorPath $target.Id $corePath
-            if ($LASTEXITCODE -ne 0) { throw "Standalone Cortex injection failed" }
+          set -euo pipefail
+          cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ui --parallel 2
+          QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
 
-            $healthy = $false
-            for ($attempt = 0; $attempt -lt 30; $attempt++) {
-              try {
-                $response = Invoke-RestMethod -Uri "http://127.0.0.1:6969/health" -TimeoutSec 1
-                if ($response.ok) {
-                  $healthy = $true
-                  break
-                }
-              } catch {
-                Start-Sleep -Milliseconds 250
-              }
-            }
-            if (-not $healthy) { throw "Injected Cortex API did not become healthy" }
-            if (-not (Test-Path $tokenPath)) { throw "Cortex token was not created at $tokenPath" }
-
-            & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
-            if (-not $?) { throw "HTTP MCP semantic E2E failed" }
-
-            & $nativeTests -HostPath $hostPath -TokenPath $tokenPath
-            if (-not $?) { throw "Native stdio MCP E2E failed" }
-          } finally {
-            if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }
-          }
-
-      - name: Package and verify release
-        shell: pwsh
+      - name: Build and test x64 runtime
+        shell: msys2 {0}
         run: |
-          $name = "cortex-${env:RELEASE_TAG}-windows-${{ matrix.arch }}"
-          $stage = Join-Path $PWD "dist/$name"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          set -euo pipefail
+          cmake -S . -B build/runtime-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/runtime-x64 --parallel 2
+          ctest --test-dir build/runtime-x64 --output-on-failure
 
-          Copy-Item "build/release-${{ matrix.arch }}/cortex_host.exe" $stage
-          Copy-Item "build/release-${{ matrix.arch }}/cortex_core.dll" $stage
-          Copy-Item "build/release-${{ matrix.arch }}/cortex_core.dll" (Join-Path $stage "cortex.asi")
-          Copy-Item "build/release-${{ matrix.arch }}/injector.exe" $stage
-          Copy-Item "build/release-${{ matrix.arch }}/${{ matrix.target_name }}" $stage
-          Copy-Item README_INSTALL.txt $stage
-          Copy-Item README.md $stage
-          Copy-Item LICENSE $stage
-          Copy-Item CHANGELOG.md $stage
-          Copy-Item -Recurse docs (Join-Path $stage "docs")
-          Copy-Item -Recurse sdk (Join-Path $stage "sdk")
-          Copy-Item -Recurse agent (Join-Path $stage "agent")
+      - name: Stage portable x64 application
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x64
+          mkdir -p stage/x64/Cortex/runtime/x64
+          cp build/ui/cortex.exe stage/x64/Cortex/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
 
-          $required = @(
-            "cortex_host.exe",
-            "cortex_core.dll",
-            "cortex.asi",
-            "injector.exe",
-            "${{ matrix.target_name }}",
-            "README_INSTALL.txt",
-            "README.md",
-            "LICENSE",
-            "CHANGELOG.md",
-            "agent/semantic-tools.md",
-            "docs/mcp.md"
-          )
-          foreach ($file in $required) {
-            $path = Join-Path $stage $file
-            if (-not (Test-Path $path)) { throw "missing packaged file: $file" }
-            if ((Get-Item $path).Length -eq 0) { throw "empty packaged file: $file" }
-          }
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            DEPLOY=windeployqt6
+          else
+            DEPLOY=windeployqt
+          fi
+          "$DEPLOY" --release --qmldir app/qml --no-translations stage/x64/Cortex/cortex.exe
 
-          $dllHash = (Get-FileHash (Join-Path $stage "cortex_core.dll") -Algorithm SHA256).Hash
-          $asiHash = (Get-FileHash (Join-Path $stage "cortex.asi") -Algorithm SHA256).Hash
-          if ($dllHash -ne $asiHash) { throw "cortex.asi must be byte-identical to cortex_core.dll" }
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/x64/Cortex/$base" ]; then
+                  cp "$dep" "stage/x64/Cortex/$base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
 
-          Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip" -CompressionLevel Optimal
-          if (-not (Test-Path "dist/$name.zip")) { throw "release ZIP was not created" }
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
 
-      - name: Upload packaged build
+      - name: Upload x64 stage
         uses: actions/upload-artifact@v4
         with:
-          name: cortex-${{ env.RELEASE_TAG }}-windows-${{ matrix.arch }}
-          path: dist/cortex-${{ env.RELEASE_TAG }}-windows-${{ matrix.arch }}.zip
+          name: cortex-release-x64-stage
+          path: stage/x64
+          if-no-files-found: error
+          retention-days: 2
+
+  windows-x86-stage:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Build and test x86 runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/runtime-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/runtime-x86 --parallel 2
+          ctest --test-dir build/runtime-x86 --output-on-failure
+
+      - name: Build private x86 bootstrap helper
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/runtime-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Stage x86 runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x86
+          mkdir -p stage/x86/runtime/x86
+          cp build/runtime-x86/cortex_core.dll stage/x86/runtime/x86/cortex_core.dll
+          cp build/runtime-x86/cortex_runtime_helper.exe stage/x86/runtime/x86/cortex_runtime_helper.exe
+
+      - name: Upload x86 stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-release-x86-stage
+          path: stage/x86
+          if-no-files-found: error
+          retention-days: 2
+
+  package:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    needs: [windows-x64-stage, windows-x86-stage]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download x64 stage
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-release-x64-stage
+          path: staging/x64
+
+      - name: Download x86 stage
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-release-x86-stage
+          path: staging/x86
+
+      - name: Assemble and validate release archive
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "staging/x64/Cortex").Path
+          New-Item -ItemType Directory -Force -Path (Join-Path $bundle "runtime\x86") | Out-Null
+          Copy-Item "staging/x86/runtime/x86/*" (Join-Path $bundle "runtime\x86") -Force
+          Copy-Item README.md, CHANGELOG.md, LICENSE $bundle
+          Copy-Item -Recurse docs (Join-Path $bundle "docs")
+
+          foreach ($required in @(
+            "cortex.exe",
+            "runtime\x64\cortex_core.dll",
+            "runtime\x86\cortex_core.dll",
+            "runtime\x86\cortex_runtime_helper.exe",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE"
+          )) {
+            $path = Join-Path $bundle $required
+            if (-not (Test-Path $path)) { throw "missing release asset: $required" }
+            if ((Get-Item $path).Length -eq 0) { throw "empty release asset: $required" }
+          }
+
+          $version = @(& (Join-Path $bundle "cortex.exe") --version)
+          $versionText = [string]::Join([Environment]::NewLine, $version)
+          if ($LASTEXITCODE -ne 0 -or $versionText -notmatch "0\.7\.0") {
+            throw "release binary does not report v0.7.0"
+          }
+
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            & (Join-Path $bundle "cortex.exe") --smoke-test
+            if ($LASTEXITCODE -ne 0) { throw "portable GUI smoke test failed" }
+          } finally {
+            $env:PATH = $oldPath
+          }
+
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v0.7.0-windows-portable.zip" -CompressionLevel Optimal
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-v0.7.0-windows-portable
+          path: dist/cortex-v0.7.0-windows-portable.zip
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.6.0')
-    needs: build
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    needs: package
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout changelog
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download packaged builds
+      - name: Download release archive
         uses: actions/download-artifact@v4
         with:
-          pattern: cortex-${{ env.RELEASE_TAG }}-windows-*
+          name: cortex-v0.7.0-windows-portable
           path: dist
-          merge-multiple: true
 
       - name: Extract release notes
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.6.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.7.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Publish GitHub release
@@ -262,4 +278,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
-            dist/*.zip
+            dist/cortex-v0.7.0-windows-portable.zip
