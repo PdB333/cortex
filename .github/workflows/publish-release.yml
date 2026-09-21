@@ -218,10 +218,20 @@ jobs:
             if ((Get-Item $path).Length -eq 0) { throw "empty release asset: $required" }
           }
 
-          $version = @(& (Join-Path $bundle "cortex.exe") --version)
-          $versionText = [string]::Join([Environment]::NewLine, $version)
-          if ($LASTEXITCODE -ne 0 -or $versionText -notmatch "0\.7\.0") {
-            throw "release binary does not report v0.7.0"
+          $versionStart = [System.Diagnostics.ProcessStartInfo]::new()
+          $versionStart.FileName = Join-Path $bundle "cortex.exe"
+          $versionStart.ArgumentList.Add("--version")
+          $versionStart.UseShellExecute = $false
+          $versionStart.RedirectStandardOutput = $true
+          $versionStart.RedirectStandardError = $true
+          $versionStart.CreateNoWindow = $true
+          $versionProcess = [System.Diagnostics.Process]::Start($versionStart)
+          $versionText = $versionProcess.StandardOutput.ReadToEnd()
+          $versionError = $versionProcess.StandardError.ReadToEnd()
+          $versionProcess.WaitForExit()
+          Write-Host ("release version output: {0}" -f $versionText.Trim())
+          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "0\.7\.0") {
+            throw "release binary does not report v0.7.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
           }
 
           $oldPath = $env:PATH
