@@ -1184,6 +1184,14 @@ std::vector<BreakpointInfo> ListBreakpoints() {
     const auto tids = ListThreadIds();
     const std::set<DWORD> live(tids.begin(), tids.end());
     const DWORD monitorTid = g_hwMonitorThreadId.load(std::memory_order_acquire);
+    // A synchronous API/MCP request can wait for hardware-breakpoint coverage
+    // while running on one of the process threads. Requiring that same caller
+    // thread to be covered creates a readiness cycle: the request cannot finish
+    // until coverage is complete, while the caller is the thread least safe to
+    // suspend during that wait. Treat it like the dedicated monitor thread for
+    // coverage accounting; process-global watchpoints still cover every other
+    // live target thread and the monitor can apply the slot to future threads.
+    const DWORD callerTid = GetCurrentThreadId();
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto& [id, e] : g_swBps) {
         BreakpointInfo info{id, BpKind::Software, e.address, 1, e.action, e.hitCount, e.condition.has_value()};
@@ -1195,7 +1203,7 @@ std::vector<BreakpointInfo> ListBreakpoints() {
         info.processGlobal = e.processGlobal;
         info.targetThreadId = e.targetThreadId;
         if (e.processGlobal) {
-            for (DWORD tid : live) if (tid != monitorTid) ++info.totalThreads;
+            for (DWORD tid : live) if (tid != monitorTid && tid != callerTid) ++info.totalThreads;
         } else if (live.count(e.targetThreadId)) {
             info.totalThreads = 1;
         }
