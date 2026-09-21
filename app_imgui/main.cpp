@@ -1,23 +1,34 @@
+#include "ui/debugger_workspace.h"
+#include "ui/disassembly_workspace.h"
+#include "ui/memory_browser_workspace.h"
 #include "ui/memory_workspace.h"
+#include "ui/modules_workspace.h"
+#include "ui/runtime_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
 
+#include "services/debugger_service.h"
+#include "services/disassembly_service.h"
+#include "services/memory_service.h"
+#include "services/module_service.h"
+#include "services/payload_client.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
 #include "target/session_manager.h"
-#include "services/memory_service.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
 #include <d3d11.h>
+#include <shellapi.h>
 #include <windows.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,6 +41,47 @@ ID3D11Device* gDevice = nullptr;
 ID3D11DeviceContext* gDeviceContext = nullptr;
 IDXGISwapChain* gSwapChain = nullptr;
 ID3D11RenderTargetView* gMainRenderTargetView = nullptr;
+
+void WriteStdout(const char* text) {
+    if (!text) return;
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out && out != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(out, text, static_cast<DWORD>(std::strlen(text)), &written, nullptr);
+    }
+}
+
+int HandleCommandLine() {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return -1;
+    int result = -1;
+    if (argc > 1) {
+        const std::wstring arg = argv[1] ? argv[1] : L"";
+        if (arg == L"--version" || arg == L"version") {
+            WriteStdout("cortex 0.8.0-dev-imgui\n");
+            result = 0;
+        } else if (arg == L"--help" || arg == L"-h" || arg == L"help") {
+            WriteStdout(
+                "Cortex lightweight UI preview\n\n"
+                "Usage:\n"
+                "  cortex              Launch the GUI\n"
+                "  cortex --version    Print version\n"
+                "  cortex --help       Print this help\n");
+            result = 0;
+        }
+    }
+    LocalFree(argv);
+    return result;
+}
+
+std::string ExecutableDirectory() {
+    std::wstring buffer(32768, L'\0');
+    DWORD size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (size == 0 || size >= buffer.size()) return ".";
+    buffer.resize(size);
+    return std::filesystem::path(buffer).parent_path().u8string();
+}
 
 void CreateRenderTarget() {
     ID3D11Texture2D* backBuffer = nullptr;
@@ -114,6 +166,10 @@ struct AppState {
     cortex::target::Catalog catalog;
     cortex::target::SessionManager sessions;
     cortex::services::MemoryService memory;
+    cortex::services::ModuleService modules;
+    cortex::services::DisassemblyService disassembly;
+    cortex::services::DebuggerService debugger;
+    cortex::services::PayloadClient payload;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -121,11 +177,35 @@ struct AppState {
     int selectedTarget = -1;
     char processFilter[160] = {};
 
-    AppState() : sessions(catalog), memory(sessions) {
+    AppState()
+        : sessions(catalog),
+          memory(sessions),
+          modules(sessions),
+          disassembly(sessions),
+          debugger(sessions),
+          payload(sessions, ExecutableDirectory()) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
+
         ui.sessions = &sessions;
         ui.memory = &memory;
+        ui.modules = &modules;
+        ui.disassembly = &disassembly;
+        ui.debugger = &debugger;
+        ui.payload = &payload;
+
         workspaces.Add<cortex::ui::MemoryWorkspace>();
+        workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
+        workspaces.Add<cortex::ui::DisassemblyWorkspace>();
+        workspaces.Add<cortex::ui::ModulesWorkspace>();
+        workspaces.Add<cortex::ui::DebuggerWorkspace>();
+        workspaces.Add<cortex::ui::RuntimeWorkspace>();
+    }
+
+    void OnAttached(const cortex::target::TargetDescriptor& target) {
+        payload.Reset();
+        ui.mutationAllowed = false;
+        ui.status = "Attached to " + target.name;
+        ui.requestWorkspace = "memory";
     }
 
     void RefreshTargets() {
@@ -155,6 +235,16 @@ bool MatchesFilter(const cortex::target::TargetDescriptor& target, const char* f
            std::to_string(target.processId).find(query) != std::string::npos;
 }
 
+void AttachTarget(AppState& app, const cortex::target::TargetDescriptor& target) {
+    std::string error;
+    if (app.sessions.Attach(target, &error)) {
+        app.OnAttached(target);
+        ImGui::CloseCurrentPopup();
+    } else {
+        app.ui.status = "Attach failed: " + error;
+    }
+}
+
 void DrawProcessPicker(AppState& app) {
     if (app.ui.requestProcessPicker) {
         app.RefreshTargets();
@@ -162,16 +252,18 @@ void DrawProcessPicker(AppState& app) {
         app.ui.requestProcessPicker = false;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(720, 560), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(760, 580), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Select process", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
 
     ImGui::TextUnformatted("Choose a process");
+    ImGui::SameLine();
+    ImGui::TextDisabled("Double-click to attach");
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) app.RefreshTargets();
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##ProcessFilter", "Search by process, window title or PID...",
+    ImGui::InputTextWithHint("##ProcessFilter", "Search process, window title or PID...",
                              app.processFilter, sizeof(app.processFilter));
     ImGui::Spacing();
 
@@ -198,16 +290,7 @@ void DrawProcessPicker(AppState& app) {
                                   ImGuiSelectableFlags_SpanAllColumns |
                                   ImGuiSelectableFlags_AllowDoubleClick)) {
                 app.selectedTarget = static_cast<int>(i);
-                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    std::string error;
-                    if (app.sessions.Attach(target, &error)) {
-                        app.ui.mutationAllowed = false;
-                        app.ui.status = "Attached to " + target.name;
-                        ImGui::CloseCurrentPopup();
-                    } else {
-                        app.ui.status = "Attach failed: " + error;
-                    }
-                }
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) AttachTarget(app, target);
             }
             ImGui::TableSetColumnIndex(1);
             ImGui::Text("%llu", static_cast<unsigned long long>(target.processId));
@@ -225,15 +308,7 @@ void DrawProcessPicker(AppState& app) {
 
     ImGui::BeginDisabled(!validSelection);
     if (ImGui::Button("Attach", ImVec2(150, 38)) && validSelection) {
-        const auto& target = app.targets[static_cast<size_t>(app.selectedTarget)];
-        std::string error;
-        if (app.sessions.Attach(target, &error)) {
-            app.ui.mutationAllowed = false;
-            app.ui.status = "Attached to " + target.name;
-            ImGui::CloseCurrentPopup();
-        } else {
-            app.ui.status = "Attach failed: " + error;
-        }
+        AttachTarget(app, app.targets[static_cast<size_t>(app.selectedTarget)]);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -262,19 +337,23 @@ void DrawHeader(AppState& app) {
                     static_cast<unsigned long long>(target.processId),
                     cortex::target::ArchitectureName(target.architecture));
 
-        const float rightWidth = 230.0f;
+        const float rightWidth = 240.0f;
         const float available = ImGui::GetContentRegionAvail().x;
-        if (available > rightWidth) ImGui::SameLine(ImGui::GetCursorPosX() + available - rightWidth);
+        if (available > rightWidth) {
+            ImGui::SameLine(ImGui::GetCursorPosX() + available - rightWidth);
+        }
 
         ImGui::Checkbox("Allow writes", &app.ui.mutationAllowed);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Required for edit/freeze operations. Memory scans remain read-only.");
+            ImGui::SetTooltip("Required for edits, freeze and runtime injection. Read-only inspection stays available.");
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Detach")) {
             app.sessions.Detach();
+            app.payload.Reset();
             app.ui.mutationAllowed = false;
             app.ui.status = "Detached";
+            app.ui.requestWorkspace = "memory";
         }
     } else {
         ImGui::SameLine();
@@ -320,17 +399,20 @@ void DrawApp(AppState& app) {
 } // namespace
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+    const int cli = HandleCommandLine();
+    if (cli >= 0) return cli;
+
     ImGui_ImplWin32_EnableDpiAwareness();
 
     WNDCLASSEXW wc{
         sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, hInstance,
-        nullptr, nullptr, nullptr, nullptr, L"CortexImGuiPrototype", nullptr
+        nullptr, nullptr, nullptr, nullptr, L"CortexWindow", nullptr
     };
     RegisterClassExW(&wc);
 
     HWND hwnd = CreateWindowW(
-        wc.lpszClassName, L"Cortex - Lightweight UI Prototype",
-        WS_OVERLAPPEDWINDOW, 100, 80, 1360, 860,
+        wc.lpszClassName, L"Cortex",
+        WS_OVERLAPPEDWINDOW, 100, 80, 1380, 880,
         nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!CreateDeviceD3D(hwnd)) {
