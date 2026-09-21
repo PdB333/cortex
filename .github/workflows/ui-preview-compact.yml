@@ -10,6 +10,7 @@ on:
       - "runtime_helper/**"
       - "CMakeLists.txt"
       - ".github/workflows/ui-preview.yml"
+      - ".github/workflows/ui-preview-compact.yml"
   workflow_dispatch:
 
 concurrency:
