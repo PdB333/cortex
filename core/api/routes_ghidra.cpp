@@ -1,6 +1,7 @@
-#include "routes.h"
+﻿#include "routes.h"
 #include "../ghidra/ghidra.h"
 #include "../overlay/overlay.h"
+#include "../action/action.h"
 
 #include <nlohmann/json.hpp>
 
@@ -20,6 +21,7 @@ void RegisterGhidraRoutes(httplib::Server& svr) {
     });
     svr.Post("/ghidra/import", [](const httplib::Request& req, httplib::Response& res) {
         try {
+            auto mutation=action::LockMutations();
             json body=json::parse(req.body); size_t imported=0; std::string error;
             const bool ok=ghidra::ImportAnnotations(body,imported,error);
             res.status=ok?200:400; res.set_content(ok?json{{"ok",true},{"imported",imported}}.dump()
@@ -29,3 +31,4 @@ void RegisterGhidraRoutes(httplib::Server& svr) {
 }
 
 } // namespace api
+

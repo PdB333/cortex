@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -12,6 +12,8 @@ struct Event {
     int      socket;
     uint32_t size;
     std::string previewHex; // first N bytes as lowercase hex
+    uint32_t threadId = 0;
+    std::vector<uintptr_t> stack; // first entry is the game-side caller into Winsock
 };
 
 // Hooks WSARecv/WSASend/recv/send (ws2_32.dll). Idempotent.
@@ -25,3 +27,4 @@ bool IsCaptureEnabled();
 std::vector<Event> Snapshot(size_t max = 200);
 
 } // namespace nethook
+

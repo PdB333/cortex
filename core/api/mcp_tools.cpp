@@ -1,4 +1,4 @@
-#include "mcp_tools.h"
+﻿#include "mcp_tools.h"
 
 #include "routes.h"
 #include "native_routes.h"
@@ -69,6 +69,11 @@ void HandleNotification(const json& notification, const std::string& scope) {
 
 json ManifestEntryToMcpTool(const json& entry) {
     const std::string name = entry.value("name", std::string());
+    const auto risk = mcp_contract::ClassifyTool(
+        name,
+        entry.value("method", std::string("GET")),
+        entry.value("path", std::string()));
+    const std::string mutationWhen = entry.value("mutation_permission_when", std::string());
     json properties = json::object();
     json required = json::array();
 
@@ -104,23 +109,27 @@ json ManifestEntryToMcpTool(const json& entry) {
         };
         required.push_back("_path");
     }
+    if (mcp_contract::RequiresMutationPermission(risk) || !mutationWhen.empty()) {
+        properties["mutation_permission"] = {{"type", "boolean"},
+            {"description", mutationWhen.empty() ? "Required explicit permission for this mutating/control/native operation."
+                                                 : "Required when " + mutationWhen + "."}};
+        if (mcp_contract::RequiresMutationPermission(risk)) required.push_back("mutation_permission");
+    }
 
     json schema = {{"type", "object"}, {"properties", std::move(properties)}};
     if (!required.empty()) schema["required"] = std::move(required);
 
-    const auto risk = mcp_contract::ClassifyTool(
-        name,
-        entry.value("method", std::string("GET")),
-        entry.value("path", std::string()));
+    json cortexMetadata = {
+        {"risk", mcp_contract::RiskName(risk)},
+        {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}
+    };
+    if (!mutationWhen.empty()) cortexMetadata["mutation_permission_when"] = mutationWhen;
 
     return {
         {"name", SanitizeToolName(name)},
         {"description", entry.value("description", std::string())},
         {"inputSchema", std::move(schema)},
-        {"_cortex", {
-            {"risk", mcp_contract::RiskName(risk)},
-            {"mutation_permission_required", mcp_contract::RequiresMutationPermission(risk)}
-        }},
+        {"_cortex", std::move(cortexMetadata)},
         {"_http", {
             {"method", entry.value("method", std::string("GET"))},
             {"path", entry.value("path", std::string())}
@@ -132,6 +141,7 @@ json BodyPayload(const json& arguments) {
     json body = arguments;
     body.erase("_path");
     body.erase("_query");
+    body.erase("mutation_permission");
     return body;
 }
 
@@ -165,7 +175,7 @@ json Dispatch(const std::string& method, const std::string& path, const json& bo
     return output;
 }
 
-bool IsToolError(const json& result) {
+bool IsToolError(const json& result, bool okFalseIsError = true) {
     if (result.contains("status")) {
         if (result["status"].is_number_integer() && result["status"].get<int>() >= 400) return true;
         if (result["status"].is_string()) {
@@ -173,21 +183,21 @@ bool IsToolError(const json& result) {
             if (status == "failed" || status == "cancelled" || status == "timed_out") return true;
         }
     }
-    if (result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>()) return true;
+    if (okFalseIsError && result.contains("ok") && result["ok"].is_boolean() && !result["ok"].get<bool>()) return true;
     if (result.contains("result") && result["result"].is_object()) {
         const auto& nested = result["result"];
-        if (nested.contains("ok") && nested["ok"].is_boolean() && !nested["ok"].get<bool>()) return true;
+        if (okFalseIsError && nested.contains("ok") && nested["ok"].is_boolean() && !nested["ok"].get<bool>()) return true;
         if (nested.contains("status") && nested["status"].is_string() &&
             nested["status"].get<std::string>() == "failed") return true;
     }
     return false;
 }
 
-json ToolCallPayload(const json& result) {
+json ToolCallPayload(const json& result, bool okFalseIsError = true) {
     return {
         {"content", json::array({{{"type", "text"}, {"text", result.dump(2)}}})},
         {"structuredContent", result},
-        {"isError", IsToolError(result)}
+        {"isError", IsToolError(result, okFalseIsError)}
     };
 }
 
@@ -223,10 +233,23 @@ bool SemanticAllowsPrimitive(const json& semanticTool, const std::string& wanted
     return false;
 }
 
+mcp_contract::ToolRisk EffectiveRiskForCall(const std::string& name,
+                                            mcp_contract::ToolRisk risk,
+                                            const json& arguments) {
+    if (name == "struct_infer" && arguments.is_object() && arguments.value("define", false))
+        return mcp_contract::ToolRisk::Control;
+    return risk;
+}
+
+bool RequiresMutationPermissionForCall(const std::string& name,
+                                       mcp_contract::ToolRisk risk,
+                                       const json& arguments) {
+    return mcp_contract::RequiresMutationPermission(EffectiveRiskForCall(name, risk, arguments));
+}
 bool SupportsTransactionalRollback(const std::string& name,
                                    mcp_contract::ToolRisk risk,
                                    const json& arguments) {
-    if (!mcp_contract::RequiresMutationPermission(risk)) return true;
+    if (!RequiresMutationPermissionForCall(name, risk, arguments)) return true;
     if (risk == mcp_contract::ToolRisk::NativeCall) return false;
 
     // These handlers record undo actions in action::Transaction. Active tools
@@ -242,7 +265,8 @@ bool SupportsTransactionalRollback(const std::string& name,
         "freeze_add",
         "watch_add",
         "watch_page_access",
-        "debug_breakpoint_add"
+        "debug_breakpoint_add",
+        "struct_infer"
     };
     if (transactional.find(name) != transactional.end()) return true;
     if (name == "batch_run")
@@ -382,26 +406,27 @@ json ExecuteSemantic(const std::string& wanted,
             manifest.value("method", std::string("GET")),
             manifest.value("path", std::string()));
         const json stepArguments = rawStep.value("arguments", json::object());
+        const auto effectiveRisk = EffectiveRiskForCall(canonical, risk, stepArguments);
 
-        if (mcp_contract::RequiresMutationPermission(risk) && !mutationPermission) {
+        if (RequiresMutationPermissionForCall(canonical, effectiveRisk, stepArguments) && !mutationPermission) {
             plan["status"] = "failed";
             plan["error"] = "mutation_permission_required";
             plan["rejected_tool"] = canonical;
-            plan["risk"] = mcp_contract::RiskName(risk);
+            plan["risk"] = mcp_contract::RiskName(effectiveRisk);
             plan["lifecycle"]["current"] = "failed";
             return plan;
         }
-        if (!SupportsTransactionalRollback(canonical, risk, stepArguments)) {
+        if (!SupportsTransactionalRollback(canonical, effectiveRisk, stepArguments)) {
             plan["status"] = "failed";
             plan["error"] = "primitive_lacks_safe_rollback_contract";
             plan["rejected_tool"] = canonical;
-            plan["risk"] = mcp_contract::RiskName(risk);
+            plan["risk"] = mcp_contract::RiskName(effectiveRisk);
             plan["lifecycle"]["current"] = "failed";
             return plan;
         }
-        if (mcp_contract::RequiresMutationPermission(risk)) needsTransaction = true;
+        if (RequiresMutationPermissionForCall(canonical, effectiveRisk, stepArguments)) needsTransaction = true;
 
-        steps.push_back({stepName, canonical, std::move(manifest), stepArguments, risk});
+        steps.push_back({stepName, canonical, std::move(manifest), stepArguments, effectiveRisk});
     }
 
     const int64_t timeoutMs = arguments.value("timeout_ms", static_cast<int64_t>(30000));
@@ -443,7 +468,7 @@ json ExecuteSemantic(const std::string& wanted,
             {"output", output}
         });
 
-        if (IsToolError(output)) {
+        if (IsToolError(output, steps[index].manifest.value("ok_false_is_error", true))) {
             UnregisterCancellation(cancellationScope, requestId, cancelled);
             plan["failed_step"] = index;
             return TerminateExecution(std::move(plan), "failed", "primitive_execution_failed",
@@ -503,7 +528,20 @@ json CallToolScoped(const std::string& wanted,
     json manifest;
     if (!FindPrimitiveTool(wanted, manifest))
         return ToolCallPayload({{"ok", false}, {"error", "unknown_tool"}});
-    return ToolCallPayload(DispatchPrimitive(manifest, arguments));
+
+    const auto risk = mcp_contract::ClassifyTool(
+        manifest.value("name", wanted),
+        manifest.value("method", std::string("GET")),
+        manifest.value("path", std::string()));
+    const auto effectiveRisk = EffectiveRiskForCall(manifest.value("name", wanted), risk, arguments);
+    if (RequiresMutationPermissionForCall(manifest.value("name", wanted), effectiveRisk, arguments) &&
+        !arguments.value("mutation_permission", false)) {
+        return ToolCallPayload({{"ok", false},
+                                {"error", "mutation_permission_required"},
+                                {"tool", manifest.value("name", wanted)},
+                                {"risk", mcp_contract::RiskName(effectiveRisk)}});
+    }
+    return ToolCallPayload(DispatchPrimitive(manifest, arguments), manifest.value("ok_false_is_error", true));
 }
 
 } // namespace
@@ -556,3 +594,4 @@ mcp_protocol::Result Handle(const json& input,
 }
 
 } // namespace api::mcp_tools
+

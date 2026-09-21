@@ -1,7 +1,9 @@
-cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.20)
 project(cortex LANGUAGES C CXX)
 
 include(CTest)
+
+option(CORTEX_BUILD_LEGACY_COMPAT "Build the legacy cortex_host compatibility executable" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,14 +23,6 @@ if(CORTEX_OFFLINE)
     set(FETCHCONTENT_FULLY_DISCONNECTED ON)
 endif()
 
-# ---- Dear ImGui (no CMake support upstream, vendor sources directly) ----
-# v1.90.9, pinned to the immutable commit resolved from the release tag.
-FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        cb16be3a3fc1f9cd146ae24d52b615f8a05fa93d
-)
-FetchContent_MakeAvailable(imgui)
 
 # kiero (D3D9/10/11/12/OpenGL, engine auto-detected at runtime) is available
 # to every bitness; D3D8 is an extra, 32-bit-only backend kept around
@@ -43,41 +37,14 @@ else()
 endif()
 set(CORTEX_ENABLE_KIERO TRUE)
 
-# D3D12 support is 64-bit only: imgui's own D3D12 backend packs a GPU
-# descriptor handle (8 bytes) into ImTextureID, which is pointer-sized (4
-# bytes on 32-bit) -- a static_assert in imgui_impl_dx12.cpp rejects 32-bit
-# outright. Real-world D3D12 games are 64-bit anyway, so this costs nothing.
+# D3D12 support stays 64-bit only. The runtime capture path is primarily aimed
+# at modern 64-bit D3D12 titles, while the 32-bit build keeps D3D8-D3D11 and
+# OpenGL coverage without carrying an unused D3D12 hook surface.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(CORTEX_ENABLE_D3D12 TRUE)
 else()
     set(CORTEX_ENABLE_D3D12 FALSE)
 endif()
-
-set(IMGUI_BACKEND_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp)
-if(CORTEX_ENABLE_KIERO)
-    list(APPEND IMGUI_BACKEND_SOURCES
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx10.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-    )
-    if(CORTEX_ENABLE_D3D12)
-        list(APPEND IMGUI_BACKEND_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_dx12.cpp)
-    endif()
-endif()
-
-add_library(imgui STATIC
-    ${imgui_SOURCE_DIR}/imgui.cpp
-    ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    ${imgui_SOURCE_DIR}/imgui_demo.cpp
-    ${IMGUI_BACKEND_SOURCES}
-)
-target_include_directories(imgui PUBLIC
-    ${imgui_SOURCE_DIR}
-    ${imgui_SOURCE_DIR}/backends
-)
 
 # ---- MinHook ----
 FetchContent_Declare(
@@ -177,7 +144,7 @@ if(CORTEX_ENABLE_KIERO)
     list(APPEND CORE_RENDER_SOURCES core/hook/kiero_hook.cpp third_party/kiero/kiero.cpp core/capture/capture.cpp)
 endif()
 if(CORTEX_ENABLE_D3D8)
-    list(APPEND CORE_RENDER_SOURCES core/hook/d3d8_hook.cpp core/overlay/imgui_impl_dx8.cpp
+    list(APPEND CORE_RENDER_SOURCES core/hook/d3d8_hook.cpp
         core/overlay/overlay_d3d8.cpp core/capture/capture_d3d8.cpp)
 endif()
 
@@ -216,6 +183,7 @@ set(CORTEX_API_ROUTE_SOURCES
     core/api/routes_mcp.cpp
     core/api/routes_lua.cpp
     core/api/routes_ocr.cpp
+    core/api/routes_re.cpp
 )
 set_source_files_properties(${CORTEX_API_ROUTE_SOURCES} PROPERTIES
     COMPILE_DEFINITIONS "CORTEX_ROUTE_REGISTRAR")
@@ -251,6 +219,7 @@ add_library(core SHARED
     core/timeline/timeline.cpp
     core/call/call.cpp
     core/watch/watch.cpp
+    core/re/re_tools.cpp
     core/watch/alloc_watch.cpp
     core/watch/page_watch.cpp
     core/analysis/analysis.cpp
@@ -277,7 +246,6 @@ if(CORTEX_ENABLE_D3D8)
 endif()
 
 target_link_libraries(core PRIVATE
-    imgui
     Zydis
     minhook
     nlohmann_json::nlohmann_json
@@ -334,6 +302,7 @@ target_link_options(core PRIVATE -static -static-libgcc -static-libstdc++)
 # =========================================================================
 # Preserve the existing, already-tested implementations by renaming each
 # source file's main() at compile time and dispatching from unified_main.cpp.
+if(CORTEX_BUILD_LEGACY_COMPAT)
 set_source_files_properties(host/main.cpp PROPERTIES
     COMPILE_DEFINITIONS "main=CortexServeMain")
 set_source_files_properties(injector/main.cpp PROPERTIES
@@ -347,6 +316,7 @@ set_source_files_properties(tools/symbolize_main.cpp PROPERTIES
 
 add_executable(cortex_host
     host/unified_main.cpp
+    host/probe_cli.cpp
     host/main.cpp
     injector/main.cpp
     mcp_bridge/main.cpp
@@ -377,6 +347,21 @@ target_link_libraries(cortex_host PRIVATE
     user32
 )
 target_link_options(cortex_host PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
+# =========================================================================
+# GUI-subsystem fixture used to prove that the injected runtime stays silent:
+# no AllocConsole/ConsoleWindowClass may appear with default configuration.
+add_executable(cortex_silent_gui_target WIN32 tests/e2e/silent_gui_target.cpp)
+target_compile_definitions(cortex_silent_gui_target PRIVATE
+    _WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(cortex_silent_gui_target PRIVATE user32)
+target_link_options(cortex_silent_gui_target PRIVATE -static -static-libgcc -static-libstdc++)
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set_target_properties(cortex_silent_gui_target PROPERTIES OUTPUT_NAME "cortex_silent_gui_target_x86")
+else()
+    set_target_properties(cortex_silent_gui_target PROPERTIES OUTPUT_NAME "cortex_silent_gui_target_x64")
+endif()
 
 # =========================================================================
 # cortex_test_target -- fake game with known memory values / window / input
@@ -420,6 +405,10 @@ foreach(RENDERER 9 11)
 endforeach()
 
 if(BUILD_TESTING)
+    add_executable(cortex_config_defaults_tests tests/config_defaults_tests.cpp)
+    target_include_directories(cortex_config_defaults_tests PRIVATE core)
+    add_test(NAME cortex_config_defaults_tests COMMAND cortex_config_defaults_tests)
+
     add_executable(cortex_core_tests
         tests/core_tests.cpp
         tests/debugger_stub.cpp
@@ -443,4 +432,11 @@ if(BUILD_TESTING)
     target_link_options(cortex_core_tests PRIVATE -static -static-libgcc -static-libstdc++)
     target_link_libraries(cortex_core_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_core_tests COMMAND cortex_core_tests)
+
+    add_executable(cortex_session_manager_tests
+        tests/session_manager_tests.cpp
+        core/target/session_manager.cpp
+    )
+    target_include_directories(cortex_session_manager_tests PRIVATE core)
+    add_test(NAME cortex_session_manager_tests COMMAND cortex_session_manager_tests)
 endif()

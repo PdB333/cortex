@@ -11,6 +11,7 @@
 
 #include "../mcp_bridge/policy.h"
 #include "diagnostics/external_host.h"
+#include "probe_cli.h"
 
 // These entry points are the existing tool mains, renamed per-source by CMake.
 // Keeping each implementation in its own translation unit avoids anonymous
@@ -244,14 +245,8 @@ int main(int argc, char** argv) {
         return Forward(CortexServeMain, "cortex_host serve", argc, argv, 2);
     if (command == "inject" || command == "injector")
         return Forward(CortexInjectMain, "cortex_host inject", argc, argv, 2);
-    if (command == "probe") {
-        ProbeOptions options;
-        if (!ParseProbeArguments(argc, argv, 2, options)) {
-            std::fputs("cortex_host probe: usage: cortex_host probe --pid <pid> [--heartbeat source]\n", stderr);
-            return 2;
-        }
-        return RunProbe(options);
-    }
+    if (command == "probe")
+        return Forward(CortexProbeMain, "cortex_host probe", argc, argv, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return Forward(CortexDiagnoseMain, "cortex_host diagnose", argc, argv, 2);
     if (command == "analyze" || command == "analyse") {

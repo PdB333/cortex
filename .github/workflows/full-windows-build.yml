@@ -57,6 +57,7 @@ jobs:
           cmake -S . -B build/full-${{ matrix.arch }} -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DBUILD_TESTING=ON
+          -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
       - name: Build complete Cortex tree
         shell: msys2 {0}

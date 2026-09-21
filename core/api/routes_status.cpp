@@ -1,5 +1,6 @@
 #include "routes.h"
 #include "server.h"
+#include "mcp_contract.h"
 #include "../overlay/overlay.h"
 #ifdef CORTEX_KIERO
 #include "../hook/kiero_hook.h"
@@ -11,6 +12,8 @@
 #include <windows.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
+#include <set>
 
 using json = nlohmann::json;
 
@@ -37,6 +40,8 @@ json BuildToolsManifest() {
                       {"description", "Self-documenting manifest of every Cortex operation."}});
         j.push_back({{"name", "openapi"}, {"method", "GET"}, {"path", "/openapi.json"}, {"public", true},
                       {"description", "OpenAPI 3 description generated from the same manifest as /tools."}});
+        j.push_back({{"name", "schema_validate"}, {"method", "GET"}, {"path", "/schema/validate"}, {"public", true},
+                      {"description", "Validates manifest, MCP/OpenAPI schemas, and registered native handlers against one another."}});
 
         j.push_back({{"name", "mcp"}, {"method", "POST"}, {"path", "/mcp"},
                       {"description", "Native Model Context Protocol endpoint. Speaks JSON-RPC 2.0 and "
@@ -48,11 +53,13 @@ json BuildToolsManifest() {
                                       "`_path` for {id} substitutions."}});
 
         j.push_back({{"name", "session_export"}, {"method", "POST"}, {"path", "/session/export"},
-                      {"description", "Dumps the current state (modules, breakpoints + their log ring "
-                                      "with captures, traces metadata, project data, screenshot) into "
-                                      "a folder under <module-dir>/cortex_sessions/session_<UTC>. "
-                                      "Returns {path} for post-hoc analysis or regression testing."}});
-
+                      {"description", "Exports a persistent RE run snapshot: modules, breakpoint logs/execution order, tracked objects/vtables, network events, allocations, traces, project/RE knowledge and screenshot. Returns a stable session id and path."}});
+        j.push_back({{"name", "session_list"}, {"method", "GET"}, {"path", "/session/list"},
+                      {"description", "Lists persisted RE run snapshots available for cross-run comparison."}});
+        j.push_back({{"name", "session_diff"}, {"method", "POST"}, {"path", "/session/diff"},
+                      {"description", "Compares two persisted runs: executed functions, callback order differences, tracked objects/vtables, network-event count and allocations."},
+                      {"body", {{"a", {{"type","string"},{"required",true},{"description","First session id from session_list/export."}}},
+                                {"b", {{"type","string"},{"required",true},{"description","Second session id."}}}}}});
         j.push_back({{"name", "lua_exec"}, {"method", "POST"}, {"path", "/lua/exec"},
                       {"description", "Executes a Lua 5.4 snippet in a fresh sandbox. The `cortex.*` "
                                       "table exposes memory.read/write/read_bytes, module_base, "
@@ -178,12 +185,19 @@ json BuildToolsManifest() {
                       {"query", {{"address", "required: start address"}, {"count", "optional, default 20, max 500: number of instructions"}}}});
 
         j.push_back({{"name", "debug_breakpoint_add"}, {"method", "POST"}, {"path", "/debug/breakpoint"},
-                      {"description", "Sets a breakpoint. 'software' (INT3, unlimited) or hw_execute/hw_write/hw_readwrite (DR0-3, 4 max, set on all threads that exist at call time -- not retroactive on threads created afterwards). With 'condition', the hit is only counted/logged/paused if it is satisfied -- useful for a breakpoint that fires too often."},
-                      {"body", {{"address", "required"}, {"kind", "software|hw_execute|hw_write|hw_readwrite, default software"},
-                                {"size", "optional, hw only: 1|2|4, default 4"},
-                                {"action", "pause|log, default pause -- pause freezes the thread until /debug/continue or /debug/step"},
-                                {"condition", "optional: {source: register|memory, register: name (e.g. eax/rax), address: required if source=memory, size: 1|2|4|8 default 4, op: ==|!=|<|>|<=|>=, value: number}"}}}});
-
+                      {"description", "Sets a software or DR0-DR3 hardware breakpoint. Hardware breakpoints are process_global by default and automatically follow newly created threads. List output reports applied_threads/total_threads. Conditions accept a structured object or short `if` expression such as `[ecx+0xB9] == 0`."},
+                      {"body", {
+                          {"address", {{"oneOf",json::array({{{"type","integer"}},{{"type","string"}},{{"type","object"}}})},{"required",true},{"description","Breakpoint address."}}},
+                          {"kind", {{"type","string"},{"enum",json::array({"software","hw_execute","hw_write","hw_readwrite"})},{"description","Breakpoint kind."}}},
+                          {"size", {{"type","integer"},{"enum",json::array({1,2,4})},{"description","Hardware watch size; ignored for execute."}}},
+                          {"action", {{"type","string"},{"enum",json::array({"pause","log"})},{"description","pause or log."}}},
+                          {"process_global", {{"type","boolean"},{"description","Hardware only. Default true; continuously applies to new threads."}}},
+                          {"thread_id", {{"type","integer"},{"minimum",1},{"description","Required for hardware breakpoints when process_global=false."}}},
+                          {"if", {{"type","string"},{"description","Short condition expression, e.g. `[ecx+0xB9] == 0` or `mem32(rcx+0x20) != 3`."}}},
+                          {"condition", {{"oneOf",json::array({{{"type","string"}},{{"type","object"}}})},{"description","Condition expression string or legacy structured condition object."}}},
+                          {"auto_capture", {{"type","boolean"},{"description","Automatically capture this-object, vtable and stack arguments for logged hits."}}},
+                          {"capture", {{"type","array"},{"items",{{"type","object"}}},{"description","Additional captures: {name,expression,size,type}."}}}
+                      }}});
         j.push_back({{"name", "debug_breakpoint_delete"}, {"method", "DELETE"}, {"path", "/debug/breakpoint/{id}"},
                       {"description", "Removes a breakpoint and restores the original state."}});
 
@@ -191,7 +205,7 @@ json BuildToolsManifest() {
                       {"description", "Lists active breakpoints with their hit count."}});
 
         j.push_back({{"name", "debug_paused"}, {"method", "GET"}, {"path", "/debug/paused"},
-                      {"description", "Lists threads currently frozen on a 'pause' breakpoint, with their registers."}});
+                      {"description", "Lists threads currently paused by Cortex, either manually or on a pause breakpoint, with their registers."}});
 
         j.push_back({{"name", "debug_threads"}, {"method", "GET"}, {"path", "/debug/threads"},
                       {"description", "Lists the thread IDs of the target process."}});
@@ -207,6 +221,10 @@ json BuildToolsManifest() {
         j.push_back({{"name", "debug_breakpoint_log"}, {"method", "GET"}, {"path", "/debug/breakpoint/{id}/log"},
                       {"description", "History of hits for a breakpoint set with action=log (registers captured at each hit, up to the 500 most recent entries -- older ones are overwritten). For a 'pause' breakpoint, check /debug/paused instead."}});
 
+        j.push_back({{"name", "debug_pause"}, {"method", "POST"}, {"path", "/debug/pause"},
+                      {"description", "Pauses a running target thread while preserving external suspend ownership."},
+                      {"body", {{"thread_id", "required"}}}});
+
         j.push_back({{"name", "debug_continue"}, {"method", "POST"}, {"path", "/debug/continue"},
                       {"description", "Releases a thread frozen on a breakpoint."},
                       {"body", {{"thread_id", "required"}}}});
@@ -215,11 +233,15 @@ json BuildToolsManifest() {
                       {"description", "Executes exactly one instruction on a frozen thread then re-freezes it; blocks the response until the step completes or times out."},
                       {"body", {{"thread_id", "required"}, {"timeout_ms", "optional, default 2000"}}}});
 
-        j.push_back({{"name", "symbols_resolve"}, {"method", "GET"}, {"path", "/symbols/resolve"},
+        j.push_back({{"name", "debug_step_over"}, {"method", "POST"}, {"path", "/debug/step_over"},
+                      {"description", "Steps over a CALL on a paused thread, stopping at its return site or an earlier debugger stop."},
+                      {"body", {{"thread_id", "required"}, {"timeout_ms", "optional, default 5000"}}}});
+
+        j.push_back({{"name", "symbols_resolve"}, {"method", "GET"}, {"path", "/symbols/resolve"}, {"ok_false_is_error", false},
                       {"description", "Resolves an address to a symbol (name + offset) and file/line if a PDB is present. Most games (especially older ones without a public PDB) won't have any symbols -- returns ok=false in that case, which is not an error, just an absence of info."},
                       {"query", {{"address", "required"}}}});
 
-        j.push_back({{"name", "symbols_lookup"}, {"method", "GET"}, {"path", "/symbols/lookup"},
+        j.push_back({{"name", "symbols_lookup"}, {"method", "GET"}, {"path", "/symbols/lookup"}, {"ok_false_is_error", false},
                       {"description", "Reverse lookup: address of a named symbol (export or PDB)."},
                       {"query", {{"name", "required"}}}});
 
@@ -270,9 +292,8 @@ json BuildToolsManifest() {
 
         j.push_back({{"name", "prompt_timed_test"}, {"method", "POST"}, {"path", "/prompt/timed_test"},
                       {"description", "Asks the player to play/test something for a given duration, "
-                                      "then report a result. The answer widget stays hidden in "
-                                      "the overlay until the timer runs out -- impossible to answer before "
-                                      "actually testing."},
+                                      "then report a result. The Qt Desktop answer control stays unavailable "
+                                      "until the timer runs out -- impossible to answer before actually testing."},
                       {"body", {{"message", "string, e.g. 'Shoot yourself and count the damage'"},
                                 {"duration_seconds", "number, required, > 0"},
                                 {"answer_type", "text|number, default number"}}}});
@@ -397,9 +418,9 @@ json BuildToolsManifest() {
                       {"body", {{"enabled", "required: bool"}}}});
 
         j.push_back({{"name", "network_events"}, {"method", "GET"}, {"path", "/network/events"},
-                      {"description", "Ring buffer snapshot of the most recent captured recv/send calls "
-                                      "with size + first 64 bytes as hex."},
-                      {"query", {{"limit", "optional int, default 200"}}}});
+                      {"description", "Ring buffer snapshot of captured recv/send calls with payload preview, game-side callstack, generated_by/caller, and the nearest debugger hit on the same thread when available."},
+                      {"query", {{"limit", {{"type","integer"},{"description","Events to return, default 200, max 512."}}},
+                                 {"correlation_window_ms", {{"type","integer"},{"description","Maximum absolute time distance to correlate a breakpoint log hit on the same TID; default 100 ms, 0 disables, max 2000."}}}}}});
 
         j.push_back({{"name", "window_move"}, {"method", "POST"}, {"path", "/window/move"},
                       {"description", "Moves (and optionally resizes) the game window. Fires "
@@ -422,8 +443,8 @@ json BuildToolsManifest() {
                       {"description", "Lists active freezes."}});
 
         j.push_back({{"name", "struct_define"}, {"method", "POST"}, {"path", "/struct/define"},
-                      {"description", "Defines (or overwrites) a named struct layout -- list of fields {name, offset, type}. Complementary to /project (which only knows individual addresses/pointer paths, not composite layouts). Not persisted to disk: must be redefined every session."},
-                      {"body", {{"name", "required"}, {"fields", "required: array of {name, offset, type: i8|i16|i32|i64|u8|u16|u32|u64|float|double|bytes|string, count: optional for bytes/string}"}}}});
+                      {"description", "Defines (or overwrites) a named struct layout -- list of fields {name, offset, type}. Complementary to /project (which only knows individual addresses/pointer paths, not composite layouts). Persisted in the current Cortex project and restored on the next runtime session."},
+                      {"body", {{"name", "required"}, {"fields", "required: array of {name, offset, type: i8|i16|i32|i64|u8|u16|u32|u64|float|double|pointer|vtable|vec3|vec4|matrix4|bytes|string, count: optional for bytes/string}"}}}});
 
         j.push_back({{"name", "struct_delete"}, {"method", "DELETE"}, {"path", "/struct/{name}"},
                       {"description", "Deletes a struct definition."}});
@@ -459,6 +480,11 @@ json BuildToolsManifest() {
         j.push_back({{"name", "watch_allocations_events"}, {"method", "GET"}, {"path", "/watch/allocations/events"},
                       {"description", "Returns all allocations recorded since the last call (api VirtualAlloc/HeapAlloc, address, size, protection/flags), then clears the queue."}});
 
+        j.push_back({{"name", "watch_allocations_status"}, {"method", "GET"}, {"path", "/watch/allocations/status"},
+                      {"description", "Returns allocation-watch enabled state and minimum recorded allocation size."}});
+
+        j.push_back({{"name", "watch_allocations_events_snapshot"}, {"method", "GET"}, {"path", "/watch/allocations/events_snapshot"},
+                      {"description", "Returns a non-destructive snapshot of the bounded allocation-event ring."}});
         j.push_back({{"name", "watch_page_access"}, {"method", "POST"}, {"path", "/watch/page_access"},
                       {"description", "Sets a memory breakpoint via page-guard (like x64dbg/Cheat Engine) on [address, address+size): marks the covered pages PAGE_GUARD, and a dedicated vectored exception handler records every access (read/write/execute) then rearms the guard (single-use by nature) before resuming. Does not affect other guard pages in the process (e.g. the stack) -- passes through if the exception does not concern a region registered here."},
                       {"body", {{"address", "required"}, {"size", "required"}, {"label", "optional"}}}});
@@ -472,6 +498,8 @@ json BuildToolsManifest() {
         j.push_back({{"name", "watch_page_access_events"}, {"method", "GET"}, {"path", "/watch/page_access/events"},
                       {"description", "Returns all accesses recorded since the last call (watch_id, exact address, access type read/write/execute), then clears the queue."}});
 
+        j.push_back({{"name", "watch_page_access_events_snapshot"}, {"method", "GET"}, {"path", "/watch/page_access/events_snapshot"},
+                      {"description", "Returns a non-destructive snapshot of page-access events, including instruction, registers, stack and before/after bytes."}});
         j.push_back({{"name", "analysis_functions"}, {"method", "POST"}, {"path", "/analysis/functions"},
                       {"description", "Heuristic function detection for a module (Ghidra/IDA-style on a binary without symbols): marks as a function start the byte after a ret+padding (0xCC/0x90) and any target of a direct call. Possible false negatives (a function reached only via a vtable, with no padding before it), rare false positives. 'size' = distance to the next detected function (0 for the last one)."},
                       {"body", {{"module", "required: module name (e.g. HitmanContracts.exe)"}}}});
@@ -531,11 +559,29 @@ json BuildToolsManifest() {
                       {"body", {{"checkpoint", "optional: checkpoint id returned by GET /actions"}}}});
         j.push_back({{"name", "actions_clear"}, {"method", "POST"}, {"path", "/actions/clear"},
                       {"description", "Clears the undo history without modifying memory."}});
-
+        const json callAddress = {{"oneOf", json::array({{{"type","integer"}},{{"type","string"}},{{"type","object"}}})},
+                                  {"required", true},
+                                  {"description", "Function address: absolute integer, decimal/hex string, module+RVA, or {module,rva}."}};
+        const json callArgs = {{"type","array"},{"maxItems",8},
+                               {"items",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}},{{"type","object"}}})}}},
+                               {"description","0..8 pointer-width arguments. Address-like values accept integer, decimal/hex string, module+RVA, or {module,rva}."}};
+        const json callConvention = {{"type","string"},{"enum",json::array({"cdecl","stdcall","thiscall","fastcall"})},
+                                     {"description","x86 calling convention; ignored by the unified x64 ABI. Default cdecl."}};
+        const json callTimeout = {{"type","integer"},{"minimum",1},{"maximum",60000},
+                                  {"description","Wait timeout in milliseconds. Default 3000."}};
         j.push_back({{"name", "call_function"}, {"method", "POST"}, {"path", "/call/function"},
-                      {"description", "Injects a function call into the process with the given arguments, on the HTTP thread (not marshalled onto a game thread). Riskier than the other routes: can crash the game if the calling convention, argument count, or game state at call time is not well understood. An exception (access violation, etc.) during the call is caught and returned as a JSON error instead of crashing the process, but this is not guaranteed (stack corruption, a crash on another thread triggered by the call)."},
-                      {"body", {{"address", "required"}, {"args", "optional: array of 0 to 8 values (number or hex string)"},
-                                {"convention", "optional: cdecl|stdcall|thiscall, default cdecl -- ignored on x64 (single ABI)"}}}});
+                      {"description", "Legacy immediate native call on the API worker thread. Prefer call_on_game_thread for engine functions with thread affinity."},
+                      {"body", {{"address", callAddress}, {"args", callArgs}, {"convention", callConvention}}}});
+        j.push_back({{"name", "call_on_game_thread"}, {"method", "POST"}, {"path", "/call/game-thread"},
+                      {"description", "Queues a native call onto the thread observed by Cortex's frame/present hook and executes it on the next frame. Returns return value, TID, duration, exception code, or bounded timeout."},
+                      {"body", {{"address", callAddress}, {"args", callArgs}, {"convention", callConvention}, {"timeout_ms", callTimeout}}}});
+        j.push_back({{"name", "call_on_thread"}, {"method", "POST"}, {"path", "/call/thread"},
+                      {"description", "Cooperatively executes a native call on a specific target TID. Frame thread uses the next-frame queue; other TIDs must own a Windows message queue. Unsafe context hijacking is deliberately refused."},
+                      {"body", {{"thread_id", {{"type","integer"},{"required",true},{"minimum",1},{"description","Target thread id."}}},
+                                {"address", callAddress}, {"args", callArgs}, {"convention", callConvention}, {"timeout_ms", callTimeout}}}});
+        j.push_back({{"name", "call_game_thread_status"}, {"method", "GET"}, {"path", "/call/game-thread/status"},
+                      {"description", "Reports observed frame/game TID, last frame time, activity age, and pending native-call count."}});
+
 
         j.push_back({{"name","memory_ownership"},{"method","GET"},{"path","/memory/ownership"},
                      {"description","Lists the ranges owned by Cortex and excluded from scans by default."}});
@@ -545,27 +591,170 @@ json BuildToolsManifest() {
         j.push_back({{"name","pointermap_list"},{"method","GET"},{"path","/pointermap/list"},{"description","Lists the game's persistent pointer maps."}});
         j.push_back({{"name","pointermap_intersect"},{"method","POST"},{"path","/pointermap/intersect"},
                      {"description","Intersects several sessions and scores the stable paths."},{"body",{{"names","at least two names"}}}});
+        j.push_back({{"name","pointermap_delete"},{"method","DELETE"},{"path","/pointermap/{name}"},{"description","Deletes a persisted pointer map."}});
         j.push_back({{"name","trace_start"},{"method","POST"},{"path","/trace/start"},
                      {"description","Starts a bounded single-step trace with thread/range filters and coverage."}});
+        j.push_back({{"name","trace_stop"},{"method","POST"},{"path","/trace/{id}/stop"},
+                     {"description","Stops an active trace while preserving its captured events and coverage."}});
+        j.push_back({{"name","trace_delete"},{"method","DELETE"},{"path","/trace/{id}"},
+                     {"description","Deletes a trace and its captured execution data."}});
         j.push_back({{"name","trace_list"},{"method","GET"},{"path","/trace/list"},{"description","Lists traces and their state."}});
         j.push_back({{"name","trace_events"},{"method","GET"},{"path","/trace/{id}/events"},{"description","Returns captured instructions, bytes, and register deltas."}});
         j.push_back({{"name","trace_coverage"},{"method","GET"},{"path","/trace/{id}/coverage"},{"description","Heatmap of executed addresses."}});
         j.push_back({{"name","trace_callgraph"},{"method","GET"},{"path","/trace/{id}/callgraph"},{"description","Dynamic call graph of observed direct calls."}});
         j.push_back({{"name","trace_compare"},{"method","POST"},{"path","/trace/compare"},{"description","Compares the coverage of two actions."}});
         j.push_back({{"name","struct_infer"},{"method","POST"},{"path","/struct/infer"},
-                     {"description","Infers a typed layout from several instances and can persist it."}});
+                     {"mutation_permission_when","define=true"},
+                     {"description","Infers a typed layout from several instances and can optionally persist it in the current Cortex project."},
+                     {"body",{{"instances","required: array of instance addresses"},{"size","required: bytes to infer (4..1048576)"},
+                               {"define","optional bool, default false; requires mutation_permission when true"},
+                               {"name","optional; required when define=true"}}}});
         j.push_back({{"name","patch_trampoline"},{"method","POST"},{"path","/patch/trampoline"},
                      {"description","Builds a detour with a gateway and relocation of relative instructions."}});
-        j.push_back({{"name","snapshot_create"},{"method","POST"},{"path","/snapshot/create"},{"description","Captures several memory ranges into a target checkpoint."}});
-        j.push_back({{"name","snapshot_diff"},{"method","POST"},{"path","/snapshot/diff"},{"description","Compares two checkpoints."}});
+        j.push_back({{"name","snapshot_create"},{"method","POST"},{"path","/snapshot/create"},{"description","Captures several memory ranges into a target checkpoint."},
+                     {"body",{{"ranges","required: array of {address,size}"},{"label","optional"}}}});
+        j.push_back({{"name","snapshot_list"},{"method","GET"},{"path","/snapshot/list"},{"description","Lists in-memory target checkpoints."}});
+        j.push_back({{"name","snapshot_diff"},{"method","POST"},{"path","/snapshot/diff"},{"description","Compares two checkpoints."},
+                     {"body",{{"from","required snapshot id"},{"to","required snapshot id"}}}});
         j.push_back({{"name","snapshot_rewind"},{"method","POST"},{"path","/snapshot/{id}/rewind"},{"description","Restores a checkpoint with a logged undo."}});
-        j.push_back({{"name","snapshot_last_change"},{"method","POST"},{"path","/snapshot/last_change"},{"description","Finds the last observed transition for a value."}});
+        j.push_back({{"name","snapshot_last_change"},{"method","POST"},{"path","/snapshot/last_change"},{"description","Finds the last observed transition for a value."},
+                     {"body",{{"address","required"},{"size","required, 1..4096"}}}});
+        j.push_back({{"name","snapshot_delete"},{"method","DELETE"},{"path","/snapshot/{id}"},{"description","Deletes a checkpoint from the runtime timeline."}});
+        const json reAddress = {{"oneOf",json::array({{{"type","integer"}},{{"type","string"}},{{"type","object"}}})},
+                                {"description","Address: integer, decimal/hex string, module+RVA, or {module,rva}."}};
+        json reAddressRequired = reAddress; reAddressRequired["required"] = true;
+        const json anyJsonValue = {{"oneOf",json::array({{{"type","string"}},{{"type","integer"}},{{"type","number"}},{{"type","boolean"}},{{"type","object"}},{{"type","array"}},{{"type","null"}}})},
+                                   {"description","Any JSON value."}};
+        json anyJsonValueRequired = anyJsonValue; anyJsonValueRequired["required"] = true;
+        j.push_back({{"name","re_track_object"},{"method","POST"},{"path","/re/object/track"},
+                     {"description","Persistently tracks an object across address changes and records changed byte ranges, pointed objects, vtables/subobjects, destruction/reappearance, and related allocation metadata."},
+                     {"body",{{"name",{{"type","string"},{"required",true},{"description","Stable track name."}}},
+                              {"address",reAddress},{"pointer_path",{{"type","string"},{"description","Optional persisted project pointer-path name; when set it is re-resolved on every sample."}}},
+                              {"struct_name",{{"type","string"},{"description","Optional persisted Cortex struct definition. Typed fields are sampled and diffed alongside raw bytes."}}},
+                              {"size",{{"type","integer"},{"minimum",1},{"maximum",4096},{"description","Bytes to observe, default 256."}}},
+                              {"persist",{{"type","boolean"},{"description","Persist into the RE session project, default true."}}}}}});
+        j.push_back({{"name","re_object_tracks"},{"method","GET"},{"path","/re/object/tracks"},{"description","Lists tracked objects and their current address/alive state."}});
+        j.push_back({{"name","re_object_get"},{"method","GET"},{"path","/re/object/{id}"},{"description","Returns the current tracked-object snapshot with pointers, vtables/subobjects and allocation metadata."}});
+        j.push_back({{"name","re_object_events"},{"method","GET"},{"path","/re/object/{id}/events"},{"description","Returns non-destructive tracked-object events: relocation, destruction/reappearance and changed byte ranges."}});
+        j.push_back({{"name","re_object_delete"},{"method","DELETE"},{"path","/re/object/{id}"},{"description","Stops and removes an object track."}});
+        j.push_back({{"name","re_object_compare"},{"method","POST"},{"path","/re/object/compare"},
+                     {"description","Compares two tracked object snapshots byte-by-byte, by typed struct field when configured, and by detected C++ subobjects/vtables."},
+                     {"body",{{"a",{{"type","integer"},{"required",true}}},{"b",{{"type","integer"},{"required",true}}}}}});
+        j.push_back({{"name","re_session"},{"method","GET"},{"path","/re/session"},
+                     {"description","Returns persistent reverse-engineering facts, persisted object-track locators and suggested breakpoint templates for the current target project."}});
+        j.push_back({{"name","re_session_fact_set"},{"method","POST"},{"path","/re/session/fact"},
+                     {"description","Stores or updates a proved RE fact in the persistent target project."},
+                     {"body",{{"key",{{"type","string"},{"required",true}}},{"value",anyJsonValueRequired}}}});
+        j.push_back({{"name","re_session_fact_delete"},{"method","DELETE"},{"path","/re/session/fact"},
+                     {"description","Deletes a persistent RE fact with undo support."},
+                     {"body",{{"key",{{"type","string"},{"required",true}}}}}});
+        j.push_back({{"name","re_session_breakpoints"},{"method","POST"},{"path","/re/session/breakpoints"},
+                     {"description","Stores breakpoint templates suggested for the next RE session; Cortex does not auto-arm them without an explicit mutation action."},
+                     {"body",{{"templates",{{"type","array"},{"required",true},{"items",{{"type","object"}}}}}}}});
+        const json reTestSteps = {{"type","array"},{"required",true},{"items",{{"type","object"}}},
+                                  {"description","Steps: press (key name such as F7 or numeric vk), delay, wait/assert (including exists=true), call_game_thread, tool, checkpoint."}};
+        j.push_back({{"name","re_test_run"},{"method","POST"},{"path","/re/test/run"},
+                     {"description","Runs an automated in-game RE test and returns PASS/FAIL. Supports input, waits/asserts, game-thread native calls and arbitrary registered Cortex tools under one Actions transaction. Default is rollback; commit=true keeps reversible mutations."},
+                     {"body",{{"steps",reTestSteps},{"rollback_ranges",{{"type","array"},{"items",{{"type","object"}}},{"description","Optional memory ranges captured before the test and restored afterwards, including side effects from native calls."}}},
+                              {"commit",{{"type","boolean"},{"description","Keep reversible changes only if the test passes; default false."}}},
+                              {"stop_on_failure",{{"type","boolean"},{"description","Default true."}}}}}});
+        j.push_back({{"name","re_experiment_run"},{"method","POST"},{"path","/re/experiment/run"},
+                     {"description","Alias of re_test_run for checkpointed experiments: patch/call/struct-write/assert then automatic Actions rollback plus explicit memory-range restoration."},
+                     {"body",{{"steps",reTestSteps},{"rollback_ranges",{{"type","array"},{"items",{{"type","object"}}}}},{"commit",{{"type","boolean"}}}}}});
+        j.push_back({{"name","re_session_apply_breakpoints"},{"method","POST"},{"path","/re/session/apply-breakpoints"},
+                     {"description","Explicitly arms the breakpoint templates persisted for this RE target. Nothing is auto-armed at startup; this opt-in action keeps restored sessions safe."},
+                     {"body",{{"stop_on_error",{{"type","boolean"},{"description","Stop at first failed template, default true."}}}}}});
+        j.push_back({{"name","re_checkpoint_create"},{"method","POST"},{"path","/re/checkpoint"},
+                     {"description","Creates a bounded RE checkpoint combining the current Actions journal position with optional memory ranges. Later rollback restores both."},
+                     {"body",{{"label",{{"type","string"},{"description","Optional checkpoint label."}}},
+                              {"ranges",{{"type","array"},{"items",{{"type","object"}}},{"description","Optional [{address,size}] ranges, max 32 MiB total."}}}}}});
+        j.push_back({{"name","re_checkpoint_list"},{"method","GET"},{"path","/re/checkpoints"},
+                     {"description","Lists the bounded in-memory RE checkpoints for this runtime."}});
+        j.push_back({{"name","re_checkpoint_rollback"},{"method","POST"},{"path","/re/checkpoint/{id}/rollback"},
+                     {"description","Rolls Actions back to the saved checkpoint and restores all explicitly captured memory ranges."},
+                     {"body",{{"keep",{{"type","boolean"},{"description","Keep checkpoint after a successful rollback; default false."}}}}}});
+        j.push_back({{"name","re_checkpoint_delete"},{"method","DELETE"},{"path","/re/checkpoint/{id}"},
+                     {"description","Deletes a saved RE checkpoint without modifying the target."}});
+        j.push_back({{"name","re_cpp_subobjects"},{"method","POST"},{"path","/re/cpp/subobjects"},
+                     {"description","Detects multiple vtables/C++ subobjects and common this-adjustment thunks inside an object."},
+                     {"body",{{"address",reAddressRequired},{"size",{{"type","integer"},{"minimum",8},{"maximum",4096},{"description","Object bytes to inspect, default 256."}}}}}});
+        j.push_back({{"name","re_find_last_writer"},{"method","POST"},{"path","/re/last-writer"},
+                     {"description","High-level who-wrote-this primitive. Installs a temporary process-global HW write breakpoint and returns instruction/caller names, registers, this/vtable, callstack, old/new bytes, or bounded timeout."},
+                     {"body",{{"address",reAddressRequired},
+                              {"size",{{"type","integer"},{"enum",json::array({1,2,4})},{"description","Hardware watch size."}}},
+                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000},{"description","Wait timeout, default 5000."}}},
+                              {"after_arm",{{"type","object"},{"description","Optional deterministic trigger executed only after the HW watch is installed: {method,path,body}. Recursive RE wait/test routes are rejected."}}}}}});
+        j.push_back({{"name","re_trace_transition"},{"method","POST"},{"path","/re/transition/trace"},
+                     {"description","Records a bounded transition timeline by combining up to four HW write watches and software execution probes until an optional value predicate becomes true."},
+                     {"body",{{"watches",{{"type","array"},{"maxItems",4},{"items",{{"type","object"}}},{"description","[{address,size,label}]"}}},
+                              {"probes",{{"type","array"},{"items",{{"type","object"}}},{"description","[{address,label}]"}}},
+                              {"until",{{"type","object"},{"description","Optional {address,size,value,op} state predicate."}}},
+                              {"timeout_ms",{{"type","integer"},{"minimum",1},{"maximum",60000}}},
+                              {"max_events",{{"type","integer"},{"minimum",1},{"maximum",4096}}},
+                              {"after_arm",{{"type","object"},{"description","Optional deterministic trigger executed after all watches/probes are armed: {method,path,body}. Useful for reproducible state-transition experiments."}}}}}});
         j.push_back({{"name","ghidra_export"},{"method","POST"},{"path","/ghidra/export"},{"description","Exports the runtime and generates the CortexImport.py script."}});
-        j.push_back({{"name","ghidra_import"},{"method","POST"},{"path","/ghidra/import"},{"description","Imports names, types, and comments into the Cortex project."}});
+        const json ghidraImportBody = {{"addresses",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"symbols",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"vtables",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"structs",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"xrefs",{{"type","array"},{"items",{{"type","object"}}}}},
+                                       {"re_facts",{{"type","object"}}}};
+        j.push_back({{"name","ghidra_import"},{"method","POST"},{"path","/ghidra/import"},
+                     {"description","Imports Ghidra names/symbols, types, comments, vtables, structs, xrefs and RE facts into the persistent Cortex project."},{"body",ghidraImportBody}});
+        j.push_back({{"name","ghidra_import_symbols"},{"method","POST"},{"path","/ghidra/import"},
+                     {"description","AI-friendly alias for ghidra_import; accepts symbols/addresses/vtables/structs/xrefs/re_facts at the document root."},{"body",ghidraImportBody}});
 
         return j;
 }
 
+namespace {
+std::string ContractSamplePath(std::string path) {
+    size_t cursor = 0;
+    while ((cursor = path.find('{', cursor)) != std::string::npos) {
+        const size_t close = path.find('}', cursor + 1);
+        if (close == std::string::npos) break;
+        path.replace(cursor, close - cursor + 1, "1");
+        cursor += 1;
+    }
+    return path;
+}
+}
+
+bool ValidateApiContracts(json& report) {
+    json errors = json::array();
+    std::set<std::string> names;
+    const json manifest = BuildToolsManifest();
+    for (const auto& tool : manifest) {
+        const std::string name = tool.value("name", std::string());
+        const std::string method = tool.value("method", std::string());
+        const std::string path = tool.value("path", std::string());
+        if (name.empty() || method.empty() || path.empty()) {
+            errors.push_back({{"tool",name},{"error","manifest_identity_missing"}});
+            continue;
+        }
+        if (!names.insert(name).second) errors.push_back({{"tool",name},{"error","duplicate_tool_name"}});
+        const std::string sample = ContractSamplePath(path);
+        if (!HasNativeRoute(method, sample)) {
+            errors.push_back({{"tool",name},{"method",method},{"path",path},{"sample_path",sample},
+                              {"error","registered_handler_missing"}});
+        }
+        if (tool.contains("body") && tool["body"].is_object()) {
+            for (auto it = tool["body"].begin(); it != tool["body"].end(); ++it) {
+                const json schema = mcp_contract::SchemaForProperty(it.key(), it.value());
+                if (!schema.is_object() ||
+                    (!schema.contains("type") && !schema.contains("oneOf") && !schema.contains("anyOf"))) {
+                    errors.push_back({{"tool",name},{"field",it.key()},{"error","invalid_body_schema"}});
+                }
+                if (schema.contains("required") && schema["required"].is_boolean()) {
+                    errors.push_back({{"tool",name},{"field",it.key()},{"error","required_marker_leaked_into_property_schema"}});
+                }
+            }
+        }
+    }
+    report = {{"ok",errors.empty()}, {"tool_count",manifest.size()},
+              {"native_route_count",NativeRouteCount()}, {"errors",std::move(errors)}};
+    return report.value("ok", false);
+}
 json BuildOpenApiDocument() {
     json paths = json::object();
     for (const auto& tool : BuildToolsManifest()) {
@@ -573,15 +762,39 @@ json BuildOpenApiDocument() {
         std::transform(method.begin(), method.end(), method.begin(), ::tolower);
         json operation{{"operationId", tool.value("name", "tool")},
                        {"summary", tool.value("description", "")},
-                       {"responses", {{"200", {{"description", "Cortex response"}}}}}};
-        if (tool.contains("body")) {
-            operation["requestBody"] = {{"required", true}, {"content", {{"application/json", {{"schema", {{"type", "object"}}}}}}}};
+                       {"responses", {{"200", {{"description", "Cortex response"}}},
+                                      {"400", {{"description", "Invalid request"}}},
+                                      {"500", {{"description", "Runtime failure"}}}}}};
+        json parameters = json::array();
+        for (const auto& parameter : mcp_contract::PathParameters(tool.value("path", std::string()))) {
+            parameters.push_back({{"name",parameter},{"in","path"},{"required",true},
+                                  {"schema",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}}});
+        }
+        if (tool.contains("query") && tool["query"].is_object()) {
+            for (auto it = tool["query"].begin(); it != tool["query"].end(); ++it) {
+                parameters.push_back({{"name",it.key()},{"in","query"},
+                                      {"required",mcp_contract::IsRequiredSpec(it.value())},
+                                      {"schema",mcp_contract::SchemaForProperty(it.key(),it.value())}});
+            }
+        }
+        if (!parameters.empty()) operation["parameters"] = std::move(parameters);
+        if (tool.contains("body") && tool["body"].is_object()) {
+            json properties = json::object();
+            json required = json::array();
+            for (auto it = tool["body"].begin(); it != tool["body"].end(); ++it) {
+                properties[it.key()] = mcp_contract::SchemaForProperty(it.key(), it.value());
+                if (mcp_contract::IsRequiredSpec(it.value())) required.push_back(it.key());
+            }
+            json schema{{"type","object"},{"properties",std::move(properties)}};
+            if (!required.empty()) schema["required"] = required;
+            operation["requestBody"] = {{"required", !required.empty()},
+                                         {"content", {{"application/json", {{"schema", std::move(schema)}}}}}};
         }
         if (!tool.value("public", false)) operation["security"] = json::array({{{"CortexToken", json::array()}}});
         paths[tool.at("path").get<std::string>()][method] = std::move(operation);
     }
-    return {{"openapi", "3.0.3"},
-            {"info", {{"title", "Cortex API"}, {"version", "2.0.0"}}},
+    return {{"openapi", "3.1.0"},
+            {"info", {{"title", "Cortex API"}, {"version", "2.1.0"}}},
             {"servers", json::array({{{"url", "http://127.0.0.1:" + std::to_string(GetPort())}}})},
             {"paths", paths},
             {"components", {{"securitySchemes", {{"CortexToken", {{"type", "apiKey"}, {"in", "header"}, {"name", "X-Cortex-Token"}}}}}}}};
@@ -595,6 +808,14 @@ void RegisterStatusRoutes(httplib::Server& svr) {
         overlay::LogApiCall("GET /status");
     });
 
+    // Desktop-only diagnostics surface. Deliberately omitted from the MCP
+    // tool manifest so an agent cannot use the UI activity feed as another
+    // public protocol surface.
+    svr.Get("/ui/api-log", [](const httplib::Request&, httplib::Response& res) {
+        json lines = json::array();
+        for (const auto& line : overlay::ApiLogSnapshot()) lines.push_back(line);
+        res.set_content(json{{"ok", true}, {"lines", lines}}.dump(), "application/json");
+    });
     svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         json hooks = json::object();
 #ifdef CORTEX_KIERO
@@ -621,9 +842,30 @@ void RegisterStatusRoutes(httplib::Server& svr) {
         overlay::LogApiCall("GET /tools");
     });
 
+    svr.Get("/schema/validate", [](const httplib::Request&, httplib::Response& res) {
+        json report;
+        const bool ok = ValidateApiContracts(report);
+        res.status = ok ? 200 : 500;
+        res.set_content(report.dump(2), "application/json");
+    });
     svr.Get("/openapi.json", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(BuildOpenApiDocument().dump(2), "application/json");
     });
 }
 
 } // namespace api
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

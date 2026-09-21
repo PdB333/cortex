@@ -9,10 +9,10 @@ namespace api::mcp_pipe_protocol {
 
 inline constexpr std::uint32_t kMaxFrameBytes = 16u * 1024u * 1024u;
 
-// The pipe endpoint is derived from the already-random API token so the host
-// and injected runtime can rendezvous without another discovery file. The
-// token itself is still sent inside the envelope and validated in constant
-// time; the 64-bit hash is only an endpoint identifier, not authentication.
+// The pipe endpoint is derived from a random private MCP token shared by the
+// injected runtime and its local client. The token itself is still sent inside
+// the envelope and validated in constant time; the 64-bit hash is only an
+// endpoint identifier, not authentication.
 inline std::string PipeNameForToken(const std::string& token) {
     std::uint64_t hash = 1469598103934665603ull;
     for (unsigned char c : token) {

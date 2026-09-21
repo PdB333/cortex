@@ -1,4 +1,4 @@
-name: P2 Contracts
+﻿name: P2 Contracts
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - agent/p2-mcp-contracts
       - agent/final-integration
       - refactor/native-mcp-tool-executor
+      - next/unified-cortex-ui
   pull_request:
     paths:
       - "core/api/mcp_contract.h"
@@ -22,6 +23,7 @@ on:
       - "tests/mcp_protocol_tests.cpp"
       - "tests/mcp_pipe_protocol_tests.cpp"
       - "tests/mcp_schema_tests.cpp"
+      - "tests/call_scheduler_tests.cpp"
       - "tests/mcp_query_schema_tests.cpp"
       - "tests/mcp_bridge_policy_tests.cpp"
       - "tests/semantic_tools_tests.cpp"
@@ -69,7 +71,21 @@ jobs:
 
       - name: Build Cortex
         shell: msys2 {0}
-        run: cmake --build build/p2-${{ matrix.arch }} --parallel 2
+        run: |
+          set +e
+          log="build/p2-${{ matrix.arch }}/compile.log"
+          cmake --build "build/p2-${{ matrix.arch }}" --parallel 2 >"$log" 2>&1
+          rc=$?
+          tail -n 250 "$log" || true
+          exit $rc
+
+      - name: Upload compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-compile-${{ matrix.arch }}
+          path: build/p2-${{ matrix.arch }}/compile.log
+          if-no-files-found: warn
 
       - name: Run core tests
         shell: msys2 {0}
@@ -115,6 +131,13 @@ jobs:
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
 
+      - name: Build and run game-thread call scheduler tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/call_scheduler_tests.cpp core/call/call.cpp
+          -o build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
+          -static -static-libgcc -static-libstdc++ -luser32
+          && build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
       - name: Build and run MCP bridge policy tests
         shell: msys2 {0}
         run: >-
@@ -134,3 +157,5 @@ jobs:
           -o build/p2-${{ matrix.arch }}/pagination_tests.exe
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/pagination_tests.exe
+
+

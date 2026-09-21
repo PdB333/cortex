@@ -2,6 +2,34 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.7.0] - 2026-09-21
+
+### Unified desktop application
+
+- Replaced the historical multi-binary user workflow with one Qt 6/QML desktop application, `cortex.exe`, while keeping x64/x86 runtime payloads as internal portable-bundle assets.
+- Added target discovery and attach/detach sessions, persistent Addresses and Project workspaces, Memory, Scanner, Disassembly, Structures, Modules, Symbols, Snapshots, Debugger, Breakpoints, Traces, Patches, Watches, Hooks, Network, Screenshots, Diagnostics, Scripts, Input, Actions, MCP and RE workspaces.
+- Added shared address navigation, global Go To, command palette, live address values, context-menu workflows and explicit Mutation permission for state-changing operations.
+
+### Runtime, debugger and reverse engineering
+
+- Added the generic local target/session backend and service layer used by both the desktop UI and native MCP execution.
+- Expanded debugger control with Pause, Continue, Step Into, Step Over, software/hardware breakpoints, process-global hardware-watch propagation and mixed-bitness validation.
+- Added runtime RE tooling for C++ subobject/vtable discovery, tracked objects and field changes, cross-session diffs, last-writer discovery, transition tracing, checkpoints, reversible experiments and persistent RE facts.
+- Added Ghidra symbol import, improved project evidence persistence, typed structure workflows and rollback-aware runtime experiments.
+
+### MCP and automation
+
+- Added persistent targetless MCP mode with process discovery, dynamic attach/detach, multi-target routing and tool-list change notifications.
+- Kept compact semantic tools as the default while preserving the complete primitive catalog under `--tools all`.
+- Added UI/MCP integration for runtime sessions and maintained the modern `2026-07-28` plus legacy MCP protocol compatibility.
+
+### Validation and packaging
+
+- Added portable Windows x64/x86 staging, Qt deployment/dependency closure checks, GUI smoke tests, mixed-bitness integrated MCP E2E coverage and AssaultCube offline E2E coverage.
+- Added Linux application build/smoke validation for the Qt frontend.
+- Fixed hardware-breakpoint readiness accounting so synchronous API/MCP callers cannot block their own process-global watchpoint coverage gate.
+- The v0.7.0 release packages one Windows portable application archive with `cortex.exe`, Qt runtime files and private `runtime/x64` + `runtime/x86` instrumentation assets.
+
 ## [v0.6.0] - 2026-08-28
 
 ### Native MCP transport and shared executor

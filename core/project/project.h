@@ -10,12 +10,13 @@ namespace project {
 using json = nlohmann::json;
 
 // Loads (or creates) a JSON project file for the current process, named
-// after its executable and stored in a "projects" folder next to this DLL.
+// after its executable. An empty directory uses cortex_projects next to this DLL;
+// otherwise the configured directory is used.
 // This is the AI's persistent long-term memory for a given game across
 // sessions: named addresses, pointer paths, and free-form notes it has
 // worked out. Every mutation below saves to disk immediately (simplicity
 // and crash-safety over batching).
-void Init();
+void Init(const std::string& directory = {});
 
 json GetAll();
 
@@ -45,4 +46,14 @@ void SetFreezes(const json& freezes);
 json GetStructDefs();
 void SetStructDefs(const json& defs);
 
+// Persistent reverse-engineering session knowledge.
+json GetReFacts();
+bool SetReFact(const std::string& key, const json& value);
+bool RemoveReFact(const std::string& key);
+json GetObjectTracks();
+bool SetObjectTracks(const json& tracks);
+json GetBreakpointTemplates();
+bool SetBreakpointTemplates(const json& templates);
+
 } // namespace project
+

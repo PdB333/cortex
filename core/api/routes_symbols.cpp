@@ -1,6 +1,7 @@
 #include "routes.h"
 #include "../symbols/symbols.h"
 #include "../overlay/overlay.h"
+#include "../process/address.h"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -41,7 +42,9 @@ void RegisterSymbolsRoutes(httplib::Server& svr) {
             return;
         }
         try {
-            uintptr_t address = static_cast<uintptr_t>(std::stoull(req.get_param_value("address"), nullptr, 0));
+            std::string addressError;
+            uintptr_t address = process::ResolveAddress(json(req.get_param_value("address")), &addressError);
+            if (!address) throw std::runtime_error(addressError.empty() ? "invalid_address" : addressError);
             auto location = symbols::ResolveDetailed(address);
             json out;
             out["ok"] = location.has_value() && location->hasSymbol;
@@ -82,7 +85,9 @@ void RegisterSymbolsRoutes(httplib::Server& svr) {
             return;
         }
         try {
-            uintptr_t address = static_cast<uintptr_t>(std::stoull(req.get_param_value("address"), nullptr, 0));
+            std::string addressError;
+            uintptr_t address = process::ResolveAddress(json(req.get_param_value("address")), &addressError);
+            if (!address) throw std::runtime_error(addressError.empty() ? "invalid_address" : addressError);
             auto location = symbols::ResolveDetailed(address);
             if (!location || !location->moduleBase) {
                 res.status = 404;

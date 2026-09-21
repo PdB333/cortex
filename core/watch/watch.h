@@ -11,6 +11,8 @@ struct WatchInfo {
     uintptr_t address;
     std::string type;
     std::string label;
+    std::string value;
+    bool has_value = false;
 };
 
 struct ChangeEvent {
@@ -59,15 +61,21 @@ struct AllocEvent {
 // error); toggling `enabled`/`minSize` on an already-installed hook always
 // succeeds.
 bool SetAllocationWatch(bool enabled, size_t minSize);
+bool AllocationWatchEnabled();
+size_t AllocationWatchMinSize();
 
 // Returns and clears all allocation events accumulated since the last call.
 std::vector<AllocEvent> DrainAllocEvents();
+// Returns a non-destructive snapshot for desktop/observability consumers.
+std::vector<AllocEvent> SnapshotAllocEvents();
 
 struct PageWatchInfo {
     int id;
     uintptr_t address;
     size_t size;
     std::string label;
+    std::string value;
+    bool has_value = false;
 };
 
 struct PageAccessEvent {
@@ -106,5 +114,7 @@ std::vector<PageWatchInfo> ListPageWatches();
 
 // Returns and clears all page-access events accumulated since the last call.
 std::vector<PageAccessEvent> DrainPageAccessEvents();
+// Returns a non-destructive snapshot without stealing events from MCP clients.
+std::vector<PageAccessEvent> SnapshotPageAccessEvents();
 
 } // namespace watch

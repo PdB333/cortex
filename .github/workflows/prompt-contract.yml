@@ -1,0 +1,32 @@
+name: Unified Cortex Prompt Contracts
+
+on:
+  push:
+    branches:
+      - next/unified-cortex-ui
+    paths:
+      - "core/prompt/**"
+      - "tests/prompt_queue_contract_tests.cpp"
+      - ".github/workflows/prompt-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build prompt queue contract test
+        run: >-
+          g++ -std=c++17 -O2 -pthread
+          tests/prompt_queue_contract_tests.cpp
+          core/prompt/prompt_queue.cpp
+          -Icore
+          -o prompt_queue_contract_tests
+
+      - name: Run prompt queue contract test
+        run: ./prompt_queue_contract_tests

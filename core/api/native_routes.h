@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <httplib.h>
 
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <utility>
@@ -24,6 +25,8 @@ void RegisterNativeRoute(const std::string& method,
                          const std::string& pattern,
                          NativeRouteHandler handler);
 void ClearNativeRoutes();
+bool HasNativeRoute(const std::string& method, const std::string& target);
+size_t NativeRouteCount();
 NativeRouteResult DispatchNativeRoute(const std::string& method,
                                       const std::string& target,
                                       const std::string& body = {},
@@ -77,3 +80,5 @@ private:
 };
 
 } // namespace api
+
+
