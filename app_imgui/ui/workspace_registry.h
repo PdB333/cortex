@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -20,18 +21,39 @@ public:
         return reference;
     }
 
+    bool Select(const std::string& id) {
+        for (size_t i = 0; i < workspaces_.size(); ++i) {
+            if (id == workspaces_[i]->Id()) {
+                active_ = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    const char* ActiveId() const {
+        return workspaces_.empty() || active_ >= workspaces_.size()
+            ? "" : workspaces_[active_]->Id();
+    }
+
     void DrawNavigation() {
-        if (workspaces_.size() <= 1) return;
         for (size_t i = 0; i < workspaces_.size(); ++i) {
             if (i != 0) ImGui::SameLine();
             const bool active = i == active_;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (active) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            }
             if (ImGui::Button(workspaces_[i]->Title())) active_ = i;
             if (active) ImGui::PopStyleColor();
         }
+        if (!workspaces_.empty()) ImGui::Separator();
     }
 
     void DrawActive(UiContext& context) {
+        if (!context.requestWorkspace.empty()) {
+            Select(context.requestWorkspace);
+            context.requestWorkspace.clear();
+        }
         if (workspaces_.empty()) return;
         if (active_ >= workspaces_.size()) active_ = 0;
         workspaces_[active_]->Draw(context);
