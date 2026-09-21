@@ -7,15 +7,19 @@ on:
     paths:
       - "app_imgui/**"
       - "core/target/**"
-      - "core/services/memory_service.*"
-      - "core/services/scan_service.*"
+      - "core/services/**"
+      - "core/api/mcp_pipe_protocol.h"
+      - "runtime_helper/**"
+      - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
   pull_request:
     paths:
       - "app_imgui/**"
       - "core/target/**"
-      - "core/services/memory_service.*"
-      - "core/services/scan_service.*"
+      - "core/services/**"
+      - "core/api/mcp_pipe_protocol.h"
+      - "runtime_helper/**"
+      - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
   workflow_dispatch:
 
@@ -29,7 +33,7 @@ permissions:
 jobs:
   windows-x64:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -44,14 +48,179 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
 
-      - name: Configure lightweight UI
+      - name: Configure Cortex ImGui app
         shell: msys2 {0}
         run: cmake -S app_imgui -B build/imgui-ui -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build lightweight UI
+      - name: Build cortex.exe
         shell: msys2 {0}
         run: cmake --build build/imgui-ui --parallel 2
 
-      - name: Verify executable
+      - name: Configure x64 Cortex runtime
         shell: msys2 {0}
-        run: test -f build/imgui-ui/cortex-imgui-prototype.exe
+        run: >-
+          cmake -S . -B build/runtime-x64 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x64 runtime and E2E target
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+
+      - name: Stage x64 portable preview
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x64
+          mkdir -p stage/x64/Cortex/runtime/x64 stage/x64/Cortex/e2e
+          cp build/imgui-ui/cortex.exe stage/x64/Cortex/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
+          cp build/runtime-x64/cortex_test_target_x64.exe stage/x64/Cortex/e2e/cortex_test_target_x64.exe
+          cp app_imgui/README_TESTING.txt stage/x64/Cortex/README_TESTING.txt
+
+          for pass in 1 2 3 4 5 6; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/x64/Cortex/$base" ]; then
+                  cp "$dep" "stage/x64/Cortex/$base"
+                  echo "Bundled dependency: $base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+      - name: Verify x64 portable preview
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          test -f stage/x64/Cortex/cortex.exe
+          test -f stage/x64/Cortex/runtime/x64/cortex_core.dll
+          test -f stage/x64/Cortex/e2e/cortex_test_target_x64.exe
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
+
+      - name: Upload x64 preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-x64
+          path: stage/x64/Cortex
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-x86-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Configure x86 Cortex runtime
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x86 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x86 runtime and E2E target
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x86 --target core cortex_test_target --parallel 2
+
+      - name: Build private x86 bootstrap helper
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/runtime-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Stage x86 assets
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x86
+          mkdir -p stage/x86/runtime/x86 stage/x86/e2e
+          cp build/runtime-x86/cortex_core.dll stage/x86/runtime/x86/cortex_core.dll
+          cp build/runtime-x86/cortex_runtime_helper.exe stage/x86/runtime/x86/cortex_runtime_helper.exe
+          cp build/runtime-x86/cortex_test_target_x86.exe stage/x86/e2e/cortex_test_target_x86.exe
+          test -f stage/x86/runtime/x86/cortex_core.dll
+          test -f stage/x86/runtime/x86/cortex_runtime_helper.exe
+
+      - name: Upload x86 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: stage/x86
+          if-no-files-found: error
+          retention-days: 7
+
+  portable:
+    runs-on: windows-latest
+    needs:
+      - windows-x64
+      - windows-x86-runtime
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x64
+          path: bundle/Cortex
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: bundle/x86
+
+      - name: Assemble portable bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bundle/Cortex/runtime/x86 | Out-Null
+          Copy-Item bundle/x86/runtime/x86/* bundle/Cortex/runtime/x86/
+          New-Item -ItemType Directory -Force -Path bundle/Cortex/e2e | Out-Null
+          Copy-Item bundle/x86/e2e/* bundle/Cortex/e2e/
+          Remove-Item -Recurse -Force bundle/x86
+
+          $required = @(
+            "bundle/Cortex/cortex.exe",
+            "bundle/Cortex/runtime/x64/cortex_core.dll",
+            "bundle/Cortex/runtime/x86/cortex_core.dll",
+            "bundle/Cortex/runtime/x86/cortex_runtime_helper.exe",
+            "bundle/Cortex/e2e/cortex_test_target_x64.exe",
+            "bundle/Cortex/e2e/cortex_test_target_x86.exe"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing portable asset: $path" }
+          }
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path bundle/Cortex -DestinationPath cortex-imgui-preview-windows-portable.zip -CompressionLevel Optimal
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-preview-windows-portable
+          path: cortex-imgui-preview-windows-portable.zip
+          if-no-files-found: error
+          retention-days: 7
