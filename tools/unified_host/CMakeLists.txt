@@ -42,6 +42,7 @@ set_source_files_properties(${CORTEX_SYMBOLIZE_SOURCE} PROPERTIES
 
 add_executable(cortex_host
     ${CORTEX_ROOT}/host/unified_main.cpp
+    ${CORTEX_ROOT}/host/probe_cli.cpp
     ${CORTEX_SERVE_SOURCE}
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
