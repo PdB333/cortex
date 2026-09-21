@@ -250,10 +250,26 @@ jobs:
           $oldPath = $env:PATH
 
           function Read-McpLine([System.IO.StreamReader]$reader, [int]$timeoutMs = 15000) {
-            $task = $reader.ReadLineAsync()
-            if (-not $task.Wait($timeoutMs)) { throw "Timed out waiting for Cortex MCP stdout" }
-            if ($null -eq $task.Result) { throw "Cortex MCP stdout closed unexpectedly" }
-            return $task.Result
+            $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+            while ([DateTime]::UtcNow -lt $deadline) {
+              $remaining = [Math]::Max(1, [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+              $task = $reader.ReadLineAsync()
+              if (-not $task.Wait($remaining)) { throw "Timed out waiting for Cortex MCP stdout" }
+              $line = $task.Result
+              if ($null -eq $line) { throw "Cortex MCP stdout closed unexpectedly" }
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              try {
+                $message = $line | ConvertFrom-Json
+                if ($null -eq $message.id -and -not [string]::IsNullOrWhiteSpace([string]$message.method)) {
+                  Write-Host ("Ignoring interleaved MCP notification: {0}" -f [string]$message.method)
+                  continue
+                }
+              } catch {
+                # Let the caller surface malformed JSON with its existing parser/check.
+              }
+              return $line
+            }
+            throw "Timed out waiting for Cortex MCP stdout"
           }
 
           function Test-CortexMcp([string]$targetPath, [string]$assetDirectory, [string]$label) {
