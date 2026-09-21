@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "CMakeLists.txt"
       - "README.md"
+      - "README_INSTALL.txt"
       - "CHANGELOG.md"
       - "LICENSE"
       - ".github/workflows/publish-release.yml"
@@ -22,6 +23,7 @@ on:
       - "docs/**"
       - "CMakeLists.txt"
       - "README.md"
+      - "README_INSTALL.txt"
       - "CHANGELOG.md"
       - "LICENSE"
       - ".github/workflows/publish-release.yml"
@@ -32,7 +34,7 @@ permissions:
 
 concurrency:
   group: publish-v0.7.0-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RELEASE_TAG: v0.7.0
@@ -201,7 +203,7 @@ jobs:
           $bundle = (Resolve-Path "staging/x64/Cortex").Path
           New-Item -ItemType Directory -Force -Path (Join-Path $bundle "runtime\x86") | Out-Null
           Copy-Item "staging/x86/runtime/x86/*" (Join-Path $bundle "runtime\x86") -Force
-          Copy-Item README.md, CHANGELOG.md, LICENSE $bundle
+          Copy-Item README.md, README_INSTALL.txt, CHANGELOG.md, LICENSE $bundle
           Copy-Item -Recurse docs (Join-Path $bundle "docs")
 
           foreach ($required in @(
@@ -210,6 +212,7 @@ jobs:
             "runtime\x86\cortex_core.dll",
             "runtime\x86\cortex_runtime_helper.exe",
             "README.md",
+            "README_INSTALL.txt",
             "CHANGELOG.md",
             "LICENSE"
           )) {

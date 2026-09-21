@@ -1,231 +1,111 @@
-CORTEX v0.6.0 - INSTALLATION ET DEMARRAGE RAPIDE
+CORTEX v0.7.0 - INSTALLATION ET DEMARRAGE RAPIDE
 ================================================
 
-Cortex est fourni en deux archives distinctes : Windows x86 et Windows x64.
-Choisissez TOUJOURS l'archive correspondant a l'architecture du jeu ou du
-programme cible :
+Cortex v0.7.0 est distribue comme une seule application Windows portable :
+cortex.exe. Les composants d'instrumentation x64 et x86 sont inclus dans le
+sous-dossier runtime et sont selectionnes automatiquement selon la cible.
 
-- jeu 32 bits  -> archive x86
-- jeu 64 bits  -> archive x64
+INSTALLATION
+------------
 
-Un injecteur x86 ne peut pas injecter un processus x64, et inversement.
+1. Telechargez l'archive :
 
-CONTENU PRINCIPAL DU ZIP
-------------------------
+       cortex-v0.7.0-windows-portable.zip
 
-cortex_core.dll
-    Agent Cortex charge dans le processus cible.
-
-cortex.asi
-    Copie strictement identique de cortex_core.dll avec l'extension .asi.
-    Utilisez ce fichier uniquement avec un ASI loader compatible.
-
-injector.exe
-    Injecteur autonome compatible avec l'utilisation historique de Cortex.
-
-cortex_host.exe
-    Outil principal unifie. Il fournit les commandes serve, inject, diagnose,
-    analyze, symbolize et mcp.
-
-cortex_test_target_x86.exe / cortex_test_target_x64.exe
-    Petit programme de demonstration permettant de tester Cortex sans jeu.
-
-README.md
-    Documentation complete.
-
-README_INSTALL.txt
-    Ce tutoriel.
-
-CHANGELOG.md, LICENSE, docs, sdk, agent
-    Historique, licence, documentation technique, SDK et documentation agent.
-
-
-METHODE 1 - INJECTEUR AUTONOME
-------------------------------
-
-1. Decompressez toute l'archive dans un dossier, par exemple :
+2. Decompressez toute l'archive dans un dossier normal et inscriptible,
+   par exemple :
 
        C:\Cortex\
 
-2. Lancez le jeu ou le programme cible.
+3. Ne deplacez pas cortex.exe seul. Conservez les DLL Qt, les plugins QML et
+   le dossier runtime a cote de l'executable.
 
-3. Ouvrez PowerShell ou l'invite de commandes dans le dossier Cortex.
+4. Lancez :
 
-4. Injectez par nom de processus :
+       .\cortex.exe
 
-       .\injector.exe game.exe
+PREMIERE SESSION
+----------------
 
-   ou par PID :
+1. Selectionnez un processus dans la barre superieure.
+2. Attachez Cortex a la cible.
+3. Utilisez Scanner (Ctrl+F) ou Memory pour commencer l'inspection.
+4. Double-cliquez un resultat de scan utile pour l'ajouter a Addresses.
+5. Utilisez le menu contextuel d'une adresse pour naviguer vers Memory,
+   Disassembly, RE, Pointers, Structures ou les actions de debugger.
+6. Activez Mutation uniquement lorsque vous voulez effectuer une operation
+   qui modifie la cible ou l'etat persistant.
 
-       .\injector.exe 1234
+MODES EN LIGNE DE COMMANDE
+--------------------------
 
-5. Par defaut, injector.exe charge cortex_core.dll situe dans le meme dossier.
-   Vous pouvez aussi donner un chemin explicite :
+Afficher l'aide :
 
-       .\injector.exe game.exe .\cortex_core.dll
+       .\cortex.exe --help
 
-6. En cas d'erreur OpenProcess, relancez le terminal en administrateur seulement
-   si les droits Windows du processus cible l'exigent.
+Afficher la version :
 
+       .\cortex.exe --version
 
-METHODE 2 - CORTEX_HOST.EXE
----------------------------
+Lancer MCP en mode stdio persistant :
 
-L'outil unifie peut egalement injecter Cortex :
+       .\cortex.exe mcp
 
-       .\cortex_host.exe inject game.exe
+Attacher automatiquement MCP a un PID :
 
-ou :
+       .\cortex.exe mcp --pid 1234
 
-       .\cortex_host.exe inject 1234 .\cortex_core.dll
+Attacher automatiquement MCP a un processus :
 
-Commandes principales :
+       .\cortex.exe mcp --process game.exe
 
-       cortex_host.exe serve ...
-       cortex_host.exe inject ...
-       cortex_host.exe probe --pid ...
-       cortex_host.exe diagnose ...
-       cortex_host.exe analyze ...
-       cortex_host.exe symbolize ...
-       cortex_host.exe mcp ...
+Exposer aussi les outils primitifs bas niveau :
 
-Affichez l'aide avec :
+       .\cortex.exe mcp --tools all
 
-       .\cortex_host.exe help
+Autres commandes integrees :
 
+       .\cortex.exe probe --pid 1234
+       .\cortex.exe diagnose --pid 1234
+       .\cortex.exe analyze <dossier>
+       .\cortex.exe symbolize [options]
 
-MCP NATIF POUR CLIENTS IA
--------------------------
+CONTENU IMPORTANT
+-----------------
 
-v0.6.0 utilise par defaut un transport MCP stdio -> Named Pipe Windows local et
-authentifie. Le bridge n'a plus besoin de repasser par HTTP pour executer les
-outils MCP.
+cortex.exe
+    Application Cortex principale (GUI et modes CLI/MCP).
 
-Pour injecter Cortex et demarrer MCP en une seule commande :
+runtime\x64\cortex_core.dll
+    Payload d'instrumentation pour les cibles 64 bits.
 
-       .\cortex_host.exe mcp --process game.exe
+runtime\x86\cortex_core.dll
+    Payload d'instrumentation pour les cibles 32 bits.
 
-Ou, si Cortex est deja injecte :
+runtime\x86\cortex_runtime_helper.exe
+    Helper prive utilise automatiquement pour les cibles 32 bits.
 
-       .\cortex_host.exe mcp --token-file .\cortex.token
+README.md, CHANGELOG.md, LICENSE, docs
+    Documentation, historique, licence et guides techniques.
 
-Le profil par defaut expose les 30 outils semantiques. Pour exposer aussi les
-primitives bas niveau :
+DEPANNAGE
+---------
 
-       .\cortex_host.exe mcp --token-file .\cortex.token --tools all
+- Si cortex.exe ne demarre pas, verifiez que l'archive a ete entierement
+  extraite et que les DLL/plugins fournis sont toujours presents.
+- Si une cible ne peut pas etre ouverte, verifiez son architecture et les
+  droits Windows du processus. N'utilisez des privileges eleves que lorsque
+  les droits de la cible l'exigent.
+- Si une operation d'ecriture, de breakpoint ou de controle est refusee,
+  activez explicitement Mutation dans Cortex.
+- Pour MCP, stdout est reserve au protocole JSON-RPC pendant toute la session.
+- Consultez docs/getting-started.md et docs/ui-guide.md pour le workflow
+  complet de l'application unifiee.
 
-Le transport HTTP historique reste disponible explicitement pour compatibilite
-et diagnostic :
+AUTORISATION
+------------
 
-       .\cortex_host.exe mcp --transport http --token-file .\cortex.token
-
-
-METHODE 3 - ASI LOADER
-----------------------
-
-Cette methode demande un ASI loader deja installe et compatible avec le jeu.
-
-1. Copiez cortex.asi dans le dossier attendu par l'ASI loader, souvent :
-
-       <dossier_du_jeu>\scripts\
-
-   ou directement dans le dossier du jeu selon le loader utilise.
-
-2. Lancez le jeu normalement.
-
-3. Ne chargez pas simultanement cortex.asi et cortex_core.dll : cela tenterait de
-   charger Cortex deux fois dans le meme processus.
-
-cortex.asi et cortex_core.dll contiennent exactement le meme binaire. Seule
-l'extension change pour faciliter l'utilisation avec un ASI loader.
-
-
-TEST RAPIDE SANS JEU
---------------------
-
-1. Lancez le programme de test correspondant a l'archive :
-
-   x86 :
-       .\cortex_test_target_x86.exe
-
-   x64 :
-       .\cortex_test_target_x64.exe
-
-2. Injectez Cortex :
-
-       .\injector.exe cortex_test_target_x86.exe
-
-   ou :
-
-       .\injector.exe cortex_test_target_x64.exe
-
-3. Verifiez que l'API repond :
-
-       Invoke-RestMethod http://127.0.0.1:6969/health
-
-Une reponse contenant "ok": true confirme que l'agent est charge.
-
-
-TOKEN ET PREMIERE REQUETE
--------------------------
-
-Apres l'injection, Cortex cree cortex.token a cote du module charge ou dans son
-repertoire de travail. Les routes protegees demandent ce token.
-
-Exemple PowerShell :
-
-       $token = (Get-Content .\cortex.token -Raw).Trim()
-       $headers = @{ "X-Cortex-Token" = $token }
-       Invoke-RestMethod http://127.0.0.1:6969/modules -Headers $headers
-
-Les routes publiques /health, /status, /tools et /openapi.json permettent de
-verifier le service et de decouvrir l'API.
-
-
-DIAGNOSTIC D'UN CRASH OU D'UN FREEZE
-------------------------------------
-
-Surveillez un processus deja injecte :
-
-       .\cortex_host.exe diagnose --pid 1234 --heartbeat render --hang-ms 5000
-
-Analysez ensuite un dossier de rapport :
-
-       .\cortex_host.exe analyze C:\chemin\vers\crash_...
-
-Pour symboliser une adresse hors ligne :
-
-       .\cortex_host.exe symbolize --image C:\mods\MonMod.dll --rva 0x1832
-
-
-PROBLEMES COURANTS
-------------------
-
-"DLL failed to load" ou "bitness mismatch"
-    Verifiez que le ZIP x86/x64 correspond exactement au processus cible.
-
-"No matching process found"
-    Utilisez le nom exact visible dans le Gestionnaire des taches ou le PID.
-
-"OpenProcess failed"
-    Le processus peut demander des droits administrateur ou bloquer l'injection.
-
-L'API ne repond pas
-    Verifiez que Cortex n'est pas deja charge, que le port 6969 est libre et
-    consultez les fichiers de log generes a cote de Cortex.
-
-Le client MCP indique "cortex_unreachable"
-    Verifiez que Cortex est bien injecte, que cortex.token correspond au runtime
-    courant et que cortex_host.exe/cortex_core.dll ont la meme architecture.
-
-L'ASI ne se charge pas
-    Verifiez l'architecture de l'ASI loader, son dossier de plugins et ses logs.
-
-
-SECURITE ET UTILISATION AUTORISEE
---------------------------------
-
-Utilisez Cortex uniquement sur des logiciels que vous possedez ou pour lesquels
-vous avez une autorisation explicite. Cortex est destine au debogage, a la
-recherche hors ligne, a l'accessibilite et au modding solo. Ne l'utilisez pas
-pour contourner un anti-cheat ou interferer avec des services en ligne.
+Utilisez Cortex uniquement sur des logiciels et systemes que vous possedez
+ou etes autorise a inspecter. Le contournement d'anti-cheat, l'acces non
+autorise et l'interference avec des services en ligne ne font pas partie du
+perimetre du projet.
