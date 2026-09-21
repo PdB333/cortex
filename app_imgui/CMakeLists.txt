@@ -59,6 +59,8 @@ target_link_libraries(cortex_imgui PRIVATE
     dxgi
     user32
     gdi32
+    dwmapi
+    d3dcompiler
 )
 
 if(MINGW)
