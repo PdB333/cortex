@@ -6,10 +6,12 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <type_traits>
 #include <utility>
 
 namespace cortex::ui {
@@ -341,7 +343,9 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     ImGui::TextDisabled("Type");
     ImGui::SetNextItemWidth(-1);
     const char* types[] = {"Int32", "Int64", "Float", "Double", "String", "Bytes"};
+    ImGui::BeginDisabled(firstScanDone_);
     ImGui::Combo("##ScanType", &typeIndex_, types, IM_ARRAYSIZE(types));
+    ImGui::EndDisabled();
 
     if (firstScanDone_) {
         ImGui::Spacing();

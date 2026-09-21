@@ -303,12 +303,13 @@ void DrawApp(AppState& app) {
     ImGui::PopStyleVar(2);
 
     DrawHeader(app);
+
+    const float statusHeight = ImGui::GetTextLineHeightWithSpacing() + 12.0f;
+    ImGui::BeginChild("WorkspaceBody", ImVec2(0, -statusHeight), ImGuiChildFlags_None);
     app.workspaces.DrawNavigation();
     app.workspaces.DrawActive(app.ui);
+    ImGui::EndChild();
 
-    const float statusHeight = ImGui::GetTextLineHeightWithSpacing() + 8.0f;
-    const float bottom = ImGui::GetWindowHeight() - statusHeight;
-    if (ImGui::GetCursorPosY() < bottom) ImGui::SetCursorPosY(bottom);
     ImGui::Separator();
     ImGui::TextDisabled("%s", app.ui.status.c_str());
 

@@ -1,0 +1,57 @@
+name: Lightweight ImGui UI
+
+on:
+  push:
+    branches:
+      - next/lightweight-imgui-ui
+    paths:
+      - "app_imgui/**"
+      - "core/target/**"
+      - "core/services/memory_service.*"
+      - "core/services/scan_service.*"
+      - ".github/workflows/imgui-ui.yml"
+  pull_request:
+    paths:
+      - "app_imgui/**"
+      - "core/target/**"
+      - "core/services/memory_service.*"
+      - "core/services/scan_service.*"
+      - ".github/workflows/imgui-ui.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lightweight-imgui-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Configure lightweight UI
+        shell: msys2 {0}
+        run: cmake -S app_imgui -B build/imgui-ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build lightweight UI
+        shell: msys2 {0}
+        run: cmake --build build/imgui-ui --parallel 2
+
+      - name: Verify executable
+        shell: msys2 {0}
+        run: test -f build/imgui-ui/cortex-imgui-prototype.exe
