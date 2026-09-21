@@ -16,17 +16,15 @@ The user-facing product is **`cortex.exe`**. Architecture-specific x64/x86 instr
 
 ## Status
 
-The unified Qt/QML application lives on **`next/unified-cortex-ui`**. It remains separate from `master` until the portable Windows application has been manually tested and explicitly approved.
+**v0.7.0** is the unified Qt/QML Cortex application. Windows is the production runtime today. The Qt application also builds and smoke-tests on Linux, but Linux runtime parity is not complete. PS4 exists in the common target model as a future backend and does not yet have Windows-level parity.
 
-Windows is the production runtime today. The Qt application also builds and smoke-tests on Linux, but Linux runtime parity is not complete. PS4 exists in the common target model as a future backend and does not yet have Windows-level parity.
-
-The historical public **v0.6.0** release predates the unified application and still uses the old multi-binary packaging. Do not use that release layout as the reference for the current branch.
+The user-facing release is one portable Windows application, `cortex.exe`, with architecture-specific runtime payloads managed internally.
 
 ## Quick start
 
-For the current unified preview, use the artifact from the latest green **Unified Cortex UI Preview** workflow on `next/unified-cortex-ui`.
+Use the Windows portable archive attached to the latest GitHub release.
 
-1. Download the `cortex-unified-ui-preview-windows` artifact.
+1. Download the `cortex-v0.7.0-windows-portable.zip` release asset.
 2. Extract the complete archive to a normal writable directory.
 3. Run `cortex.exe`.
 4. Select a target from the top bar.
