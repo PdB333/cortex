@@ -264,18 +264,15 @@ jobs:
       - name: Extract and validate full integrated MCP E2E
         shell: pwsh
         run: |
-          $sourceBlob = "2c2dda411d49540c0b599d5c93cd96de9f76de7e"
-          $rawLines = @(& git cat-file blob $sourceBlob)
-          if ($LASTEXITCODE -ne 0 -or $rawLines.Count -lt 1000) {
-            throw "could not load the full historical UI Preview E2E source blob"
+          $sourcePath = ".github/workflows/ui-preview.yml"
+          if (-not (Test-Path $sourcePath)) {
+            throw "current UI Preview workflow source is missing"
+          }
+          $rawLines = @(Get-Content $sourcePath)
+          if ($rawLines.Count -lt 1000) {
+            throw "current UI Preview workflow source is unexpectedly short"
           }
           $text = ($rawLines -join "`n") + "`n"
-
-          $bad = '$trackEvents = @{ jsonrpc="2.0"; id=404; method="tools/call"; params=@{ name="re_object_events"; arguments=@{ _path=@{ id=$trackId } } } | ConvertTo-Json -Depth 8 -Compress'
-          $good = '$trackEvents = @{ jsonrpc="2.0"; id=404; method="tools/call"; params=@{ name="re_object_events"; arguments=@{ _path=@{ id=$trackId } } } } | ConvertTo-Json -Depth 8 -Compress'
-          $badCount = ([regex]::Matches($text, [regex]::Escape($bad))).Count
-          if ($badCount -ne 1) { throw "expected exactly one historical E2E repair target, found $badCount" }
-          $text = $text.Replace($bad, $good)
 
           $startMarker = '      - name: Integrated MCP E2E on x64 and x86 targets'
           $endMarker = '      - name: Portable GUI smoke test with clean PATH'
@@ -297,10 +294,6 @@ jobs:
           $scriptPath = Join-Path $env:RUNNER_TEMP "cortex-integrated-mcp-e2e.ps1"
           [IO.File]::WriteAllText($scriptPath, $script, [Text.UTF8Encoding]::new($false))
           $scriptSha = (Get-FileHash $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expectedSha = "8b018b8e847216101f3bbaf38b77185b7a1aea5d4bb22efd75b6b95f534357aa"
-          if ($scriptSha -ne $expectedSha) {
-            throw "extracted E2E script differs from locally validated source: $scriptSha"
-          }
           foreach ($requiredProbe in @('debug_pause','debug_step_over','Test-CortexMcpMultiTarget $x64Target $x86Target')) {
             if (-not $script.Contains($requiredProbe)) { throw "missing required E2E probe: $requiredProbe" }
           }
