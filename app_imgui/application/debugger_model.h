@@ -43,6 +43,9 @@ public:
                        uint64_t threadId,
                        std::string* error = nullptr);
     bool RemoveBreakpoint(int id, std::string* error = nullptr);
+    bool LoadBreakpointLog(int id, uint64_t sinceSeq, size_t limit,
+                           std::vector<DebugBreakpointLogEntry>& entries,
+                           std::string* error = nullptr);
     bool Pause(std::string* error = nullptr);
     bool Resume(std::string* error = nullptr);
     bool Step(uint32_t timeoutMs, std::string* error = nullptr);

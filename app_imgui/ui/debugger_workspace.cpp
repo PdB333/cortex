@@ -139,6 +139,18 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     const float threadWidth = 220.0f;
 
     ImGui::BeginChild("ThreadList", ImVec2(threadWidth, upperHeight), ImGuiChildFlags_Borders);
+    if (!debugger.PausedThreads().empty()) {
+        ImGui::Text("Paused (%zu)", debugger.PausedThreads().size());
+        ImGui::Separator();
+        for (const auto& paused : debugger.PausedThreads()) {
+            const std::string label =
+                "TID " + std::to_string(paused.threadId) +
+                "  BP " + std::to_string(paused.breakpointId);
+            if (ImGui::Selectable(label.c_str(), paused.threadId == currentThread))
+                SelectThread(context, paused.threadId);
+        }
+        ImGui::Spacing();
+    }
     ImGui::Text("Threads (%zu)", debugger.Threads().size());
     ImGui::Separator();
     for (const uint64_t threadId : debugger.Threads()) {
@@ -232,7 +244,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 65);
         ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthFixed, 65);
         ImGui::TableSetupColumn("Coverage", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 150);
         ImGui::TableHeadersRow();
 
         int removeBreakpointId = -1;
@@ -255,6 +267,17 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             else
                 ImGui::TextUnformatted(bp.processGlobal ? "process" : "thread");
             ImGui::TableSetColumnIndex(6);
+            if (ImGui::SmallButton("Hit log")) {
+                std::string error;
+                breakpointLogId_ = bp.id;
+                if (!debugger.LoadBreakpointLog(bp.id, 0, 500, breakpointLog_, &error)) {
+                    context.status = "Breakpoint log failed: " + error;
+                    breakpointLog_.clear();
+                } else {
+                    ImGui::OpenPopup("Breakpoint hit log");
+                }
+            }
+            ImGui::SameLine();
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::SmallButton("Remove"))
                 removeBreakpointId = bp.id;
@@ -273,6 +296,71 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::EndChild();
+
+    ImGui::SetNextWindowSize(ImVec2(880, 520), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("Breakpoint hit log", nullptr,
+                               ImGuiWindowFlags_NoSavedSettings)) {
+        ImGui::Text("Breakpoint %d", breakpointLogId_);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%zu entries)", breakpointLog_.size());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Refresh") && breakpointLogId_ >= 0) {
+            std::string error;
+            if (!debugger.LoadBreakpointLog(
+                    breakpointLogId_, 0, 500, breakpointLog_, &error))
+                context.status = "Breakpoint log failed: " + error;
+        }
+        ImGui::Separator();
+
+        if (ImGui::BeginTable("BreakpointLogTable", 5,
+                              ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_Resizable |
+                              ImGuiTableFlags_ScrollY,
+                              ImVec2(0, -42))) {
+            ImGui::TableSetupColumn("Seq", ImGuiTableColumnFlags_WidthFixed, 70);
+            ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 120);
+            ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthFixed, 150);
+            ImGui::TableSetupColumn("Registers", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            for (const auto& entry : breakpointLog_) {
+                ImGui::PushID(static_cast<int>(entry.seq));
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%llu", static_cast<unsigned long long>(entry.seq));
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%llu", static_cast<unsigned long long>(entry.threadId));
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%llu", static_cast<unsigned long long>(entry.timestampMs));
+                ImGui::TableSetColumnIndex(3);
+                const char instruction[32] = {};
+                ImGui::Text("0x%llX",
+                            static_cast<unsigned long long>(entry.instruction));
+                if (ImGui::IsItemHovered() &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    context.navigationAddress = entry.instruction;
+                    context.navigationAddressPending = true;
+                    context.requestWorkspace = "disassembly";
+                }
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%zu registers", entry.registers.registers.size());
+                if (ImGui::IsItemHovered() && !entry.registers.registers.empty()) {
+                    ImGui::BeginTooltip();
+                    for (const auto& reg : entry.registers.registers)
+                        ImGui::Text("%s = 0x%llX", reg.name.c_str(),
+                                    static_cast<unsigned long long>(reg.value));
+                    ImGui::EndTooltip();
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        if (ImGui::Button("Close", ImVec2(100, 30)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
 }
 
 } // namespace cortex::ui

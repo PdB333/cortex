@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace cortex::ui {
 
@@ -24,6 +25,8 @@ private:
     int breakpointSize_ = 4;
     int breakpointAction_ = 0;
     bool processGlobal_ = true;
+    int breakpointLogId_ = -1;
+    std::vector<DebugBreakpointLogEntry> breakpointLog_;
 };
 
 } // namespace cortex::ui

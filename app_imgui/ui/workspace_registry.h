@@ -72,7 +72,7 @@ public:
                 OpenMany({"disassembly", "memory-browser", "modules", "runtime"});
                 break;
             case WorkspacePreset::Trace:
-                OpenMany({"disassembly", "debugger", "runtime"});
+                OpenMany({"disassembly", "debugger", "trace", "memory-browser"});
                 break;
             case WorkspacePreset::Automation:
                 OpenMany({"runtime"});

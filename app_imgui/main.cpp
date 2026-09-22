@@ -8,6 +8,7 @@
 #include "ui/runtime_workspace.h"
 #include "ui/sessions_workspace.h"
 #include "ui/settings_workspace.h"
+#include "ui/trace_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -288,6 +289,7 @@ struct AppState {
         workspaces.Add<cortex::ui::RuntimeWorkspace>();
         workspaces.Add<cortex::ui::SessionsWorkspace>();
         workspaces.Add<cortex::ui::SettingsWorkspace>();
+        workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
 
@@ -411,6 +413,7 @@ enum class CommandAction {
     ViewDisassembly,
     ViewModules,
     ViewDebugger,
+    ViewTrace,
     ViewAdvanced,
     ViewSessions,
     ViewSettings,
@@ -438,6 +441,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Disassembler", CommandAction::ViewDisassembly},
     {"View: Modules", CommandAction::ViewModules},
     {"View: Debugger", CommandAction::ViewDebugger},
+    {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
     {"View: Sessions", CommandAction::ViewSessions},
     {"View: Settings", CommandAction::ViewSettings},
@@ -494,6 +498,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewDisassembly: app.workspaces.Select("disassembly"); break;
         case CommandAction::ViewModules: app.workspaces.Select("modules"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
+        case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
         case CommandAction::ViewSessions: app.workspaces.Select("sessions"); break;
         case CommandAction::ViewSettings: app.workspaces.Select("settings"); break;

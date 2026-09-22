@@ -139,6 +139,18 @@ bool DebuggerModel::RemoveBreakpoint(int id, std::string* error) {
     return RefreshRuntime(error);
 }
 
+bool DebuggerModel::LoadBreakpointLog(
+        int id, uint64_t sinceSeq, size_t limit,
+        std::vector<DebugBreakpointLogEntry>& entries, std::string* error) {
+    entries.clear();
+    if (!EnsureProvider(false, error) || !provider_ || !provider_->Ready()) {
+        if (error && error->empty()) *error = "debugger_not_attached";
+        return false;
+    }
+    entries = provider_->BreakpointLog(id, sinceSeq, limit, error);
+    return !error || error->empty();
+}
+
 bool DebuggerModel::Pause(std::string* error) {
     if (!EnsureProvider(true, error) || currentThreadId_ == 0) {
         if (error && error->empty()) *error = "no_thread_selected";

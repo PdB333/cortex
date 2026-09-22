@@ -58,11 +58,11 @@ Target presets:
 - [x] Windows and VEH provider selection
 - [x] software/hardware breakpoints
 - [x] per-thread/process-global hardware breakpoint coverage
-- [~] breakpoint hit counters/coverage done; detailed hit-log viewer remains
+- [x] breakpoint hit counters, coverage and detailed hit-log viewer
 - [x] pause / continue / step into / step over
-- [~] paused-thread state wired in model; dedicated paused-thread UI remains
-- [~] integrated Debug preset active; further panel splitting remains
-- [ ] trace start/stop/delete/events/register snapshots
+- [x] paused-thread state and dedicated paused-thread UI
+- [x] integrated dockable Debug preset
+- [x] trace start/stop/delete/events/register snapshots
 
 ### 5. Reverse-engineering workspace
 - [ ] tracked runtime objects
