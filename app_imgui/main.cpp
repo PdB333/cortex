@@ -1,3 +1,4 @@
+#include "application/settings.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
 #include "ui/memory_browser_workspace.h"
@@ -5,6 +6,7 @@
 #include "ui/modules_workspace.h"
 #include "ui/runtime_workspace.h"
 #include "ui/sessions_workspace.h"
+#include "ui/settings_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -244,6 +246,7 @@ struct AppState {
     cortex::services::DisassemblyService disassembly;
     cortex::services::DebuggerService debugger;
     cortex::services::PayloadClient payload;
+    cortex::application::SettingsStore settings;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -261,7 +264,8 @@ struct AppState {
           modules(sessions),
           disassembly(sessions),
           debugger(sessions),
-          payload(sessions, ExecutableDirectory()) {
+          payload(sessions, ExecutableDirectory()),
+          settings(ExecutableDirectory()) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -270,6 +274,7 @@ struct AppState {
         ui.disassembly = &disassembly;
         ui.debugger = &debugger;
         ui.payload = &payload;
+        ui.settings = &settings;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -278,6 +283,7 @@ struct AppState {
         workspaces.Add<cortex::ui::DebuggerWorkspace>();
         workspaces.Add<cortex::ui::RuntimeWorkspace>();
         workspaces.Add<cortex::ui::SessionsWorkspace>();
+        workspaces.Add<cortex::ui::SettingsWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
 
@@ -402,6 +408,7 @@ enum class CommandAction {
     ViewDebugger,
     ViewAdvanced,
     ViewSessions,
+    ViewSettings,
     GoTo
 };
 
@@ -428,6 +435,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
     {"View: Sessions", CommandAction::ViewSessions},
+    {"View: Settings", CommandAction::ViewSettings},
     {"Navigate: Go to address", CommandAction::GoTo}
 };
 
@@ -482,6 +490,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
         case CommandAction::ViewSessions: app.workspaces.Select("sessions"); break;
+        case CommandAction::ViewSettings: app.workspaces.Select("settings"); break;
         case CommandAction::GoTo:
             app.requestGoTo = true;
             break;

@@ -78,6 +78,7 @@ set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
 
 add_executable(cortex_imgui WIN32
     main.cpp
+    application/settings.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
@@ -85,6 +86,7 @@ add_executable(cortex_imgui WIN32
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp
     ui/sessions_workspace.cpp
+    ui/settings_workspace.cpp
     ui/theme.cpp
 
     ../host/probe_cli.cpp

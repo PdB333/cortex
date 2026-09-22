@@ -77,7 +77,7 @@ public:
                 OpenMany({"runtime"});
                 break;
             case WorkspacePreset::Runtime:
-                OpenMany({"runtime", "modules", "sessions"});
+                OpenMany({"runtime", "modules", "sessions", "settings"});
                 break;
         }
 

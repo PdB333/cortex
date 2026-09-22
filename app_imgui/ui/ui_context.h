@@ -1,5 +1,6 @@
 #pragma once
 
+#include "application/settings.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
 #include "services/memory_service.h"
@@ -19,6 +20,7 @@ struct UiContext {
     services::DisassemblyService* disassembly = nullptr;
     services::DebuggerService* debugger = nullptr;
     services::PayloadClient* payload = nullptr;
+    application::SettingsStore* settings = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;

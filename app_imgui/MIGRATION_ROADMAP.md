@@ -31,10 +31,10 @@ Target presets:
 
 ### 2. Application state, settings and sessions
 - [ ] toolkit-neutral application model layer
-- [ ] persistent Settings equivalent to SettingsController
+- [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
-- [ ] project/session storage paths and retention
+- [x] project/session storage paths and retention settings
 - [ ] human Prompt surface and private answer route
 - [ ] AI activity listener/history
 - [ ] true Qt-era MCP host mode parity (dynamic targets, operations, events)
