@@ -24,7 +24,6 @@
 #include <d3d11.h>
 #include <shellapi.h>
 #include <windows.h>
-#include <shellapi.h>
 
 #include <algorithm>
 #include <cctype>
@@ -271,6 +270,7 @@ struct AppState {
         workspaces.Add<cortex::ui::ModulesWorkspace>();
         workspaces.Add<cortex::ui::DebuggerWorkspace>();
         workspaces.Add<cortex::ui::RuntimeWorkspace>();
+        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
 
     void OnAttached(const cortex::target::TargetDescriptor& target) {
@@ -442,30 +442,69 @@ void DrawApp(AppState& app) {
     ImGui::SetNextWindowViewport(viewport->ID);
 
     const ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoDecoration |
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoBringToFrontOnFocus;
+        ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_MenuBar;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::Begin("CortexShell", nullptr, flags);
+    ImGui::Begin("CortexDockHost", nullptr, flags);
     ImGui::PopStyleVar(2);
+
+    if (ImGui::BeginMenuBar()) {
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Select process..."))
+                app.ui.requestProcessPicker = true;
+            const bool attached = static_cast<bool>(app.sessions.Active());
+            ImGui::BeginDisabled(!attached);
+            if (ImGui::MenuItem("Detach active target")) {
+                app.sessions.Detach();
+                app.payload.Reset();
+                app.ui.mutationAllowed = false;
+                app.ui.status = "Detached";
+            }
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Workspace")) {
+            app.workspaces.DrawPresetMenu();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View")) {
+            app.workspaces.DrawViewMenu();
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
 
     DrawHeader(app);
 
+    ImGui::TextDisabled("Workspace");
+    ImGui::SameLine();
+    app.workspaces.DrawPresetButtons();
+    ImGui::Separator();
+
     const float statusHeight = ImGui::GetTextLineHeightWithSpacing() + 12.0f;
-    ImGui::BeginChild("WorkspaceBody", ImVec2(0, -statusHeight), ImGuiChildFlags_None);
-    app.workspaces.DrawNavigation();
-    app.workspaces.DrawActive(app.ui);
-    ImGui::EndChild();
+    ImVec2 dockSize = ImGui::GetContentRegionAvail();
+    dockSize.y = std::max(1.0f, dockSize.y - statusHeight);
+
+    const ImGuiID dockspaceId = ImGui::GetID("CortexDockSpace");
+    ImGui::DockSpace(dockspaceId, dockSize, ImGuiDockNodeFlags_None);
 
     ImGui::Separator();
-    ImGui::TextDisabled("%s", app.ui.status.c_str());
+    ImGui::TextDisabled("[%s]  %s",
+                        cortex::ui::WorkspaceRegistry::PresetName(app.workspaces.Preset()),
+                        app.ui.status.c_str());
 
     DrawProcessPicker(app);
     ImGui::End();
+
+    app.workspaces.DrawDockWindows(app.ui);
 }
 
 } // namespace
