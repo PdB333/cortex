@@ -86,6 +86,7 @@ add_executable(cortex_imgui WIN32
     application/pointer_maps_model.cpp
     application/snapshots_model.cpp
     application/re_model.cpp
+    application/instrumentation_model.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
@@ -95,6 +96,7 @@ add_executable(cortex_imgui WIN32
     ui/pointer_maps_workspace.cpp
     ui/snapshots_workspace.cpp
     ui/re_workspace.cpp
+    ui/instrumentation_workspace.cpp
     ui/disassembly_workspace.cpp
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp

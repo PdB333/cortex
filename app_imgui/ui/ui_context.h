@@ -2,6 +2,7 @@
 
 #include "application/debugger_model.h"
 #include "application/project_model.h"
+#include "application/instrumentation_model.h"
 #include "application/re_model.h"
 #include "application/settings.h"
 #include "application/pointer_maps_model.h"
@@ -35,6 +36,7 @@ struct UiContext {
     application::PointerMapsModel* pointerMapsModel = nullptr;
     application::SnapshotsModel* snapshotsModel = nullptr;
     application::ReModel* reModel = nullptr;
+    application::InstrumentationModel* instrumentationModel = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;

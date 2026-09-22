@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots and RE models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE and Instrumentation models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -67,7 +67,7 @@ Target presets:
 ### 5. Reverse-engineering workspace
 - [x] tracked runtime objects
 - [x] find last writer
-- [ ] page-access/find-access workflow
+- [x] page-access/find-access workflow
 - [x] C++ subobject detection
 - [x] transition tracing
 - [x] controlled tests and experiments
@@ -79,7 +79,7 @@ Target presets:
 
 ### 6. Runtime, automation and observability
 - [ ] Actions journal / rollback
-- [ ] allocation/page-access instrumentation
+- [x] allocation/page-access instrumentation
 - [ ] Hooks panel
 - [ ] Network capture/events
 - [ ] Screenshots
