@@ -46,6 +46,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
     ImGui::BeginDisabled(targets_.empty());
     if (ImGui::SmallButton("Detach all")) {
         if (context.debuggerModel) context.debuggerModel->Reset();
+        if (context.projectModel) context.projectModel->Reset();
+        if (context.symbolsModel) context.symbolsModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -111,6 +113,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
             if (ImGui::SmallButton("Activate")) {
                 if (context.sessions->Activate(target.id)) {
                     if (context.debuggerModel) context.debuggerModel->Reset();
+                    if (context.projectModel) context.projectModel->Reset();
+                    if (context.symbolsModel) context.symbolsModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -121,6 +125,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
             if (ImGui::SmallButton("Detach")) {
                 const bool wasActive = target.id == context.sessions->ActiveTargetId();
                 if (wasActive && context.debuggerModel) context.debuggerModel->Reset();
+                if (wasActive && context.projectModel) context.projectModel->Reset();
+                if (wasActive && context.symbolsModel) context.symbolsModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();
