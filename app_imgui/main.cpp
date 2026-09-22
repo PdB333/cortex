@@ -4,6 +4,7 @@
 #include "ui/memory_workspace.h"
 #include "ui/modules_workspace.h"
 #include "ui/runtime_workspace.h"
+#include "ui/sessions_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -276,6 +277,7 @@ struct AppState {
         workspaces.Add<cortex::ui::ModulesWorkspace>();
         workspaces.Add<cortex::ui::DebuggerWorkspace>();
         workspaces.Add<cortex::ui::RuntimeWorkspace>();
+        workspaces.Add<cortex::ui::SessionsWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
 
@@ -399,6 +401,7 @@ enum class CommandAction {
     ViewModules,
     ViewDebugger,
     ViewAdvanced,
+    ViewSessions,
     GoTo
 };
 
@@ -424,6 +427,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Modules", CommandAction::ViewModules},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
+    {"View: Sessions", CommandAction::ViewSessions},
     {"Navigate: Go to address", CommandAction::GoTo}
 };
 
@@ -477,6 +481,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewModules: app.workspaces.Select("modules"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
+        case CommandAction::ViewSessions: app.workspaces.Select("sessions"); break;
         case CommandAction::GoTo:
             app.requestGoTo = true;
             break;
@@ -621,14 +626,15 @@ void DrawProcessPicker(AppState& app) {
     ImGui::Spacing();
 
     const float footerHeight = 54.0f;
-    if (ImGui::BeginTable("ProcessTable", 4,
+    if (ImGui::BeginTable("ProcessTable", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImVec2(0, -footerHeight))) {
         ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_WidthStretch, 0.42f);
         ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 78.0f);
         ImGui::TableSetupColumn("Arch", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-        ImGui::TableSetupColumn("Window", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+        ImGui::TableSetupColumn("Window", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
         ImGui::TableHeadersRow();
 
         for (size_t i = 0; i < app.targets.size(); ++i) {
@@ -651,6 +657,13 @@ void DrawProcessPicker(AppState& app) {
             ImGui::TextUnformatted(cortex::target::ArchitectureName(target.architecture));
             ImGui::TableSetColumnIndex(3);
             ImGui::TextUnformatted(target.windowTitle.empty() ? "-" : target.windowTitle.c_str());
+            ImGui::TableSetColumnIndex(4);
+            if (app.sessions.ActiveTargetId() == target.id)
+                ImGui::TextUnformatted("ACTIVE");
+            else if (app.sessions.HasSession(target.id))
+                ImGui::TextDisabled("attached");
+            else
+                ImGui::TextDisabled("-");
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -685,10 +698,11 @@ void DrawHeader(AppState& app) {
     ImGui::SameLine();
     if (session) {
         const auto& target = session->Target();
-        ImGui::Text("%s  |  PID %llu  |  %s",
+        ImGui::Text("%s  |  PID %llu  |  %s  |  %zu session(s)",
                     target.name.c_str(),
                     static_cast<unsigned long long>(target.processId),
-                    cortex::target::ArchitectureName(target.architecture));
+                    cortex::target::ArchitectureName(target.architecture),
+                    app.sessions.SessionCount());
 
         const float rightWidth = 240.0f;
         const float available = ImGui::GetContentRegionAvail().x;

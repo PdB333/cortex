@@ -32,8 +32,8 @@ Target presets:
 ### 2. Application state, settings and sessions
 - [ ] toolkit-neutral application model layer
 - [ ] persistent Settings equivalent to SettingsController
-- [ ] multi-target/session manager UI
-- [ ] target capability summary
+- [x] multi-target/session manager UI
+- [x] target capability summary in Sessions
 - [ ] project/session storage paths and retention
 - [ ] human Prompt surface and private answer route
 - [ ] AI activity listener/history

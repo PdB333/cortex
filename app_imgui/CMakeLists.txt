@@ -84,6 +84,7 @@ add_executable(cortex_imgui WIN32
     ui/disassembly_workspace.cpp
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp
+    ui/sessions_workspace.cpp
     ui/theme.cpp
 
     ../host/probe_cli.cpp
