@@ -80,9 +80,11 @@ add_executable(cortex_imgui WIN32
     main.cpp
     application/settings.cpp
     application/debugger_model.cpp
+    application/project_model.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
+    ui/project_workspace.cpp
     ui/disassembly_workspace.cpp
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp
