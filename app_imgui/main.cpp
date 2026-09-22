@@ -1,6 +1,7 @@
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
+#include "application/symbols_model.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
 #include "ui/memory_browser_workspace.h"
@@ -10,6 +11,7 @@
 #include "ui/runtime_workspace.h"
 #include "ui/sessions_workspace.h"
 #include "ui/settings_workspace.h"
+#include "ui/symbols_workspace.h"
 #include "ui/trace_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
@@ -253,6 +255,7 @@ struct AppState {
     cortex::application::SettingsStore settings;
     cortex::application::DebuggerModel debuggerModel;
     cortex::application::ProjectModel projectModel;
+    cortex::application::SymbolsModel symbolsModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -273,7 +276,8 @@ struct AppState {
           payload(sessions, ExecutableDirectory()),
           settings(ExecutableDirectory()),
           debuggerModel(sessions, payload, settings),
-          projectModel(payload) {
+          projectModel(payload),
+          symbolsModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -285,6 +289,7 @@ struct AppState {
         ui.settings = &settings;
         ui.debuggerModel = &debuggerModel;
         ui.projectModel = &projectModel;
+        ui.symbolsModel = &symbolsModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -295,6 +300,7 @@ struct AppState {
         workspaces.Add<cortex::ui::SessionsWorkspace>();
         workspaces.Add<cortex::ui::SettingsWorkspace>();
         workspaces.Add<cortex::ui::ProjectWorkspace>();
+        workspaces.Add<cortex::ui::SymbolsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -303,6 +309,7 @@ struct AppState {
         payload.Reset();
         debuggerModel.Reset();
         projectModel.Reset();
+        symbolsModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -410,7 +417,14 @@ bool ResolveAddressExpression(AppState& app, const char* expression,
         }
     }
 
-    error = moduleError.empty() ? "Address, module or project name not found" : moduleError;
+    if (app.symbolsModel.Lookup(value, nullptr)) {
+        const auto& symbol = app.symbolsModel.Result();
+        if (symbol.found && !symbol.address.empty() && symbol.address != value &&
+            ResolveAddressExpression(app, symbol.address.c_str(), address, error))
+            return true;
+    }
+
+    error = moduleError.empty() ? "Address, module, project or symbol not found" : moduleError;
     return false;
 }
 
@@ -436,6 +450,7 @@ enum class CommandAction {
     ViewDisassembly,
     ViewModules,
     ViewProject,
+    ViewSymbols,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -465,6 +480,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Disassembler", CommandAction::ViewDisassembly},
     {"View: Modules", CommandAction::ViewModules},
     {"View: Project", CommandAction::ViewProject},
+    {"View: Symbols", CommandAction::ViewSymbols},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -523,6 +539,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewDisassembly: app.workspaces.Select("disassembly"); break;
         case CommandAction::ViewModules: app.workspaces.Select("modules"); break;
         case CommandAction::ViewProject: app.workspaces.Select("project"); break;
+        case CommandAction::ViewSymbols: app.workspaces.Select("symbols"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;

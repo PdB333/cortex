@@ -16,7 +16,7 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 - [x] explicit mutation gate
 - [~] dockable IDE shell and workspace presets
 - [x] command palette (Ctrl+Shift+P / Ctrl+K)
-- [~] Go To (Ctrl+G): address, module offset and Project names done; symbol resolution remains
+- [x] Go To (Ctrl+G): address, module offset, Project names/pointer paths and symbols
 - [ ] shared address context menu everywhere
 - [ ] bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
 - [~] global keyboard shortcuts started; navigation history remains
@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger and Project models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project and Symbols models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -48,7 +48,7 @@ Target presets:
 - [x] persistent Project addresses/notes/pointer paths
 - [ ] Pointer Maps capture/intersection/ranking
 - [ ] Structures define/read/write/infer
-- [ ] Symbols resolve/lookup/details
+- [x] Symbols resolve/lookup/details
 - [ ] Snapshots capture/diff/rewind/last-change
 - [ ] runtime Watches/Freezes (not only local frontend freeze)
 

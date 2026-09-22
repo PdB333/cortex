@@ -3,6 +3,7 @@
 #include "application/debugger_model.h"
 #include "application/project_model.h"
 #include "application/settings.h"
+#include "application/symbols_model.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
 #include "services/memory_service.h"
@@ -25,6 +26,7 @@ struct UiContext {
     application::SettingsStore* settings = nullptr;
     application::DebuggerModel* debuggerModel = nullptr;
     application::ProjectModel* projectModel = nullptr;
+    application::SymbolsModel* symbolsModel = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;
