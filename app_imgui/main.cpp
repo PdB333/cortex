@@ -1,3 +1,4 @@
+#include "application/debugger_model.h"
 #include "application/settings.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
@@ -247,6 +248,7 @@ struct AppState {
     cortex::services::DebuggerService debugger;
     cortex::services::PayloadClient payload;
     cortex::application::SettingsStore settings;
+    cortex::application::DebuggerModel debuggerModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -265,7 +267,8 @@ struct AppState {
           disassembly(sessions),
           debugger(sessions),
           payload(sessions, ExecutableDirectory()),
-          settings(ExecutableDirectory()) {
+          settings(ExecutableDirectory()),
+          debuggerModel(sessions, payload, settings) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -275,6 +278,7 @@ struct AppState {
         ui.debugger = &debugger;
         ui.payload = &payload;
         ui.settings = &settings;
+        ui.debuggerModel = &debuggerModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -289,6 +293,7 @@ struct AppState {
 
     void OnAttached(const cortex::target::TargetDescriptor& target) {
         payload.Reset();
+        debuggerModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -460,6 +465,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             if (app.sessions.Active()) {
                 app.sessions.Detach();
                 app.payload.Reset();
+                app.debuggerModel.Reset();
                 app.ui.mutationAllowed = false;
                 app.ui.status = "Detached";
             }
@@ -727,6 +733,7 @@ void DrawHeader(AppState& app) {
         if (ImGui::SmallButton("Detach")) {
             app.sessions.Detach();
             app.payload.Reset();
+            app.debuggerModel.Reset();
             app.ui.mutationAllowed = false;
             app.ui.status = "Detached";
             app.ui.requestWorkspace = "memory";

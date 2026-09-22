@@ -79,6 +79,7 @@ set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
 add_executable(cortex_imgui WIN32
     main.cpp
     application/settings.cpp
+    application/debugger_model.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
@@ -99,6 +100,9 @@ add_executable(cortex_imgui WIN32
     ../core/symbols/symbols.cpp
     ../core/symbols/external.cpp
     ../app/cortex.rc
+    ../app/windows_debug_provider.cpp
+    ../app/windows_debugger_backend.cpp
+    ../app/veh_debug_provider.cpp
 
     ../core/target/local_backend.cpp
     ../core/target/session_manager.cpp
@@ -116,6 +120,7 @@ add_executable(cortex_imgui WIN32
 target_include_directories(cortex_imgui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../app
     ${CMAKE_CURRENT_SOURCE_DIR}/../sdk/include
     ${httplib_SOURCE_DIR}
 )

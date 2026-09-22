@@ -53,15 +53,15 @@ Target presets:
 - [ ] runtime Watches/Freezes (not only local frontend freeze)
 
 ### 4. Full debugger and tracing
-- [~] thread/register inspection
-- [ ] WindowsDebuggerBackend integration
-- [ ] Windows and VEH provider selection
-- [ ] software/hardware breakpoints
-- [ ] per-thread/process-global hardware breakpoint coverage
-- [ ] breakpoint hit log and counters
-- [ ] pause / continue / step into / step over
-- [ ] paused-thread state
-- [ ] integrated Debug layout
+- [x] thread/register inspection
+- [x] WindowsDebuggerBackend integration
+- [x] Windows and VEH provider selection
+- [x] software/hardware breakpoints
+- [x] per-thread/process-global hardware breakpoint coverage
+- [~] breakpoint hit counters/coverage done; detailed hit-log viewer remains
+- [x] pause / continue / step into / step over
+- [~] paused-thread state wired in model; dedicated paused-thread UI remains
+- [~] integrated Debug preset active; further panel splitting remains
 - [ ] trace start/stop/delete/events/register snapshots
 
 ### 5. Reverse-engineering workspace

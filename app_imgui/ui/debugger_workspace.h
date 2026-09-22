@@ -1,11 +1,9 @@
 #pragma once
 
 #include "workspace.h"
-#include "target/thread_provider.h"
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace cortex::ui {
 
@@ -16,13 +14,16 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    void RefreshThreads(UiContext& context);
+    void Refresh(UiContext& context, bool attachRuntimeState);
     void SelectThread(UiContext& context, uint64_t threadId);
+    bool RequireMutation(UiContext& context);
 
-    std::vector<uint64_t> threads_;
-    target::ThreadRegisterSnapshot snapshot_;
-    uint64_t selectedThread_ = 0;
     std::string targetId_;
+    char breakpointAddress_[64] = {};
+    int breakpointKind_ = 0;
+    int breakpointSize_ = 4;
+    int breakpointAction_ = 0;
+    bool processGlobal_ = true;
 };
 
 } // namespace cortex::ui
