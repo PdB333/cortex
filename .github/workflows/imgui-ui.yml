@@ -4,12 +4,29 @@ on:
   push:
     branches:
       - next/lightweight-imgui-ui
+      - test/imgui-full-migration
     paths:
       - "app_imgui/**"
       - "core/target/**"
       - "core/services/**"
       - "core/api/mcp_pipe_protocol.h"
       - "runtime_helper/**"
+      - "host/**"
+      - "injector/**"
+      - "mcp_bridge/**"
+      - "tools/diagnostics_host/**"
+      - "tools/symbolize_main.cpp"
+      - "core/symbols/**"
+      - "app/cortex.rc"
+      - "app/resources/cortex.ico"
+      - "host/**"
+      - "injector/**"
+      - "mcp_bridge/**"
+      - "tools/diagnostics_host/**"
+      - "tools/symbolize_main.cpp"
+      - "core/symbols/**"
+      - "app/cortex.rc"
+      - "app/resources/cortex.ico"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
   pull_request:
@@ -56,6 +73,16 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/imgui-ui --parallel 2
 
+      - name: CLI compatibility smoke
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          build/imgui-ui/cortex.exe --version > version.txt
+          grep -q "0.7.0-imgui-preview" version.txt
+          build/imgui-ui/cortex.exe --help > help.txt
+          grep -q "cortex mcp" help.txt
+          grep -q "cortex diagnose" help.txt
+
       - name: Configure x64 Cortex runtime
         shell: msys2 {0}
         run: >-
@@ -75,6 +102,7 @@ jobs:
           mkdir -p stage/x64/Cortex/runtime/x64 stage/x64/Cortex/e2e
           cp build/imgui-ui/cortex.exe stage/x64/Cortex/cortex.exe
           cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/cortex_core.dll
           cp build/runtime-x64/cortex_test_target_x64.exe stage/x64/Cortex/e2e/cortex_test_target_x64.exe
           cp app_imgui/README_TESTING.txt stage/x64/Cortex/README_TESTING.txt
 
@@ -203,6 +231,7 @@ jobs:
           $required = @(
             "bundle/Cortex/cortex.exe",
             "bundle/Cortex/runtime/x64/cortex_core.dll",
+            "bundle/Cortex/cortex_core.dll",
             "bundle/Cortex/runtime/x86/cortex_core.dll",
             "bundle/Cortex/runtime/x86/cortex_runtime_helper.exe",
             "bundle/Cortex/e2e/cortex_test_target_x64.exe",

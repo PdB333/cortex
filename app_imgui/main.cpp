@@ -24,18 +24,107 @@
 #include <d3d11.h>
 #include <shellapi.h>
 #include <windows.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
+int CortexMcpMain(int argc, char** argv);
+int CortexInjectMain(int argc, char** argv);
+int CortexProbeMain(int argc, char** argv);
+int CortexDiagnoseMain(int argc, char** argv);
+int CortexSymbolizeMain(int argc, char** argv);
+
 namespace {
+
+using CliEntryPoint = int (*)(int, char**);
+
+std::vector<std::string> CurrentCommandLineArgs() {
+    int count = 0;
+    LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &count);
+    std::vector<std::string> result;
+    if (!wide || count <= 0) return result;
+    result.reserve(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, nullptr, 0, nullptr, nullptr);
+        if (bytes <= 0) {
+            result.emplace_back();
+            continue;
+        }
+        std::string value(static_cast<size_t>(bytes), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, value.data(), bytes, nullptr, nullptr);
+        if (!value.empty() && value.back() == '\0') value.pop_back();
+        result.push_back(std::move(value));
+    }
+    LocalFree(wide);
+    return result;
+}
+
+int ForwardCli(CliEntryPoint entry, const char* programName,
+               std::vector<std::string>& args, size_t firstArgument,
+               const std::vector<std::string>& injected = {}) {
+    std::vector<std::string> storage;
+    storage.emplace_back(programName ? programName : "cortex");
+    storage.insert(storage.end(), injected.begin(), injected.end());
+    for (size_t i = firstArgument; i < args.size(); ++i) storage.push_back(args[i]);
+    std::vector<char*> raw;
+    raw.reserve(storage.size() + 1);
+    for (auto& value : storage) raw.push_back(value.data());
+    raw.push_back(nullptr);
+    return entry(static_cast<int>(storage.size()), raw.data());
+}
+
+void PrintCliUsage(FILE* out = stdout) {
+    std::fputs(
+        "Cortex lightweight migration preview\n\n"
+        "Usage:\n"
+        "  cortex                         Launch the ImGui desktop UI\n"
+        "  cortex --version               Print preview version\n"
+        "  cortex mcp [options]           Run the native/HTTP MCP stdio bridge\n"
+        "  cortex inject <target> [dll]   Inject cortex_core.dll\n"
+        "  cortex probe --pid <pid>       Inspect target/runtime health\n"
+        "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
+        "  cortex analyze <directory>     Analyze a crash directory\n"
+        "  cortex symbolize [options]     Resolve PE symbols offline\n",
+        out);
+}
+
+std::optional<int> RunCliMode(std::vector<std::string>& args) {
+    if (args.size() <= 1) return std::nullopt;
+    const std::string& command = args[1];
+
+    if (command == "--help" || command == "-h" || command == "help") {
+        PrintCliUsage();
+        return 0;
+    }
+    if (command == "--version" || command == "version") {
+        std::puts("cortex 0.7.0-imgui-preview");
+        return 0;
+    }
+    if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
+    if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
+    if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
+    if (command == "diagnose" || command == "diagnostics" || command == "watch")
+        return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
+    if (command == "analyze" || command == "analyse") {
+        if (args.size() < 3) {
+            std::fputs("cortex analyze: missing crash directory\n", stderr);
+            return 2;
+        }
+        return ForwardCli(CortexDiagnoseMain, "cortex analyze", args, 2, {"--analyze"});
+    }
+    if (command == "symbolize" || command == "symbolise" || command == "symbols")
+        return ForwardCli(CortexSymbolizeMain, "cortex symbolize", args, 2);
+    return std::nullopt;
+}
 
 ID3D11Device* gDevice = nullptr;
 ID3D11DeviceContext* gDeviceContext = nullptr;

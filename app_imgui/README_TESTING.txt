@@ -1,39 +1,44 @@
-CORTEX LIGHTWEIGHT UI PREVIEW
-=============================
+CORTEX IMGUI FULL-MIGRATION TEST BUILD
+======================================
 
-This archive is an experimental migration of the Cortex desktop frontend from
-Qt/QML to Dear ImGui + Win32 + DirectX 11.
+This archive is the migration candidate for replacing the Cortex Qt/QML
+desktop frontend with Dear ImGui + Win32 + DirectX 11.
 
 Run:
   cortex.exe
 
-Basic workflow:
-  1. Select process
-  2. Enter a value and run First scan
-  3. Change the value in the target and run Next scan
-  4. Double-click a result to add it to Address list
-  5. Enable "Allow writes" only when you want to edit/freeze values
+Desktop workflow:
+  1. Select a process.
+  2. Use Memory for first/next scans.
+  3. Double-click useful results into the address list.
+  4. Use Memory viewer / Disassembler / Modules / Debugger for native inspection.
+  5. Enable "Allow writes" only when you intend to modify target state.
+  6. Use Advanced for the complete Cortex runtime/MCP tool catalog: RE, hooks,
+     traces, scripts, capture, sessions, automation and specialized tooling.
 
-Main workspaces:
-  Memory         Cheat-Engine-style scanner and address list
-  Memory viewer  Hex/raw memory inspection and byte writes
-  Disassembler   Native Zydis disassembly
-  Modules        Loaded module list
-  Debugger       Thread/register inspection
-  Advanced       Full Cortex runtime/MCP tool catalog
+CLI compatibility:
+  cortex.exe --version
+  cortex.exe --help
+  cortex.exe mcp [options]
+  cortex.exe inject <target> [dll]
+  cortex.exe probe --pid <pid>
+  cortex.exe diagnose --pid <pid>
+  cortex.exe analyze <directory>
+  cortex.exe symbolize [options]
 
-Right-click addresses/results to jump directly to Memory viewer,
-Disassembler, or "Find what writes this".
+Portable runtime:
+  cortex_core.dll                         x64 CLI compatibility copy
+  runtime/x64/cortex_core.dll             x64 GUI/runtime asset
+  runtime/x86/cortex_core.dll             x86 runtime asset
+  runtime/x86/cortex_runtime_helper.exe   x86 bootstrap helper
 
-Runtime:
-  runtime/x64/cortex_core.dll
-  runtime/x86/cortex_core.dll
-  runtime/x86/cortex_runtime_helper.exe
+E2E fixtures:
+  e2e/cortex_test_target_x64.exe
+  e2e/cortex_test_target_x86.exe
 
-The native Memory/Modules/Disassembler/Debugger pages do not need runtime
-injection. Advanced hooks/traces/RE/MCP operations use the Cortex runtime.
-Enabling runtime can load cortex_core.dll into the selected process and
-therefore requires "Allow writes".
-
-This preview intentionally keeps the old Qt/QML source tree in the repository
-as a comparison/fallback while the ImGui frontend is validated.
+Notes:
+  - Native Memory/Modules/Disassembler/Debugger inspection does not require
+    runtime injection.
+  - Advanced operations can load cortex_core.dll into the selected process and
+    require explicit write permission.
+  - This test branch does not change main/master.

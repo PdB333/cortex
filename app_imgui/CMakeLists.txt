@@ -17,6 +17,13 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(imgui)
 
 FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        5c00bbf36ba8ff47b4fb97712fc38cb2884e5b98
+)
+FetchContent_MakeAvailable(httplib)
+
+FetchContent_Declare(
     json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG        9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
@@ -60,6 +67,15 @@ target_compile_definitions(cortex_imgui_vendor PRIVATE
     NOMINMAX
 )
 
+set_source_files_properties(../injector/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexInjectMain")
+set_source_files_properties(../mcp_bridge/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexMcpMain")
+set_source_files_properties(../tools/diagnostics_host/main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
+set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
+    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
+
 add_executable(cortex_imgui WIN32
     main.cpp
     ui/memory_workspace.cpp
@@ -69,6 +85,17 @@ add_executable(cortex_imgui WIN32
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp
     ui/theme.cpp
+
+    ../host/probe_cli.cpp
+    ../injector/main.cpp
+    ../mcp_bridge/main.cpp
+    ../tools/diagnostics_host/main.cpp
+    ../tools/symbolize_main.cpp
+    ../host/diagnostics/external_host.cpp
+    ../host/diagnostics/analyzer.cpp
+    ../core/symbols/symbols.cpp
+    ../core/symbols/external.cpp
+    ../app/cortex.rc
 
     ../core/target/local_backend.cpp
     ../core/target/session_manager.cpp
@@ -86,6 +113,8 @@ add_executable(cortex_imgui WIN32
 target_include_directories(cortex_imgui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../sdk/include
+    ${httplib_SOURCE_DIR}
 )
 
 target_compile_definitions(cortex_imgui PRIVATE
@@ -107,6 +136,9 @@ target_link_libraries(cortex_imgui PRIVATE
     shell32
     advapi32
     psapi
+    ws2_32
+    bcrypt
+    dbghelp
 )
 
 if(MINGW)

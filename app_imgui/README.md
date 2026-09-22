@@ -1,41 +1,42 @@
-# Cortex lightweight UI prototype
+# Cortex ImGui full-migration test branch
 
-This directory is the experimental user-facing Cortex frontend on
-`next/lightweight-imgui-ui`.
+This directory is the replacement desktop frontend used by
+`test/imgui-full-migration`.
 
-The existing Qt/QML application is intentionally left untouched while this
-frontend is validated.
+The test build is self-contained and does not require Qt at runtime. It uses
+Win32 + DirectX 11 + Dear ImGui while reusing the toolkit-neutral Cortex
+target/services/runtime layers.
 
-## Goals
+## Migrated desktop surfaces
 
-- Make the default flow obvious: **process -> scan -> address list -> edit/freeze**.
-- Keep advanced debugger/RE surfaces out of the way until the user asks for them.
-- Use a small native Win32 + DirectX 11 + Dear ImGui stack.
-- Keep Cortex services independent from the UI toolkit.
-- Grow advanced surfaces through small `IWorkspace` modules rather than a large
-  monolithic navigation tree.
+- Memory scanner: exact/refine scans, address list, live values, edit/freeze.
+- Memory viewer: raw hex/ASCII inspection and gated byte writes.
+- Modules: native module enumeration with jumps to memory/disassembly.
+- Disassembler: Zydis-backed native disassembly.
+- Debugger: external thread/register inspection.
+- Advanced: the complete runtime/MCP tool catalog for RE, traces, hooks,
+  scripts, capture, actions, sessions and other specialized features.
 
-The first prototype already uses the existing Cortex `LocalBackend`,
-`SessionManager`, `MemoryService`, and `ScanService`. Process selection,
-attach, exact scans, scan refinement, live address values, and freeze writes are
-therefore backed by Cortex rather than mock data.
+Context navigation is wired between the native workspaces and the Advanced
+runtime surface, including "find what writes this".
+
+## CLI compatibility in the same cortex.exe
+
+    cortex --version
+    cortex mcp [options]
+    cortex inject <target> [dll]
+    cortex probe --pid <pid>
+    cortex diagnose --pid <pid>
+    cortex analyze <directory>
+    cortex symbolize [options]
 
 ## Build
 
-From an MSYS2 MINGW64 shell:
+From MSYS2 MINGW64:
 
     cmake -S app_imgui -B build/imgui-ui -G Ninja -DCMAKE_BUILD_TYPE=Release
     cmake --build build/imgui-ui --parallel 2
 
-Run:
-
-    build/imgui-ui/cortex-imgui-prototype.exe
-
-Dear ImGui is pinned to the docking-branch commit declared in
-`app_imgui/CMakeLists.txt`.
-
-## Migration rule
-
-Do not delete the Qt app while this branch is experimental. New UI work should
-prove itself here first; backend fixes should stay toolkit-independent whenever
-possible.
+The CI workflow packages a mixed-bitness portable preview with x64/x86 runtime
+assets and test targets. The legacy Qt/QML source remains only as a
+comparison/fallback during validation; it is not required by the ImGui bundle.
