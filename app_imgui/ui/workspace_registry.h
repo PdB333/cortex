@@ -76,11 +76,11 @@ public:
                 OpenMany({"disassembly", "debugger", "trace", "memory-browser", "watches"});
                 break;
             case WorkspacePreset::Automation:
-                OpenMany({"actions", "watches", "runtime"});
+                OpenMany({"scripts", "input", "actions", "watches", "runtime"});
                 break;
             case WorkspacePreset::Runtime:
-                OpenMany({"runtime", "instrumentation", "actions", "watches",
-                          "modules", "sessions", "settings"});
+                OpenMany({"runtime", "diagnostics", "network", "instrumentation",
+                          "actions", "watches", "modules", "sessions", "settings"});
                 break;
         }
 

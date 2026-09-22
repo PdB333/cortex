@@ -1,6 +1,9 @@
 #pragma once
 
 #include "application/actions_model.h"
+#include "application/diagnostics_model.h"
+#include "application/input_model.h"
+#include "application/network_model.h"
 #include "application/debugger_model.h"
 #include "application/project_model.h"
 #include "application/instrumentation_model.h"
@@ -11,6 +14,7 @@
 #include "application/structures_model.h"
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
+#include "application/scripts_model.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
 #include "services/memory_service.h"
@@ -41,6 +45,10 @@ struct UiContext {
     application::InstrumentationModel* instrumentationModel = nullptr;
     application::WatchesModel* watchesModel = nullptr;
     application::ActionsModel* actionsModel = nullptr;
+    application::NetworkModel* networkModel = nullptr;
+    application::DiagnosticsModel* diagnosticsModel = nullptr;
+    application::ScriptsModel* scriptsModel = nullptr;
+    application::InputModel* inputModel = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;

@@ -1,4 +1,7 @@
 #include "application/actions_model.h"
+#include "application/diagnostics_model.h"
+#include "application/input_model.h"
+#include "application/network_model.h"
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
@@ -9,7 +12,11 @@
 #include "application/structures_model.h"
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
+#include "application/scripts_model.h"
 #include "ui/actions_workspace.h"
+#include "ui/diagnostics_workspace.h"
+#include "ui/input_workspace.h"
+#include "ui/network_workspace.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
 #include "ui/memory_browser_workspace.h"
@@ -27,6 +34,7 @@
 #include "ui/symbols_workspace.h"
 #include "ui/trace_workspace.h"
 #include "ui/watches_workspace.h"
+#include "ui/scripts_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -277,6 +285,10 @@ struct AppState {
     cortex::application::InstrumentationModel instrumentationModel;
     cortex::application::WatchesModel watchesModel;
     cortex::application::ActionsModel actionsModel;
+    cortex::application::NetworkModel networkModel;
+    cortex::application::DiagnosticsModel diagnosticsModel;
+    cortex::application::ScriptsModel scriptsModel;
+    cortex::application::InputModel inputModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -305,7 +317,11 @@ struct AppState {
           reModel(payload),
           instrumentationModel(payload),
           watchesModel(payload),
-          actionsModel(payload) {
+          actionsModel(payload),
+          networkModel(payload),
+          diagnosticsModel(payload),
+          scriptsModel(payload),
+          inputModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -325,6 +341,10 @@ struct AppState {
         ui.instrumentationModel = &instrumentationModel;
         ui.watchesModel = &watchesModel;
         ui.actionsModel = &actionsModel;
+        ui.networkModel = &networkModel;
+        ui.diagnosticsModel = &diagnosticsModel;
+        ui.scriptsModel = &scriptsModel;
+        ui.inputModel = &inputModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -343,6 +363,10 @@ struct AppState {
         workspaces.Add<cortex::ui::InstrumentationWorkspace>();
         workspaces.Add<cortex::ui::WatchesWorkspace>();
         workspaces.Add<cortex::ui::ActionsWorkspace>();
+        workspaces.Add<cortex::ui::NetworkWorkspace>();
+        workspaces.Add<cortex::ui::DiagnosticsWorkspace>();
+        workspaces.Add<cortex::ui::ScriptsWorkspace>();
+        workspaces.Add<cortex::ui::InputWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -359,6 +383,10 @@ struct AppState {
         instrumentationModel.Reset();
         watchesModel.Reset();
         actionsModel.Reset();
+        networkModel.Reset();
+        diagnosticsModel.Reset();
+        scriptsModel.Reset();
+        inputModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -507,6 +535,10 @@ enum class CommandAction {
     ViewInstrumentation,
     ViewWatches,
     ViewActions,
+    ViewNetwork,
+    ViewDiagnostics,
+    ViewScripts,
+    ViewInput,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -544,6 +576,10 @@ constexpr CommandEntry kCommands[] = {
     {"View: Instrumentation", CommandAction::ViewInstrumentation},
     {"View: Watches & Freezes", CommandAction::ViewWatches},
     {"View: Actions journal", CommandAction::ViewActions},
+    {"View: Network", CommandAction::ViewNetwork},
+    {"View: Diagnostics", CommandAction::ViewDiagnostics},
+    {"View: Lua Scripts", CommandAction::ViewScripts},
+    {"View: Input", CommandAction::ViewInput},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -581,15 +617,35 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
+                app.networkModel.Reset();
+                app.diagnosticsModel.Reset();
+                app.scriptsModel.Reset();
+                app.inputModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -628,6 +684,10 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewInstrumentation: app.workspaces.Select("instrumentation"); break;
         case CommandAction::ViewWatches: app.workspaces.Select("watches"); break;
         case CommandAction::ViewActions: app.workspaces.Select("actions"); break;
+        case CommandAction::ViewNetwork: app.workspaces.Select("network"); break;
+        case CommandAction::ViewDiagnostics: app.workspaces.Select("diagnostics"); break;
+        case CommandAction::ViewScripts: app.workspaces.Select("scripts"); break;
+        case CommandAction::ViewInput: app.workspaces.Select("input"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
@@ -877,6 +937,10 @@ void DrawHeader(AppState& app) {
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -929,15 +993,35 @@ void DrawApp(AppState& app) {
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
+            app.networkModel.Reset();
+            app.diagnosticsModel.Reset();
+            app.scriptsModel.Reset();
+            app.inputModel.Reset();
+                app.networkModel.Reset();
+                app.diagnosticsModel.Reset();
+                app.scriptsModel.Reset();
+                app.inputModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;

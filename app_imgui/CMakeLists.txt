@@ -89,6 +89,10 @@ add_executable(cortex_imgui WIN32
     application/instrumentation_model.cpp
     application/watches_model.cpp
     application/actions_model.cpp
+    application/network_model.cpp
+    application/diagnostics_model.cpp
+    application/scripts_model.cpp
+    application/input_model.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
@@ -101,6 +105,10 @@ add_executable(cortex_imgui WIN32
     ui/instrumentation_workspace.cpp
     ui/watches_workspace.cpp
     ui/actions_workspace.cpp
+    ui/network_workspace.cpp
+    ui/diagnostics_workspace.cpp
+    ui/scripts_workspace.cpp
+    ui/input_workspace.cpp
     ui/disassembly_workspace.cpp
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp

@@ -55,6 +55,10 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.instrumentationModel) context.instrumentationModel->Reset();
         if (context.watchesModel) context.watchesModel->Reset();
         if (context.actionsModel) context.actionsModel->Reset();
+        if (context.networkModel) context.networkModel->Reset();
+        if (context.diagnosticsModel) context.diagnosticsModel->Reset();
+        if (context.scriptsModel) context.scriptsModel->Reset();
+        if (context.inputModel) context.inputModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -129,6 +133,14 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.instrumentationModel) context.instrumentationModel->Reset();
                     if (context.watchesModel) context.watchesModel->Reset();
                     if (context.actionsModel) context.actionsModel->Reset();
+                    if (context.networkModel) context.networkModel->Reset();
+                    if (context.diagnosticsModel) context.diagnosticsModel->Reset();
+                    if (context.scriptsModel) context.scriptsModel->Reset();
+                    if (context.inputModel) context.inputModel->Reset();
+        if (context.networkModel) context.networkModel->Reset();
+        if (context.diagnosticsModel) context.diagnosticsModel->Reset();
+        if (context.scriptsModel) context.scriptsModel->Reset();
+        if (context.inputModel) context.inputModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -148,6 +160,10 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.instrumentationModel) context.instrumentationModel->Reset();
                 if (wasActive && context.watchesModel) context.watchesModel->Reset();
                 if (wasActive && context.actionsModel) context.actionsModel->Reset();
+                if (wasActive && context.networkModel) context.networkModel->Reset();
+                if (wasActive && context.diagnosticsModel) context.diagnosticsModel->Reset();
+                if (wasActive && context.scriptsModel) context.scriptsModel->Reset();
+                if (wasActive && context.inputModel) context.inputModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();
