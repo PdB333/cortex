@@ -3,7 +3,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <vector>
