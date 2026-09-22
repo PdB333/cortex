@@ -94,7 +94,7 @@ jobs:
           }
 
           $version = Invoke-CortexCli @("--version")
-          if ($version -notmatch "0\.7\.0-imgui-preview") { throw "Unexpected version output: $version" }
+          if ($version -notmatch "0\.8\.0-dev-imgui") { throw "Unexpected version output: $version" }
 
           $help = Invoke-CortexCli @("--help")
           if ($help -notmatch "cortex mcp") { throw "MCP command missing from help" }

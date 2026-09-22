@@ -106,7 +106,7 @@ std::optional<int> RunCliMode(std::vector<std::string>& args) {
         return 0;
     }
     if (command == "--version" || command == "version") {
-        std::puts("cortex 0.7.0-imgui-preview");
+        std::puts("cortex 0.8.0-dev-imgui");
         return 0;
     }
     if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
@@ -141,27 +141,10 @@ void WriteStdout(const char* text) {
 }
 
 int HandleCommandLine() {
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv) return -1;
-    int result = -1;
-    if (argc > 1) {
-        const std::wstring arg = argv[1] ? argv[1] : L"";
-        if (arg == L"--version" || arg == L"version") {
-            WriteStdout("cortex 0.8.0-dev-imgui\n");
-            result = 0;
-        } else if (arg == L"--help" || arg == L"-h" || arg == L"help") {
-            WriteStdout(
-                "Cortex lightweight UI preview\n\n"
-                "Usage:\n"
-                "  cortex              Launch the GUI\n"
-                "  cortex --version    Print version\n"
-                "  cortex --help       Print this help\n");
-            result = 0;
-        }
-    }
-    LocalFree(argv);
-    return result;
+    auto args = CurrentCommandLineArgs();
+    if (args.size() <= 1) return -1;
+    if (const auto result = RunCliMode(args)) return *result;
+    return -1;
 }
 
 std::string ExecutableDirectory() {
