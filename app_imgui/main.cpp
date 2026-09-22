@@ -1,6 +1,9 @@
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
+#include "application/pointer_maps_model.h"
+#include "application/snapshots_model.h"
+#include "application/structures_model.h"
 #include "application/symbols_model.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
@@ -8,6 +11,9 @@
 #include "ui/memory_workspace.h"
 #include "ui/modules_workspace.h"
 #include "ui/project_workspace.h"
+#include "ui/pointer_maps_workspace.h"
+#include "ui/snapshots_workspace.h"
+#include "ui/structures_workspace.h"
 #include "ui/runtime_workspace.h"
 #include "ui/sessions_workspace.h"
 #include "ui/settings_workspace.h"
@@ -256,6 +262,9 @@ struct AppState {
     cortex::application::DebuggerModel debuggerModel;
     cortex::application::ProjectModel projectModel;
     cortex::application::SymbolsModel symbolsModel;
+    cortex::application::StructuresModel structuresModel;
+    cortex::application::PointerMapsModel pointerMapsModel;
+    cortex::application::SnapshotsModel snapshotsModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -277,7 +286,10 @@ struct AppState {
           settings(ExecutableDirectory()),
           debuggerModel(sessions, payload, settings),
           projectModel(payload),
-          symbolsModel(payload) {
+          symbolsModel(payload),
+          structuresModel(payload),
+          pointerMapsModel(payload),
+          snapshotsModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -290,6 +302,9 @@ struct AppState {
         ui.debuggerModel = &debuggerModel;
         ui.projectModel = &projectModel;
         ui.symbolsModel = &symbolsModel;
+        ui.structuresModel = &structuresModel;
+        ui.pointerMapsModel = &pointerMapsModel;
+        ui.snapshotsModel = &snapshotsModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -301,6 +316,9 @@ struct AppState {
         workspaces.Add<cortex::ui::SettingsWorkspace>();
         workspaces.Add<cortex::ui::ProjectWorkspace>();
         workspaces.Add<cortex::ui::SymbolsWorkspace>();
+        workspaces.Add<cortex::ui::StructuresWorkspace>();
+        workspaces.Add<cortex::ui::PointerMapsWorkspace>();
+        workspaces.Add<cortex::ui::SnapshotsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -310,6 +328,9 @@ struct AppState {
         debuggerModel.Reset();
         projectModel.Reset();
         symbolsModel.Reset();
+        structuresModel.Reset();
+        pointerMapsModel.Reset();
+        snapshotsModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -451,6 +472,9 @@ enum class CommandAction {
     ViewModules,
     ViewProject,
     ViewSymbols,
+    ViewStructures,
+    ViewPointerMaps,
+    ViewSnapshots,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -481,6 +505,9 @@ constexpr CommandEntry kCommands[] = {
     {"View: Modules", CommandAction::ViewModules},
     {"View: Project", CommandAction::ViewProject},
     {"View: Symbols", CommandAction::ViewSymbols},
+    {"View: Structures", CommandAction::ViewStructures},
+    {"View: Pointer Maps", CommandAction::ViewPointerMaps},
+    {"View: Snapshots", CommandAction::ViewSnapshots},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -511,6 +538,9 @@ void ExecuteCommand(AppState& app, CommandAction action) {
                 app.debuggerModel.Reset();
                 app.projectModel.Reset();
                 app.symbolsModel.Reset();
+                app.structuresModel.Reset();
+                app.pointerMapsModel.Reset();
+                app.snapshotsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -542,6 +572,9 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewModules: app.workspaces.Select("modules"); break;
         case CommandAction::ViewProject: app.workspaces.Select("project"); break;
         case CommandAction::ViewSymbols: app.workspaces.Select("symbols"); break;
+        case CommandAction::ViewStructures: app.workspaces.Select("structures"); break;
+        case CommandAction::ViewPointerMaps: app.workspaces.Select("pointermaps"); break;
+        case CommandAction::ViewSnapshots: app.workspaces.Select("snapshots"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
@@ -784,6 +817,9 @@ void DrawHeader(AppState& app) {
             app.debuggerModel.Reset();
             app.projectModel.Reset();
             app.symbolsModel.Reset();
+            app.structuresModel.Reset();
+            app.pointerMapsModel.Reset();
+            app.snapshotsModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -829,6 +865,9 @@ void DrawApp(AppState& app) {
                 app.debuggerModel.Reset();
                 app.projectModel.Reset();
                 app.symbolsModel.Reset();
+                app.structuresModel.Reset();
+                app.pointerMapsModel.Reset();
+                app.snapshotsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;

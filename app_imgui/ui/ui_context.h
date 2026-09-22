@@ -3,6 +3,9 @@
 #include "application/debugger_model.h"
 #include "application/project_model.h"
 #include "application/settings.h"
+#include "application/pointer_maps_model.h"
+#include "application/snapshots_model.h"
+#include "application/structures_model.h"
 #include "application/symbols_model.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
@@ -27,6 +30,9 @@ struct UiContext {
     application::DebuggerModel* debuggerModel = nullptr;
     application::ProjectModel* projectModel = nullptr;
     application::SymbolsModel* symbolsModel = nullptr;
+    application::StructuresModel* structuresModel = nullptr;
+    application::PointerMapsModel* pointerMapsModel = nullptr;
+    application::SnapshotsModel* snapshotsModel = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;
