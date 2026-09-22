@@ -122,6 +122,8 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
         targetId_ = id;
         bytes_.clear();
         currentAddress_ = 0;
+        if (context.settings)
+            byteCount_ = context.settings->Values().memoryReadSize;
         std::snprintf(address_, sizeof(address_), "0x%llX",
                       static_cast<unsigned long long>(session->MemoryRegions().empty()
                         ? 0ull : session->MemoryRegions().front().base));
@@ -153,6 +155,9 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::Spacing();
+    const size_t rowWidth = context.settings
+        ? static_cast<size_t>(context.settings->Values().memoryBytesPerRow)
+        : size_t{16};
     if (ImGui::BeginChild("HexView", ImVec2(0, -118), ImGuiChildFlags_Borders)) {
         if (bytes_.empty()) {
             ImGui::TextDisabled("Enter an address and press Read.");
@@ -165,8 +170,8 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
             ImGui::TableSetupColumn("ASCII", ImGuiTableColumnFlags_WidthStretch, 0.28f);
             ImGui::TableHeadersRow();
 
-            for (size_t offset = 0; offset < bytes_.size(); offset += 16) {
-                const size_t count = std::min<size_t>(16, bytes_.size() - offset);
+            for (size_t offset = 0; offset < bytes_.size(); offset += rowWidth) {
+                const size_t count = std::min(rowWidth, bytes_.size() - offset);
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
                 ImGui::Text("0x%llX",
