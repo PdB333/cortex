@@ -774,6 +774,7 @@ void DrawApp(AppState& app) {
             const bool attached = static_cast<bool>(app.sessions.Active());
             ImGui::BeginDisabled(!attached);
             if (ImGui::MenuItem("Detach active target")) {
+                app.debuggerModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
