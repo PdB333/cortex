@@ -4,6 +4,7 @@
 #include "windows_debug_provider.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace cortex::application {
 
