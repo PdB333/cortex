@@ -235,6 +235,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableHeadersRow();
 
+        int removeBreakpointId = -1;
         for (const auto& bp : debugger.Breakpoints()) {
             ImGui::PushID(bp.id);
             ImGui::TableNextRow();
@@ -255,20 +256,20 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                 ImGui::TextUnformatted(bp.processGlobal ? "process" : "thread");
             ImGui::TableSetColumnIndex(6);
             ImGui::BeginDisabled(!context.mutationAllowed);
-            if (ImGui::SmallButton("Remove")) {
-                std::string error;
-                if (!debugger.RemoveBreakpoint(bp.id, &error))
-                    context.status = "Remove breakpoint failed: " + error;
-                else
-                    context.status = "Breakpoint removed";
-                ImGui::EndDisabled();
-                ImGui::PopID();
-                break;
-            }
+            if (ImGui::SmallButton("Remove"))
+                removeBreakpointId = bp.id;
             ImGui::EndDisabled();
             ImGui::PopID();
         }
         ImGui::EndTable();
+
+        if (removeBreakpointId >= 0) {
+            std::string error;
+            if (!debugger.RemoveBreakpoint(removeBreakpointId, &error))
+                context.status = "Remove breakpoint failed: " + error;
+            else
+                context.status = "Breakpoint removed";
+        }
     }
 
     ImGui::EndChild();
