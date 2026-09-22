@@ -51,6 +51,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.structuresModel) context.structuresModel->Reset();
         if (context.pointerMapsModel) context.pointerMapsModel->Reset();
         if (context.snapshotsModel) context.snapshotsModel->Reset();
+        if (context.reModel) context.reModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -121,6 +122,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.structuresModel) context.structuresModel->Reset();
                     if (context.pointerMapsModel) context.pointerMapsModel->Reset();
                     if (context.snapshotsModel) context.snapshotsModel->Reset();
+                    if (context.reModel) context.reModel->Reset();
+        if (context.reModel) context.reModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -136,6 +139,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.structuresModel) context.structuresModel->Reset();
                 if (wasActive && context.pointerMapsModel) context.pointerMapsModel->Reset();
                 if (wasActive && context.snapshotsModel) context.snapshotsModel->Reset();
+                if (wasActive && context.reModel) context.reModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();

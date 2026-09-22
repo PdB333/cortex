@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps and Snapshots models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots and RE models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -65,17 +65,17 @@ Target presets:
 - [x] trace start/stop/delete/events/register snapshots
 
 ### 5. Reverse-engineering workspace
-- [ ] tracked runtime objects
-- [~] find last writer entry point
+- [x] tracked runtime objects
+- [x] find last writer
 - [ ] page-access/find-access workflow
-- [ ] C++ subobject detection
-- [ ] transition tracing
-- [ ] controlled tests and experiments
-- [ ] reversible checkpoints and rollback
-- [ ] persistent RE facts
-- [ ] run/session export and diff
-- [ ] Ghidra export/import
-- [ ] breakpoint templates
+- [x] C++ subobject detection
+- [x] transition tracing
+- [x] controlled tests and experiments
+- [x] reversible checkpoints and rollback
+- [x] persistent RE facts
+- [x] run/session export and diff
+- [x] Ghidra export/import
+- [x] breakpoint templates
 
 ### 6. Runtime, automation and observability
 - [ ] Actions journal / rollback

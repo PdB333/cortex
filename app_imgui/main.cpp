@@ -1,6 +1,7 @@
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
+#include "application/re_model.h"
 #include "application/pointer_maps_model.h"
 #include "application/snapshots_model.h"
 #include "application/structures_model.h"
@@ -11,6 +12,7 @@
 #include "ui/memory_workspace.h"
 #include "ui/modules_workspace.h"
 #include "ui/project_workspace.h"
+#include "ui/re_workspace.h"
 #include "ui/pointer_maps_workspace.h"
 #include "ui/snapshots_workspace.h"
 #include "ui/structures_workspace.h"
@@ -265,6 +267,7 @@ struct AppState {
     cortex::application::StructuresModel structuresModel;
     cortex::application::PointerMapsModel pointerMapsModel;
     cortex::application::SnapshotsModel snapshotsModel;
+    cortex::application::ReModel reModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -289,7 +292,8 @@ struct AppState {
           symbolsModel(payload),
           structuresModel(payload),
           pointerMapsModel(payload),
-          snapshotsModel(payload) {
+          snapshotsModel(payload),
+          reModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -305,6 +309,7 @@ struct AppState {
         ui.structuresModel = &structuresModel;
         ui.pointerMapsModel = &pointerMapsModel;
         ui.snapshotsModel = &snapshotsModel;
+        ui.reModel = &reModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -319,6 +324,7 @@ struct AppState {
         workspaces.Add<cortex::ui::StructuresWorkspace>();
         workspaces.Add<cortex::ui::PointerMapsWorkspace>();
         workspaces.Add<cortex::ui::SnapshotsWorkspace>();
+        workspaces.Add<cortex::ui::ReWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -331,6 +337,7 @@ struct AppState {
         structuresModel.Reset();
         pointerMapsModel.Reset();
         snapshotsModel.Reset();
+        reModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -475,6 +482,7 @@ enum class CommandAction {
     ViewStructures,
     ViewPointerMaps,
     ViewSnapshots,
+    ViewReWorkspace,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -508,6 +516,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Structures", CommandAction::ViewStructures},
     {"View: Pointer Maps", CommandAction::ViewPointerMaps},
     {"View: Snapshots", CommandAction::ViewSnapshots},
+    {"View: Reverse Engineering", CommandAction::ViewReWorkspace},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -541,6 +550,8 @@ void ExecuteCommand(AppState& app, CommandAction action) {
                 app.structuresModel.Reset();
                 app.pointerMapsModel.Reset();
                 app.snapshotsModel.Reset();
+            app.reModel.Reset();
+                app.reModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -575,6 +586,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewStructures: app.workspaces.Select("structures"); break;
         case CommandAction::ViewPointerMaps: app.workspaces.Select("pointermaps"); break;
         case CommandAction::ViewSnapshots: app.workspaces.Select("snapshots"); break;
+        case CommandAction::ViewReWorkspace: app.workspaces.Select("re"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
@@ -820,6 +832,7 @@ void DrawHeader(AppState& app) {
             app.structuresModel.Reset();
             app.pointerMapsModel.Reset();
             app.snapshotsModel.Reset();
+            app.reModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -868,6 +881,8 @@ void DrawApp(AppState& app) {
                 app.structuresModel.Reset();
                 app.pointerMapsModel.Reset();
                 app.snapshotsModel.Reset();
+            app.reModel.Reset();
+                app.reModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
