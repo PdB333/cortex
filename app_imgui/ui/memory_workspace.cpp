@@ -220,6 +220,9 @@ void MemoryWorkspace::StartScan(UiContext& context) {
     const auto kind = SelectedKind();
     const auto comparison = SelectedComparison();
     const auto previous = scanResults_;
+    const size_t maxResults = context.settings
+        ? static_cast<size_t>(context.settings->Values().maxScanResults)
+        : size_t{5000};
     scanCancel_ = std::make_shared<std::atomic_bool>(false);
     auto cancel = scanCancel_;
 
@@ -228,7 +231,7 @@ void MemoryWorkspace::StartScan(UiContext& context) {
 
     scanFuture_ = std::async(std::launch::async,
         [session, exactValue = std::move(exactValue), previous, kind, comparison,
-         refine, cancel]() mutable {
+         refine, cancel, maxResults]() mutable {
             ScanTaskResult result;
             if (refine) {
                 result.ok = services::ScanService::Refine(
@@ -236,7 +239,7 @@ void MemoryWorkspace::StartScan(UiContext& context) {
                     &result.error, cancel.get());
             } else {
                 result.ok = services::ScanService::Exact(
-                    session, exactValue, result.results, 5000, &result.error, cancel.get());
+                    session, exactValue, result.results, maxResults, &result.error, cancel.get());
             }
             return result;
         });
@@ -703,7 +706,18 @@ void MemoryWorkspace::Draw(UiContext& context) {
 
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     const std::string targetId = session ? session->Target().id : std::string();
-    if (targetId != activeTargetId_) ResetForTarget(targetId);
+    if (targetId != activeTargetId_) {
+        ResetForTarget(targetId);
+        if (context.settings) {
+            const std::string& type = context.settings->Values().defaultScanType;
+            if (type == "i64") typeIndex_ = 1;
+            else if (type == "f32") typeIndex_ = 2;
+            else if (type == "f64") typeIndex_ = 3;
+            else if (type == "string") typeIndex_ = 4;
+            else if (type == "bytes") typeIndex_ = 5;
+            else typeIndex_ = 0;
+        }
+    }
 
     if (!session) {
         DrawWelcome(context);
