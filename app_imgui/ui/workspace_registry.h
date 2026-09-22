@@ -79,7 +79,7 @@ public:
                 OpenMany({"scripts", "input", "actions", "watches", "runtime"});
                 break;
             case WorkspacePreset::Runtime:
-                OpenMany({"runtime", "diagnostics", "network", "instrumentation",
+                OpenMany({"runtime", "diagnostics", "network", "screenshots", "instrumentation",
                           "actions", "watches", "modules", "sessions", "settings"});
                 break;
         }

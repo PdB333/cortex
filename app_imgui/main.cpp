@@ -13,6 +13,7 @@
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
 #include "application/scripts_model.h"
+#include "application/screenshot_model.h"
 #include "ui/actions_workspace.h"
 #include "ui/diagnostics_workspace.h"
 #include "ui/input_workspace.h"
@@ -35,6 +36,7 @@
 #include "ui/trace_workspace.h"
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
+#include "ui/screenshot_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -289,6 +291,7 @@ struct AppState {
     cortex::application::DiagnosticsModel diagnosticsModel;
     cortex::application::ScriptsModel scriptsModel;
     cortex::application::InputModel inputModel;
+    cortex::application::ScreenshotModel screenshotModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -321,7 +324,8 @@ struct AppState {
           networkModel(payload),
           diagnosticsModel(payload),
           scriptsModel(payload),
-          inputModel(payload) {
+          inputModel(payload),
+          screenshotModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -345,6 +349,8 @@ struct AppState {
         ui.diagnosticsModel = &diagnosticsModel;
         ui.scriptsModel = &scriptsModel;
         ui.inputModel = &inputModel;
+        ui.screenshotModel = &screenshotModel;
+        ui.nativeRenderDevice = gDevice;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -367,6 +373,7 @@ struct AppState {
         workspaces.Add<cortex::ui::DiagnosticsWorkspace>();
         workspaces.Add<cortex::ui::ScriptsWorkspace>();
         workspaces.Add<cortex::ui::InputWorkspace>();
+        workspaces.Add<cortex::ui::ScreenshotWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -387,6 +394,7 @@ struct AppState {
         diagnosticsModel.Reset();
         scriptsModel.Reset();
         inputModel.Reset();
+        screenshotModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -539,6 +547,7 @@ enum class CommandAction {
     ViewDiagnostics,
     ViewScripts,
     ViewInput,
+    ViewScreenshots,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -580,6 +589,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Diagnostics", CommandAction::ViewDiagnostics},
     {"View: Lua Scripts", CommandAction::ViewScripts},
     {"View: Input", CommandAction::ViewInput},
+    {"View: Screenshots", CommandAction::ViewScreenshots},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -621,6 +631,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
@@ -629,6 +640,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
@@ -636,16 +648,20 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
             app.networkModel.Reset();
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.networkModel.Reset();
                 app.diagnosticsModel.Reset();
                 app.scriptsModel.Reset();
                 app.inputModel.Reset();
+            app.screenshotModel.Reset();
+                app.screenshotModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -688,6 +704,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewDiagnostics: app.workspaces.Select("diagnostics"); break;
         case CommandAction::ViewScripts: app.workspaces.Select("scripts"); break;
         case CommandAction::ViewInput: app.workspaces.Select("input"); break;
+        case CommandAction::ViewScreenshots: app.workspaces.Select("screenshots"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
@@ -941,6 +958,7 @@ void DrawHeader(AppState& app) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -997,6 +1015,7 @@ void DrawApp(AppState& app) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
@@ -1005,6 +1024,7 @@ void DrawApp(AppState& app) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
@@ -1012,16 +1032,20 @@ void DrawApp(AppState& app) {
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
             app.networkModel.Reset();
             app.diagnosticsModel.Reset();
             app.scriptsModel.Reset();
             app.inputModel.Reset();
+            app.screenshotModel.Reset();
                 app.networkModel.Reset();
                 app.diagnosticsModel.Reset();
                 app.scriptsModel.Reset();
                 app.inputModel.Reset();
+            app.screenshotModel.Reset();
+                app.screenshotModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;

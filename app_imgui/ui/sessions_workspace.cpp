@@ -59,6 +59,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.diagnosticsModel) context.diagnosticsModel->Reset();
         if (context.scriptsModel) context.scriptsModel->Reset();
         if (context.inputModel) context.inputModel->Reset();
+        if (context.screenshotModel) context.screenshotModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -137,10 +138,13 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.diagnosticsModel) context.diagnosticsModel->Reset();
                     if (context.scriptsModel) context.scriptsModel->Reset();
                     if (context.inputModel) context.inputModel->Reset();
+                    if (context.screenshotModel) context.screenshotModel->Reset();
+        if (context.screenshotModel) context.screenshotModel->Reset();
         if (context.networkModel) context.networkModel->Reset();
         if (context.diagnosticsModel) context.diagnosticsModel->Reset();
         if (context.scriptsModel) context.scriptsModel->Reset();
         if (context.inputModel) context.inputModel->Reset();
+        if (context.screenshotModel) context.screenshotModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -164,6 +168,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.diagnosticsModel) context.diagnosticsModel->Reset();
                 if (wasActive && context.scriptsModel) context.scriptsModel->Reset();
                 if (wasActive && context.inputModel) context.inputModel->Reset();
+                if (wasActive && context.screenshotModel) context.screenshotModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();

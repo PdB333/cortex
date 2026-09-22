@@ -93,6 +93,7 @@ add_executable(cortex_imgui WIN32
     application/diagnostics_model.cpp
     application/scripts_model.cpp
     application/input_model.cpp
+    application/screenshot_model.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
@@ -109,6 +110,7 @@ add_executable(cortex_imgui WIN32
     ui/diagnostics_workspace.cpp
     ui/scripts_workspace.cpp
     ui/input_workspace.cpp
+    ui/screenshot_workspace.cpp
     ui/disassembly_workspace.cpp
     ui/debugger_workspace.cpp
     ui/runtime_workspace.cpp
@@ -174,6 +176,9 @@ target_link_libraries(cortex_imgui PRIVATE
     ws2_32
     bcrypt
     dbghelp
+    windowscodecs
+    ole32
+    crypt32
 )
 
 if(MINGW)

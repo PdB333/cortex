@@ -15,6 +15,7 @@
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
 #include "application/scripts_model.h"
+#include "application/screenshot_model.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
 #include "services/memory_service.h"
@@ -49,6 +50,8 @@ struct UiContext {
     application::DiagnosticsModel* diagnosticsModel = nullptr;
     application::ScriptsModel* scriptsModel = nullptr;
     application::InputModel* inputModel = nullptr;
+    application::ScreenshotModel* screenshotModel = nullptr;
+    void* nativeRenderDevice = nullptr;
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;

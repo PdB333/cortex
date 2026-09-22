@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts and Input models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input and Screenshot models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -80,9 +80,9 @@ Target presets:
 ### 6. Runtime, automation and observability
 - [x] Actions journal / rollback
 - [x] allocation/page-access instrumentation
-- [ ] Hooks panel
+- [x] Hooks workspace parity via Instrumentation + Diagnostics hook state
 - [x] Network capture/events
-- [ ] Screenshots
+- [x] Screenshots
 - [x] Lua script editor/save/run/output
 - [x] Input recording/replay/sequences
 - [x] Diagnostics dashboard
