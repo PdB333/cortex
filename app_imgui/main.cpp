@@ -28,7 +28,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -247,6 +249,10 @@ struct AppState {
     std::vector<cortex::target::TargetDescriptor> targets;
     int selectedTarget = -1;
     char processFilter[160] = {};
+    bool requestCommandPalette = false;
+    bool requestGoTo = false;
+    char commandFilter[160] = {};
+    char goToExpression[160] = {};
 
     AppState()
         : sessions(catalog),
@@ -298,6 +304,281 @@ struct AppState {
         selectedTarget = -1;
     }
 };
+
+std::string Trim(std::string value) {
+    auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(), value.end());
+    return value;
+}
+
+bool ParseAddressToken(const std::string& text, uint64_t& value, int defaultBase = 0) {
+    const std::string token = Trim(text);
+    if (token.empty()) return false;
+    int base = defaultBase;
+    if (token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X')) {
+        base = 0;
+    } else if (base == 0) {
+        const bool hasHexAlpha = std::any_of(token.begin(), token.end(), [](unsigned char ch) {
+            ch = static_cast<unsigned char>(std::tolower(ch));
+            return ch >= 'a' && ch <= 'f';
+        });
+        if (hasHexAlpha) base = 16;
+    }
+
+    try {
+        size_t used = 0;
+        const unsigned long long parsed = std::stoull(token, &used, base);
+        if (used != token.size()) return false;
+        value = static_cast<uint64_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ResolveAddressExpression(AppState& app, const char* expression,
+                              uint64_t& address, std::string& error) {
+    error.clear();
+    const std::string value = Trim(expression ? expression : "");
+    if (value.empty()) {
+        error = "Enter an address or module+offset";
+        return false;
+    }
+    if (ParseAddressToken(value, address)) return true;
+
+    const size_t plus = value.find_last_of('+');
+    if (plus == std::string::npos || plus == 0 || plus + 1 >= value.size()) {
+        error = "Address not recognized";
+        return false;
+    }
+
+    const std::string moduleName = Lower(Trim(value.substr(0, plus)));
+    uint64_t offset = 0;
+    if (!ParseAddressToken(value.substr(plus + 1), offset, 16)) {
+        error = "Invalid module offset";
+        return false;
+    }
+
+    std::string moduleError;
+    const auto modules = app.modules.List(&moduleError);
+    for (const auto& module : modules) {
+        if (Lower(module.name) != moduleName) continue;
+        if (offset > std::numeric_limits<uint64_t>::max() - module.base) {
+            error = "Address overflow";
+            return false;
+        }
+        address = module.base + offset;
+        return true;
+    }
+
+    error = moduleError.empty() ? "Module not found" : moduleError;
+    return false;
+}
+
+void NavigateTo(AppState& app, uint64_t address, const char* workspace) {
+    app.ui.navigationAddress = address;
+    app.ui.navigationAddressPending = true;
+    app.ui.requestWorkspace = workspace ? workspace : "memory-browser";
+}
+
+enum class CommandAction {
+    PresetMemory,
+    PresetDebug,
+    PresetRE,
+    PresetTrace,
+    PresetAutomation,
+    PresetRuntime,
+    SelectProcess,
+    Detach,
+    ToggleWrites,
+    EnableRuntime,
+    ViewMemory,
+    ViewMemoryBrowser,
+    ViewDisassembly,
+    ViewModules,
+    ViewDebugger,
+    ViewAdvanced,
+    GoTo
+};
+
+struct CommandEntry {
+    const char* label;
+    CommandAction action;
+};
+
+constexpr CommandEntry kCommands[] = {
+    {"Workspace: Memory", CommandAction::PresetMemory},
+    {"Workspace: Debug", CommandAction::PresetDebug},
+    {"Workspace: RE", CommandAction::PresetRE},
+    {"Workspace: Trace", CommandAction::PresetTrace},
+    {"Workspace: Automation", CommandAction::PresetAutomation},
+    {"Workspace: Runtime", CommandAction::PresetRuntime},
+    {"Target: Select process", CommandAction::SelectProcess},
+    {"Target: Detach active target", CommandAction::Detach},
+    {"Safety: Toggle write permission", CommandAction::ToggleWrites},
+    {"Runtime: Enable instrumentation", CommandAction::EnableRuntime},
+    {"View: Memory scanner / addresses", CommandAction::ViewMemory},
+    {"View: Memory viewer", CommandAction::ViewMemoryBrowser},
+    {"View: Disassembler", CommandAction::ViewDisassembly},
+    {"View: Modules", CommandAction::ViewModules},
+    {"View: Debugger", CommandAction::ViewDebugger},
+    {"View: Advanced runtime", CommandAction::ViewAdvanced},
+    {"Navigate: Go to address", CommandAction::GoTo}
+};
+
+bool CommandMatches(const char* label, const char* filter) {
+    if (!filter || !*filter) return true;
+    return Lower(label ? label : "").find(Lower(filter)) != std::string::npos;
+}
+
+void ExecuteCommand(AppState& app, CommandAction action) {
+    using cortex::ui::WorkspacePreset;
+    switch (action) {
+        case CommandAction::PresetMemory: app.workspaces.ApplyPreset(WorkspacePreset::Memory); break;
+        case CommandAction::PresetDebug: app.workspaces.ApplyPreset(WorkspacePreset::Debug); break;
+        case CommandAction::PresetRE: app.workspaces.ApplyPreset(WorkspacePreset::ReverseEngineering); break;
+        case CommandAction::PresetTrace: app.workspaces.ApplyPreset(WorkspacePreset::Trace); break;
+        case CommandAction::PresetAutomation: app.workspaces.ApplyPreset(WorkspacePreset::Automation); break;
+        case CommandAction::PresetRuntime: app.workspaces.ApplyPreset(WorkspacePreset::Runtime); break;
+        case CommandAction::SelectProcess:
+            app.ui.requestProcessPicker = true;
+            break;
+        case CommandAction::Detach:
+            if (app.sessions.Active()) {
+                app.sessions.Detach();
+                app.payload.Reset();
+                app.ui.mutationAllowed = false;
+                app.ui.status = "Detached";
+            }
+            break;
+        case CommandAction::ToggleWrites:
+            if (app.sessions.Active()) app.ui.mutationAllowed = !app.ui.mutationAllowed;
+            break;
+        case CommandAction::EnableRuntime: {
+            if (!app.sessions.Active()) {
+                app.ui.status = "Select a process first";
+                break;
+            }
+            if (!app.ui.mutationAllowed) {
+                app.ui.status = "Enable writes before runtime injection";
+                break;
+            }
+            std::string error;
+            if (app.payload.EnsureReady(&error))
+                app.ui.status = "Cortex runtime enabled";
+            else
+                app.ui.status = "Runtime enable failed: " + error;
+            break;
+        }
+        case CommandAction::ViewMemory: app.workspaces.Select("memory"); break;
+        case CommandAction::ViewMemoryBrowser: app.workspaces.Select("memory-browser"); break;
+        case CommandAction::ViewDisassembly: app.workspaces.Select("disassembly"); break;
+        case CommandAction::ViewModules: app.workspaces.Select("modules"); break;
+        case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
+        case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
+        case CommandAction::GoTo:
+            app.requestGoTo = true;
+            break;
+    }
+}
+
+void HandleGlobalShortcuts(AppState& app) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.WantTextInput) return;
+
+    if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_P, false)) {
+        app.requestCommandPalette = true;
+    } else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
+        app.requestCommandPalette = true;
+    }
+
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false) && app.sessions.Active())
+        app.requestGoTo = true;
+}
+
+void DrawCommandPalette(AppState& app) {
+    if (app.requestCommandPalette) {
+        app.commandFilter[0] = '\0';
+        ImGui::OpenPopup("Command palette");
+        app.requestCommandPalette = false;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(640, 460), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Command palette", nullptr,
+                                ImGuiWindowFlags_NoSavedSettings)) return;
+
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    const bool enter = ImGui::InputTextWithHint(
+        "##CommandFilter", "Type a Cortex command...",
+        app.commandFilter, sizeof(app.commandFilter),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+
+    const CommandEntry* firstMatch = nullptr;
+    ImGui::Separator();
+    ImGui::BeginChild("CommandResults", ImVec2(0, -38), ImGuiChildFlags_None);
+    for (const auto& command : kCommands) {
+        if (!CommandMatches(command.label, app.commandFilter)) continue;
+        if (!firstMatch) firstMatch = &command;
+        if (ImGui::Selectable(command.label)) {
+            ExecuteCommand(app, command.action);
+            ImGui::CloseCurrentPopup();
+            break;
+        }
+    }
+    ImGui::EndChild();
+
+    if (enter && firstMatch) {
+        ExecuteCommand(app, firstMatch->action);
+        ImGui::CloseCurrentPopup();
+    }
+
+    if (ImGui::Button("Close", ImVec2(100, 28))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void DrawGoTo(AppState& app) {
+    if (app.requestGoTo) {
+        ImGui::OpenPopup("Go to");
+        app.requestGoTo = false;
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(520, 190), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Go to", nullptr,
+                                ImGuiWindowFlags_NoSavedSettings)) return;
+
+    ImGui::TextUnformatted("Address or module+offset");
+    ImGui::TextDisabled("Examples: 0x140001000   game.exe+1F234");
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1);
+    const bool enter = ImGui::InputTextWithHint(
+        "##GoToExpression", "0x... or module+offset",
+        app.goToExpression, sizeof(app.goToExpression),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+
+    auto go = [&](const char* workspace) {
+        uint64_t address = 0;
+        std::string error;
+        if (!ResolveAddressExpression(app, app.goToExpression, address, error)) {
+            app.ui.status = "Go To: " + error;
+            return false;
+        }
+        NavigateTo(app, address, workspace);
+        app.ui.status = "Navigated to " + std::string(app.goToExpression);
+        return true;
+    };
+
+    if ((ImGui::Button("Memory", ImVec2(130, 32)) || enter) && go("memory-browser"))
+        ImGui::CloseCurrentPopup();
+    ImGui::SameLine();
+    if (ImGui::Button("Disassembly", ImVec2(130, 32)) && go("disassembly"))
+        ImGui::CloseCurrentPopup();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(100, 32))) ImGui::CloseCurrentPopup();
+
+    ImGui::EndPopup();
+}
 
 bool MatchesFilter(const cortex::target::TargetDescriptor& target, const char* filter) {
     if (!filter || !*filter) return true;
@@ -477,6 +758,12 @@ void DrawApp(AppState& app) {
         }
         if (ImGui::BeginMenu("View")) {
             app.workspaces.DrawViewMenu();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Command palette...", "Ctrl+Shift+P"))
+                app.requestCommandPalette = true;
+            if (ImGui::MenuItem("Go to...", "Ctrl+G", false,
+                                static_cast<bool>(app.sessions.Active())))
+                app.requestGoTo = true;
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -502,6 +789,8 @@ void DrawApp(AppState& app) {
                         app.ui.status.c_str());
 
     DrawProcessPicker(app);
+    DrawCommandPalette(app);
+    DrawGoTo(app);
     ImGui::End();
 
     app.workspaces.DrawDockWindows(app.ui);
@@ -562,6 +851,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
+        HandleGlobalShortcuts(app);
         DrawApp(app);
 
         ImGui::Render();

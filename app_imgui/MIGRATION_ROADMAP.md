@@ -15,11 +15,11 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 - [x] process picker and target attach
 - [x] explicit mutation gate
 - [~] dockable IDE shell and workspace presets
-- [ ] command palette (Ctrl+Shift+P / Ctrl+K)
-- [ ] Go To (Ctrl+G) with address/symbol/project resolution
+- [x] command palette (Ctrl+Shift+P / Ctrl+K)
+- [~] Go To (Ctrl+G): address + module offset done; symbol/project resolution remains
 - [ ] shared address context menu everywhere
 - [ ] bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
-- [ ] global keyboard shortcuts and navigation history
+- [~] global keyboard shortcuts started; navigation history remains
 
 Target presets:
 - Memory: Scanner + Addresses + Memory viewer + Watches
