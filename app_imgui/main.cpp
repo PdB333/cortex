@@ -508,9 +508,11 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             break;
         case CommandAction::Detach:
             if (app.sessions.Active()) {
+                app.debuggerModel.Reset();
+                app.projectModel.Reset();
+                app.symbolsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
-                app.debuggerModel.Reset();
                 app.ui.mutationAllowed = false;
                 app.ui.status = "Detached";
             }
@@ -779,9 +781,11 @@ void DrawHeader(AppState& app) {
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Detach")) {
+            app.debuggerModel.Reset();
+            app.projectModel.Reset();
+            app.symbolsModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
-            app.debuggerModel.Reset();
             app.ui.mutationAllowed = false;
             app.ui.status = "Detached";
             app.ui.requestWorkspace = "memory";
@@ -823,6 +827,8 @@ void DrawApp(AppState& app) {
             ImGui::BeginDisabled(!attached);
             if (ImGui::MenuItem("Detach active target")) {
                 app.debuggerModel.Reset();
+                app.projectModel.Reset();
+                app.symbolsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
