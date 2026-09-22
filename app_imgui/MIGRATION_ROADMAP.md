@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE and Instrumentation models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches and Actions models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -50,7 +50,7 @@ Target presets:
 - [x] Structures define/read/write/infer
 - [x] Symbols resolve/lookup/details
 - [x] Snapshots capture/diff/rewind/last-change
-- [ ] runtime Watches/Freezes (not only local frontend freeze)
+- [x] runtime Watches/Freezes (not only local frontend freeze)
 
 ### 4. Full debugger and tracing
 - [x] thread/register inspection
@@ -78,7 +78,7 @@ Target presets:
 - [x] breakpoint templates
 
 ### 6. Runtime, automation and observability
-- [ ] Actions journal / rollback
+- [x] Actions journal / rollback
 - [x] allocation/page-access instrumentation
 - [ ] Hooks panel
 - [ ] Network capture/events

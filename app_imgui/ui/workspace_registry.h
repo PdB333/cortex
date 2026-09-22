@@ -63,23 +63,24 @@ public:
 
         switch (preset) {
             case WorkspacePreset::Memory:
-                OpenMany({"memory", "memory-browser", "modules"});
+                OpenMany({"memory", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::Debug:
-                OpenMany({"disassembly", "debugger", "memory-browser", "modules"});
+                OpenMany({"disassembly", "debugger", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::ReverseEngineering:
                 OpenMany({"re", "disassembly", "memory-browser", "modules", "project", "symbols",
                           "structures", "pointermaps", "snapshots", "instrumentation", "runtime"});
                 break;
             case WorkspacePreset::Trace:
-                OpenMany({"disassembly", "debugger", "trace", "memory-browser"});
+                OpenMany({"disassembly", "debugger", "trace", "memory-browser", "watches"});
                 break;
             case WorkspacePreset::Automation:
-                OpenMany({"runtime"});
+                OpenMany({"actions", "watches", "runtime"});
                 break;
             case WorkspacePreset::Runtime:
-                OpenMany({"runtime", "instrumentation", "modules", "sessions", "settings"});
+                OpenMany({"runtime", "instrumentation", "actions", "watches",
+                          "modules", "sessions", "settings"});
                 break;
         }
 

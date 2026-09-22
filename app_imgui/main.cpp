@@ -1,3 +1,4 @@
+#include "application/actions_model.h"
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
@@ -7,6 +8,8 @@
 #include "application/snapshots_model.h"
 #include "application/structures_model.h"
 #include "application/symbols_model.h"
+#include "application/watches_model.h"
+#include "ui/actions_workspace.h"
 #include "ui/debugger_workspace.h"
 #include "ui/disassembly_workspace.h"
 #include "ui/memory_browser_workspace.h"
@@ -23,6 +26,7 @@
 #include "ui/settings_workspace.h"
 #include "ui/symbols_workspace.h"
 #include "ui/trace_workspace.h"
+#include "ui/watches_workspace.h"
 #include "ui/theme.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
@@ -271,6 +275,8 @@ struct AppState {
     cortex::application::SnapshotsModel snapshotsModel;
     cortex::application::ReModel reModel;
     cortex::application::InstrumentationModel instrumentationModel;
+    cortex::application::WatchesModel watchesModel;
+    cortex::application::ActionsModel actionsModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -297,7 +303,9 @@ struct AppState {
           pointerMapsModel(payload),
           snapshotsModel(payload),
           reModel(payload),
-          instrumentationModel(payload) {
+          instrumentationModel(payload),
+          watchesModel(payload),
+          actionsModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -315,6 +323,8 @@ struct AppState {
         ui.snapshotsModel = &snapshotsModel;
         ui.reModel = &reModel;
         ui.instrumentationModel = &instrumentationModel;
+        ui.watchesModel = &watchesModel;
+        ui.actionsModel = &actionsModel;
 
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
@@ -331,6 +341,8 @@ struct AppState {
         workspaces.Add<cortex::ui::SnapshotsWorkspace>();
         workspaces.Add<cortex::ui::ReWorkspace>();
         workspaces.Add<cortex::ui::InstrumentationWorkspace>();
+        workspaces.Add<cortex::ui::WatchesWorkspace>();
+        workspaces.Add<cortex::ui::ActionsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
     }
@@ -345,6 +357,8 @@ struct AppState {
         snapshotsModel.Reset();
         reModel.Reset();
         instrumentationModel.Reset();
+        watchesModel.Reset();
+        actionsModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -491,6 +505,8 @@ enum class CommandAction {
     ViewSnapshots,
     ViewReWorkspace,
     ViewInstrumentation,
+    ViewWatches,
+    ViewActions,
     ViewDebugger,
     ViewTrace,
     ViewAdvanced,
@@ -526,6 +542,8 @@ constexpr CommandEntry kCommands[] = {
     {"View: Snapshots", CommandAction::ViewSnapshots},
     {"View: Reverse Engineering", CommandAction::ViewReWorkspace},
     {"View: Instrumentation", CommandAction::ViewInstrumentation},
+    {"View: Watches & Freezes", CommandAction::ViewWatches},
+    {"View: Actions journal", CommandAction::ViewActions},
     {"View: Debugger", CommandAction::ViewDebugger},
     {"View: Trace", CommandAction::ViewTrace},
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
@@ -561,9 +579,17 @@ void ExecuteCommand(AppState& app, CommandAction action) {
                 app.snapshotsModel.Reset();
             app.reModel.Reset();
             app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
                 app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
+                app.watchesModel.Reset();
+                app.actionsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -600,6 +626,8 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewSnapshots: app.workspaces.Select("snapshots"); break;
         case CommandAction::ViewReWorkspace: app.workspaces.Select("re"); break;
         case CommandAction::ViewInstrumentation: app.workspaces.Select("instrumentation"); break;
+        case CommandAction::ViewWatches: app.workspaces.Select("watches"); break;
+        case CommandAction::ViewActions: app.workspaces.Select("actions"); break;
         case CommandAction::ViewDebugger: app.workspaces.Select("debugger"); break;
         case CommandAction::ViewTrace: app.workspaces.Select("trace"); break;
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
@@ -847,6 +875,8 @@ void DrawHeader(AppState& app) {
             app.snapshotsModel.Reset();
             app.reModel.Reset();
             app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -897,9 +927,17 @@ void DrawApp(AppState& app) {
                 app.snapshotsModel.Reset();
             app.reModel.Reset();
             app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
                 app.instrumentationModel.Reset();
+            app.watchesModel.Reset();
+            app.actionsModel.Reset();
+                app.watchesModel.Reset();
+                app.actionsModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;

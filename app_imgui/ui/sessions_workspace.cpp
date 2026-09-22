@@ -53,6 +53,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.snapshotsModel) context.snapshotsModel->Reset();
         if (context.reModel) context.reModel->Reset();
         if (context.instrumentationModel) context.instrumentationModel->Reset();
+        if (context.watchesModel) context.watchesModel->Reset();
+        if (context.actionsModel) context.actionsModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -125,9 +127,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.snapshotsModel) context.snapshotsModel->Reset();
                     if (context.reModel) context.reModel->Reset();
                     if (context.instrumentationModel) context.instrumentationModel->Reset();
-        if (context.instrumentationModel) context.instrumentationModel->Reset();
-        if (context.reModel) context.reModel->Reset();
-        if (context.instrumentationModel) context.instrumentationModel->Reset();
+                    if (context.watchesModel) context.watchesModel->Reset();
+                    if (context.actionsModel) context.actionsModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -145,6 +146,8 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.snapshotsModel) context.snapshotsModel->Reset();
                 if (wasActive && context.reModel) context.reModel->Reset();
                 if (wasActive && context.instrumentationModel) context.instrumentationModel->Reset();
+                if (wasActive && context.watchesModel) context.watchesModel->Reset();
+                if (wasActive && context.actionsModel) context.actionsModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();
