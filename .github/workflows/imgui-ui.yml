@@ -74,14 +74,31 @@ jobs:
         run: cmake --build build/imgui-ui --parallel 2
 
       - name: CLI compatibility smoke
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          set -euo pipefail
-          build/imgui-ui/cortex.exe --version > version.txt
-          grep -q "0.7.0-imgui-preview" version.txt
-          build/imgui-ui/cortex.exe --help > help.txt
-          grep -q "cortex mcp" help.txt
-          grep -q "cortex diagnose" help.txt
+          function Invoke-CortexCli([string[]]$Arguments) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path "build/imgui-ui/cortex.exe")
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($arg in $Arguments) { [void]$psi.ArgumentList.Add($arg) }
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) {
+              throw "cortex $($Arguments -join ' ') failed ($($process.ExitCode)): $stderr"
+            }
+            return $stdout
+          }
+
+          $version = Invoke-CortexCli @("--version")
+          if ($version -notmatch "0\.7\.0-imgui-preview") { throw "Unexpected version output: $version" }
+
+          $help = Invoke-CortexCli @("--help")
+          if ($help -notmatch "cortex mcp") { throw "MCP command missing from help" }
+          if ($help -notmatch "cortex diagnose") { throw "diagnose command missing from help" }
 
       - name: Configure x64 Cortex runtime
         shell: msys2 {0}
