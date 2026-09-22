@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: lightweight-imgui-ui-${{ github.ref }}
+  group: lightweight-imgui-ui-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
