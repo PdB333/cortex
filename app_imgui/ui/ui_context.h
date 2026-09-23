@@ -8,6 +8,7 @@
 #include "application/project_model.h"
 #include "application/instrumentation_model.h"
 #include "application/re_model.h"
+#include "application/runtime_events_model.h"
 #include "application/settings.h"
 #include "application/pointer_maps_model.h"
 #include "application/snapshots_model.h"
@@ -51,6 +52,7 @@ struct UiContext {
     application::ScriptsModel* scriptsModel = nullptr;
     application::InputModel* inputModel = nullptr;
     application::ScreenshotModel* screenshotModel = nullptr;
+    application::RuntimeEventsModel* runtimeEventsModel = nullptr;
     void* nativeRenderDevice = nullptr;
 
     bool mutationAllowed = false;
@@ -67,6 +69,7 @@ struct UiContext {
     // "Find what writes this".
     std::string runtimeToolPreset;
     std::string runtimeArgumentsPreset;
+    bool requestSemanticRuntime = false;
 };
 
 } // namespace cortex::ui

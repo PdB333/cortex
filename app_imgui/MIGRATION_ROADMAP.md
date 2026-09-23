@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input and Screenshot models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot and Runtime Events models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -86,9 +86,9 @@ Target presets:
 - [x] Lua script editor/save/run/output
 - [x] Input recording/replay/sequences
 - [x] Diagnostics dashboard
-- [~] raw MCP/Advanced tool runner
-- [ ] Semantic tool view
-- [ ] runtime/API event console
+- [x] raw MCP/Advanced tool runner
+- [x] Semantic tool view
+- [x] runtime/API event console
 
 ### 7. Parity hardening and release gate
 - [ ] map every Qt workspace to direct ImGui coverage (0 missing / 0 partial)

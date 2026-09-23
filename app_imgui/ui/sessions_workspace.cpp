@@ -60,6 +60,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.scriptsModel) context.scriptsModel->Reset();
         if (context.inputModel) context.inputModel->Reset();
         if (context.screenshotModel) context.screenshotModel->Reset();
+        if (context.runtimeEventsModel) context.runtimeEventsModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -139,12 +140,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.scriptsModel) context.scriptsModel->Reset();
                     if (context.inputModel) context.inputModel->Reset();
                     if (context.screenshotModel) context.screenshotModel->Reset();
-        if (context.screenshotModel) context.screenshotModel->Reset();
-        if (context.networkModel) context.networkModel->Reset();
-        if (context.diagnosticsModel) context.diagnosticsModel->Reset();
-        if (context.scriptsModel) context.scriptsModel->Reset();
-        if (context.inputModel) context.inputModel->Reset();
-        if (context.screenshotModel) context.screenshotModel->Reset();
+                    if (context.runtimeEventsModel) context.runtimeEventsModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -169,6 +165,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.scriptsModel) context.scriptsModel->Reset();
                 if (wasActive && context.inputModel) context.inputModel->Reset();
                 if (wasActive && context.screenshotModel) context.screenshotModel->Reset();
+                if (wasActive && context.runtimeEventsModel) context.runtimeEventsModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();
