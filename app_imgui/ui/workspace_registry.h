@@ -66,10 +66,10 @@ public:
                 OpenMany({"memory", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::Debug:
-                OpenMany({"disassembly", "debugger", "memory-browser", "modules", "watches"});
+                OpenMany({"disassembly", "debugger", "patches", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::ReverseEngineering:
-                OpenMany({"re", "disassembly", "memory-browser", "modules", "project", "symbols",
+                OpenMany({"re", "disassembly", "patches", "memory-browser", "modules", "project", "symbols",
                           "structures", "pointermaps", "snapshots", "instrumentation", "runtime"});
                 break;
             case WorkspacePreset::Trace:

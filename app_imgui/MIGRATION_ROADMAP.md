@@ -12,7 +12,7 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 ### 1. IDE shell, docking and navigation — IN PROGRESS
 - [x] Win32 + DirectX 11 Dear ImGui application
 - [x] persistent ImGui layout file
-- [x] process picker and target attach
+- [x] process picker and target attach\n- [x] Overview target/session dashboard
 - [x] explicit mutation gate
 - [~] dockable IDE shell and workspace presets
 - [x] command palette (Ctrl+Shift+P / Ctrl+K)
@@ -30,7 +30,7 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot and Runtime Events models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events and Patches models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -50,6 +50,7 @@ Target presets:
 - [x] Structures define/read/write/infer
 - [x] Symbols resolve/lookup/details
 - [x] Snapshots capture/diff/rewind/last-change
+- [x] Patches raw/NOP/assembly/detour/trampoline/code-cave + revert
 - [x] runtime Watches/Freezes (not only local frontend freeze)
 
 ### 4. Full debugger and tracing

@@ -81,6 +81,7 @@ add_executable(cortex_imgui WIN32
     application/settings.cpp
     application/debugger_model.cpp
     application/project_model.cpp
+    application/patches_model.cpp
     application/symbols_model.cpp
     application/structures_model.cpp
     application/pointer_maps_model.cpp
@@ -98,6 +99,8 @@ add_executable(cortex_imgui WIN32
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp
+    ui/overview_workspace.cpp
+    ui/patches_workspace.cpp
     ui/project_workspace.cpp
     ui/symbols_workspace.cpp
     ui/structures_workspace.cpp

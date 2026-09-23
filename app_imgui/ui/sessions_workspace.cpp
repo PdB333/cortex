@@ -61,6 +61,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
         if (context.inputModel) context.inputModel->Reset();
         if (context.screenshotModel) context.screenshotModel->Reset();
         if (context.runtimeEventsModel) context.runtimeEventsModel->Reset();
+        if (context.patchesModel) context.patchesModel->Reset();
         context.sessions->DetachAll();
         if (context.payload) context.payload->Reset();
         context.mutationAllowed = false;
@@ -141,6 +142,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                     if (context.inputModel) context.inputModel->Reset();
                     if (context.screenshotModel) context.screenshotModel->Reset();
                     if (context.runtimeEventsModel) context.runtimeEventsModel->Reset();
+                    if (context.patchesModel) context.patchesModel->Reset();
                     if (context.payload) context.payload->Reset();
                     context.mutationAllowed = false;
                     context.status = "Active target: " + target.name;
@@ -166,6 +168,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 if (wasActive && context.inputModel) context.inputModel->Reset();
                 if (wasActive && context.screenshotModel) context.screenshotModel->Reset();
                 if (wasActive && context.runtimeEventsModel) context.runtimeEventsModel->Reset();
+                if (wasActive && context.patchesModel) context.patchesModel->Reset();
                 context.sessions->Detach(target.id);
                 if (wasActive) {
                     if (context.payload) context.payload->Reset();

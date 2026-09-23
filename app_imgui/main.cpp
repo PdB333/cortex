@@ -5,6 +5,7 @@
 #include "application/debugger_model.h"
 #include "application/settings.h"
 #include "application/project_model.h"
+#include "application/patches_model.h"
 #include "application/instrumentation_model.h"
 #include "application/re_model.h"
 #include "application/runtime_events_model.h"
@@ -25,6 +26,8 @@
 #include "ui/memory_browser_workspace.h"
 #include "ui/memory_workspace.h"
 #include "ui/modules_workspace.h"
+#include "ui/overview_workspace.h"
+#include "ui/patches_workspace.h"
 #include "ui/instrumentation_workspace.h"
 #include "ui/project_workspace.h"
 #include "ui/re_workspace.h"
@@ -295,6 +298,7 @@ struct AppState {
     cortex::application::InputModel inputModel;
     cortex::application::ScreenshotModel screenshotModel;
     cortex::application::RuntimeEventsModel runtimeEventsModel;
+    cortex::application::PatchesModel patchesModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -329,7 +333,8 @@ struct AppState {
           scriptsModel(payload),
           inputModel(payload),
           screenshotModel(payload),
-          runtimeEventsModel(payload) {
+          runtimeEventsModel(payload),
+          patchesModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -355,8 +360,10 @@ struct AppState {
         ui.inputModel = &inputModel;
         ui.screenshotModel = &screenshotModel;
         ui.runtimeEventsModel = &runtimeEventsModel;
+        ui.patchesModel = &patchesModel;
         ui.nativeRenderDevice = gDevice;
 
+        workspaces.Add<cortex::ui::OverviewWorkspace>();
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
         workspaces.Add<cortex::ui::DisassemblyWorkspace>();
@@ -379,6 +386,7 @@ struct AppState {
         workspaces.Add<cortex::ui::ScriptsWorkspace>();
         workspaces.Add<cortex::ui::InputWorkspace>();
         workspaces.Add<cortex::ui::ScreenshotWorkspace>();
+        workspaces.Add<cortex::ui::PatchesWorkspace>();
         workspaces.Add<cortex::ui::EventsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
@@ -402,6 +410,7 @@ struct AppState {
         inputModel.Reset();
         screenshotModel.Reset();
         runtimeEventsModel.Reset();
+        patchesModel.Reset();
         ui.mutationAllowed = false;
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
@@ -537,6 +546,7 @@ enum class CommandAction {
     Detach,
     ToggleWrites,
     EnableRuntime,
+    ViewOverview,
     ViewMemory,
     ViewMemoryBrowser,
     ViewDisassembly,
@@ -640,6 +650,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
@@ -650,6 +661,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
@@ -659,6 +671,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
             app.networkModel.Reset();
@@ -667,15 +680,20 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.networkModel.Reset();
                 app.diagnosticsModel.Reset();
                 app.scriptsModel.Reset();
                 app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
+                app.patchesModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;
@@ -701,6 +719,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
                 app.ui.status = "Runtime enable failed: " + error;
             break;
         }
+        case CommandAction::ViewOverview: app.workspaces.Select("overview"); break;
         case CommandAction::ViewMemory: app.workspaces.Select("memory"); break;
         case CommandAction::ViewMemoryBrowser: app.workspaces.Select("memory-browser"); break;
         case CommandAction::ViewDisassembly: app.workspaces.Select("disassembly"); break;
@@ -974,6 +993,7 @@ void DrawHeader(AppState& app) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
             app.sessions.Detach();
             app.payload.Reset();
             app.ui.mutationAllowed = false;
@@ -1032,6 +1052,7 @@ void DrawApp(AppState& app) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.reModel.Reset();
             app.instrumentationModel.Reset();
             app.watchesModel.Reset();
@@ -1042,6 +1063,7 @@ void DrawApp(AppState& app) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.instrumentationModel.Reset();
             app.watchesModel.Reset();
             app.actionsModel.Reset();
@@ -1051,6 +1073,7 @@ void DrawApp(AppState& app) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.watchesModel.Reset();
                 app.actionsModel.Reset();
             app.networkModel.Reset();
@@ -1059,15 +1082,20 @@ void DrawApp(AppState& app) {
             app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.networkModel.Reset();
                 app.diagnosticsModel.Reset();
                 app.scriptsModel.Reset();
                 app.inputModel.Reset();
             app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.screenshotModel.Reset();
             app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
                 app.runtimeEventsModel.Reset();
+            app.patchesModel.Reset();
+                app.patchesModel.Reset();
                 app.sessions.Detach();
                 app.payload.Reset();
                 app.ui.mutationAllowed = false;

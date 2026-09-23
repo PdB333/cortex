@@ -6,6 +6,7 @@
 #include "application/network_model.h"
 #include "application/debugger_model.h"
 #include "application/project_model.h"
+#include "application/patches_model.h"
 #include "application/instrumentation_model.h"
 #include "application/re_model.h"
 #include "application/runtime_events_model.h"
@@ -53,6 +54,7 @@ struct UiContext {
     application::InputModel* inputModel = nullptr;
     application::ScreenshotModel* screenshotModel = nullptr;
     application::RuntimeEventsModel* runtimeEventsModel = nullptr;
+    application::PatchesModel* patchesModel = nullptr;
     void* nativeRenderDevice = nullptr;
 
     bool mutationAllowed = false;
