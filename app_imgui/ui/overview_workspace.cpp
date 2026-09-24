@@ -7,15 +7,6 @@
 namespace cortex::ui {
 namespace {
 
-const char* PlatformName(target::Platform platform) {
-    switch (platform) {
-        case target::Platform::Windows: return "Windows";
-        case target::Platform::Linux: return "Linux";
-        case target::Platform::PS4: return "PS4";
-        default: return "Unknown";
-    }
-}
-
 std::string CapabilitySummary(const target::TargetDescriptor& target) {
     std::ostringstream out;
     const auto names = target.capabilities.Names();
@@ -47,7 +38,7 @@ void OverviewWorkspace::Draw(UiContext& context) {
     const auto& target = session->Target();
     ImGui::TextDisabled("PID %llu | %s | %s",
                         static_cast<unsigned long long>(target.processId),
-                        PlatformName(target.platform),
+                        target::PlatformName(target.platform),
                         target::ArchitectureName(target.architecture));
 
     ImGui::Separator();
@@ -68,7 +59,7 @@ void OverviewWorkspace::Draw(UiContext& context) {
             ImGui::TextUnformatted(value.c_str());
         };
 
-        row("Platform", PlatformName(target.platform));
+        row("Platform", target::PlatformName(target.platform));
         row("Architecture", target::ArchitectureName(target.architecture));
         row("Session", session->Alive() ? "active" : "stale");
         row("Attached targets",
