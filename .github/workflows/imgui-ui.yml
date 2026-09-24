@@ -162,10 +162,14 @@ jobs:
       - name: Validate native prompt and event channels
         shell: pwsh
         run: |
-          $exe = (Resolve-Path "build/imgui-ui/cortex.exe").Path
-          $root = (Resolve-Path "build/runtime-x64").Path
-          $targetPath = Join-Path $root "cortex_test_target_x64.exe"
-          $corePath = Join-Path $root "cortex_core.dll"
+          $appRoot = (Resolve-Path "build/imgui-ui").Path
+          $exe = Join-Path $appRoot "cortex.exe"
+          $runtimeRoot = (Resolve-Path "build/runtime-x64").Path
+          $targetPath = Join-Path $runtimeRoot "cortex_test_target_x64.exe"
+
+          # Mirror the portable layout: the x64 runtime DLL lives next to cortex.exe.
+          $corePath = Join-Path $appRoot "cortex_core.dll"
+          Copy-Item (Join-Path $runtimeRoot "cortex_core.dll") $corePath -Force
           function Invoke-CortexChannelSmoke([string[]]$Arguments) {
             $psi = [System.Diagnostics.ProcessStartInfo]::new()
             $psi.FileName = $exe
@@ -199,7 +203,8 @@ jobs:
             # cortex.exe is a GUI-subsystem binary, so PowerShell's LASTEXITCODE is
             # not a reliable injection verdict here. The private MCP token is the
             # runtime's authoritative readiness signal.
-            $tokenPath = Join-Path $root ("cortex.mcp.{0}.token" -f $target.Id)
+            $tokenPath = Join-Path $appRoot ("cortex.mcp.{0}.token" -f $target.Id)
+            Remove-Item $tokenPath -ErrorAction SilentlyContinue
             $ready = $false
             for ($attempt = 0; $attempt -lt 60; $attempt++) {
               if (Test-Path $tokenPath) { $ready = $true; break }
