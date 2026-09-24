@@ -82,8 +82,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          function Measure-CortexSample(
-            [string]$Name,
+          function New-CortexStartInfo(
             [string]$Executable,
             [string]$Argument,
             [hashtable]$Environment
@@ -98,65 +97,109 @@ jobs:
             foreach ($key in $Environment.Keys) {
               $psi.Environment[$key] = [string]$Environment[$key]
             }
+            return $psi
+          }
 
+          function Measure-CliSample(
+            [string]$Name,
+            [string]$Executable
+          ) {
+            $psi = New-CortexStartInfo $Executable "--version" @{}
             $timer = [System.Diagnostics.Stopwatch]::StartNew()
             $process = [System.Diagnostics.Process]::Start($psi)
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
             $stderrTask = $process.StandardError.ReadToEndAsync()
             if (-not $process.WaitForExit(20000)) {
               $process.Kill()
-              throw "$Name startup sample timed out"
+              throw "$Name CLI startup sample timed out"
             }
             $timer.Stop()
-            $process.Refresh()
-            $stdout = $stdoutTask.Result
             $stderr = $stderrTask.Result
             if ($process.ExitCode -ne 0) {
-              throw "$Name startup sample failed ($($process.ExitCode)): $stderr"
+              throw "$Name CLI startup sample failed ($($process.ExitCode)): $stderr"
+            }
+            [Math]::Round($timer.Elapsed.TotalMilliseconds, 3)
+          }
+
+          function Measure-UiWorkingSet(
+            [string]$Name,
+            [string]$Executable,
+            [string]$Argument,
+            [hashtable]$Environment
+          ) {
+            $psi = New-CortexStartInfo $Executable $Argument $Environment
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            $deadline = [DateTime]::UtcNow.AddSeconds(20)
+            [int64]$peak = 0
+
+            while (-not $process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+              try {
+                $process.Refresh()
+                if ($process.WorkingSet64 -gt $peak) {
+                  $peak = [int64]$process.WorkingSet64
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 5
             }
 
-            [pscustomobject]@{
-              elapsed_ms = [Math]::Round($timer.Elapsed.TotalMilliseconds, 3)
-              peak_working_set_bytes = [int64]$process.PeakWorkingSet64
-              stdout = $stdout.Trim()
+            if (-not $process.HasExited) {
+              $process.Kill()
+              throw "$Name UI working-set sample timed out"
             }
+            $process.Refresh()
+            if ($process.PeakWorkingSet64 -gt $peak) {
+              $peak = [int64]$process.PeakWorkingSet64
+            }
+            $stderr = $stderrTask.Result
+            if ($process.ExitCode -ne 0) {
+              throw "$Name UI working-set sample failed ($($process.ExitCode)): $stderr"
+            }
+            if ($peak -le 0) {
+              throw "$Name UI working-set sample produced no memory measurement"
+            }
+            return $peak
           }
 
           $definitions = @(
             [pscustomobject]@{
               name = "qt_reference"
               exe = "build/qt-reference/cortex.exe"
-              arg = "--version"
-              env = @{}
+              ui_arg = "--smoke-test"
+              ui_env = @{ QT_QPA_PLATFORM = "offscreen" }
             },
             [pscustomobject]@{
               name = "imgui_candidate"
               exe = "build/imgui-candidate/cortex.exe"
-              arg = "--version"
-              env = @{}
+              ui_arg = "--window-smoke-test"
+              ui_env = @{}
             }
           )
 
           $result = [ordered]@{
-            schema = "cortex.ui.migration.benchmark.v1"
+            schema = "cortex.ui.migration.benchmark.v2"
             commit = $env:GITHUB_SHA
             generated_utc = [DateTime]::UtcNow.ToString("o")
             samples = [ordered]@{}
           }
 
           foreach ($definition in $definitions) {
-            $rows = @()
+            $startup = @()
+            $working = @()
             foreach ($iteration in 1..5) {
-              $rows += Measure-CortexSample $definition.name $definition.exe $definition.arg $definition.env
+              $startup += Measure-CliSample $definition.name $definition.exe
+              $working += Measure-UiWorkingSet $definition.name $definition.exe $definition.ui_arg $definition.ui_env
             }
 
-            $elapsed = @($rows | ForEach-Object elapsed_ms | Sort-Object)
-            $working = @($rows | ForEach-Object peak_working_set_bytes | Sort-Object)
+            $startup = @($startup | Sort-Object)
+            $working = @($working | Sort-Object)
             $result.samples[$definition.name] = [ordered]@{
               executable_bytes = (Get-Item $definition.exe).Length
-              median_cli_startup_ms = $elapsed[2]
-              median_peak_working_set_bytes = $working[2]
-              runs = $rows
+              median_cli_startup_ms = $startup[2]
+              median_ui_peak_working_set_bytes = $working[2]
+              cli_startup_runs_ms = $startup
+              ui_peak_working_set_runs_bytes = $working
             }
           }
 
@@ -165,8 +208,8 @@ jobs:
 
           $qt = $result.samples.qt_reference
           $imgui = $result.samples.imgui_candidate
-          Write-Host ("BENCHMARK Qt exe={0} cli_startup_ms={1} peak_ws={2}" -f $qt.executable_bytes, $qt.median_cli_startup_ms, $qt.median_peak_working_set_bytes)
-          Write-Host ("BENCHMARK ImGui exe={0} startup_ms={1} peak_ws={2}" -f $imgui.executable_bytes, $imgui.median_cli_startup_ms, $imgui.median_peak_working_set_bytes)
+          Write-Host ("BENCHMARK Qt exe={0} cli_startup_ms={1} ui_peak_ws={2}" -f $qt.executable_bytes, $qt.median_cli_startup_ms, $qt.median_ui_peak_working_set_bytes)
+          Write-Host ("BENCHMARK ImGui exe={0} cli_startup_ms={1} ui_peak_ws={2}" -f $imgui.executable_bytes, $imgui.median_cli_startup_ms, $imgui.median_ui_peak_working_set_bytes)
 
           @(
             "## UI migration benchmark"
@@ -175,7 +218,7 @@ jobs:
             "| --- | ---: | ---: |"
             "| Executable bytes | $($qt.executable_bytes) | $($imgui.executable_bytes) |"
             "| Median CLI startup (ms) | $($qt.median_cli_startup_ms) | $($imgui.median_cli_startup_ms) |"
-            "| Median peak working set (bytes) | $($qt.median_peak_working_set_bytes) | $($imgui.median_peak_working_set_bytes) |"
+            "| Median UI peak working set (bytes) | $($qt.median_ui_peak_working_set_bytes) | $($imgui.median_ui_peak_working_set_bytes) |"
           ) | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Upload benchmark evidence

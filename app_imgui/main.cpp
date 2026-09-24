@@ -91,6 +91,9 @@ namespace {
 using CliEntryPoint = int (*)(int, char**);
 
 int RunImGuiSmokeTest();
+int RunAiActivityChannelSmoke();
+int RunPromptChannelSmoke(const std::vector<std::string>& args);
+int RunEventChannelSmoke(const std::vector<std::string>& args);
 
 std::vector<std::string> CurrentCommandLineArgs() {
     int count = 0;
@@ -135,6 +138,9 @@ void PrintCliUsage(FILE* out = stdout) {
         "  cortex --version               Print preview version\n"
         "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
         "  cortex --window-smoke-test     Run native Win32 + D3D11 backend smoke\n"
+        "  cortex --ai-activity-smoke     Validate cross-process AI activity IPC\n"
+        "  cortex --prompt-channel-smoke  Answer a private prompt for --pid\n"
+        "  cortex --event-channel-smoke   Observe a runtime event for --pid\n"
         "  cortex mcp [options]           Run the native/HTTP MCP stdio bridge\n"
         "  cortex inject <target> [dll]   Inject cortex_core.dll\n"
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
@@ -158,6 +164,12 @@ std::optional<int> RunCliMode(std::vector<std::string>& args) {
     }
     if (command == "--smoke-test" || command == "smoke-test")
         return RunImGuiSmokeTest();
+    if (command == "--ai-activity-smoke")
+        return RunAiActivityChannelSmoke();
+    if (command == "--prompt-channel-smoke")
+        return RunPromptChannelSmoke(args);
+    if (command == "--event-channel-smoke")
+        return RunEventChannelSmoke(args);
     if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
     if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
@@ -468,6 +480,269 @@ struct AppState {
         selectedTarget = -1;
     }
 };
+
+bool SmokeArgValue(const std::vector<std::string>& args,
+                   const std::string& name, std::string& value) {
+    for (size_t i = 2; i + 1 < args.size(); ++i) {
+        if (args[i] == name) {
+            value = args[i + 1];
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AttachSmokeTarget(AppState& app, DWORD pid, std::string& error) {
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        app.RefreshTargets();
+        for (const auto& target : app.targets) {
+            if (target.processId != pid) continue;
+            if (!app.sessions.Attach(target, &error)) return false;
+            app.OnAttached(target);
+            return true;
+        }
+        Sleep(100);
+    }
+    error = "target_not_found";
+    return false;
+}
+
+int RunPromptChannelSmoke(const std::vector<std::string>& args) {
+    std::string pidText;
+    std::string answer = "imgui-prompt-e2e";
+    SmokeArgValue(args, "--answer", answer);
+    if (!SmokeArgValue(args, "--pid", pidText)) {
+        std::fputs("--prompt-channel-smoke requires --pid <target pid>\n", stderr);
+        return 2;
+    }
+
+    DWORD pid = 0;
+    try { pid = static_cast<DWORD>(std::stoul(pidText)); }
+    catch (...) { pid = 0; }
+    if (!pid) {
+        std::fputs("invalid prompt smoke pid\n", stderr);
+        return 2;
+    }
+
+    AppState app;
+    std::string error;
+    if (!AttachSmokeTarget(app, pid, error)) {
+        std::fprintf(stderr, "prompt smoke attach failed: %s\n", error.c_str());
+        return 3;
+    }
+
+    for (int attempt = 0; attempt < 60 && !app.promptModel.Active(); ++attempt) {
+        app.promptModel.Refresh(&error);
+        if (!app.promptModel.Active()) Sleep(100);
+    }
+    if (!app.promptModel.Active()) {
+        std::fprintf(stderr, "prompt smoke did not observe an active prompt: %s\n",
+                     error.c_str());
+        return 4;
+    }
+
+    const int promptId = app.promptModel.Id();
+    if (!app.promptModel.Answer(answer, &error)) {
+        std::fprintf(stderr, "prompt smoke answer failed: %s\n", error.c_str());
+        return 5;
+    }
+
+    std::printf("PASS: ImGui prompt channel answered prompt %d\n", promptId);
+    return 0;
+}
+
+int RunEventChannelSmoke(const std::vector<std::string>& args) {
+    std::string pidText;
+    std::string expected = "prompt.answered";
+    SmokeArgValue(args, "--expect", expected);
+    if (!SmokeArgValue(args, "--pid", pidText)) {
+        std::fputs("--event-channel-smoke requires --pid <target pid>\n", stderr);
+        return 2;
+    }
+
+    DWORD pid = 0;
+    try { pid = static_cast<DWORD>(std::stoul(pidText)); }
+    catch (...) { pid = 0; }
+    if (!pid) {
+        std::fputs("invalid event smoke pid\n", stderr);
+        return 2;
+    }
+
+    AppState app;
+    std::string error;
+    if (!AttachSmokeTarget(app, pid, error)) {
+        std::fprintf(stderr, "event smoke attach failed: %s\n", error.c_str());
+        return 3;
+    }
+    if (!app.payload.Ready() && !app.payload.TryConnectExisting(&error)) {
+        std::fprintf(stderr, "event smoke runtime connect failed: %s\n", error.c_str());
+        return 4;
+    }
+
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        if (app.runtimeEventsModel.RefreshEvents(&error)) {
+            for (const auto& event : app.runtimeEventsModel.Events()) {
+                if (event.type == expected) {
+                    std::printf("PASS: ImGui event channel observed %s\n", expected.c_str());
+                    return 0;
+                }
+            }
+        }
+        Sleep(100);
+    }
+
+    std::fprintf(stderr, "event smoke did not observe %s: %s\n",
+                 expected.c_str(), error.c_str());
+    return 5;
+}
+
+struct SmokeMcpChild {
+    PROCESS_INFORMATION process{};
+    HANDLE input = INVALID_HANDLE_VALUE;
+    HANDLE output = INVALID_HANDLE_VALUE;
+
+    ~SmokeMcpChild() {
+        if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
+        if (output != INVALID_HANDLE_VALUE) CloseHandle(output);
+        if (process.hThread) CloseHandle(process.hThread);
+        if (process.hProcess) CloseHandle(process.hProcess);
+    }
+};
+
+bool StartMcpSmokeChild(SmokeMcpChild& child, std::string& error) {
+    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE childInput = INVALID_HANDLE_VALUE;
+    HANDLE childOutput = INVALID_HANDLE_VALUE;
+    if (!CreatePipe(&childInput, &child.input, &security, 0) ||
+        !CreatePipe(&child.output, &childOutput, &security, 0)) {
+        error = "pipe_create_failed";
+        if (childInput != INVALID_HANDLE_VALUE) CloseHandle(childInput);
+        if (childOutput != INVALID_HANDLE_VALUE) CloseHandle(childOutput);
+        return false;
+    }
+    SetHandleInformation(child.input, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(child.output, HANDLE_FLAG_INHERIT, 0);
+
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(
+        nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) {
+        error = "module_path_failed";
+        CloseHandle(childInput);
+        CloseHandle(childOutput);
+        return false;
+    }
+    executable.resize(length);
+
+    std::wstring command = L"\"" + executable + L"\" mcp --tools all";
+    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
+    mutableCommand.push_back(L'\0');
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = childInput;
+    startup.hStdOutput = childOutput;
+    startup.hStdError = childOutput;
+
+    const BOOL started = CreateProcessW(
+        nullptr, mutableCommand.data(), nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child.process);
+    CloseHandle(childInput);
+    CloseHandle(childOutput);
+    if (!started) {
+        error = "mcp_child_start_failed:" + std::to_string(GetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool WriteSmokeJson(HANDLE input, const char* json) {
+    const std::string payload = std::string(json ? json : "") + "\n";
+    DWORD written = 0;
+    return WriteFile(input, payload.data(), static_cast<DWORD>(payload.size()),
+                     &written, nullptr) &&
+           written == payload.size();
+}
+
+void DrainSmokeOutput(HANDLE output, std::string& text) {
+    for (;;) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(output, nullptr, 0, nullptr, &available, nullptr) ||
+            available == 0)
+            return;
+        char buffer[4096];
+        const DWORD wanted = (std::min)(available, static_cast<DWORD>(sizeof(buffer)));
+        DWORD read = 0;
+        if (!ReadFile(output, buffer, wanted, &read, nullptr) || read == 0) return;
+        text.append(buffer, buffer + read);
+    }
+}
+
+int RunAiActivityChannelSmoke() {
+    cortex::application::AiActivityModel activity;
+    if (!activity.Listening()) {
+        std::fputs("AI activity smoke could not own the native activity endpoint\n", stderr);
+        return 2;
+    }
+
+    SmokeMcpChild child;
+    std::string error;
+    if (!StartMcpSmokeChild(child, error)) {
+        std::fprintf(stderr, "AI activity smoke child start failed: %s\n", error.c_str());
+        return 3;
+    }
+
+    constexpr const char* initialize =
+        R"json({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"imgui-ai-activity-smoke","version":"1"}}})json";
+    constexpr const char* initialized =
+        R"json({"jsonrpc":"2.0","method":"notifications/initialized"})json";
+    constexpr const char* toolCall =
+        R"json({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex_targets","arguments":{}}})json";
+
+    if (!WriteSmokeJson(child.input, initialize) ||
+        !WriteSmokeJson(child.input, initialized) ||
+        !WriteSmokeJson(child.input, toolCall)) {
+        std::fputs("AI activity smoke could not write MCP requests\n", stderr);
+        TerminateProcess(child.process.hProcess, 1);
+        return 4;
+    }
+
+    bool sawResponse = false;
+    bool sawStarted = false;
+    bool sawCompleted = false;
+    std::string output;
+    const ULONGLONG deadline = GetTickCount64() + 8000;
+    while (GetTickCount64() < deadline &&
+           !(sawResponse && sawStarted && sawCompleted)) {
+        DrainSmokeOutput(child.output, output);
+        if (output.find("\"id\":2") != std::string::npos) sawResponse = true;
+        activity.Poll(500);
+        for (const auto& row : activity.Activities()) {
+            if (row.tool != "cortex_targets") continue;
+            if (row.phase == "started") sawStarted = true;
+            if (row.phase == "completed") sawCompleted = true;
+        }
+        Sleep(10);
+    }
+
+    CloseHandle(child.input);
+    child.input = INVALID_HANDLE_VALUE;
+    WaitForSingleObject(child.process.hProcess, 3000);
+    activity.Poll(500);
+
+    if (!sawResponse || !sawStarted || !sawCompleted ||
+        activity.ActiveTaskCount() != 0) {
+        std::fprintf(stderr,
+                     "AI activity smoke missed lifecycle response=%d started=%d completed=%d\n",
+                     sawResponse ? 1 : 0, sawStarted ? 1 : 0, sawCompleted ? 1 : 0);
+        TerminateProcess(child.process.hProcess, 1);
+        return 5;
+    }
+
+    std::puts("PASS: ImGui AI activity observed a cross-process MCP tool lifecycle");
+    return 0;
+}
 
 void DrawApp(AppState& app);
 
@@ -1311,6 +1586,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     AppState app;
     bool done = false;
     int smokeFrames = 0;
+    const ULONGLONG windowSmokeStarted = GetTickCount64();
     while (!done) {
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
@@ -1340,8 +1616,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                              static_cast<unsigned long>(presentResult));
                 done = true;
                 smokeFrames = -100;
-            } else if (++smokeFrames >= 3) {
-                done = true;
+            } else {
+                ++smokeFrames;
+                if (smokeFrames >= 3 &&
+                    GetTickCount64() - windowSmokeStarted >= 250)
+                    done = true;
             }
         }
     }

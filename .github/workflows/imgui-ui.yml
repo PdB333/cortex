@@ -102,6 +102,11 @@ jobs:
             throw "Unexpected native window smoke output: $windowSmoke"
           }
 
+          $activitySmoke = Invoke-CortexCli @("--ai-activity-smoke")
+          if ($activitySmoke -notmatch "PASS: ImGui AI activity observed a cross-process MCP tool lifecycle") {
+            throw "Unexpected AI activity smoke output: $activitySmoke"
+          }
+
           $exe = Resolve-Path "build/imgui-ui/cortex.exe"
 
           $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -153,6 +158,90 @@ jobs:
       - name: Build x64 runtime and E2E target
         shell: msys2 {0}
         run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+
+      - name: Validate native prompt and event channels
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build/imgui-ui/cortex.exe").Path
+          $root = (Resolve-Path "build/runtime-x64").Path
+          $targetPath = Join-Path $root "cortex_test_target_x64.exe"
+          $corePath = Join-Path $root "cortex_core.dll"
+          $target = Start-Process -FilePath $targetPath -PassThru
+          $mcp = $null
+          try {
+            Start-Sleep -Milliseconds 750
+            & $exe inject "$($target.Id)" $corePath
+            if ($LASTEXITCODE -ne 0) { throw "ImGui injector command failed" }
+
+            $tokenPath = Join-Path $root ("cortex.mcp.{0}.token" -f $target.Id)
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 60; $attempt++) {
+              if (Test-Path $tokenPath) { $ready = $true; break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $ready) { throw "Private MCP token was not created: $tokenPath" }
+
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $exe
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath)) {
+              [void]$psi.ArgumentList.Add($arg)
+            }
+            $mcp = [System.Diagnostics.Process]::Start($psi)
+
+            function Invoke-McpLine([string]$Payload) {
+              $mcp.StandardInput.WriteLine($Payload)
+              $line = $mcp.StandardOutput.ReadLine()
+              if (-not $line) { throw "MCP produced no response: $($mcp.StandardError.ReadToEnd())" }
+              return ($line | ConvertFrom-Json)
+            }
+
+            $init = Invoke-McpLine '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"imgui-private-channel-smoke","version":"1"}}}'
+            if ($init.id -ne 1 -or -not $init.result) { throw "Invalid MCP initialize response" }
+            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+
+            $promptRequest = @{
+              jsonrpc = "2.0"
+              id = 2
+              method = "tools/call"
+              params = @{
+                name = "prompt_value_change"
+                arguments = @{
+                  label = "ImGui prompt E2E"
+                  current_value = "before"
+                  target_value = "after"
+                }
+              }
+            } | ConvertTo-Json -Compress -Depth 8
+            $created = Invoke-McpLine $promptRequest
+            if ($created.id -ne 2 -or $created.result.isError) {
+              throw "Failed to create private prompt: $($created | ConvertTo-Json -Compress -Depth 8)"
+            }
+
+            $promptOutput = & $exe --prompt-channel-smoke --pid "$($target.Id)" --answer "imgui-e2e" 2>&1
+            $promptText = $promptOutput -join [Environment]::NewLine
+            if ($LASTEXITCODE -ne 0 -or $promptText -notmatch "PASS: ImGui prompt channel answered prompt") {
+              throw "Prompt channel smoke failed: $promptText"
+            }
+
+            $eventOutput = & $exe --event-channel-smoke --pid "$($target.Id)" --expect "prompt.answered" 2>&1
+            $eventText = $eventOutput -join [Environment]::NewLine
+            if ($LASTEXITCODE -ne 0 -or $eventText -notmatch "PASS: ImGui event channel observed prompt.answered") {
+              throw "Event channel smoke failed: $eventText"
+            }
+          } finally {
+            if ($mcp) {
+              try { $mcp.StandardInput.Close() } catch {}
+              if (-not $mcp.WaitForExit(3000)) { try { $mcp.Kill() } catch {} }
+              $mcp.Dispose()
+            }
+            if ($target -and -not $target.HasExited) {
+              Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Stage x64 portable preview
         shell: msys2 {0}
