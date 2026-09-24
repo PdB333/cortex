@@ -3,7 +3,9 @@
 #include "workspace.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -64,7 +66,7 @@ public:
         }
     }
 
-    void ApplyPreset(WorkspacePreset preset) {
+    void ApplyPreset(WorkspacePreset preset, bool rebuildLayout = true) {
         for (auto& entry : entries_) entry.open = false;
 
         switch (preset) {
@@ -92,6 +94,8 @@ public:
 
         SetOpen("bottom", true);
         preset_ = preset;
+        pendingFocus_ = PrimaryWorkspace(preset);
+        if (rebuildLayout) layoutDirty_ = true;
     }
 
     WorkspacePreset Preset() const { return preset_; }
@@ -150,6 +154,83 @@ public:
             if (ImGui::MenuItem(PresetName(preset), nullptr, selected))
                 ApplyPreset(preset);
         }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Rebuild current layout"))
+            layoutDirty_ = true;
+    }
+
+    void PrepareDockLayout(ImGuiID dockspaceId, const ImVec2& dockspaceSize) {
+        if (!initialLayoutChecked_) {
+            initialLayoutChecked_ = true;
+            const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspaceId);
+            if (!node || (!node->ChildNodes[0] && !node->ChildNodes[1]))
+                layoutDirty_ = true;
+        }
+
+        if (!layoutDirty_) return;
+
+        ImGui::DockBuilderRemoveNode(dockspaceId);
+        ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
+
+        ImGuiID center = dockspaceId;
+        const ImGuiID bottom =
+            ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
+        const ImGuiID left =
+            ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
+        const ImGuiID right =
+            ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
+
+        std::vector<std::string> docked;
+        DockMany(bottom, {"bottom"}, docked);
+
+        switch (preset_) {
+            case WorkspacePreset::Memory:
+                DockMany(left, {"addresses", "modules"}, docked);
+                DockMany(center, {"memory", "memory-browser"}, docked);
+                DockMany(right, {"watches"}, docked);
+                break;
+
+            case WorkspacePreset::Debug:
+                DockMany(left, {"modules", "watches"}, docked);
+                DockMany(center, {"disassembly", "memory-browser"}, docked);
+                DockMany(right, {"debugger", "patches"}, docked);
+                break;
+
+            case WorkspacePreset::ReverseEngineering:
+                DockMany(left, {"project", "symbols", "structures", "pointermaps", "snapshots"}, docked);
+                DockMany(center, {"re", "disassembly", "memory-browser"}, docked);
+                DockMany(right, {"patches", "instrumentation", "runtime"}, docked);
+                break;
+
+            case WorkspacePreset::Trace:
+                DockMany(left, {"watches"}, docked);
+                DockMany(center, {"trace", "disassembly"}, docked);
+                DockMany(right, {"debugger", "memory-browser"}, docked);
+                break;
+
+            case WorkspacePreset::Automation:
+                DockMany(left, {"scripts", "input"}, docked);
+                DockMany(center, {"actions", "events"}, docked);
+                DockMany(right, {"watches", "runtime"}, docked);
+                break;
+
+            case WorkspacePreset::Runtime:
+                DockMany(left, {"modules", "sessions", "settings"}, docked);
+                DockMany(center, {"runtime", "diagnostics", "network"}, docked);
+                DockMany(right, {"screenshots", "instrumentation", "actions", "watches"}, docked);
+                break;
+        }
+
+        for (const auto& entry : entries_) {
+            if (!entry.open) continue;
+            const std::string id = entry.workspace->Id();
+            if (std::find(docked.begin(), docked.end(), id) != docked.end()) continue;
+            ImGui::DockBuilderDockWindow(entry.workspace->Title(), center);
+        }
+
+        ImGui::DockBuilderFinish(dockspaceId);
+        layoutDirty_ = false;
     }
 
     void DrawDockWindows(UiContext& context) {
@@ -185,6 +266,31 @@ private:
         bool open = false;
     };
 
+    static const char* PrimaryWorkspace(WorkspacePreset preset) {
+        switch (preset) {
+            case WorkspacePreset::Memory: return "memory";
+            case WorkspacePreset::Debug: return "disassembly";
+            case WorkspacePreset::ReverseEngineering: return "re";
+            case WorkspacePreset::Trace: return "trace";
+            case WorkspacePreset::Automation: return "scripts";
+            case WorkspacePreset::Runtime: return "runtime";
+        }
+        return "memory";
+    }
+
+    void DockMany(ImGuiID node,
+                  std::initializer_list<const char*> ids,
+                  std::vector<std::string>& docked) {
+        for (const char* id : ids) {
+            for (const auto& entry : entries_) {
+                if (id != std::string(entry.workspace->Id()) || !entry.open) continue;
+                ImGui::DockBuilderDockWindow(entry.workspace->Title(), node);
+                docked.emplace_back(id);
+                break;
+            }
+        }
+    }
+
     void OpenMany(std::initializer_list<const char*> ids) {
         for (const char* id : ids) SetOpen(id, true);
     }
@@ -192,6 +298,8 @@ private:
     std::vector<Entry> entries_;
     WorkspacePreset preset_ = WorkspacePreset::Memory;
     std::string pendingFocus_;
+    bool initialLayoutChecked_ = false;
+    bool layoutDirty_ = false;
 };
 
 } // namespace cortex::ui

@@ -425,7 +425,7 @@ struct AppState {
         workspaces.Add<cortex::ui::PatchesWorkspace>();
         workspaces.Add<cortex::ui::EventsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
-        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
+        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 
     void OnAttached(const cortex::target::TargetDescriptor& target) {
@@ -1522,6 +1522,7 @@ void DrawApp(AppState& app) {
     dockSize.y = std::max(1.0f, dockSize.y - statusHeight);
 
     const ImGuiID dockspaceId = ImGui::GetID("CortexDockSpace");
+    app.workspaces.PrepareDockLayout(dockspaceId, dockSize);
     ImGui::DockSpace(dockspaceId, dockSize, ImGuiDockNodeFlags_None);
 
     ImGui::Separator();
