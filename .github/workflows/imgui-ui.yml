@@ -92,6 +92,11 @@ jobs:
           if ($help -notmatch "cortex mcp") { throw "MCP command missing from help" }
           if ($help -notmatch "cortex diagnose") { throw "diagnose command missing from help" }
 
+          $smoke = Invoke-CortexCli @("--smoke-test")
+          if ($smoke -notmatch "PASS: deterministic ImGui application smoke") {
+            throw "Unexpected ImGui smoke output: $smoke"
+          }
+
       - name: Configure x64 Cortex runtime
         shell: msys2 {0}
         run: >-

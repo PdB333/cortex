@@ -43,6 +43,12 @@ public:
         return false;
     }
 
+    bool Has(const std::string& id) const {
+        for (const auto& entry : entries_)
+            if (id == entry.workspace->Id()) return true;
+        return false;
+    }
+
     bool IsOpen(const std::string& id) const {
         for (const auto& entry : entries_)
             if (id == entry.workspace->Id()) return entry.open;

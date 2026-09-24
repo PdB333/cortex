@@ -89,6 +89,8 @@ namespace {
 
 using CliEntryPoint = int (*)(int, char**);
 
+int RunImGuiSmokeTest();
+
 std::vector<std::string> CurrentCommandLineArgs() {
     int count = 0;
     LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &count);
@@ -130,6 +132,7 @@ void PrintCliUsage(FILE* out = stdout) {
         "Usage:\n"
         "  cortex                         Launch the ImGui desktop UI\n"
         "  cortex --version               Print preview version\n"
+        "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
         "  cortex mcp [options]           Run the native/HTTP MCP stdio bridge\n"
         "  cortex inject <target> [dll]   Inject cortex_core.dll\n"
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
@@ -151,6 +154,8 @@ std::optional<int> RunCliMode(std::vector<std::string>& args) {
         std::puts("cortex 0.8.0-dev-imgui");
         return 0;
     }
+    if (command == "--smoke-test" || command == "smoke-test")
+        return RunImGuiSmokeTest();
     if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
     if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
@@ -446,6 +451,66 @@ struct AppState {
         selectedTarget = -1;
     }
 };
+
+int RunImGuiSmokeTest() {
+    AppState app;
+
+    constexpr const char* requiredWorkspaces[] = {
+        "overview", "bottom", "memory", "memory-browser", "disassembly",
+        "modules", "debugger", "runtime", "sessions", "settings", "project",
+        "symbols", "structures", "pointermaps", "snapshots", "re",
+        "instrumentation", "watches", "actions", "network", "diagnostics",
+        "scripts", "input", "screenshots", "patches", "events", "trace"
+    };
+    for (const char* id : requiredWorkspaces) {
+        if (!app.workspaces.Has(id)) {
+            std::fprintf(stderr, "smoke: missing workspace %s\n", id);
+            return 2;
+        }
+    }
+
+    constexpr cortex::ui::WorkspacePreset presets[] = {
+        cortex::ui::WorkspacePreset::Memory,
+        cortex::ui::WorkspacePreset::Debug,
+        cortex::ui::WorkspacePreset::ReverseEngineering,
+        cortex::ui::WorkspacePreset::Trace,
+        cortex::ui::WorkspacePreset::Automation,
+        cortex::ui::WorkspacePreset::Runtime
+    };
+    for (const auto preset : presets) {
+        app.workspaces.ApplyPreset(preset);
+        if (!app.workspaces.IsOpen("bottom")) {
+            std::fputs("smoke: bottom panel must remain open in every preset\n", stderr);
+            return 3;
+        }
+    }
+    app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    io.DeltaTime = 1.0f / 60.0f;
+    io.Fonts->AddFontDefault();
+    io.Fonts->Build();
+
+    ImGui::NewFrame();
+    DrawApp(app);
+    ImGui::Render();
+
+    const ImDrawData* drawData = ImGui::GetDrawData();
+    const bool rendered = drawData != nullptr && drawData->Valid;
+    ImGui::DestroyContext();
+
+    if (!rendered) {
+        std::fputs("smoke: ImGui frame did not render\n", stderr);
+        return 4;
+    }
+
+    std::puts("PASS: deterministic ImGui application smoke");
+    return 0;
+}
 
 std::string Trim(std::string value) {
     auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };

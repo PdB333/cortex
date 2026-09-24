@@ -95,7 +95,7 @@ Target presets:
 - [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 24 full / 4 partial / 0 missing)
 - [ ] map every Qt Q_INVOKABLE workflow to ImGui/application-model coverage
 - [ ] x64/x86 runtime and helper E2E
-- [ ] GUI smoke tests and deterministic test mode
+- [~] deterministic headless ImGui smoke mode runs in CI; native Win32/DX window smoke remains
 - [ ] portable dependency-closure validation
 - [ ] performance/memory/startup measurements versus Qt
 - [ ] Windows packaging and release workflow
