@@ -11,6 +11,7 @@
 #include "application/re_model.h"
 #include "application/runtime_events_model.h"
 #include "application/pointer_maps_model.h"
+#include "application/prompt_model.h"
 #include "application/snapshots_model.h"
 #include "application/structures_model.h"
 #include "application/symbols_model.h"
@@ -302,6 +303,7 @@ struct AppState {
     cortex::application::ScreenshotModel screenshotModel;
     cortex::application::RuntimeEventsModel runtimeEventsModel;
     cortex::application::PatchesModel patchesModel;
+    cortex::application::PromptModel promptModel;
     cortex::ui::UiContext ui;
     cortex::ui::WorkspaceRegistry workspaces;
 
@@ -312,6 +314,8 @@ struct AppState {
     bool requestGoTo = false;
     char commandFilter[160] = {};
     char goToExpression[160] = {};
+    char promptAnswer[512] = {};
+    int promptAnswerId = -1;
 
     AppState()
         : sessions(catalog),
@@ -337,7 +341,8 @@ struct AppState {
           inputModel(payload),
           screenshotModel(payload),
           runtimeEventsModel(payload),
-          patchesModel(payload) {
+          patchesModel(payload),
+          promptModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
 
         ui.sessions = &sessions;
@@ -416,6 +421,7 @@ struct AppState {
         screenshotModel.Reset();
         runtimeEventsModel.Reset();
         patchesModel.Reset();
+        promptModel.Reset();
         ui.mutationAllowed = false;
         ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
@@ -557,6 +563,7 @@ void ResetTargetState(AppState& app) {
     app.screenshotModel.Reset();
     app.runtimeEventsModel.Reset();
     app.patchesModel.Reset();
+    app.promptModel.Reset();
     app.sessions.Detach();
     app.payload.Reset();
     app.ui.mutationAllowed = false;
@@ -924,6 +931,111 @@ void DrawProcessPicker(AppState& app) {
     ImGui::EndPopup();
 }
 
+void DrawPromptSurface(AppState& app) {
+    app.promptModel.Poll();
+
+    if (app.promptModel.Active() &&
+        app.promptAnswerId != app.promptModel.Id()) {
+        app.promptAnswerId = app.promptModel.Id();
+        std::memset(app.promptAnswer, 0, sizeof(app.promptAnswer));
+        ImGui::OpenPopup("Human prompt");
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal(
+            "Human prompt", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoSavedSettings))
+        return;
+
+    if (!app.promptModel.Active()) {
+        app.promptAnswerId = -1;
+        ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+
+    const bool timedTest = app.promptModel.Kind() == "timed_test";
+    const bool answerReady = !timedTest || app.promptModel.RemainingMs() <= 0;
+
+    ImGui::TextUnformatted(timedTest
+        ? "Human test requested"
+        : "Human action requested");
+    ImGui::SameLine();
+    ImGui::TextDisabled("Prompt #%d", app.promptModel.Id());
+    ImGui::Separator();
+
+    if (timedTest) {
+        ImGui::TextWrapped("%s", app.promptModel.Message().c_str());
+    } else {
+        ImGui::TextUnformatted(app.promptModel.Label().c_str());
+        ImGui::Spacing();
+        ImGui::TextDisabled("%s",
+            app.promptModel.CurrentValue().empty()
+                ? "Current value not provided"
+                : app.promptModel.CurrentValue().c_str());
+        ImGui::SameLine();
+        ImGui::TextUnformatted("->");
+        ImGui::SameLine();
+        ImGui::Text("%s", app.promptModel.TargetValue().c_str());
+    }
+
+    if (timedTest) {
+        ImGui::Spacing();
+        if (!answerReady) {
+            const int64_t seconds =
+                std::max<int64_t>(1, (app.promptModel.RemainingMs() + 999) / 1000);
+            ImGui::Text("Answer unlocks in %llds",
+                        static_cast<long long>(seconds));
+        }
+
+        ImGui::BeginDisabled(!answerReady);
+        ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue;
+        if (app.promptModel.AnswerType() == "number")
+            inputFlags |= ImGuiInputTextFlags_CharsScientific;
+        const bool submittedByEnter = ImGui::InputTextWithHint(
+            "##PromptAnswer",
+            app.promptModel.AnswerType() == "number"
+                ? "Enter the measured number"
+                : "Enter the result",
+            app.promptAnswer, sizeof(app.promptAnswer), inputFlags);
+        ImGui::EndDisabled();
+
+        if (submittedByEnter && answerReady && app.promptAnswer[0] != '\0') {
+            std::string error;
+            if (app.promptModel.Answer(app.promptAnswer, &error)) {
+                app.promptAnswerId = -1;
+                ImGui::CloseCurrentPopup();
+            } else {
+                app.ui.status = "Prompt answer failed: " + error;
+            }
+        }
+    }
+
+    if (!app.promptModel.LastError().empty()) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("Error: %s", app.promptModel.LastError().c_str());
+    }
+
+    ImGui::Spacing();
+    const bool canSubmit =
+        !timedTest || (answerReady && app.promptAnswer[0] != '\0');
+    ImGui::BeginDisabled(!canSubmit);
+    if (ImGui::Button(timedTest ? "Submit result" : "Done", ImVec2(130, 34))) {
+        std::string error;
+        const std::string answer = timedTest ? app.promptAnswer : "ack";
+        if (app.promptModel.Answer(answer, &error)) {
+            app.promptAnswerId = -1;
+            ImGui::CloseCurrentPopup();
+        } else {
+            app.ui.status = "Prompt answer failed: " + error;
+        }
+    }
+    ImGui::EndDisabled();
+
+    ImGui::EndPopup();
+}
+
 void DrawHeader(AppState& app) {
     const auto session = app.sessions.Active();
 
@@ -1058,6 +1170,7 @@ void DrawApp(AppState& app) {
     DrawProcessPicker(app);
     DrawCommandPalette(app);
     DrawGoTo(app);
+    DrawPromptSurface(app);
     ImGui::End();
 
     app.workspaces.DrawDockWindows(app.ui);

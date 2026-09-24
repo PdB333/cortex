@@ -30,12 +30,12 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity and Patches models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity, Prompt and Patches models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
 - [x] project/session storage paths and retention settings
-- [ ] human Prompt surface and private answer route
+- [x] human Prompt surface + private answer route (value-change and timed-test flows)
 - [x] native AI activity listener/history (Win32 mailslot, no Qt dependency)
 - [ ] true Qt-era MCP host mode parity (dynamic targets, operations, events)
 - [ ] crash-report service integration

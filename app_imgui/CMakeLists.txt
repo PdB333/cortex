@@ -86,6 +86,7 @@ add_executable(cortex_imgui WIN32
     application/symbols_model.cpp
     application/structures_model.cpp
     application/pointer_maps_model.cpp
+    application/prompt_model.cpp
     application/snapshots_model.cpp
     application/re_model.cpp
     application/instrumentation_model.cpp

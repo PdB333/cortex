@@ -56,7 +56,7 @@ of the parity contract because they are shared by multiple Qt workspaces.
 | `AddressContextMenu.qml` | Full | shared direct actions across Scanner, Addresses, Memory, Disassembly and debugger hit-log |
 | `BottomPanel.qml` | Full | dockable six-tab bottom panel using the migrated application models |
 | navigation history | Full | global address history shared across ImGui workspaces (Alt+Left / Alt+Right) |
-| `PromptSurface.qml` / private answer route | Missing | human prompt surface and answer path |
+| `PromptSurface.qml` / private answer route | Full | modal ImGui prompt using the existing private `/prompt/*` routes |
 | AI activity listener/history | Full | native MCP publisher + ImGui history model over a local Win32 mailslot |
 | crash-report service UI/integration | Missing | expose/report startup/runtime crashes without Qt dependency |
 
