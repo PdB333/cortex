@@ -92,7 +92,7 @@ Target presets:
 - [x] runtime/API event console
 
 ### 7. Parity hardening and release gate
-- [ ] map every Qt workspace to direct ImGui coverage (0 missing / 0 partial)
+- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 24 full / 4 partial / 0 missing)
 - [ ] map every Qt Q_INVOKABLE workflow to ImGui/application-model coverage
 - [ ] x64/x86 runtime and helper E2E
 - [ ] GUI smoke tests and deterministic test mode
