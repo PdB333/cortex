@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(cortex_imgui_app LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -200,3 +202,23 @@ endif()
 set_target_properties(cortex_imgui PROPERTIES
     OUTPUT_NAME "cortex"
 )
+
+if(BUILD_TESTING)
+    add_test(
+        NAME cortex_imgui_workspace_suite
+        COMMAND $<TARGET_FILE:cortex_imgui> --gui-workspace-suite
+    )
+    set_tests_properties(cortex_imgui_workspace_suite PROPERTIES TIMEOUT 30)
+
+    add_test(
+        NAME cortex_imgui_window_smoke
+        COMMAND $<TARGET_FILE:cortex_imgui> --window-smoke-test
+    )
+    set_tests_properties(cortex_imgui_window_smoke PROPERTIES TIMEOUT 30)
+
+    add_test(
+        NAME cortex_imgui_ai_activity_smoke
+        COMMAND $<TARGET_FILE:cortex_imgui> --ai-activity-smoke
+    )
+    set_tests_properties(cortex_imgui_ai_activity_smoke PROPERTIES TIMEOUT 30)
+endif()

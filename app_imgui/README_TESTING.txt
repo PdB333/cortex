@@ -69,3 +69,24 @@ Cross-bitness:
 Context menus:
   - Right-click addresses/registers/stack values for Open/Follow, Monitor,
     Debugger, Reverse Engineering, Addresses and Copy actions.
+
+
+GUI validation commands:
+  cortex.exe --gui-workspace-suite
+      Renders all 28 workspaces and all 6 presets headlessly, validates unique
+      workspace ids/titles, docking and Back/Forward navigation.
+  cortex.exe --gui-attached-suite --pid <pid>
+      Uses a real process, attaches the debugger, reads live memory, disassembles
+      a live code address, renders every workspace and lets live refresh paths run.
+  cortex.exe --gui-multi-session-suite --pid-a <pid> --pid-b <pid>
+      Keeps two processes attached and switches the active target repeatedly while
+      rendering Memory/Debug/Sessions layouts.
+  cortex.exe --gui-cross-bitness-suite --pid <x86-pid>
+      Validates the x64 GUI -> x86 runtime/helper path, runtime verification,
+      reconnect and RE/Runtime workspace rendering.
+
+CI:
+  The "Cortex ImGui GUI Test Suite" workflow runs source contracts, a Debug
+  CTest build with ImGui assertions, the full Release suite against real x64/x86
+  targets, then repeats the integration suite from a clean-PATH portable bundle.
+  JSON evidence is uploaded as cortex-imgui-gui-test-evidence.

@@ -1,4 +1,4 @@
-﻿name: P2 Contracts
+name: P2 Contracts
 
 on:
   push:
@@ -6,7 +6,8 @@ on:
       - agent/p2-mcp-contracts
       - agent/final-integration
       - refactor/native-mcp-tool-executor
-      - next/unified-cortex-ui
+      - test/imgui-full-migration
+      - main
   pull_request:
     paths:
       - "core/api/mcp_contract.h"

@@ -37,8 +37,10 @@ public:
     bool Select(const std::string& id) {
         for (auto& entry : entries_) {
             if (id == entry.workspace->Id()) {
+                const bool wasOpen = entry.open;
                 entry.open = true;
                 pendingFocus_ = id;
+                if (!wasOpen) layoutDirty_ = true;
                 return true;
             }
         }
@@ -60,10 +62,69 @@ public:
     void SetOpen(const std::string& id, bool open) {
         for (auto& entry : entries_) {
             if (id == entry.workspace->Id()) {
+                const bool changed = entry.open != open;
                 entry.open = open;
+                if (changed && open) layoutDirty_ = true;
                 return;
             }
         }
+    }
+
+    size_t Count() const { return entries_.size(); }
+
+    std::vector<std::string> Ids() const {
+        std::vector<std::string> ids;
+        ids.reserve(entries_.size());
+        for (const auto& entry : entries_)
+            ids.emplace_back(entry.workspace->Id());
+        return ids;
+    }
+
+    void CloseAll() {
+        for (auto& entry : entries_) entry.open = false;
+        pendingFocus_.clear();
+    }
+
+    bool ValidateUnique(std::string* error = nullptr) const {
+        if (error) error->clear();
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            const std::string id = entries_[i].workspace->Id();
+            const std::string title = entries_[i].workspace->Title();
+            if (id.empty() || title.empty()) {
+                if (error) *error = "workspace_empty_id_or_title";
+                return false;
+            }
+            for (size_t j = i + 1; j < entries_.size(); ++j) {
+                if (id == entries_[j].workspace->Id()) {
+                    if (error) *error = "workspace_duplicate_id:" + id;
+                    return false;
+                }
+                if (title == entries_[j].workspace->Title()) {
+                    if (error) *error = "workspace_duplicate_title:" + title;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool ValidateOpenWindowsDocked(std::string* error = nullptr) const {
+        if (error) error->clear();
+        for (const auto& entry : entries_) {
+            if (!entry.open) continue;
+            ImGuiWindow* window = ImGui::FindWindowByName(entry.workspace->Title());
+            if (!window) {
+                if (error) *error =
+                    "workspace_window_missing:" + std::string(entry.workspace->Id());
+                return false;
+            }
+            if (!window->DockNode) {
+                if (error) *error =
+                    "workspace_not_docked:" + std::string(entry.workspace->Id());
+                return false;
+            }
+        }
+        return true;
     }
 
     void ApplyPreset(WorkspacePreset preset, bool rebuildLayout = true) {
@@ -135,8 +196,11 @@ public:
     void DrawViewMenu() {
         for (auto& entry : entries_) {
             bool open = entry.open;
-            if (ImGui::MenuItem(entry.workspace->Title(), nullptr, &open))
+            if (ImGui::MenuItem(entry.workspace->Title(), nullptr, &open)) {
+                const bool wasOpen = entry.open;
                 entry.open = open;
+                if (!wasOpen && open) layoutDirty_ = true;
+            }
         }
     }
 

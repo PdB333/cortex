@@ -92,6 +92,10 @@ namespace {
 using CliEntryPoint = int (*)(int, char**);
 
 int RunImGuiSmokeTest();
+int RunGuiWorkspaceSuite();
+int RunGuiAttachedSuite(const std::vector<std::string>& args);
+int RunGuiMultiSessionSuite(const std::vector<std::string>& args);
+int RunGuiCrossBitnessSuite(const std::vector<std::string>& args);
 int RunAiActivityChannelSmoke();
 int RunPromptChannelSmoke(const std::vector<std::string>& args);
 int RunEventChannelSmoke(const std::vector<std::string>& args);
@@ -138,6 +142,10 @@ void PrintCliUsage(FILE* out = stdout) {
         "  cortex                         Launch the ImGui desktop UI\n"
         "  cortex --version               Print preview version\n"
         "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
+        "  cortex --gui-workspace-suite   Render all workspaces/presets and validate docking\n"
+        "  cortex --gui-attached-suite    Exercise GUI against a live --pid target\n"
+        "  cortex --gui-multi-session-suite  Exercise two attached --pid-a/--pid-b targets\n"
+        "  cortex --gui-cross-bitness-suite  Validate x64 GUI -> x86 --pid runtime bootstrap\n"
         "  cortex --window-smoke-test     Run native Win32 + D3D11 backend smoke\n"
         "  cortex --ai-activity-smoke     Validate cross-process AI activity IPC\n"
         "  cortex --prompt-channel-smoke  Answer a private prompt for --pid\n"
@@ -165,6 +173,14 @@ std::optional<int> RunCliMode(std::vector<std::string>& args) {
     }
     if (command == "--smoke-test" || command == "smoke-test")
         return RunImGuiSmokeTest();
+    if (command == "--gui-workspace-suite")
+        return RunGuiWorkspaceSuite();
+    if (command == "--gui-attached-suite")
+        return RunGuiAttachedSuite(args);
+    if (command == "--gui-multi-session-suite")
+        return RunGuiMultiSessionSuite(args);
+    if (command == "--gui-cross-bitness-suite")
+        return RunGuiCrossBitnessSuite(args);
     if (command == "--ai-activity-smoke")
         return RunAiActivityChannelSmoke();
     if (command == "--prompt-channel-smoke")
@@ -748,63 +764,450 @@ int RunAiActivityChannelSmoke() {
 
 void DrawApp(AppState& app);
 
-int RunImGuiSmokeTest() {
-    AppState app;
+constexpr const char* kGuiRequiredWorkspaces[] = {
+    "overview", "bottom", "addresses", "memory", "memory-browser", "disassembly",
+    "modules", "debugger", "runtime", "sessions", "settings", "project",
+    "symbols", "structures", "pointermaps", "snapshots", "re",
+    "instrumentation", "watches", "actions", "network", "diagnostics",
+    "scripts", "input", "screenshots", "patches", "events", "trace"
+};
 
-    constexpr const char* requiredWorkspaces[] = {
-        "overview", "bottom", "addresses", "memory", "memory-browser", "disassembly",
-        "modules", "debugger", "runtime", "sessions", "settings", "project",
-        "symbols", "structures", "pointermaps", "snapshots", "re",
-        "instrumentation", "watches", "actions", "network", "diagnostics",
-        "scripts", "input", "screenshots", "patches", "events", "trace"
-    };
-    for (const char* id : requiredWorkspaces) {
-        if (!app.workspaces.Has(id)) {
-            std::fprintf(stderr, "smoke: missing workspace %s\n", id);
-            return 2;
-        }
+constexpr cortex::ui::WorkspacePreset kGuiPresets[] = {
+    cortex::ui::WorkspacePreset::Memory,
+    cortex::ui::WorkspacePreset::Debug,
+    cortex::ui::WorkspacePreset::ReverseEngineering,
+    cortex::ui::WorkspacePreset::Trace,
+    cortex::ui::WorkspacePreset::Automation,
+    cortex::ui::WorkspacePreset::Runtime
+};
+
+class HeadlessGuiContext {
+public:
+    HeadlessGuiContext() {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        io.DisplaySize = ImVec2(1440.0f, 900.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        io.IniFilename = nullptr;
+        io.Fonts->AddFontDefault();
+        io.Fonts->Build();
+        cortex::ui::ApplyCortexTheme();
     }
 
-    constexpr cortex::ui::WorkspacePreset presets[] = {
-        cortex::ui::WorkspacePreset::Memory,
-        cortex::ui::WorkspacePreset::Debug,
-        cortex::ui::WorkspacePreset::ReverseEngineering,
-        cortex::ui::WorkspacePreset::Trace,
-        cortex::ui::WorkspacePreset::Automation,
-        cortex::ui::WorkspacePreset::Runtime
-    };
-    for (const auto preset : presets) {
-        app.workspaces.ApplyPreset(preset);
-        if (!app.workspaces.IsOpen("bottom")) {
-            std::fputs("smoke: bottom panel must remain open in every preset\n", stderr);
-            return 3;
-        }
+    ~HeadlessGuiContext() {
+        if (ImGui::GetCurrentContext())
+            ImGui::DestroyContext();
     }
-    app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
 
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    HeadlessGuiContext(const HeadlessGuiContext&) = delete;
+    HeadlessGuiContext& operator=(const HeadlessGuiContext&) = delete;
+};
+
+bool RenderGuiFrame(
+        AppState& app, std::string& error,
+        bool validateDocking = true) {
+    error.clear();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.DisplaySize = ImVec2(1280.0f, 720.0f);
+    io.DisplaySize = ImVec2(1440.0f, 900.0f);
     io.DeltaTime = 1.0f / 60.0f;
-    io.Fonts->AddFontDefault();
-    io.Fonts->Build();
 
     ImGui::NewFrame();
     DrawApp(app);
     ImGui::Render();
 
     const ImDrawData* drawData = ImGui::GetDrawData();
-    const bool rendered = drawData != nullptr && drawData->Valid;
-    ImGui::DestroyContext();
+    if (!drawData || !drawData->Valid || drawData->CmdListsCount <= 0) {
+        error = "imgui_draw_data_invalid";
+        return false;
+    }
 
-    if (!rendered) {
-        std::fputs("smoke: ImGui frame did not render\n", stderr);
+    if (validateDocking &&
+        !app.workspaces.ValidateOpenWindowsDocked(&error))
+        return false;
+
+    return true;
+}
+
+bool RenderGuiStable(
+        AppState& app, std::string& error,
+        bool validateDocking = true) {
+    // DockBuilder can assign a just-opened window on the first frame; validate
+    // the settled layout on the second frame.
+    if (!RenderGuiFrame(app, error, false)) return false;
+    return RenderGuiFrame(app, error, validateDocking);
+}
+
+bool ValidateGuiRegistry(AppState& app, std::string& error) {
+    error.clear();
+    if (app.workspaces.Count() != IM_ARRAYSIZE(kGuiRequiredWorkspaces)) {
+        error = "workspace_count:" + std::to_string(app.workspaces.Count());
+        return false;
+    }
+    if (!app.workspaces.ValidateUnique(&error)) return false;
+
+    for (const char* id : kGuiRequiredWorkspaces) {
+        if (!app.workspaces.Has(id)) {
+            error = std::string("workspace_missing:") + id;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ExerciseGuiPresets(AppState& app, std::string& error) {
+    for (const auto preset : kGuiPresets) {
+        app.workspaces.ApplyPreset(preset);
+        if (!app.workspaces.IsOpen("bottom")) {
+            error = std::string("bottom_panel_closed:") +
+                    cortex::ui::WorkspaceRegistry::PresetName(preset);
+            return false;
+        }
+        if (!RenderGuiStable(app, error, true)) {
+            error = std::string("preset_") +
+                    cortex::ui::WorkspaceRegistry::PresetName(preset) +
+                    ":" + error;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ExerciseEveryWorkspace(AppState& app, std::string& error) {
+    for (const char* id : kGuiRequiredWorkspaces) {
+        app.workspaces.CloseAll();
+        if (!app.workspaces.Select(id)) {
+            error = std::string("workspace_select_failed:") + id;
+            return false;
+        }
+        if (!RenderGuiStable(app, error, true)) {
+            error = std::string("workspace_render_failed:") + id + ":" + error;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ExerciseNavigationContract(AppState& app, std::string& error) {
+    app.ui.ResetNavigation();
+    app.ui.NavigateTo("memory-browser", 0x1000);
+    app.ui.NavigateTo("disassembly", 0x2000);
+    if (!app.ui.CanNavigateBack()) {
+        error = "navigation_back_unavailable";
+        return false;
+    }
+    if (!app.ui.NavigateBack() ||
+        app.ui.navigationCurrent.workspace != "memory-browser" ||
+        app.ui.navigationCurrent.address != 0x1000 ||
+        !app.ui.CanNavigateForward()) {
+        error = "navigation_back_contract_failed";
+        return false;
+    }
+    if (!app.ui.NavigateForward() ||
+        app.ui.navigationCurrent.workspace != "disassembly" ||
+        app.ui.navigationCurrent.address != 0x2000) {
+        error = "navigation_forward_contract_failed";
+        return false;
+    }
+    app.ui.ResetNavigation();
+    return true;
+}
+
+bool ParseSmokePid(
+        const std::vector<std::string>& args,
+        const std::string& name, DWORD& pid,
+        std::string& error) {
+    std::string value;
+    if (!SmokeArgValue(args, name, value)) {
+        error = "missing_" + name;
+        return false;
+    }
+    try {
+        const unsigned long long parsed = std::stoull(value);
+        if (parsed == 0 || parsed > std::numeric_limits<DWORD>::max()) {
+            error = "invalid_" + name;
+            return false;
+        }
+        pid = static_cast<DWORD>(parsed);
+        return true;
+    } catch (...) {
+        error = "invalid_" + name;
+        return false;
+    }
+}
+
+uint64_t GuiSmokeCodeAddress(AppState& app, std::string& error) {
+    error.clear();
+
+    if (app.debuggerModel.Ready()) {
+        if (!app.debuggerModel.RefreshThreads(&error)) return 0;
+        const auto& threads = app.debuggerModel.Threads();
+        if (!threads.empty() &&
+            app.debuggerModel.SelectThread(threads.front(), &error)) {
+            const uint64_t ip =
+                app.debuggerModel.Snapshot().instructionPointer;
+            if (ip) return ip;
+        }
+        error.clear();
+    }
+
+    const auto regions = app.memory.Regions(&error);
+    for (const auto& region : regions) {
+        if (region.readable && region.executable && region.size >= 64)
+            return region.base;
+    }
+    if (error.empty()) error = "no_readable_executable_region";
+    return 0;
+}
+
+int RunGuiWorkspaceSuite() {
+    AppState app;
+    std::string error;
+    if (!ValidateGuiRegistry(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 2;
+    }
+
+    HeadlessGuiContext gui;
+    if (!ExerciseGuiPresets(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 3;
+    }
+    if (!ExerciseEveryWorkspace(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 4;
+    }
+    if (!ExerciseNavigationContract(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 5;
+    }
+
+    std::printf(
+        "PASS: GUI workspace suite %zu workspaces / %zu presets / docking / navigation\n",
+        static_cast<size_t>(IM_ARRAYSIZE(kGuiRequiredWorkspaces)),
+        static_cast<size_t>(IM_ARRAYSIZE(kGuiPresets)));
+    return 0;
+}
+
+int RunImGuiSmokeTest() {
+    const int result = RunGuiWorkspaceSuite();
+    if (result != 0) return result;
+    std::puts("PASS: deterministic ImGui application smoke");
+    return 0;
+}
+
+int RunGuiAttachedSuite(const std::vector<std::string>& args) {
+    DWORD pid = 0;
+    std::string error;
+    if (!ParseSmokePid(args, "--pid", pid, error)) {
+        std::fprintf(stderr, "--gui-attached-suite: %s\n", error.c_str());
+        return 2;
+    }
+
+    AppState app;
+    if (!AttachSmokeTarget(app, pid, error)) {
+        std::fprintf(stderr, "gui attached suite: attach failed: %s\n", error.c_str());
+        return 3;
+    }
+
+    if (!app.debuggerModel.EnsureAttached(&error)) {
+        std::fprintf(stderr, "gui attached suite: debugger attach failed: %s\n", error.c_str());
         return 4;
     }
 
-    std::puts("PASS: deterministic ImGui application smoke");
+    const uint64_t address = GuiSmokeCodeAddress(app, error);
+    if (!address) {
+        std::fprintf(stderr, "gui attached suite: code address failed: %s\n", error.c_str());
+        return 5;
+    }
+
+    std::vector<uint8_t> bytes;
+    if (!app.memory.Read(address, 64, bytes, &error) || bytes.empty()) {
+        std::fprintf(stderr, "gui attached suite: memory read failed: %s\n", error.c_str());
+        return 6;
+    }
+
+    std::vector<cortex::services::DisassemblyInstruction> decoded;
+    if (!app.disassembly.Decode(address, 8, decoded, &error) || decoded.empty()) {
+        std::fprintf(stderr, "gui attached suite: disassembly failed: %s\n", error.c_str());
+        return 7;
+    }
+
+    app.ui.NavigateTo("memory-browser", address);
+    app.ui.NavigateTo("disassembly", address);
+
+    HeadlessGuiContext gui;
+    if (!ExerciseGuiPresets(app, error)) {
+        std::fprintf(stderr, "gui attached suite: preset render failed: %s\n", error.c_str());
+        return 8;
+    }
+    if (!ExerciseEveryWorkspace(app, error)) {
+        std::fprintf(stderr, "gui attached suite: workspace render failed: %s\n", error.c_str());
+        return 9;
+    }
+
+    // Give the panel-local live refresh loops enough time to execute at least
+    // once while Debug/Mem/Disassembly are visible.
+    app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Debug);
+    app.ui.NavigateTo("disassembly", address);
+    if (!RenderGuiStable(app, error, true)) {
+        std::fprintf(stderr, "gui attached suite: debug render failed: %s\n", error.c_str());
+        return 10;
+    }
+    Sleep(600);
+    if (!RenderGuiStable(app, error, true)) {
+        std::fprintf(stderr, "gui attached suite: live refresh render failed: %s\n", error.c_str());
+        return 11;
+    }
+
+    std::printf(
+        "PASS: GUI attached suite pid=%lu address=0x%llX bytes=%zu instructions=%zu\n",
+        static_cast<unsigned long>(pid),
+        static_cast<unsigned long long>(address),
+        bytes.size(), decoded.size());
+    return 0;
+}
+
+int RunGuiMultiSessionSuite(const std::vector<std::string>& args) {
+    DWORD pidA = 0;
+    DWORD pidB = 0;
+    std::string error;
+    if (!ParseSmokePid(args, "--pid-a", pidA, error) ||
+        !ParseSmokePid(args, "--pid-b", pidB, error) ||
+        pidA == pidB) {
+        if (error.empty()) error = "multi_session_pids_must_differ";
+        std::fprintf(stderr, "--gui-multi-session-suite: %s\n", error.c_str());
+        return 2;
+    }
+
+    AppState app;
+    if (!AttachSmokeTarget(app, pidA, error)) {
+        std::fprintf(stderr, "gui multi-session suite: attach A failed: %s\n", error.c_str());
+        return 3;
+    }
+    const auto first = app.sessions.ActiveTarget();
+    if (!first) {
+        std::fputs("gui multi-session suite: first target missing\n", stderr);
+        return 4;
+    }
+    const cortex::target::TargetDescriptor targetA = *first;
+
+    if (!AttachSmokeTarget(app, pidB, error)) {
+        std::fprintf(stderr, "gui multi-session suite: attach B failed: %s\n", error.c_str());
+        return 5;
+    }
+    const auto second = app.sessions.ActiveTarget();
+    if (!second) {
+        std::fputs("gui multi-session suite: second target missing\n", stderr);
+        return 6;
+    }
+    const cortex::target::TargetDescriptor targetB = *second;
+
+    if (app.sessions.SessionCount() != 2 ||
+        app.sessions.AttachedTargets().size() != 2) {
+        std::fprintf(stderr, "gui multi-session suite: expected 2 sessions, got %zu\n",
+                     app.sessions.SessionCount());
+        return 7;
+    }
+
+    HeadlessGuiContext gui;
+    const cortex::target::TargetDescriptor targets[] = {targetA, targetB};
+    for (int round = 0; round < 3; ++round) {
+        for (const auto& target : targets) {
+            if (!app.sessions.Activate(target.id)) {
+                std::fprintf(stderr, "gui multi-session suite: activate failed: %s\n",
+                             target.id.c_str());
+                return 8;
+            }
+            app.OnAttached(target, false);
+            app.workspaces.ApplyPreset(
+                round % 2 == 0
+                    ? cortex::ui::WorkspacePreset::Memory
+                    : cortex::ui::WorkspacePreset::Debug);
+            if (!RenderGuiStable(app, error, true)) {
+                std::fprintf(stderr,
+                    "gui multi-session suite: render failed for pid %llu: %s\n",
+                    static_cast<unsigned long long>(target.processId),
+                    error.c_str());
+                return 9;
+            }
+        }
+    }
+
+    app.workspaces.Select("sessions");
+    if (!RenderGuiStable(app, error, true)) {
+        std::fprintf(stderr, "gui multi-session suite: sessions view failed: %s\n",
+                     error.c_str());
+        return 10;
+    }
+
+    std::printf("PASS: GUI multi-session suite pidA=%lu pidB=%lu switches=6\n",
+                static_cast<unsigned long>(pidA),
+                static_cast<unsigned long>(pidB));
+    return 0;
+}
+
+int RunGuiCrossBitnessSuite(const std::vector<std::string>& args) {
+    DWORD pid = 0;
+    std::string error;
+    if (!ParseSmokePid(args, "--pid", pid, error)) {
+        std::fprintf(stderr, "--gui-cross-bitness-suite: %s\n", error.c_str());
+        return 2;
+    }
+
+    AppState app;
+    if (!AttachSmokeTarget(app, pid, error)) {
+        std::fprintf(stderr, "gui cross-bitness suite: attach failed: %s\n", error.c_str());
+        return 3;
+    }
+    const auto target = app.sessions.ActiveTarget();
+    if (!target || target->architecture != cortex::target::Architecture::X86) {
+        std::fputs("gui cross-bitness suite: target is not x86\n", stderr);
+        return 4;
+    }
+
+    if (!app.payload.RuntimeSupportAvailable(&error)) {
+        std::fprintf(stderr, "gui cross-bitness suite: support unavailable: %s\n",
+                     error.c_str());
+        return 5;
+    }
+
+    app.ui.mutationAllowed = true;
+    if (!app.payload.EnsureReady(&error)) {
+        std::fprintf(stderr, "gui cross-bitness suite: runtime enable failed: %s\n",
+                     error.c_str());
+        return 6;
+    }
+    if (!app.payload.Ready() || app.payload.TargetProcessId() != pid) {
+        std::fputs("gui cross-bitness suite: payload verification failed\n", stderr);
+        return 7;
+    }
+
+    app.payload.Reset();
+    if (!app.payload.TryConnectExisting(&error)) {
+        std::fprintf(stderr, "gui cross-bitness suite: reconnect failed: %s\n",
+                     error.c_str());
+        return 8;
+    }
+
+    HeadlessGuiContext gui;
+    app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::ReverseEngineering);
+    if (!RenderGuiStable(app, error, true)) {
+        std::fprintf(stderr, "gui cross-bitness suite: RE render failed: %s\n",
+                     error.c_str());
+        return 9;
+    }
+    app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Runtime);
+    if (!RenderGuiStable(app, error, true)) {
+        std::fprintf(stderr, "gui cross-bitness suite: runtime render failed: %s\n",
+                     error.c_str());
+        return 10;
+    }
+
+    std::printf("PASS: GUI cross-bitness x64->x86 suite pid=%lu runtime-ready\n",
+                static_cast<unsigned long>(pid));
     return 0;
 }
 
@@ -1793,6 +2196,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     AppState app;
     bool done = false;
     int smokeFrames = 0;
+    int windowSmokePreset = 0;
+    std::string windowSmokeError;
     const ULONGLONG windowSmokeStarted = GetTickCount64();
     while (!done) {
         MSG msg;
@@ -1808,9 +2213,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         ImGui::NewFrame();
 
         HandleGlobalShortcuts(app);
+        if (windowSmoke && smokeFrames % 3 == 0 &&
+            windowSmokePreset < static_cast<int>(IM_ARRAYSIZE(kGuiPresets))) {
+            app.workspaces.ApplyPreset(kGuiPresets[windowSmokePreset]);
+            ++windowSmokePreset;
+        }
         DrawApp(app);
 
         ImGui::Render();
+        if (windowSmoke && windowSmokeError.empty() &&
+            !app.workspaces.ValidateOpenWindowsDocked(&windowSmokeError)) {
+            std::fprintf(stderr, "window smoke: %s\n", windowSmokeError.c_str());
+            done = true;
+            smokeFrames = -100;
+        }
         constexpr float clearColor[4] = {0.055f, 0.064f, 0.078f, 1.0f};
         gDeviceContext->OMSetRenderTargets(1, &gMainRenderTargetView, nullptr);
         gDeviceContext->ClearRenderTargetView(gMainRenderTargetView, clearColor);
@@ -1825,8 +2241,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 smokeFrames = -100;
             } else {
                 ++smokeFrames;
-                if (smokeFrames >= 3 &&
-                    GetTickCount64() - windowSmokeStarted >= 250)
+                const int requiredFrames =
+                    static_cast<int>(IM_ARRAYSIZE(kGuiPresets)) * 3;
+                if (smokeFrames >= requiredFrames &&
+                    windowSmokePreset >= static_cast<int>(IM_ARRAYSIZE(kGuiPresets)) &&
+                    GetTickCount64() - windowSmokeStarted >= 500)
                     done = true;
             }
         }
@@ -1841,8 +2260,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
     if (windowSmoke) {
-        if (smokeFrames < 3) return 5;
-        std::puts("PASS: native Win32 D3D11 ImGui window smoke");
+        if (smokeFrames < static_cast<int>(IM_ARRAYSIZE(kGuiPresets)) * 3)
+            return 5;
+        std::puts("PASS: native Win32 D3D11 ImGui window smoke (all presets docked)");
     }
     return 0;
 }

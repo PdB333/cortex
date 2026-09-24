@@ -1,0 +1,308 @@
+name: Cortex ImGui GUI Test Suite
+
+on:
+  push:
+    branches:
+      - test/imgui-full-migration
+      - main
+    paths:
+      - "app_imgui/**"
+      - "app/windows_debug_provider.*"
+      - "app/windows_debugger_backend.*"
+      - "app/veh_debug_provider.*"
+      - "app/debug_provider.h"
+      - "core/target/**"
+      - "core/services/**"
+      - "core/api/**"
+      - "core/prompt/**"
+      - "runtime_helper/**"
+      - "tests/gui/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/imgui-gui-tests.yml"
+  pull_request:
+    paths:
+      - "app_imgui/**"
+      - "app/windows_debug_provider.*"
+      - "app/windows_debugger_backend.*"
+      - "app/veh_debug_provider.*"
+      - "app/debug_provider.h"
+      - "core/target/**"
+      - "core/services/**"
+      - "core/api/**"
+      - "core/prompt/**"
+      - "runtime_helper/**"
+      - "tests/gui/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/imgui-gui-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imgui-gui-suite-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Dear ImGui workspace registration
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(grep -c 'workspaces.Add<cortex::ui::' app_imgui/main.cpp)"
+          test "$count" -eq 28
+          grep -q 'GUI workspace suite' app_imgui/main.cpp
+          grep -q 'ValidateOpenWindowsDocked' app_imgui/ui/workspace_registry.h
+          grep -q -- '--gui-cross-bitness-suite' app_imgui/main.cpp
+          echo "registered workspaces: $count"
+
+      - name: Reject stale Qt/QML CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r file; do
+            case "$file" in
+              .github/workflows/ui-migration-benchmarks.yml) continue ;;
+            esac
+            if grep -E -n 'Qt 6|qt6-|QML|windeployqt|cmake -S app([[:space:]]|$)|next/unified-cortex-ui' "$file"; then
+              echo "stale Qt/QML or legacy-branch workflow: $file"
+              bad=1
+            fi
+          done < <(find .github/workflows -maxdepth 1 -type f -name '*.yml' -print | sort)
+          test "$bad" -eq 0
+
+      - name: Parse GUI suite PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "tests/gui/run_imgui_gui_suite.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            throw "GUI suite PowerShell parser reported $($errors.Count) error(s)"
+          }
+
+  x86-fixture:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Build x86 runtime and target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/gui-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build/gui-x86 --target core cortex_test_target --parallel 2
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp             -o build/gui-x86/cortex_runtime_helper.exe             -static -static-libgcc -static-libstdc++
+
+      - name: Stage x86 GUI fixture
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p stage/runtime/x86 stage/e2e
+          cp build/gui-x86/cortex_core.dll stage/runtime/x86/cortex_core.dll
+          cp build/gui-x86/cortex_runtime_helper.exe stage/runtime/x86/cortex_runtime_helper.exe
+          cp build/gui-x86/cortex_test_target_x86.exe stage/e2e/cortex_test_target_x86.exe
+          test -s stage/runtime/x86/cortex_core.dll
+          test -s stage/runtime/x86/cortex_runtime_helper.exe
+          test -s stage/e2e/cortex_test_target_x86.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imgui-gui-x86-fixture
+          path: stage
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-debug-ui:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Build Debug UI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S app_imgui -B build/gui-debug -G Ninja             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake --build build/gui-debug --parallel 2
+
+      - name: Run Debug GUI CTest suite
+        shell: msys2 {0}
+        run: ctest --test-dir build/gui-debug --output-on-failure
+
+  windows-release-full:
+    needs:
+      - source-contracts
+      - x86-fixture
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Build Release GUI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S app_imgui -B build/gui-release -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/gui-release --parallel 2
+
+      - name: Run targetless GUI CTest suite
+        shell: msys2 {0}
+        run: ctest --test-dir build/gui-release --output-on-failure
+
+      - name: Build x64 runtime and target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/runtime-x64 -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+
+      - name: Download x86 GUI fixture
+        uses: actions/download-artifact@v4
+        with:
+          name: imgui-gui-x86-fixture
+          path: build/x86-fixture
+
+      - name: Assemble runtime layout for direct GUI tests
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path "build/gui-release").Path
+          New-Item -ItemType Directory -Force -Path "$app/runtime/x64", "$app/runtime/x86" | Out-Null
+          Copy-Item "build/runtime-x64/cortex_core.dll" "$app/cortex_core.dll" -Force
+          Copy-Item "build/runtime-x64/cortex_core.dll" "$app/runtime/x64/cortex_core.dll" -Force
+          Copy-Item "build/x86-fixture/runtime/x86/cortex_core.dll" "$app/runtime/x86/cortex_core.dll" -Force
+          Copy-Item "build/x86-fixture/runtime/x86/cortex_runtime_helper.exe" "$app/runtime/x86/cortex_runtime_helper.exe" -Force
+
+      - name: Run full GUI integration suite
+        shell: pwsh
+        run: |
+          ./tests/gui/run_imgui_gui_suite.ps1             -CortexExe "build/gui-release/cortex.exe"             -X64Target "build/runtime-x64/cortex_test_target_x64.exe"             -X86Target "build/x86-fixture/e2e/cortex_test_target_x86.exe"             -ReportPath "build/gui-report-direct.json"
+
+      - name: Stage portable GUI test bundle
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/Cortex
+          mkdir -p stage/Cortex/runtime/x64 stage/Cortex/runtime/x86 stage/Cortex/e2e
+          cp build/gui-release/cortex.exe stage/Cortex/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/Cortex/cortex_core.dll
+          cp build/runtime-x64/cortex_core.dll stage/Cortex/runtime/x64/cortex_core.dll
+          cp build/x86-fixture/runtime/x86/cortex_core.dll stage/Cortex/runtime/x86/cortex_core.dll
+          cp build/x86-fixture/runtime/x86/cortex_runtime_helper.exe stage/Cortex/runtime/x86/cortex_runtime_helper.exe
+          cp build/runtime-x64/cortex_test_target_x64.exe stage/Cortex/e2e/cortex_test_target_x64.exe
+          cp build/x86-fixture/e2e/cortex_test_target_x86.exe stage/Cortex/e2e/cortex_test_target_x86.exe
+          cp app_imgui/README_TESTING.txt stage/Cortex/README_TESTING.txt
+
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/Cortex/$base" ]; then
+                  cp "$dep" "stage/Cortex/$base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+      - name: Validate portable GUI with clean PATH
+        shell: pwsh
+        run: |
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+            ./tests/gui/run_imgui_gui_suite.ps1               -CortexExe "stage/Cortex/cortex.exe"               -X64Target "stage/Cortex/e2e/cortex_test_target_x64.exe"               -X86Target "stage/Cortex/e2e/cortex_test_target_x86.exe"               -ReportPath "build/gui-report-portable.json"
+          } finally {
+            $env:PATH = $oldPath
+          }
+
+      - name: Publish GUI test summary
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($path in @("build/gui-report-direct.json", "build/gui-report-portable.json")) {
+            if (-not (Test-Path $path)) { continue }
+            $report = Get-Content $path -Raw | ConvertFrom-Json
+            @(
+              "### $([IO.Path]::GetFileNameWithoutExtension($path))"
+              ""
+              "Passed: **$($report.passed)**  Failed: **$($report.failed)**"
+              ""
+              "| Test | Result | Duration ms |"
+              "| --- | --- | ---: |"
+            ) | Add-Content $env:GITHUB_STEP_SUMMARY
+            foreach ($test in $report.tests) {
+              $status = if ($test.passed) { "PASS" } else { "FAIL" }
+              "| $($test.name) | $status | $($test.duration_ms) |" |
+                Add-Content $env:GITHUB_STEP_SUMMARY
+            }
+            "" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload GUI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-gui-test-evidence
+          path: |
+            build/gui-report-direct.json
+            build/gui-report-portable.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload tested portable bundle
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-gui-tested-portable
+          path: stage/Cortex
+          if-no-files-found: error
+          retention-days: 14
