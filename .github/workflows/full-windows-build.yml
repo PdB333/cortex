@@ -114,6 +114,13 @@ jobs:
           $tokenPath = Join-Path $root "cortex.token"
           $semanticTests = (Resolve-Path "tests/semantic_mcp_e2e.ps1").Path
           $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
+          $configPath = Join-Path $root "cortex.ini"
+
+          @"
+http_api_enabled=true
+"@ | Set-Content -Encoding ascii $configPath
+
+          Remove-Item $tokenPath -ErrorAction SilentlyContinue
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
