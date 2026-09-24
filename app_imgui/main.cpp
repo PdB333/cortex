@@ -134,6 +134,7 @@ void PrintCliUsage(FILE* out = stdout) {
         "  cortex                         Launch the ImGui desktop UI\n"
         "  cortex --version               Print preview version\n"
         "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
+        "  cortex --window-smoke-test     Run native Win32 + D3D11 backend smoke\n"
         "  cortex mcp [options]           Run the native/HTTP MCP stdio bridge\n"
         "  cortex inject <target> [dll]   Inject cortex_core.dll\n"
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
@@ -235,11 +236,17 @@ bool CreateDeviceD3D(HWND hwnd) {
     };
 
     D3D_FEATURE_LEVEL featureLevel{};
-    const HRESULT result = D3D11CreateDeviceAndSwapChain(
+    HRESULT result = D3D11CreateDeviceAndSwapChain(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
         featureLevels, 2, D3D11_SDK_VERSION, &sd,
         &gSwapChain, &gDevice, &featureLevel, &gDeviceContext);
 
+    if (FAILED(result)) {
+        result = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            featureLevels, 2, D3D11_SDK_VERSION, &sd,
+            &gSwapChain, &gDevice, &featureLevel, &gDeviceContext);
+    }
     if (FAILED(result)) return false;
     CreateRenderTarget();
     return true;
@@ -1262,6 +1269,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     const int cli = HandleCommandLine();
     if (cli >= 0) return cli;
 
+    const auto launchArgs = CurrentCommandLineArgs();
+    const bool windowSmoke =
+        std::find(launchArgs.begin(), launchArgs.end(), "--window-smoke-test") !=
+        launchArgs.end();
+
     ImGui_ImplWin32_EnableDpiAwareness();
 
     WNDCLASSEXW wc{
@@ -1281,7 +1293,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         return 1;
     }
 
-    ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ShowWindow(hwnd, windowSmoke ? SW_HIDE : SW_SHOWDEFAULT);
     UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
@@ -1289,7 +1301,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = "cortex-ui.ini";
+    io.IniFilename = windowSmoke ? nullptr : "cortex-ui.ini";
 
     cortex::ui::ApplyCortexTheme();
 
@@ -1298,6 +1310,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     AppState app;
     bool done = false;
+    int smokeFrames = 0;
     while (!done) {
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
@@ -1320,7 +1333,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         gDeviceContext->ClearRenderTargetView(gMainRenderTargetView, clearColor);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-        gSwapChain->Present(1, 0);
+        const HRESULT presentResult = gSwapChain->Present(windowSmoke ? 0 : 1, 0);
+        if (windowSmoke) {
+            if (FAILED(presentResult)) {
+                std::fprintf(stderr, "window smoke: Present failed (0x%08lX)\n",
+                             static_cast<unsigned long>(presentResult));
+                done = true;
+                smokeFrames = -100;
+            } else if (++smokeFrames >= 3) {
+                done = true;
+            }
+        }
     }
 
     ImGui_ImplDX11_Shutdown();
@@ -1330,5 +1353,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     CleanupDeviceD3D();
     DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
+
+    if (windowSmoke) {
+        if (smokeFrames < 3) return 5;
+        std::puts("PASS: native Win32 D3D11 ImGui window smoke");
+    }
     return 0;
 }

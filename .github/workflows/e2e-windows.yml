@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - "CMakeLists.txt"
+      - "app_imgui/**"
+      - "runtime_helper/**"
       - "core/**"
       - "host/**"
       - "injector/**"
@@ -72,6 +74,38 @@ jobs:
           -Isdk/include
           -o build/e2e-${{ matrix.arch }}/cortex_e2e_mod.dll
           -static -static-libgcc -static-libstdc++
+
+      - name: Build private x86 bootstrap helper
+        if: matrix.arch == 'x86'
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/e2e-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Validate private x86 bootstrap helper injection
+        if: matrix.arch == 'x86'
+        shell: pwsh
+        run: |
+          $root = Resolve-Path "build/e2e-x86"
+          $target = Start-Process -FilePath (Join-Path $root "cortex_test_target_x86.exe") -PassThru
+          try {
+            Start-Sleep -Seconds 1
+            $token = Join-Path $root "cortex.mcp.$($target.Id).token"
+            Remove-Item $token -ErrorAction SilentlyContinue
+
+            & (Join-Path $root "cortex_runtime_helper.exe") --pid $target.Id --dll (Join-Path $root "cortex_core.dll")
+            if ($LASTEXITCODE -ne 0) { throw "x86 runtime helper injection failed" }
+
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 60; $attempt++) {
+              if (Test-Path $token) { $ready = $true; break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $ready) { throw "x86 runtime helper injected DLL but native MCP token did not appear" }
+          } finally {
+            if ($target -and -not $target.HasExited) { Stop-Process -Id $target.Id -Force }
+          }
 
       - name: Run deterministic E2E scenarios
         shell: pwsh

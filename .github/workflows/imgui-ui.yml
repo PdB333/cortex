@@ -97,6 +97,11 @@ jobs:
             throw "Unexpected ImGui smoke output: $smoke"
           }
 
+          $windowSmoke = Invoke-CortexCli @("--window-smoke-test")
+          if ($windowSmoke -notmatch "PASS: native Win32 D3D11 ImGui window smoke") {
+            throw "Unexpected native window smoke output: $windowSmoke"
+          }
+
           $exe = Resolve-Path "build/imgui-ui/cortex.exe"
 
           $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -294,6 +299,38 @@ jobs:
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing portable asset: $path" }
+          }
+
+      - name: Validate portable dependency closure
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "bundle/Cortex/cortex.exe").Path
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+
+            foreach ($argument in @("--smoke-test", "--window-smoke-test")) {
+              $psi = [System.Diagnostics.ProcessStartInfo]::new()
+              $psi.FileName = $exe
+              [void]$psi.ArgumentList.Add($argument)
+              $psi.UseShellExecute = $false
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $psi.CreateNoWindow = $true
+              $process = [System.Diagnostics.Process]::Start($psi)
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              if (-not $process.WaitForExit(15000)) {
+                $process.Kill()
+                throw "Portable $argument timed out"
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "Portable $argument failed ($($process.ExitCode)): $stderr"
+              }
+              Write-Host $stdout
+            }
+          } finally {
+            $env:PATH = $oldPath
           }
 
       - name: Create portable ZIP
