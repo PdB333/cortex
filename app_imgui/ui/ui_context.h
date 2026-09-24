@@ -1,6 +1,7 @@
 #pragma once
 
 #include "application/actions_model.h"
+#include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
 #include "application/input_model.h"
 #include "application/network_model.h"
@@ -54,6 +55,7 @@ struct UiContext {
     application::InstrumentationModel* instrumentationModel = nullptr;
     application::WatchesModel* watchesModel = nullptr;
     application::ActionsModel* actionsModel = nullptr;
+    application::AiActivityModel* aiActivityModel = nullptr;
     application::NetworkModel* networkModel = nullptr;
     application::DiagnosticsModel* diagnosticsModel = nullptr;
     application::ScriptsModel* scriptsModel = nullptr;

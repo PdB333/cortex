@@ -18,7 +18,7 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 - [x] command palette (Ctrl+Shift+P / Ctrl+K)
 - [x] Go To (Ctrl+G): address, module offset, Project names/pointer paths and symbols
 - [x] shared address context menu across Scanner / Addresses / Memory / Disassembly / debugger hit-log
-- [ ] bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
+- [x] dockable bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
 - [x] global keyboard shortcuts + address navigation history (Alt+Left / Alt+Right)
 
 Target presets:
@@ -30,13 +30,13 @@ Target presets:
 - Runtime: Hooks + Network + Diagnostics + MCP/AI
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events and Patches models ported)
+- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity and Patches models ported)
 - [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
 - [x] project/session storage paths and retention settings
 - [ ] human Prompt surface and private answer route
-- [ ] AI activity listener/history
+- [x] native AI activity listener/history (Win32 mailslot, no Qt dependency)
 - [ ] true Qt-era MCP host mode parity (dynamic targets, operations, events)
 - [ ] crash-report service integration
 

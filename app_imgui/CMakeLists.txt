@@ -79,6 +79,7 @@ set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
 add_executable(cortex_imgui WIN32
     main.cpp
     application/settings.cpp
+    application/ai_activity_model.cpp
     application/debugger_model.cpp
     application/project_model.cpp
     application/patches_model.cpp
@@ -96,6 +97,7 @@ add_executable(cortex_imgui WIN32
     application/input_model.cpp
     application/screenshot_model.cpp
     application/runtime_events_model.cpp
+    ui/bottom_panel_workspace.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp

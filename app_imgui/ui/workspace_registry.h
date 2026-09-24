@@ -84,6 +84,7 @@ public:
                 break;
         }
 
+        SetOpen("bottom", true);
         preset_ = preset;
     }
 
@@ -157,7 +158,10 @@ public:
             if (pendingFocus_ == entry.workspace->Id())
                 ImGui::SetNextWindowFocus();
 
-            ImGui::SetNextWindowSize(ImVec2(680, 520), ImGuiCond_FirstUseEver);
+            const bool isBottomPanel = std::string(entry.workspace->Id()) == "bottom";
+            ImGui::SetNextWindowSize(
+                isBottomPanel ? ImVec2(980, 280) : ImVec2(680, 520),
+                ImGuiCond_FirstUseEver);
             if (ImGui::Begin(entry.workspace->Title(), &entry.open,
                              ImGuiWindowFlags_NoCollapse)) {
                 entry.workspace->Draw(context);

@@ -53,11 +53,11 @@ of the parity contract because they are shared by multiple Qt workspaces.
 
 | Qt surface | ImGui status | Required work |
 | --- | --- | --- |
-| `AddressContextMenu.qml` | Partial | one reusable address context menu shared by Addresses, Scanner, Memory, Disassembly and debugger disassembly |
-| `BottomPanel.qml` | Missing | dockable bottom panel for Events / Console / Breakpoints / Watches / AI / Diagnostics |
+| `AddressContextMenu.qml` | Full | shared direct actions across Scanner, Addresses, Memory, Disassembly and debugger hit-log |
+| `BottomPanel.qml` | Full | dockable six-tab bottom panel using the migrated application models |
 | navigation history | Full | global address history shared across ImGui workspaces (Alt+Left / Alt+Right) |
 | `PromptSurface.qml` / private answer route | Missing | human prompt surface and answer path |
-| AI activity listener/history | Missing | listener + visible history |
+| AI activity listener/history | Full | native MCP publisher + ImGui history model over a local Win32 mailslot |
 | crash-report service UI/integration | Missing | expose/report startup/runtime crashes without Qt dependency |
 
 ## Controller / Q_INVOKABLE parity

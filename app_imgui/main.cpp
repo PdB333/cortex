@@ -1,4 +1,5 @@
 #include "application/actions_model.h"
+#include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
 #include "application/input_model.h"
 #include "application/network_model.h"
@@ -17,6 +18,7 @@
 #include "application/scripts_model.h"
 #include "application/screenshot_model.h"
 #include "ui/actions_workspace.h"
+#include "ui/bottom_panel_workspace.h"
 #include "ui/diagnostics_workspace.h"
 #include "ui/input_workspace.h"
 #include "ui/network_workspace.h"
@@ -292,6 +294,7 @@ struct AppState {
     cortex::application::InstrumentationModel instrumentationModel;
     cortex::application::WatchesModel watchesModel;
     cortex::application::ActionsModel actionsModel;
+    cortex::application::AiActivityModel aiActivityModel;
     cortex::application::NetworkModel networkModel;
     cortex::application::DiagnosticsModel diagnosticsModel;
     cortex::application::ScriptsModel scriptsModel;
@@ -354,6 +357,7 @@ struct AppState {
         ui.instrumentationModel = &instrumentationModel;
         ui.watchesModel = &watchesModel;
         ui.actionsModel = &actionsModel;
+        ui.aiActivityModel = &aiActivityModel;
         ui.networkModel = &networkModel;
         ui.diagnosticsModel = &diagnosticsModel;
         ui.scriptsModel = &scriptsModel;
@@ -364,6 +368,7 @@ struct AppState {
         ui.nativeRenderDevice = gDevice;
 
         workspaces.Add<cortex::ui::OverviewWorkspace>();
+        workspaces.Add<cortex::ui::BottomPanelWorkspace>();
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
         workspaces.Add<cortex::ui::DisassemblyWorkspace>();
@@ -959,10 +964,24 @@ void DrawHeader(AppState& app) {
         ImGui::TextDisabled("No process attached");
     }
 
+    if (app.settings.Values().showAiActivityInTitleBar) {
+        ImGui::SameLine();
+        if (app.aiActivityModel.Connected()) {
+            ImGui::Text("AI %zu session(s) / %zu active",
+                        app.aiActivityModel.SessionCount(),
+                        app.aiActivityModel.ActiveTaskCount());
+        } else {
+            ImGui::TextDisabled(app.aiActivityModel.Listening()
+                                    ? "AI idle" : "AI listener unavailable");
+        }
+    }
+
     ImGui::Separator();
 }
 
 void DrawApp(AppState& app) {
+    app.aiActivityModel.Poll(app.settings.Values().aiActivityHistoryLimit);
+
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
