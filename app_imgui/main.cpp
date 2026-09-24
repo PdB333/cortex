@@ -342,7 +342,7 @@ struct AppState {
           watchesModel(payload),
           actionsModel(payload),
           networkModel(payload),
-          diagnosticsModel(payload),
+          diagnosticsModel(payload, ExecutableDirectory()),
           scriptsModel(payload),
           inputModel(payload),
           screenshotModel(payload),

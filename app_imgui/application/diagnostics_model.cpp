@@ -19,6 +19,12 @@ void DiagnosticsModel::Reset() {
     healthJson_.clear();
     hooks_.clear();
     toolStats_ = {};
+    crashFound_ = false;
+    crashDirectory_.clear();
+    crashReportJson_.clear();
+    crashSymbolizedJson_.clear();
+    crashHooksJson_.clear();
+    crashBreadcrumbsJson_.clear();
 }
 
 bool DiagnosticsModel::EnsureRuntime(std::string* error) {
@@ -85,6 +91,34 @@ bool DiagnosticsModel::Refresh(std::string* error) {
                std::to_string(toolStats_.total) + " tools | " +
                std::to_string(hooks_.size()) + " hook(s)";
     return true;
+}
+
+bool DiagnosticsModel::LoadLatestCrash(
+        const target::TargetDescriptor& target,
+        const std::string& configuredDirectory,
+        std::string* error) {
+    std::string localError;
+    auto* errorOut = error ? error : &localError;
+    errorOut->clear();
+
+    const auto bundle = services::CrashReportService::Latest(
+        services::CrashReportService::DefaultRoots(
+            runtimeDirectory_, target.architecture, configuredDirectory),
+        target.processId, errorOut);
+
+    crashFound_ = bundle.found;
+    crashDirectory_ = bundle.found ? bundle.directory.u8string() : std::string();
+    crashReportJson_ = bundle.found ? bundle.report.dump(2) : std::string();
+    crashSymbolizedJson_ =
+        bundle.found && !bundle.symbolized.empty()
+            ? bundle.symbolized.dump(2) : std::string();
+    crashHooksJson_ =
+        bundle.found && !bundle.hooks.empty()
+            ? bundle.hooks.dump(2) : std::string();
+    crashBreadcrumbsJson_ =
+        bundle.found && !bundle.breadcrumbs.empty()
+            ? bundle.breadcrumbs.dump(2) : std::string();
+    return errorOut->empty();
 }
 
 } // namespace cortex::application

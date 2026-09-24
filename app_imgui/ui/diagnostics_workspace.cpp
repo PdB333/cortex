@@ -32,6 +32,20 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
         else
             context.status = context.diagnosticsModel->Summary();
     }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Latest crash report")) {
+        std::string error;
+        const std::string configured =
+            context.settings ? context.settings->Values().diagnosticsCrashDirectory
+                             : std::string();
+        if (!context.diagnosticsModel->LoadLatestCrash(
+                session->Target(), configured, &error))
+            context.status = "Crash report lookup failed: " + error;
+        else if (context.diagnosticsModel->CrashFound())
+            context.status = "Crash report: " + context.diagnosticsModel->CrashDirectory();
+        else
+            context.status = "No crash report found for this target";
+    }
 
     ImGui::Separator();
     ImGui::TextUnformatted(context.diagnosticsModel->Summary().empty()
@@ -80,6 +94,54 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
                                       ? "No health data."
                                       : context.diagnosticsModel->HealthJson().c_str());
             ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Crash report")) {
+            if (!context.diagnosticsModel->CrashFound()) {
+                ImGui::TextDisabled("Use Latest crash report to load the newest bundle for this process.");
+            } else {
+                ImGui::TextWrapped("Directory: %s",
+                                   context.diagnosticsModel->CrashDirectory().c_str());
+                if (ImGui::BeginTabBar("CrashReportTabs")) {
+                    if (ImGui::BeginTabItem("Report")) {
+                        ImGui::BeginChild("CrashReportJson", ImVec2(0, 0), ImGuiChildFlags_Borders);
+                        ImGui::TextWrapped("%s",
+                            context.diagnosticsModel->CrashReportJson().empty()
+                                ? "No report.json data."
+                                : context.diagnosticsModel->CrashReportJson().c_str());
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Symbolized")) {
+                        ImGui::BeginChild("CrashSymbolizedJson", ImVec2(0, 0), ImGuiChildFlags_Borders);
+                        ImGui::TextWrapped("%s",
+                            context.diagnosticsModel->CrashSymbolizedJson().empty()
+                                ? "No symbolized crash data."
+                                : context.diagnosticsModel->CrashSymbolizedJson().c_str());
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Hooks")) {
+                        ImGui::BeginChild("CrashHooksJson", ImVec2(0, 0), ImGuiChildFlags_Borders);
+                        ImGui::TextWrapped("%s",
+                            context.diagnosticsModel->CrashHooksJson().empty()
+                                ? "No hook snapshot in the crash bundle."
+                                : context.diagnosticsModel->CrashHooksJson().c_str());
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Breadcrumbs")) {
+                        ImGui::BeginChild("CrashBreadcrumbsJson", ImVec2(0, 0), ImGuiChildFlags_Borders);
+                        ImGui::TextWrapped("%s",
+                            context.diagnosticsModel->CrashBreadcrumbsJson().empty()
+                                ? "No breadcrumbs in the crash bundle."
+                                : context.diagnosticsModel->CrashBreadcrumbsJson().c_str());
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
+            }
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

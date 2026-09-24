@@ -2,6 +2,7 @@
 #include "address_context_menu.h"
 
 #include <imgui.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -51,6 +52,42 @@ void DisassemblyWorkspace::Decode(UiContext& context, uint64_t address) {
     context.status = std::to_string(instructions_.size()) + " instruction(s)";
 }
 
+void DisassemblyWorkspace::Analyze(
+        UiContext& context, const char* tool,
+        const char* argumentKey, const char* kind,
+        bool includeData) {
+    if (!context.payload || !tool || !argumentKey || !kind) return;
+    const std::string address = address_;
+    if (address.empty() || address == "0x0") {
+        analysisKind_ = kind;
+        analysisResult_.clear();
+        analysisError_ = "analysis_address_required";
+        context.status = analysisError_;
+        return;
+    }
+
+    nlohmann::json arguments = {{argumentKey, address}};
+    if (std::string(tool) == "analysis_xrefs")
+        arguments["include_data"] = includeData;
+
+    nlohmann::json output;
+    std::string error;
+    if (!context.payload->CallTool(tool, arguments, output, &error)) {
+        analysisKind_ = kind;
+        analysisResult_.clear();
+        analysisError_ = error.empty() ? "analysis_failed" : error;
+        context.status = std::string(kind) + " analysis failed: " + analysisError_;
+        return;
+    }
+
+    const auto result = output.find("result");
+    analysisResult_ =
+        (result != output.end() ? *result : output).dump(2);
+    analysisKind_ = kind;
+    analysisError_.clear();
+    context.status = std::string(kind) + " analysis complete";
+}
+
 void DisassemblyWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
@@ -62,6 +99,9 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
         targetId_ = session->Target().id;
         instructions_.clear();
         currentAddress_ = 0;
+        analysisKind_.clear();
+        analysisResult_.clear();
+        analysisError_.clear();
     }
 
     uint64_t navigationAddress = 0;
@@ -88,8 +128,38 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Memory") && currentAddress_) {
         context.NavigateTo("memory-browser", currentAddress_);
     }
+    ImGui::SameLine();
+    if (ImGui::Button("CFG"))
+        Analyze(context, "analysis_cfg", "address", "CFG");
+    ImGui::SameLine();
+    if (ImGui::Button("Xrefs"))
+        Analyze(context, "analysis_xrefs", "target", "Xrefs", true);
+    ImGui::SameLine();
+    if (ImGui::Button("Structured CFG"))
+        Analyze(context, "analysis_structure", "address", "Structured CFG");
+
+    if (!analysisKind_.empty() || !analysisError_.empty()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear analysis")) {
+            analysisKind_.clear();
+            analysisResult_.clear();
+            analysisError_.clear();
+        }
+    }
 
     ImGui::Spacing();
+
+    if (!analysisKind_.empty() || !analysisError_.empty()) {
+        ImGui::BeginChild("DisassemblyAnalysis", ImVec2(0, 170), ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(analysisKind_.empty() ? "Analysis" : analysisKind_.c_str());
+        ImGui::Separator();
+        if (!analysisError_.empty())
+            ImGui::TextWrapped("Error: %s", analysisError_.c_str());
+        else
+            ImGui::TextWrapped("%s", analysisResult_.c_str());
+        ImGui::EndChild();
+        ImGui::Spacing();
+    }
     if (instructions_.empty()) {
         ImGui::TextDisabled("Enter an address, or open one from Modules / Memory.");
         return;

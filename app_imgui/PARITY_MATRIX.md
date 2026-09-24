@@ -58,20 +58,17 @@ of the parity contract because they are shared by multiple Qt workspaces.
 | navigation history | Full | global address history shared across ImGui workspaces (Alt+Left / Alt+Right) |
 | `PromptSurface.qml` / private answer route | Full | modal ImGui prompt using the existing private `/prompt/*` routes |
 | AI activity listener/history | Full | native MCP publisher + ImGui history model over a local Win32 mailslot |
-| crash-report service UI/integration | Missing | expose/report startup/runtime crashes without Qt dependency |
+| crash-report service UI/integration | Full | Diagnostics loads the latest native CrashReportService bundle (report, symbols, hooks and breadcrumbs) |
 
 ## Controller / Q_INVOKABLE parity
 
 The frozen Qt application layer exposes **148 `Q_INVOKABLE` methods** across
-its controllers. Workspace parity is necessary but not sufficient: every
-invokable workflow must be mapped to one of these outcomes before Qt removal:
+its controllers. The method-level audit is complete in
+[`INVOKABLE_PARITY.md`](INVOKABLE_PARITY.md): **148 mapped / 0 unmapped**.
 
-1. direct ImGui/application-model coverage;
-2. intentionally removed with a documented replacement;
-3. not user-facing and explicitly retained only as compatibility/runtime code.
-
-The method-level audit is the next pass of this matrix. Until that pass reaches
-**0 unmapped methods**, the first Stage 7 parity gate remains incomplete.
+The audit distinguishes direct ImGui/application-model workflows from generic
+replacement mechanisms and lifecycle-only reset/cleanup methods. No public
+Qt invokable remains without an explicit migration outcome.
 
 ## Release-hardening gates
 
