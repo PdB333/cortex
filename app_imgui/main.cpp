@@ -19,6 +19,7 @@
 #include "application/scripts_model.h"
 #include "application/screenshot_model.h"
 #include "ui/actions_workspace.h"
+#include "ui/address_context_menu.h"
 #include "ui/addresses_workspace.h"
 #include "ui/bottom_panel_workspace.h"
 #include "ui/diagnostics_workspace.h"
@@ -428,7 +429,8 @@ struct AppState {
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 
-    void OnAttached(const cortex::target::TargetDescriptor& target) {
+    void OnAttached(const cortex::target::TargetDescriptor& target,
+                    bool selectMemory = true) {
         payload.Reset();
         debuggerModel.Reset();
         projectModel.Reset();
@@ -451,7 +453,7 @@ struct AppState {
         ui.mutationAllowed = false;
         ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
-        ui.requestWorkspace = "memory";
+        if (selectMemory) ui.requestWorkspace = "memory";
 
         if (settings.Values().autoLoadRuntimeOnAttach) {
             std::string error;
@@ -1398,6 +1400,123 @@ void DrawPromptSurface(AppState& app) {
     ImGui::EndPopup();
 }
 
+void ActivateAttachedTarget(
+        AppState& app, const cortex::target::TargetDescriptor& target) {
+    if (app.sessions.ActiveTargetId() == target.id) return;
+    if (!app.sessions.Activate(target.id)) {
+        app.ui.status = "Could not activate " + target.name;
+        return;
+    }
+    app.OnAttached(target, false);
+    app.ui.status = "Active target: " + target.name +
+                    " (PID " + std::to_string(target.processId) + ")";
+}
+
+void DrawSessionStrip(AppState& app) {
+    const auto attached = app.sessions.AttachedTargets();
+    if (attached.empty()) return;
+
+    ImGui::TextDisabled("Sessions");
+    for (const auto& target : attached) {
+        ImGui::SameLine();
+        ImGui::PushID(target.id.c_str());
+        const bool active = app.sessions.ActiveTargetId() == target.id;
+        if (active)
+            ImGui::PushStyleColor(
+                ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+
+        const std::string label =
+            target.name + " [" + std::to_string(target.processId) + "]";
+        if (ImGui::SmallButton(label.c_str()))
+            ActivateAttachedTarget(app, target);
+
+        if (active) ImGui::PopStyleColor();
+
+        if (ImGui::BeginPopupContextItem("SessionMenu")) {
+            if (!active && ImGui::MenuItem("Activate"))
+                ActivateAttachedTarget(app, target);
+            if (ImGui::MenuItem("Detach")) {
+                const bool wasActive = active;
+                app.sessions.Detach(target.id);
+                if (wasActive) {
+                    const auto remaining = app.sessions.AttachedTargets();
+                    if (!remaining.empty()) {
+                        app.sessions.Activate(remaining.front().id);
+                        app.OnAttached(remaining.front(), false);
+                    } else {
+                        ResetTargetState(app);
+                    }
+                }
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+}
+
+void DrawQuickToolbar(AppState& app) {
+    const bool attached = static_cast<bool>(app.sessions.Active());
+
+    if (ImGui::SmallButton("+ Process"))
+        app.ui.requestProcessPicker = true;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Sessions"))
+        app.workspaces.Select("sessions");
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!attached);
+    if (ImGui::SmallButton("Memory"))
+        app.workspaces.Select("memory-browser");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Disasm"))
+        app.workspaces.Select("disassembly");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Debugger"))
+        app.workspaces.Select("debugger");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Modules"))
+        app.workspaces.Select("modules");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Runtime"))
+        app.workspaces.Select("runtime");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Go to"))
+        app.requestGoTo = true;
+    ImGui::EndDisabled();
+
+    if (attached && app.debuggerModel.Ready()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("| debug");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!app.ui.mutationAllowed ||
+                             app.debuggerModel.CurrentThread() == 0);
+        if (ImGui::SmallButton("Pause")) {
+            std::string error;
+            if (!app.debuggerModel.Pause(&error))
+                app.ui.status = "Pause failed: " + error;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Continue")) {
+            std::string error;
+            if (!app.debuggerModel.Resume(&error))
+                app.ui.status = "Continue failed: " + error;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Step")) {
+            std::string error;
+            if (!app.debuggerModel.Step(2000, &error))
+                app.ui.status = "Step failed: " + error;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Over")) {
+            std::string error;
+            if (!app.debuggerModel.StepOver(5000, &error))
+                app.ui.status = "Step over failed: " + error;
+        }
+        ImGui::EndDisabled();
+    }
+}
+
 void DrawHeader(AppState& app) {
     const auto session = app.sessions.Active();
 
@@ -1450,6 +1569,17 @@ void DrawHeader(AppState& app) {
         }
     }
 
+    DrawSessionStrip(app);
+
+    if (session && !app.payload.Ready()) {
+        std::string runtimeReason;
+        if (!app.payload.RuntimeSupportAvailable(&runtimeReason)) {
+            ImGui::TextDisabled("Runtime support: %s",
+                cortex::ui::RuntimeSupportText(runtimeReason).c_str());
+        }
+    }
+
+    DrawQuickToolbar(app);
     ImGui::Separator();
 }
 
@@ -1488,6 +1618,75 @@ void DrawApp(AppState& app) {
             ImGui::EndDisabled();
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Edit")) {
+            if (ImGui::MenuItem("Command palette...", "Ctrl+Shift+P"))
+                app.requestCommandPalette = true;
+            if (ImGui::MenuItem("Go to...", "Ctrl+G", false,
+                                static_cast<bool>(app.sessions.Active())))
+                app.requestGoTo = true;
+            ImGui::Separator();
+            if (ImGui::MenuItem("Settings"))
+                app.workspaces.Select("settings");
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Debug")) {
+            const bool attached = static_cast<bool>(app.sessions.Active());
+            ImGui::BeginDisabled(!attached);
+            if (ImGui::MenuItem("Debugger workspace"))
+                app.workspaces.Select("debugger");
+            if (ImGui::MenuItem("Breakpoints"))
+                app.workspaces.Select("bottom");
+            ImGui::Separator();
+            if (ImGui::MenuItem("Attach debugger", nullptr, false,
+                                !app.debuggerModel.Ready())) {
+                std::string error;
+                if (!app.debuggerModel.EnsureAttached(&error))
+                    app.ui.status = "Debugger attach failed: " + error;
+            }
+            const bool canControl =
+                app.debuggerModel.Ready() &&
+                app.debuggerModel.CurrentThread() != 0 &&
+                app.ui.mutationAllowed;
+            ImGui::BeginDisabled(!canControl);
+            if (ImGui::MenuItem("Pause")) {
+                std::string error;
+                if (!app.debuggerModel.Pause(&error))
+                    app.ui.status = "Pause failed: " + error;
+            }
+            if (ImGui::MenuItem("Continue")) {
+                std::string error;
+                if (!app.debuggerModel.Resume(&error))
+                    app.ui.status = "Continue failed: " + error;
+            }
+            if (ImGui::MenuItem("Step into")) {
+                std::string error;
+                if (!app.debuggerModel.Step(2000, &error))
+                    app.ui.status = "Step failed: " + error;
+            }
+            if (ImGui::MenuItem("Step over")) {
+                std::string error;
+                if (!app.debuggerModel.StepOver(5000, &error))
+                    app.ui.status = "Step over failed: " + error;
+            }
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Tools")) {
+            if (ImGui::MenuItem("Memory viewer"))
+                app.workspaces.Select("memory-browser");
+            if (ImGui::MenuItem("Disassembler"))
+                app.workspaces.Select("disassembly");
+            if (ImGui::MenuItem("Modules"))
+                app.workspaces.Select("modules");
+            if (ImGui::MenuItem("Sessions"))
+                app.workspaces.Select("sessions");
+            if (ImGui::MenuItem("Runtime"))
+                app.workspaces.Select("runtime");
+            if (ImGui::MenuItem("Diagnostics"))
+                app.workspaces.Select("diagnostics");
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Workspace")) {
             app.workspaces.DrawPresetMenu();
             ImGui::EndMenu();
@@ -1505,6 +1704,13 @@ void DrawApp(AppState& app) {
             if (ImGui::MenuItem("Go to...", "Ctrl+G", false,
                                 static_cast<bool>(app.sessions.Active())))
                 app.requestGoTo = true;
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Help")) {
+            ImGui::TextDisabled("Cortex v0.8.0-dev-imgui");
+            ImGui::Separator();
+            if (ImGui::MenuItem("Diagnostics"))
+                app.workspaces.Select("diagnostics");
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
