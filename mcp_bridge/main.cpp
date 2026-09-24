@@ -17,6 +17,7 @@
 
 #include "api/mcp_pipe_protocol.h"
 #include "ai_activity_channel.h"
+#include "host_mode.h"
 #include "policy.h"
 
 #include <httplib.h>
@@ -526,9 +527,23 @@ int RunHttp(const std::string& host,
     return 0;
 }
 
+bool UseBridgeCompatibilityMode(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i] ? argv[i] : "";
+        if (argument == "--token" || argument == "--token-file" ||
+            argument == "--transport" || argument == "--host" ||
+            argument == "--port" || argument == "--dll")
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
+    if (!UseBridgeCompatibilityMode(argc, argv))
+        return RunFullMcpHost(argc, argv, ExecutableDir());
+
     std::string host = "127.0.0.1";
     std::string token;
     std::string tokenFile;

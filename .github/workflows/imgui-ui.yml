@@ -97,6 +97,47 @@ jobs:
             throw "Unexpected ImGui smoke output: $smoke"
           }
 
+          $exe = Resolve-Path "build/imgui-ui/cortex.exe"
+
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $exe
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          [void]$psi.ArgumentList.Add("mcp")
+          [void]$psi.ArgumentList.Add("--tools")
+          [void]$psi.ArgumentList.Add("all")
+          $mcp = [System.Diagnostics.Process]::Start($psi)
+
+          $initialize = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci-host-smoke","version":"1"}}}'
+          $mcp.StandardInput.WriteLine($initialize)
+          $initLine = $mcp.StandardOutput.ReadLine()
+          if (-not $initLine) { throw "MCP initialize produced no response: $($mcp.StandardError.ReadToEnd())" }
+          $init = $initLine | ConvertFrom-Json
+          if ($init.id -ne 1 -or -not $init.result) { throw "Invalid MCP initialize response: $initLine" }
+
+          $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+          $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
+          $toolsLine = $mcp.StandardOutput.ReadLine()
+          if (-not $toolsLine) { throw "MCP tools/list produced no response" }
+          $tools = $toolsLine | ConvertFrom-Json
+          $names = @($tools.result.tools | ForEach-Object { $_.name })
+          foreach ($requiredTool in @("cortex_processes","cortex_attach","cortex_detach","cortex_targets","cortex_operations","cortex_operation_cancel","cortex_events")) {
+            if ($names -notcontains $requiredTool) {
+              throw "Targetless MCP host is missing $requiredTool. Tools: $($names -join ', ')"
+            }
+          }
+
+          $mcp.StandardInput.Close()
+          if (-not $mcp.WaitForExit(5000)) {
+            $mcp.Kill()
+            throw "Targetless MCP host did not exit after stdin close"
+          }
+          if ($mcp.ExitCode -ne 0) {
+            throw "Targetless MCP host exited $($mcp.ExitCode): $($mcp.StandardError.ReadToEnd())"
+          }
+
       - name: Configure x64 Cortex runtime
         shell: msys2 {0}
         run: >-

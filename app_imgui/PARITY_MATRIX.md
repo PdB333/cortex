@@ -40,11 +40,11 @@ Status legend:
 | Input | `InputWorkspace` | Full | — |
 | Actions | `ActionsWorkspace` | Full | — |
 | Settings | `SettingsWorkspace` | Full | — |
-| MCP | `RuntimeWorkspace` | Partial | true Qt-era MCP host-mode parity: dynamic targets, operations and events |
+| MCP | `RuntimeWorkspace` + native full MCP host | Full | — |
 | Semantic | semantic mode in `RuntimeWorkspace` | Full | — |
 | Sessions | `SessionsWorkspace` | Full | — |
 
-Current workspace result: **27 Full / 1 Partial / 0 Missing**.
+Current workspace result: **28 Full / 0 Partial / 0 Missing**.
 
 ## Cross-cutting Qt surfaces
 

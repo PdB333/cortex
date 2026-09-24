@@ -320,12 +320,25 @@ add_executable(cortex_host
     host/main.cpp
     injector/main.cpp
     mcp_bridge/main.cpp
+    mcp_bridge/host_mode.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
     host/diagnostics/external_host.cpp
     host/diagnostics/analyzer.cpp
     core/symbols/symbols.cpp
     core/symbols/external.cpp
+    app/windows_debug_provider.cpp
+    app/windows_debugger_backend.cpp
+    app/veh_debug_provider.cpp
+    core/target/local_backend.cpp
+    core/target/session_manager.cpp
+    core/target/module_provider.cpp
+    core/target/thread_provider.cpp
+    core/services/debugger_service.cpp
+    core/services/disassembly_service.cpp
+    core/services/payload_client.cpp
+    core/services/operation_manager.cpp
+    core/services/crash_report_service.cpp
 )
 target_include_directories(cortex_host PRIVATE
     core
@@ -341,6 +354,7 @@ target_compile_definitions(cortex_host PRIVATE
 )
 target_link_libraries(cortex_host PRIVATE
     nlohmann_json::nlohmann_json
+    Zydis
     ws2_32
     bcrypt
     dbghelp

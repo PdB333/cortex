@@ -37,7 +37,7 @@ Target presets:
 - [x] project/session storage paths and retention settings
 - [x] human Prompt surface + private answer route (value-change and timed-test flows)
 - [x] native AI activity listener/history (Win32 mailslot, no Qt dependency)
-- [ ] true Qt-era MCP host mode parity (dynamic targets, operations, events)
+- [x] true Qt-era MCP host mode parity (targetless dynamic attach/detach, target generations, operations/cancellation, events, capabilities and debugger host controls)
 - [ ] crash-report service integration
 
 ### 3. Memory and persistent target knowledge
@@ -92,7 +92,7 @@ Target presets:
 - [x] runtime/API event console
 
 ### 7. Parity hardening and release gate
-- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 27 full / 1 partial / 0 missing)
+- [x] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; 28 full / 0 partial / 0 missing)
 - [ ] map every Qt Q_INVOKABLE workflow to ImGui/application-model coverage
 - [ ] x64/x86 runtime and helper E2E
 - [~] deterministic headless ImGui smoke mode runs in CI; native Win32/DX window smoke remains

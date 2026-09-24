@@ -131,6 +131,7 @@ add_executable(cortex_imgui WIN32
     ../host/probe_cli.cpp
     ../injector/main.cpp
     ../mcp_bridge/main.cpp
+    ../mcp_bridge/host_mode.cpp
     ../tools/diagnostics_host/main.cpp
     ../tools/symbolize_main.cpp
     ../host/diagnostics/external_host.cpp
@@ -153,6 +154,8 @@ add_executable(cortex_imgui WIN32
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
     ../core/services/payload_client.cpp
+    ../core/services/operation_manager.cpp
+    ../core/services/crash_report_service.cpp
 )
 
 target_include_directories(cortex_imgui PRIVATE
