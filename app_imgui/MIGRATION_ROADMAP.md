@@ -17,7 +17,7 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 - [~] dockable IDE shell and workspace presets
 - [x] command palette (Ctrl+Shift+P / Ctrl+K)
 - [x] Go To (Ctrl+G): address, module offset, Project names/pointer paths and symbols
-- [ ] shared address context menu everywhere
+- [x] shared address context menu across Scanner / Addresses / Memory / Disassembly / debugger hit-log
 - [ ] bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
 - [x] global keyboard shortcuts + address navigation history (Alt+Left / Alt+Right)
 

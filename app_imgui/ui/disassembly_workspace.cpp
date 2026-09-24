@@ -1,4 +1,5 @@
 #include "disassembly_workspace.h"
+#include "address_context_menu.h"
 
 #include <imgui.h>
 
@@ -116,16 +117,10 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
                 currentAddress_ = row.address;
             }
             if (ImGui::BeginPopupContextItem()) {
-                if (ImGui::MenuItem("Browse memory here")) {
-                    context.NavigateTo("memory-browser", row.address);
-                }
-                if (ImGui::MenuItem("Find what writes this")) {
-                    context.runtimeToolPreset = "re_find_last_writer";
-                    context.runtimeArgumentsPreset =
-                        std::string("{\"address\":") + std::to_string(row.address) +
-                        ",\"size\":1,\"timeout_ms\":5000,\"mutation_permission\":true}";
-                    context.requestWorkspace = "runtime";
-                }
+                AddressContextOptions options;
+                options.valueType = "u8";
+                options.valueSize = std::max(1, static_cast<int>(row.bytes.size()));
+                DrawAddressContextActions(context, row.address, options);
                 ImGui::EndPopup();
             }
 

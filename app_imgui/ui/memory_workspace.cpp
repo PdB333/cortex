@@ -1,4 +1,5 @@
 #include "memory_workspace.h"
+#include "address_context_menu.h"
 
 #include <imgui.h>
 
@@ -42,6 +43,17 @@ size_t FixedKindSize(services::ScanValueKind kind) {
         case services::ScanValueKind::I64:
         case services::ScanValueKind::F64: return 8;
         default: return 0;
+    }
+}
+
+const char* ValueKindName(services::ScanValueKind kind) {
+    switch (kind) {
+        case services::ScanValueKind::I64: return "i64";
+        case services::ScanValueKind::F32: return "float";
+        case services::ScanValueKind::F64: return "double";
+        case services::ScanValueKind::String: return "string";
+        case services::ScanValueKind::Bytes: return "bytes";
+        default: return "i32";
     }
 }
 
@@ -444,16 +456,12 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
                     }
                 }
                 if (ImGui::BeginPopupContextItem("ResultMenu")) {
-                    if (ImGui::MenuItem("Add to address list")) AddAddress(result);
-                    if (ImGui::MenuItem("Browse memory")) {
-                        NavigateAddress(context, result.address, "memory-browser");
-                    }
-                    if (ImGui::MenuItem("Disassemble here")) {
-                        NavigateAddress(context, result.address, "disassembly");
-                    }
-                    if (ImGui::MenuItem("Find what writes this")) {
-                        FindWriter(context, result.address);
-                    }
+                    if (ImGui::MenuItem("Add to local address list")) AddAddress(result);
+                    ImGui::Separator();
+                    AddressContextOptions options;
+                    options.valueType = ValueKindName(SelectedKind());
+                    options.valueSize = static_cast<int>(FixedKindSize(SelectedKind()));
+                    DrawAddressContextActions(context, result.address, options);
                     ImGui::EndPopup();
                 }
 
@@ -611,15 +619,12 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
                 ImGui::BeginDisabled(!context.mutationAllowed);
                 if (ImGui::MenuItem("Edit value")) BeginValueEdit(i);
                 ImGui::EndDisabled();
-                if (ImGui::MenuItem("Browse memory")) {
-                    NavigateAddress(context, entry.address, "memory-browser");
-                }
-                if (ImGui::MenuItem("Disassemble here")) {
-                    NavigateAddress(context, entry.address, "disassembly");
-                }
-                if (ImGui::MenuItem("Find what writes this")) {
-                    FindWriter(context, entry.address);
-                }
+                ImGui::Separator();
+                AddressContextOptions options;
+                options.label = entry.description;
+                options.valueType = ValueKindName(entry.kind);
+                options.valueSize = static_cast<int>(FixedKindSize(entry.kind));
+                DrawAddressContextActions(context, entry.address, options);
                 ImGui::Separator();
                 if (ImGui::MenuItem("Remove")) remove = true;
                 ImGui::EndPopup();

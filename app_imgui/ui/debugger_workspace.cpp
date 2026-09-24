@@ -1,4 +1,5 @@
 #include "debugger_workspace.h"
+#include "address_context_menu.h"
 
 #include <imgui.h>
 
@@ -339,6 +340,13 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                 if (ImGui::IsItemHovered() &&
                     ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     context.NavigateTo("disassembly", entry.instruction);
+                }
+                if (ImGui::BeginPopupContextItem("HitInstructionMenu")) {
+                    AddressContextOptions options;
+                    options.valueType = "u8";
+                    options.valueSize = 1;
+                    DrawAddressContextActions(context, entry.instruction, options);
+                    ImGui::EndPopup();
                 }
                 ImGui::TableSetColumnIndex(4);
                 ImGui::Text("%zu registers", entry.registers.registers.size());

@@ -1,4 +1,5 @@
 #include "memory_browser_workspace.h"
+#include "address_context_menu.h"
 
 #include <imgui.h>
 
@@ -175,9 +176,10 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                 ImGui::Text("0x%llX",
                             static_cast<unsigned long long>(currentAddress_ + offset));
                 if (ImGui::BeginPopupContextItem()) {
-                    if (ImGui::MenuItem("Disassemble here")) {
-                        context.NavigateTo("disassembly", currentAddress_ + offset);
-                    }
+                    AddressContextOptions options;
+                    options.valueType = "u8";
+                    options.valueSize = 1;
+                    DrawAddressContextActions(context, currentAddress_ + offset, options);
                     ImGui::EndPopup();
                 }
                 ImGui::TableSetColumnIndex(1);
