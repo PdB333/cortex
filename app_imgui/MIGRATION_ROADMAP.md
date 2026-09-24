@@ -94,12 +94,12 @@ Target presets:
 ### 7. Parity hardening and release gate
 - [x] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; 28 full / 0 partial / 0 missing)
 - [x] map all 148 Qt Q_INVOKABLE workflows (see `INVOKABLE_PARITY.md`; 148 mapped / 0 unmapped)
-- [ ] x64/x86 runtime and helper E2E
-- [~] deterministic headless ImGui smoke mode runs in CI; native Win32/DX window smoke remains
-- [ ] portable dependency-closure validation
-- [ ] performance/memory/startup measurements versus Qt
-- [ ] Windows packaging and release workflow
-- [ ] decide/implement Linux renderer if Linux desktop remains a requirement
+- [x] x64/x86 runtime + private x86 helper E2E
+- [x] deterministic headless + native Win32/D3D11 window smoke modes run in CI
+- [x] portable dependency-closure + clean-PATH headless/window validation
+- [~] automated Qt-vs-ImGui size/startup/peak-working-set benchmark added; evidence pending CI
+- [x] Windows Dear ImGui v0.8 candidate packaging and guarded release workflow
+- [x] v0.8 platform scope decided: Windows x64 desktop; Linux desktop renderer explicitly deferred (see `PLATFORM_SCOPE.md`)
 - [ ] remove Qt/QML only after the parity matrix is green
 
 ## Qt reference surface
