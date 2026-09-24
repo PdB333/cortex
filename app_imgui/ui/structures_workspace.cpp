@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace cortex::ui {
@@ -43,6 +44,14 @@ void StructuresWorkspace::Draw(UiContext& context) {
              "[\n  {\"name\":\"field0\",\"offset\":0,\"type\":\"i32\"}\n]");
         Copy(valuesJson_.data(), valuesJson_.size(), "{\n}");
         Copy(instancesJson_.data(), instancesJson_.size(), "[\n  \"0x0\"\n]");
+    }
+
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("structures", navigationAddress)) {
+        char buffer[32] = {};
+        std::snprintf(buffer, sizeof(buffer), "0x%llX",
+                      static_cast<unsigned long long>(navigationAddress));
+        Copy(address_.data(), address_.size(), buffer);
     }
 
     ImGui::TextUnformatted("Runtime structures");

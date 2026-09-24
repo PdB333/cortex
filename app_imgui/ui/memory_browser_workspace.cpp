@@ -129,9 +129,9 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                         ? 0ull : session->MemoryRegions().front().base));
     }
 
-    if (context.navigationAddressPending) {
-        Navigate(context.navigationAddress);
-        context.navigationAddressPending = false;
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("memory-browser", navigationAddress)) {
+        Navigate(navigationAddress);
         Refresh(context);
     }
 

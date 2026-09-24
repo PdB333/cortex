@@ -72,6 +72,7 @@ struct UiContext {
     std::string requestWorkspace;
     uint64_t navigationAddress = 0;
     bool navigationAddressPending = false;
+    std::string navigationTargetWorkspace;
     std::vector<NavigationEntry> navigationBack;
     std::vector<NavigationEntry> navigationForward;
     NavigationEntry navigationCurrent;
@@ -88,8 +89,17 @@ struct UiContext {
         navigationCurrent = {targetWorkspace, address};
         navigationCurrentValid = true;
         requestWorkspace = targetWorkspace;
+        navigationTargetWorkspace = targetWorkspace;
         navigationAddress = address;
         navigationAddressPending = true;
+    }
+
+    bool ConsumeNavigation(const std::string& workspace, uint64_t& address) {
+        if (!navigationAddressPending || navigationTargetWorkspace != workspace) return false;
+        address = navigationAddress;
+        navigationAddressPending = false;
+        navigationTargetWorkspace.clear();
+        return true;
     }
 
     bool CanNavigateBack() const { return !navigationBack.empty(); }
@@ -123,6 +133,7 @@ struct UiContext {
         requestWorkspace.clear();
         navigationAddress = 0;
         navigationAddressPending = false;
+        navigationTargetWorkspace.clear();
         navigationBack.clear();
         navigationForward.clear();
         navigationCurrent = {};

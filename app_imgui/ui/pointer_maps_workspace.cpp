@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
 
 namespace cortex::ui {
 
@@ -28,6 +29,12 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
         targetId_ = session->Target().id;
         context.pointerMapsModel->Reset();
         selected_.clear();
+    }
+
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("pointermaps", navigationAddress)) {
+        std::snprintf(target_.data(), target_.size(), "0x%llX",
+                      static_cast<unsigned long long>(navigationAddress));
     }
 
     ImGui::TextUnformatted("Pointer maps");

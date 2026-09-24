@@ -63,11 +63,9 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
         currentAddress_ = 0;
     }
 
-    if (context.navigationAddressPending) {
-        const uint64_t address = context.navigationAddress;
-        context.navigationAddressPending = false;
-        Decode(context, address);
-    }
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("disassembly", navigationAddress))
+        Decode(context, navigationAddress);
 
     ImGui::TextUnformatted("Disassembler");
     ImGui::SameLine();

@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace cortex::ui {
@@ -79,6 +80,15 @@ void ReWorkspace::Draw(UiContext& context) {
 
     if (targetId_ != session->Target().id)
         ResetForTarget(context, session->Target().id);
+
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("re", navigationAddress)) {
+        char buffer[32] = {};
+        std::snprintf(buffer, sizeof(buffer), "0x%llX",
+                      static_cast<unsigned long long>(navigationAddress));
+        Copy(analysisAddress_.data(), analysisAddress_.size(), buffer);
+        Copy(trackAddress_.data(), trackAddress_.size(), buffer);
+    }
 
     ImGui::TextUnformatted("Reverse Engineering");
     ImGui::SameLine();
