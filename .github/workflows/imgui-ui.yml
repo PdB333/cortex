@@ -166,6 +166,30 @@ jobs:
           $root = (Resolve-Path "build/runtime-x64").Path
           $targetPath = Join-Path $root "cortex_test_target_x64.exe"
           $corePath = Join-Path $root "cortex_core.dll"
+          function Invoke-CortexChannelSmoke([string[]]$Arguments) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $exe
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.CreateNoWindow = $true
+            foreach ($argument in $Arguments) {
+              [void]$psi.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(15000)) {
+              $process.Kill()
+              throw "cortex $($Arguments -join ' ') timed out"
+            }
+            [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              Stdout = $stdoutTask.Result
+              Stderr = $stderrTask.Result
+            }
+          }
+
           $target = Start-Process -FilePath $targetPath -PassThru
           $mcp = $null
           try {
@@ -222,10 +246,12 @@ jobs:
             # Send the request first, let the ImGui smoke answer it, then consume the MCP response.
             $mcp.StandardInput.WriteLine($promptRequest)
 
-            $promptOutput = & $exe --prompt-channel-smoke --pid "$($target.Id)" --answer "imgui-e2e" 2>&1
-            $promptText = $promptOutput -join [Environment]::NewLine
-            if ($LASTEXITCODE -ne 0 -or $promptText -notmatch "PASS: ImGui prompt channel answered prompt") {
-              throw "Prompt channel smoke failed: $promptText"
+            $promptResult = Invoke-CortexChannelSmoke @(
+              "--prompt-channel-smoke","--pid","$($target.Id)","--answer","imgui-e2e"
+            )
+            if ($promptResult.ExitCode -ne 0 -or
+                $promptResult.Stdout -notmatch "PASS: ImGui prompt channel answered prompt") {
+              throw "Prompt channel smoke failed ($($promptResult.ExitCode)): $($promptResult.Stdout) $($promptResult.Stderr)"
             }
 
             $createdLine = $mcp.StandardOutput.ReadLine()
@@ -237,10 +263,12 @@ jobs:
               throw "Private prompt MCP response failed: $createdLine"
             }
 
-            $eventOutput = & $exe --event-channel-smoke --pid "$($target.Id)" --expect "prompt.answered" 2>&1
-            $eventText = $eventOutput -join [Environment]::NewLine
-            if ($LASTEXITCODE -ne 0 -or $eventText -notmatch "PASS: ImGui event channel observed prompt.answered") {
-              throw "Event channel smoke failed: $eventText"
+            $eventResult = Invoke-CortexChannelSmoke @(
+              "--event-channel-smoke","--pid","$($target.Id)","--expect","prompt.answered"
+            )
+            if ($eventResult.ExitCode -ne 0 -or
+                $eventResult.Stdout -notmatch "PASS: ImGui event channel observed prompt.answered") {
+              throw "Event channel smoke failed ($($eventResult.ExitCode)): $($eventResult.Stdout) $($eventResult.Stderr)"
             }
           } finally {
             if ($mcp) {
