@@ -42,3 +42,30 @@ Notes:
   - Advanced operations can load cortex_core.dll into the selected process and
     require explicit write permission.
   - This test branch does not change main/master.
+
+
+Live views:
+  - Memory viewer can auto-refresh at 100/250/500/1000 ms and marks rows whose
+    bytes changed since the previous refresh.
+  - Disassembler can auto-refresh and follow the current debugger IP.
+  - Debugger refreshes threads/registers only while visible and includes a live
+    stack view around RSP/ESP. Double-click stack values to follow them in memory.
+  - These refresh loops are panel-local; hidden workspaces do not continuously
+    poll the target.
+
+Multi-process:
+  - Multiple processes can stay attached at once.
+  - The session strip in the header switches the active target without detaching
+    the other sessions. Right-click a session button to activate or detach it.
+  - Workspaces currently follow the active session; simultaneous target-pinned
+    workspace instances are a later extension.
+
+Cross-bitness:
+  - The x64 preview now includes runtime/x86/cortex_core.dll and
+    runtime/x86/cortex_runtime_helper.exe.
+  - Runtime-backed RE/context actions are disabled with an explanatory tooltip
+    when the required runtime/helper is unavailable instead of repeatedly failing.
+
+Context menus:
+  - Right-click addresses/registers/stack values for Open/Follow, Monitor,
+    Debugger, Reverse Engineering, Addresses and Copy actions.

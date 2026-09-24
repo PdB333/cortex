@@ -94,13 +94,15 @@ void ReWorkspace::Draw(UiContext& context) {
     std::string runtimeReason;
     const bool runtimeSupported =
         AddressRuntimeAvailable(context, runtimeReason);
+    const bool runtimeConnected =
+        context.payload && context.payload->Ready();
 
     ImGui::TextUnformatted("Reverse Engineering");
     ImGui::SameLine();
-    ImGui::TextDisabled(context.payload && context.payload->Ready()
+    ImGui::TextDisabled(runtimeConnected
                             ? "runtime connected"
                             : (runtimeSupported
-                                ? "runtime available"
+                                ? "runtime available - enable to use RE"
                                 : "runtime unavailable"));
     ImGui::SameLine();
     if (context.payload && !context.payload->Ready()) {
@@ -123,7 +125,7 @@ void ReWorkspace::Draw(UiContext& context) {
         ImGui::EndDisabled();
         ImGui::SameLine();
     }
-    ImGui::BeginDisabled(!runtimeSupported);
+    ImGui::BeginDisabled(!runtimeConnected);
     if (ImGui::SmallButton("Refresh")) RefreshAll(context);
     ImGui::EndDisabled();
 
@@ -134,7 +136,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    ImGui::BeginDisabled(!runtimeSupported);
+    ImGui::BeginDisabled(!runtimeConnected);
     if (ImGui::BeginTabBar("ReTabs")) {
         if (ImGui::BeginTabItem("Objects")) {
             ImGui::SetNextItemWidth(150);

@@ -74,6 +74,8 @@ inline void DrawAddressContextActions(
 
     std::string runtimeReason;
     const bool runtimeAvailable = AddressRuntimeAvailable(context, runtimeReason);
+    const bool runtimeConnected =
+        context.payload && context.payload->Ready();
     const bool runtimeMutation =
         runtimeAvailable && context.mutationAllowed;
 
@@ -127,7 +129,7 @@ inline void DrawAddressContextActions(
         RuntimeDisabledHint(pageDisabled && !runtimeAvailable, runtimeReason);
 
         const bool snapshotDisabled =
-            !context.snapshotsModel || !runtimeAvailable;
+            !context.snapshotsModel || !runtimeConnected;
         ImGui::BeginDisabled(snapshotDisabled);
         if (ImGui::MenuItem("Snapshot 64 bytes")) {
             const std::string ranges =
@@ -141,7 +143,10 @@ inline void DrawAddressContextActions(
             }
         }
         ImGui::EndDisabled();
-        RuntimeDisabledHint(snapshotDisabled && !runtimeAvailable, runtimeReason);
+        if (snapshotDisabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", runtimeConnected
+                ? "Snapshot unavailable."
+                : "Connect or enable the target runtime before taking snapshots.");
         ImGui::EndMenu();
     }
 
@@ -213,7 +218,7 @@ inline void DrawAddressContextActions(
         RuntimeDisabledHint(reMutationDisabled && !runtimeAvailable, runtimeReason);
 
         const bool subobjectDisabled =
-            !context.reModel || !runtimeAvailable;
+            !context.reModel || !runtimeConnected;
         ImGui::BeginDisabled(subobjectDisabled);
         if (ImGui::MenuItem("Detect C++ subobjects")) {
             std::string error;
@@ -225,7 +230,10 @@ inline void DrawAddressContextActions(
             }
         }
         ImGui::EndDisabled();
-        RuntimeDisabledHint(subobjectDisabled && !runtimeAvailable, runtimeReason);
+        if (subobjectDisabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", runtimeConnected
+                ? "Subobject analysis unavailable."
+                : "Connect or enable the target runtime before subobject analysis.");
         ImGui::EndMenu();
     }
 
@@ -256,7 +264,7 @@ inline void DrawAddressContextActions(
             ImGui::SetClipboardText(addressText.c_str());
 
         const bool symbolDisabled =
-            !context.symbolsModel || !runtimeAvailable;
+            !context.symbolsModel || !runtimeConnected;
         ImGui::BeginDisabled(symbolDisabled);
         if (ImGui::MenuItem("Module + offset")) {
             std::string error;
@@ -274,7 +282,10 @@ inline void DrawAddressContextActions(
             }
         }
         ImGui::EndDisabled();
-        RuntimeDisabledHint(symbolDisabled && !runtimeAvailable, runtimeReason);
+        if (symbolDisabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", runtimeConnected
+                ? "Symbol resolution unavailable."
+                : "Connect or enable the target runtime before symbol resolution.");
         ImGui::EndMenu();
     }
 
