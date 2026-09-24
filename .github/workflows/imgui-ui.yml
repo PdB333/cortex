@@ -216,15 +216,23 @@ jobs:
                 }
               }
             } | ConvertTo-Json -Compress -Depth 8
-            $created = Invoke-McpLine $promptRequest
-            if ($created.id -ne 2 -or $created.result.isError) {
-              throw "Failed to create private prompt: $($created | ConvertTo-Json -Compress -Depth 8)"
-            }
+            # prompt_value_change intentionally blocks until the human presenter answers.
+            # Send the request first, let the ImGui smoke answer it, then consume the MCP response.
+            $mcp.StandardInput.WriteLine($promptRequest)
 
             $promptOutput = & $exe --prompt-channel-smoke --pid "$($target.Id)" --answer "imgui-e2e" 2>&1
             $promptText = $promptOutput -join [Environment]::NewLine
             if ($LASTEXITCODE -ne 0 -or $promptText -notmatch "PASS: ImGui prompt channel answered prompt") {
               throw "Prompt channel smoke failed: $promptText"
+            }
+
+            $createdLine = $mcp.StandardOutput.ReadLine()
+            if (-not $createdLine) {
+              throw "MCP prompt request produced no response after ImGui answer: $($mcp.StandardError.ReadToEnd())"
+            }
+            $created = $createdLine | ConvertFrom-Json
+            if ($created.id -ne 2 -or $created.result.isError) {
+              throw "Private prompt MCP response failed: $createdLine"
             }
 
             $eventOutput = & $exe --event-channel-smoke --pid "$($target.Id)" --expect "prompt.answered" 2>&1
