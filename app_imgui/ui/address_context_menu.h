@@ -58,7 +58,7 @@ inline void DrawAddressContextActions(
                 context.status = "Save address failed: " + error;
             } else {
                 context.status = "Address saved";
-                context.requestWorkspace = "memory";
+                context.requestWorkspace = "addresses";
             }
         }
         ImGui::EndDisabled();

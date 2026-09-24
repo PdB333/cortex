@@ -69,7 +69,7 @@ public:
 
         switch (preset) {
             case WorkspacePreset::Memory:
-                OpenMany({"memory", "memory-browser", "modules", "watches"});
+                OpenMany({"memory", "addresses", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::Debug:
                 OpenMany({"disassembly", "debugger", "patches", "memory-browser", "modules", "watches"});

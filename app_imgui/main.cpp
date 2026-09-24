@@ -19,6 +19,7 @@
 #include "application/scripts_model.h"
 #include "application/screenshot_model.h"
 #include "ui/actions_workspace.h"
+#include "ui/addresses_workspace.h"
 #include "ui/bottom_panel_workspace.h"
 #include "ui/diagnostics_workspace.h"
 #include "ui/input_workspace.h"
@@ -379,6 +380,7 @@ struct AppState {
 
         workspaces.Add<cortex::ui::OverviewWorkspace>();
         workspaces.Add<cortex::ui::BottomPanelWorkspace>();
+        workspaces.Add<cortex::ui::AddressesWorkspace>();
         workspaces.Add<cortex::ui::MemoryWorkspace>();
         workspaces.Add<cortex::ui::MemoryBrowserWorkspace>();
         workspaces.Add<cortex::ui::DisassemblyWorkspace>();
@@ -458,7 +460,7 @@ int RunImGuiSmokeTest() {
     AppState app;
 
     constexpr const char* requiredWorkspaces[] = {
-        "overview", "bottom", "memory", "memory-browser", "disassembly",
+        "overview", "bottom", "addresses", "memory", "memory-browser", "disassembly",
         "modules", "debugger", "runtime", "sessions", "settings", "project",
         "symbols", "structures", "pointermaps", "snapshots", "re",
         "instrumentation", "watches", "actions", "network", "diagnostics",
@@ -651,6 +653,7 @@ enum class CommandAction {
     ToggleWrites,
     EnableRuntime,
     ViewOverview,
+    ViewAddresses,
     ViewMemory,
     ViewMemoryBrowser,
     ViewDisassembly,
@@ -695,7 +698,8 @@ constexpr CommandEntry kCommands[] = {
     {"Target: Detach active target", CommandAction::Detach},
     {"Safety: Toggle write permission", CommandAction::ToggleWrites},
     {"Runtime: Enable instrumentation", CommandAction::EnableRuntime},
-    {"View: Memory scanner / addresses", CommandAction::ViewMemory},
+    {"View: Addresses", CommandAction::ViewAddresses},
+    {"View: Memory scanner", CommandAction::ViewMemory},
     {"View: Memory viewer", CommandAction::ViewMemoryBrowser},
     {"View: Disassembler", CommandAction::ViewDisassembly},
     {"View: Modules", CommandAction::ViewModules},
@@ -763,6 +767,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             break;
         }
         case CommandAction::ViewOverview: app.workspaces.Select("overview"); break;
+        case CommandAction::ViewAddresses: app.workspaces.Select("addresses"); break;
         case CommandAction::ViewMemory: app.workspaces.Select("memory"); break;
         case CommandAction::ViewMemoryBrowser: app.workspaces.Select("memory-browser"); break;
         case CommandAction::ViewDisassembly: app.workspaces.Select("disassembly"); break;

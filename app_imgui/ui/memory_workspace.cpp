@@ -36,6 +36,16 @@ std::string NumberToString(const std::vector<uint8_t>& bytes) {
     return out.str();
 }
 
+std::string RawBytesToHex(const std::vector<uint8_t>& bytes) {
+    std::ostringstream out;
+    out << std::hex << std::uppercase << std::setfill('0');
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i) out << ' ';
+        out << std::setw(2) << static_cast<unsigned>(bytes[i]);
+    }
+    return out.str();
+}
+
 size_t FixedKindSize(services::ScanValueKind kind) {
     switch (kind) {
         case services::ScanValueKind::I32:
@@ -53,6 +63,15 @@ const char* ValueKindName(services::ScanValueKind kind) {
         case services::ScanValueKind::F64: return "double";
         case services::ScanValueKind::String: return "string";
         case services::ScanValueKind::Bytes: return "bytes";
+        default: return "i32";
+    }
+}
+
+const char* PersistentAddressType(services::ScanValueKind kind) {
+    switch (kind) {
+        case services::ScanValueKind::I64: return "i64";
+        case services::ScanValueKind::F32: return "float";
+        case services::ScanValueKind::F64: return "double";
         default: return "i32";
     }
 }
@@ -426,12 +445,13 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
         return;
     }
 
-    if (ImGui::BeginTable("ResultsTable", 2,
+    if (ImGui::BeginTable("ResultsTable", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.52f);
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.48f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.34f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.31f);
+        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthStretch, 0.35f);
         ImGui::TableHeadersRow();
 
         const auto kind = SelectedKind();
@@ -451,22 +471,41 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
                                       ImGuiSelectableFlags_SpanAllColumns |
                                       ImGuiSelectableFlags_AllowDoubleClick)) {
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                        AddAddress(result);
-                        context.status = "Address added to list";
+                        if (context.projectModel && context.mutationAllowed) {
+                            const std::string addressText = address;
+                            const std::string label = "Scan " + addressText;
+                            const std::string notes =
+                                "Scanner value: " + FormatValue(result.value, kind);
+                            std::string error;
+                            if (!context.projectModel->SetAddress(
+                                    label, addressText, PersistentAddressType(kind),
+                                    notes, context.mutationAllowed, &error)) {
+                                context.status = "Save scan address failed: " + error;
+                            } else {
+                                context.status = "Scan address saved";
+                                context.requestWorkspace = "addresses";
+                            }
+                        } else {
+                            context.NavigateTo("addresses", result.address);
+                            context.status = "Open Addresses to save this result";
+                        }
                     }
                 }
                 if (ImGui::BeginPopupContextItem("ResultMenu")) {
                     if (ImGui::MenuItem("Add to local address list")) AddAddress(result);
                     ImGui::Separator();
                     AddressContextOptions options;
-                    options.valueType = ValueKindName(SelectedKind());
-                    options.valueSize = static_cast<int>(FixedKindSize(SelectedKind()));
+                    options.label = std::string("Scan ") + address;
+                    options.valueType = PersistentAddressType(kind);
+                    options.valueSize = static_cast<int>(FixedKindSize(kind));
                     DrawAddressContextActions(context, result.address, options);
                     ImGui::EndPopup();
                 }
 
                 ImGui::TableSetColumnIndex(1);
                 ImGui::TextUnformatted(FormatValue(result.value, kind).c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(RawBytesToHex(result.value).c_str());
                 ImGui::PopID();
             }
         }
@@ -502,6 +541,8 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
         };
         ImGui::Combo("##ScanComparison", &comparisonIndex_,
                      comparisons, IM_ARRAYSIZE(comparisons));
+        if (typeIndex_ >= 4 && comparisonIndex_ >= 3)
+            comparisonIndex_ = 1;
     }
 
     ImGui::Dummy(ImVec2(0, 12));
@@ -525,8 +566,8 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     }
 
     ImGui::Dummy(ImVec2(0, 10));
-    ImGui::TextWrapped("Double-click a result to add it. Right-click for Memory, "
-                       "Disassembler or Find what writes this.");
+    ImGui::TextWrapped("Double-click saves to persistent Addresses when writes are enabled. "
+                       "Right-click for the shared address actions.");
     ImGui::EndChild();
 }
 
@@ -550,7 +591,7 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
     if (addresses_.empty()) {
         ImGui::Dummy(ImVec2(0, 12));
-        ImGui::TextDisabled("Double-click a scan result or use + Add address.");
+        ImGui::TextDisabled("Use + Add address for local scratch entries; Scanner saves go to Addresses.");
         ImGui::EndChild();
         return;
     }

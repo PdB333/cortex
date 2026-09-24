@@ -41,8 +41,8 @@ Target presets:
 - [ ] crash-report service integration
 
 ### 3. Memory and persistent target knowledge
-- [~] exact/refine Scanner
-- [~] Addresses table and edit/freeze
+- [x] exact/refine Scanner with Qt comparison modes, persistent result save and shared actions
+- [x] persistent Addresses table with edit, live watch, freeze, shortcuts and shared actions
 - [x] raw Memory viewer and gated byte writes
 - [x] Modules
 - [x] persistent Project addresses/notes/pointer paths
@@ -92,7 +92,7 @@ Target presets:
 - [x] runtime/API event console
 
 ### 7. Parity hardening and release gate
-- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 24 full / 4 partial / 0 missing)
+- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 26 full / 2 partial / 0 missing)
 - [ ] map every Qt Q_INVOKABLE workflow to ImGui/application-model coverage
 - [ ] x64/x86 runtime and helper E2E
 - [~] deterministic headless ImGui smoke mode runs in CI; native Win32/DX window smoke remains

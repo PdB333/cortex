@@ -99,6 +99,7 @@ add_executable(cortex_imgui WIN32
     application/screenshot_model.cpp
     application/runtime_events_model.cpp
     ui/bottom_panel_workspace.cpp
+    ui/addresses_workspace.cpp
     ui/memory_workspace.cpp
     ui/memory_browser_workspace.cpp
     ui/modules_workspace.cpp

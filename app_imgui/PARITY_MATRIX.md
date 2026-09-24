@@ -16,11 +16,11 @@ Status legend:
 | Qt workspace | Dear ImGui surface | Status | Remaining gap |
 | --- | --- | --- | --- |
 | Overview | `OverviewWorkspace` | Full | — |
-| Addresses | address list in `MemoryWorkspace` | Partial | finish full Qt-era address-table/context workflow and shared address context menu |
+| Addresses | `AddressesWorkspace` | Full | — |
 | Project | `ProjectWorkspace` | Full | — |
 | RE | `ReWorkspace` | Full | — |
 | Memory | `MemoryBrowserWorkspace` | Full | — |
-| Scanner | scanner in `MemoryWorkspace` | Partial | complete exact/refine scan parity and scanner-specific context actions |
+| Scanner | scanner in `MemoryWorkspace` | Full | — |
 | Pointers | `PointerMapsWorkspace` | Full | — |
 | Disassembly | `DisassemblyWorkspace` | Full | — |
 | Structures | `StructuresWorkspace` | Full | — |
@@ -44,7 +44,7 @@ Status legend:
 | Semantic | semantic mode in `RuntimeWorkspace` | Full | — |
 | Sessions | `SessionsWorkspace` | Full | — |
 
-Current workspace result: **24 Full / 4 Partial / 0 Missing**.
+Current workspace result: **26 Full / 2 Partial / 0 Missing**.
 
 ## Cross-cutting Qt surfaces
 
