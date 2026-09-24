@@ -27,8 +27,14 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace cortex::ui {
+
+struct NavigationEntry {
+    std::string workspace;
+    uint64_t address = 0;
+};
 
 struct UiContext {
     target::SessionManager* sessions = nullptr;
@@ -66,6 +72,62 @@ struct UiContext {
     std::string requestWorkspace;
     uint64_t navigationAddress = 0;
     bool navigationAddressPending = false;
+    std::vector<NavigationEntry> navigationBack;
+    std::vector<NavigationEntry> navigationForward;
+    NavigationEntry navigationCurrent;
+    bool navigationCurrentValid = false;
+
+    void NavigateTo(const std::string& workspace, uint64_t address, bool recordHistory = true) {
+        const std::string targetWorkspace = workspace.empty() ? "memory-browser" : workspace;
+        if (recordHistory && navigationCurrentValid &&
+            (navigationCurrent.workspace != targetWorkspace || navigationCurrent.address != address)) {
+            navigationBack.push_back(navigationCurrent);
+            if (navigationBack.size() > 64) navigationBack.erase(navigationBack.begin());
+            navigationForward.clear();
+        }
+        navigationCurrent = {targetWorkspace, address};
+        navigationCurrentValid = true;
+        requestWorkspace = targetWorkspace;
+        navigationAddress = address;
+        navigationAddressPending = true;
+    }
+
+    bool CanNavigateBack() const { return !navigationBack.empty(); }
+    bool CanNavigateForward() const { return !navigationForward.empty(); }
+
+    bool NavigateBack() {
+        if (navigationBack.empty()) return false;
+        if (navigationCurrentValid) {
+            navigationForward.push_back(navigationCurrent);
+            if (navigationForward.size() > 64) navigationForward.erase(navigationForward.begin());
+        }
+        const NavigationEntry target = navigationBack.back();
+        navigationBack.pop_back();
+        NavigateTo(target.workspace, target.address, false);
+        return true;
+    }
+
+    bool NavigateForward() {
+        if (navigationForward.empty()) return false;
+        if (navigationCurrentValid) {
+            navigationBack.push_back(navigationCurrent);
+            if (navigationBack.size() > 64) navigationBack.erase(navigationBack.begin());
+        }
+        const NavigationEntry target = navigationForward.back();
+        navigationForward.pop_back();
+        NavigateTo(target.workspace, target.address, false);
+        return true;
+    }
+
+    void ResetNavigation() {
+        requestWorkspace.clear();
+        navigationAddress = 0;
+        navigationAddressPending = false;
+        navigationBack.clear();
+        navigationForward.clear();
+        navigationCurrent = {};
+        navigationCurrentValid = false;
+    }
 
     // Optional generic runtime-tool preset used by context menus such as
     // "Find what writes this".

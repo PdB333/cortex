@@ -147,9 +147,7 @@ std::string MemoryWorkspace::FormatValue(
 
 void MemoryWorkspace::NavigateAddress(UiContext& context, uint64_t address,
                                       const char* workspace) {
-    context.navigationAddress = address;
-    context.navigationAddressPending = true;
-    context.requestWorkspace = workspace ? workspace : "memory-browser";
+    context.NavigateTo(workspace ? workspace : "memory-browser", address);
 }
 
 void MemoryWorkspace::FindWriter(UiContext& context, uint64_t address) {

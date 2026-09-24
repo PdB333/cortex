@@ -149,9 +149,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Read")) Refresh(context);
     ImGui::SameLine();
     if (ImGui::Button("Disassemble") && ParseAddress(currentAddress_)) {
-        context.navigationAddress = currentAddress_;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = "disassembly";
+        context.NavigateTo("disassembly", currentAddress_);
     }
 
     ImGui::Spacing();
@@ -178,9 +176,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                             static_cast<unsigned long long>(currentAddress_ + offset));
                 if (ImGui::BeginPopupContextItem()) {
                     if (ImGui::MenuItem("Disassemble here")) {
-                        context.navigationAddress = currentAddress_ + offset;
-                        context.navigationAddressPending = true;
-                        context.requestWorkspace = "disassembly";
+                        context.NavigateTo("disassembly", currentAddress_ + offset);
                     }
                     ImGui::EndPopup();
                 }

@@ -412,6 +412,7 @@ struct AppState {
         runtimeEventsModel.Reset();
         patchesModel.Reset();
         ui.mutationAllowed = false;
+        ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
     }
@@ -530,9 +531,33 @@ bool ResolveAddressExpression(AppState& app, const char* expression,
 }
 
 void NavigateTo(AppState& app, uint64_t address, const char* workspace) {
-    app.ui.navigationAddress = address;
-    app.ui.navigationAddressPending = true;
-    app.ui.requestWorkspace = workspace ? workspace : "memory-browser";
+    app.ui.NavigateTo(workspace ? workspace : "memory-browser", address);
+}
+
+void ResetTargetState(AppState& app) {
+    app.debuggerModel.Reset();
+    app.projectModel.Reset();
+    app.symbolsModel.Reset();
+    app.structuresModel.Reset();
+    app.pointerMapsModel.Reset();
+    app.snapshotsModel.Reset();
+    app.reModel.Reset();
+    app.instrumentationModel.Reset();
+    app.watchesModel.Reset();
+    app.actionsModel.Reset();
+    app.networkModel.Reset();
+    app.diagnosticsModel.Reset();
+    app.scriptsModel.Reset();
+    app.inputModel.Reset();
+    app.screenshotModel.Reset();
+    app.runtimeEventsModel.Reset();
+    app.patchesModel.Reset();
+    app.sessions.Detach();
+    app.payload.Reset();
+    app.ui.mutationAllowed = false;
+    app.ui.ResetNavigation();
+    app.ui.requestWorkspace = "memory";
+    app.ui.status = "Detached";
 }
 
 enum class CommandAction {
@@ -570,6 +595,8 @@ enum class CommandAction {
     ViewAdvanced,
     ViewSessions,
     ViewSettings,
+    NavigateBack,
+    NavigateForward,
     GoTo
 };
 
@@ -612,6 +639,8 @@ constexpr CommandEntry kCommands[] = {
     {"View: Advanced runtime", CommandAction::ViewAdvanced},
     {"View: Sessions", CommandAction::ViewSessions},
     {"View: Settings", CommandAction::ViewSettings},
+    {"Navigate: Back", CommandAction::NavigateBack},
+    {"Navigate: Forward", CommandAction::NavigateForward},
     {"Navigate: Go to address", CommandAction::GoTo}
 };
 
@@ -633,72 +662,7 @@ void ExecuteCommand(AppState& app, CommandAction action) {
             app.ui.requestProcessPicker = true;
             break;
         case CommandAction::Detach:
-            if (app.sessions.Active()) {
-                app.debuggerModel.Reset();
-                app.projectModel.Reset();
-                app.symbolsModel.Reset();
-                app.structuresModel.Reset();
-                app.pointerMapsModel.Reset();
-                app.snapshotsModel.Reset();
-            app.reModel.Reset();
-            app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.reModel.Reset();
-            app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.watchesModel.Reset();
-                app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.networkModel.Reset();
-                app.diagnosticsModel.Reset();
-                app.scriptsModel.Reset();
-                app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.patchesModel.Reset();
-                app.sessions.Detach();
-                app.payload.Reset();
-                app.ui.mutationAllowed = false;
-                app.ui.status = "Detached";
-            }
+            if (app.sessions.Active()) ResetTargetState(app);
             break;
         case CommandAction::ToggleWrites:
             if (app.sessions.Active()) app.ui.mutationAllowed = !app.ui.mutationAllowed;
@@ -743,6 +707,12 @@ void ExecuteCommand(AppState& app, CommandAction action) {
         case CommandAction::ViewAdvanced: app.workspaces.Select("runtime"); break;
         case CommandAction::ViewSessions: app.workspaces.Select("sessions"); break;
         case CommandAction::ViewSettings: app.workspaces.Select("settings"); break;
+        case CommandAction::NavigateBack:
+            if (!app.ui.NavigateBack()) app.ui.status = "No previous address";
+            break;
+        case CommandAction::NavigateForward:
+            if (!app.ui.NavigateForward()) app.ui.status = "No next address";
+            break;
         case CommandAction::GoTo:
             app.requestGoTo = true;
             break;
@@ -761,6 +731,11 @@ void HandleGlobalShortcuts(AppState& app) {
 
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false) && app.sessions.Active())
         app.requestGoTo = true;
+
+    if (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false) && app.ui.CanNavigateBack())
+        app.ui.NavigateBack();
+    if (io.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_RightArrow, false) && app.ui.CanNavigateForward())
+        app.ui.NavigateForward();
 }
 
 void DrawCommandPalette(AppState& app) {
@@ -977,28 +952,7 @@ void DrawHeader(AppState& app) {
         }
         ImGui::SameLine();
         if (ImGui::SmallButton("Detach")) {
-            app.debuggerModel.Reset();
-            app.projectModel.Reset();
-            app.symbolsModel.Reset();
-            app.structuresModel.Reset();
-            app.pointerMapsModel.Reset();
-            app.snapshotsModel.Reset();
-            app.reModel.Reset();
-            app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-            app.sessions.Detach();
-            app.payload.Reset();
-            app.ui.mutationAllowed = false;
-            app.ui.status = "Detached";
-            app.ui.requestWorkspace = "memory";
+            ResetTargetState(app);
         }
     } else {
         ImGui::SameLine();
@@ -1036,70 +990,7 @@ void DrawApp(AppState& app) {
             const bool attached = static_cast<bool>(app.sessions.Active());
             ImGui::BeginDisabled(!attached);
             if (ImGui::MenuItem("Detach active target")) {
-                app.debuggerModel.Reset();
-                app.projectModel.Reset();
-                app.symbolsModel.Reset();
-                app.structuresModel.Reset();
-                app.pointerMapsModel.Reset();
-                app.snapshotsModel.Reset();
-            app.reModel.Reset();
-            app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.reModel.Reset();
-            app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.instrumentationModel.Reset();
-            app.watchesModel.Reset();
-            app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.watchesModel.Reset();
-                app.actionsModel.Reset();
-            app.networkModel.Reset();
-            app.diagnosticsModel.Reset();
-            app.scriptsModel.Reset();
-            app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.networkModel.Reset();
-                app.diagnosticsModel.Reset();
-                app.scriptsModel.Reset();
-                app.inputModel.Reset();
-            app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.screenshotModel.Reset();
-            app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.runtimeEventsModel.Reset();
-            app.patchesModel.Reset();
-                app.patchesModel.Reset();
-                app.sessions.Detach();
-                app.payload.Reset();
-                app.ui.mutationAllowed = false;
-                app.ui.status = "Detached";
+                ResetTargetState(app);
             }
             ImGui::EndDisabled();
             ImGui::EndMenu();
@@ -1110,6 +1001,11 @@ void DrawApp(AppState& app) {
         }
         if (ImGui::BeginMenu("View")) {
             app.workspaces.DrawViewMenu();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Back", "Alt+Left", false, app.ui.CanNavigateBack()))
+                app.ui.NavigateBack();
+            if (ImGui::MenuItem("Forward", "Alt+Right", false, app.ui.CanNavigateForward()))
+                app.ui.NavigateForward();
             ImGui::Separator();
             if (ImGui::MenuItem("Command palette...", "Ctrl+Shift+P"))
                 app.requestCommandPalette = true;

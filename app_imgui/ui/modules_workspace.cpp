@@ -73,21 +73,15 @@ void ModulesWorkspace::Draw(UiContext& context) {
                                   ImGuiSelectableFlags_SpanAllColumns |
                                   ImGuiSelectableFlags_AllowDoubleClick)) {
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    context.navigationAddress = module.base;
-                    context.navigationAddressPending = true;
-                    context.requestWorkspace = "disassembly";
+                    context.NavigateTo("disassembly", module.base);
                 }
             }
             if (ImGui::BeginPopupContextItem()) {
                 if (ImGui::MenuItem("Disassemble module entry")) {
-                    context.navigationAddress = module.base;
-                    context.navigationAddressPending = true;
-                    context.requestWorkspace = "disassembly";
+                    context.NavigateTo("disassembly", module.base);
                 }
                 if (ImGui::MenuItem("Browse memory")) {
-                    context.navigationAddress = module.base;
-                    context.navigationAddressPending = true;
-                    context.requestWorkspace = "memory-browser";
+                    context.NavigateTo("memory-browser", module.base);
                 }
                 ImGui::EndPopup();
             }

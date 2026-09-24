@@ -19,7 +19,7 @@ Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 - [x] Go To (Ctrl+G): address, module offset, Project names/pointer paths and symbols
 - [ ] shared address context menu everywhere
 - [ ] bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
-- [~] global keyboard shortcuts started; navigation history remains
+- [x] global keyboard shortcuts + address navigation history (Alt+Left / Alt+Right)
 
 Target presets:
 - Memory: Scanner + Addresses + Memory viewer + Watches

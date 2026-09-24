@@ -87,9 +87,7 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Memory") && currentAddress_) {
-        context.navigationAddress = currentAddress_;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = "memory-browser";
+        context.NavigateTo("memory-browser", currentAddress_);
     }
 
     ImGui::Spacing();
@@ -121,9 +119,7 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
             }
             if (ImGui::BeginPopupContextItem()) {
                 if (ImGui::MenuItem("Browse memory here")) {
-                    context.navigationAddress = row.address;
-                    context.navigationAddressPending = true;
-                    context.requestWorkspace = "memory-browser";
+                    context.NavigateTo("memory-browser", row.address);
                 }
                 if (ImGui::MenuItem("Find what writes this")) {
                     context.runtimeToolPreset = "re_find_last_writer";

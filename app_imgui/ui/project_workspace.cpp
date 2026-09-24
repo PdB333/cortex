@@ -82,9 +82,7 @@ bool ProjectWorkspace::Navigate(UiContext& context, const std::string& expressio
                                 const char* workspace) {
     uint64_t address = 0;
     if (ParseNumber(expression, address)) {
-        context.navigationAddress = address;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = workspace;
+        context.NavigateTo(workspace, address);
         return true;
     }
 
@@ -109,9 +107,7 @@ bool ProjectWorkspace::Navigate(UiContext& context, const std::string& expressio
             context.status = "Project address overflow";
             return false;
         }
-        context.navigationAddress = module.base + offset;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = workspace;
+        context.NavigateTo(workspace, module.base + offset);
         return true;
     }
     context.status = error.empty() ? "Project module not found" : error;

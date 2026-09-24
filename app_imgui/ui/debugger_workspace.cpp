@@ -128,9 +128,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     if (snapshot.instructionPointer) {
         ImGui::SameLine();
         if (ImGui::Button("Disassemble IP")) {
-            context.navigationAddress = snapshot.instructionPointer;
-            context.navigationAddressPending = true;
-            context.requestWorkspace = "disassembly";
+            context.NavigateTo("disassembly", snapshot.instructionPointer);
         }
     }
 
@@ -340,9 +338,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                             static_cast<unsigned long long>(entry.instruction));
                 if (ImGui::IsItemHovered() &&
                     ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    context.navigationAddress = entry.instruction;
-                    context.navigationAddressPending = true;
-                    context.requestWorkspace = "disassembly";
+                    context.NavigateTo("disassembly", entry.instruction);
                 }
                 ImGui::TableSetColumnIndex(4);
                 ImGui::Text("%zu registers", entry.registers.registers.size());

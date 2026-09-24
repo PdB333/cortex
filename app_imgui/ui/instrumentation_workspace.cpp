@@ -13,9 +13,7 @@ bool InstrumentationWorkspace::Navigate(UiContext& context,
         size_t used = 0;
         const uint64_t address = std::stoull(rawAddress, &used, 0);
         if (used != rawAddress.size()) return false;
-        context.navigationAddress = address;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = workspace;
+        context.NavigateTo(workspace, address);
         return true;
     } catch (...) {
         return false;

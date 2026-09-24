@@ -55,7 +55,7 @@ of the parity contract because they are shared by multiple Qt workspaces.
 | --- | --- | --- |
 | `AddressContextMenu.qml` | Partial | one reusable address context menu shared by Addresses, Scanner, Memory, Disassembly and debugger disassembly |
 | `BottomPanel.qml` | Missing | dockable bottom panel for Events / Console / Breakpoints / Watches / AI / Diagnostics |
-| navigation history | Partial | back/forward history across address navigation |
+| navigation history | Full | global address history shared across ImGui workspaces (Alt+Left / Alt+Right) |
 | `PromptSurface.qml` / private answer route | Missing | human prompt surface and answer path |
 | AI activity listener/history | Missing | listener + visible history |
 | crash-report service UI/integration | Missing | expose/report startup/runtime crashes without Qt dependency |

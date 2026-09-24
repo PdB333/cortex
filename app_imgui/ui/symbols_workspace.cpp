@@ -13,9 +13,7 @@ bool SymbolsWorkspace::Navigate(UiContext& context, const std::string& address,
             context.status = "Symbol address is not numeric: " + address;
             return false;
         }
-        context.navigationAddress = value;
-        context.navigationAddressPending = true;
-        context.requestWorkspace = workspace;
+        context.NavigateTo(workspace, value);
         return true;
     } catch (...) {
         context.status = "Symbol address is not numeric: " + address;
