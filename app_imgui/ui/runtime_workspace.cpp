@@ -179,13 +179,14 @@ void RuntimeWorkspace::Draw(UiContext& context) {
 
     if (targetId_ != session->Target().id) {
         targetId_ = session->Target().id;
-        context.payload->Reset();
         tools_.clear();
         selected_ = -1;
         output_.clear();
         initializedArgs_ = false;
         filter_.fill(0);
-        modeIndex_ = 0;
+        modeIndex_ =
+            context.settings && context.settings->Values().mcpToolProfile == "all"
+                ? 1 : 0;
     }
 
     if (!initializedArgs_) {
@@ -231,6 +232,12 @@ void RuntimeWorkspace::Draw(UiContext& context) {
     }
 
     if (context.payload->Ready() && tools_.empty()) RefreshTools(context);
+
+    if (modeIndex_ != 2 && context.settings) {
+        const int configuredMode =
+            context.settings->Values().mcpToolProfile == "all" ? 1 : 0;
+        if (modeIndex_ != configuredMode) modeIndex_ = configuredMode;
+    }
     ApplyPreset(context);
 
     if (tools_.empty()) {
@@ -241,7 +248,14 @@ void RuntimeWorkspace::Draw(UiContext& context) {
 
     static const char* modes[] = {"Primitives", "All tools", "Semantic"};
     ImGui::SetNextItemWidth(130);
-    ImGui::Combo("##RuntimeMode", &modeIndex_, modes, IM_ARRAYSIZE(modes));
+    if (ImGui::Combo("##RuntimeMode", &modeIndex_, modes, IM_ARRAYSIZE(modes)) &&
+        modeIndex_ <= 1 && context.settings) {
+        context.settings->Values().mcpToolProfile =
+            modeIndex_ == 1 ? "all" : "compact";
+        std::string error;
+        if (!context.settings->SaveAndSync(&error))
+            context.status = "MCP profile save failed: " + error;
+    }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(260);
     ImGui::InputTextWithHint("##RuntimeFilter", "Filter tools...",

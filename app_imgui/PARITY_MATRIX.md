@@ -39,12 +39,12 @@ Status legend:
 | Scripts | `ScriptsWorkspace` | Full | — |
 | Input | `InputWorkspace` | Full | — |
 | Actions | `ActionsWorkspace` | Full | — |
-| Settings | `SettingsWorkspace` | Partial | finish wiring remaining per-panel settings consumers |
+| Settings | `SettingsWorkspace` | Full | — |
 | MCP | `RuntimeWorkspace` | Partial | true Qt-era MCP host-mode parity: dynamic targets, operations and events |
 | Semantic | semantic mode in `RuntimeWorkspace` | Full | — |
 | Sessions | `SessionsWorkspace` | Full | — |
 
-Current workspace result: **26 Full / 2 Partial / 0 Missing**.
+Current workspace result: **27 Full / 1 Partial / 0 Missing**.
 
 ## Cross-cutting Qt surfaces
 

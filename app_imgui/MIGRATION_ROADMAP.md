@@ -31,7 +31,7 @@ Target presets:
 
 ### 2. Application state, settings and sessions
 - [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity, Prompt and Patches models ported)
-- [~] persistent Settings store + direct ImGui Settings UI; per-panel consumers still being wired
+- [x] persistent Settings store + direct ImGui Settings UI with runtime, scanner, debugger, trace, AI and MCP consumers wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
 - [x] project/session storage paths and retention settings
@@ -92,7 +92,7 @@ Target presets:
 - [x] runtime/API event console
 
 ### 7. Parity hardening and release gate
-- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 26 full / 2 partial / 0 missing)
+- [~] map every Qt workspace to direct ImGui coverage (see `PARITY_MATRIX.md`; currently 27 full / 1 partial / 0 missing)
 - [ ] map every Qt Q_INVOKABLE workflow to ImGui/application-model coverage
 - [ ] x64/x86 runtime and helper E2E
 - [~] deterministic headless ImGui smoke mode runs in CI; native Win32/DX window smoke remains

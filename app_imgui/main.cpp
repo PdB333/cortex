@@ -433,6 +433,14 @@ struct AppState {
         ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
         ui.requestWorkspace = "memory";
+
+        if (settings.Values().autoLoadRuntimeOnAttach) {
+            std::string error;
+            if (payload.EnsureReady(&error))
+                ui.status += " | runtime auto-loaded";
+            else
+                ui.status += " | runtime auto-load failed: " + error;
+        }
     }
 
     void RefreshTargets() {
