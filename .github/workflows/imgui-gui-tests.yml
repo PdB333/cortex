@@ -68,7 +68,7 @@ jobs:
           bad=0
           while IFS= read -r file; do
             case "$file" in
-              .github/workflows/ui-migration-benchmarks.yml) continue ;;
+              .github/workflows/ui-migration-benchmarks.yml|.github/workflows/imgui-gui-tests.yml) continue ;;
             esac
             if grep -E -n 'Qt 6|qt6-|QML|windeployqt|cmake -S app([[:space:]]|$)|next/unified-cortex-ui' "$file"; then
               echo "stale Qt/QML or legacy-branch workflow: $file"
