@@ -51,7 +51,12 @@ void MemoryBrowserWorkspace::Navigate(uint64_t address) {
                   static_cast<unsigned long long>(address));
 }
 
-void MemoryBrowserWorkspace::Refresh(UiContext& context) {
+int MemoryBrowserWorkspace::LiveIntervalMs() const {
+    static constexpr int rates[] = {100, 250, 500, 1000};
+    return rates[std::clamp(liveRateIndex_, 0, 3)];
+}
+
+void MemoryBrowserWorkspace::Refresh(UiContext& context, bool quiet) {
     if (!context.memory) return;
     uint64_t address = 0;
     if (!ParseAddress(address)) {
@@ -62,13 +67,15 @@ void MemoryBrowserWorkspace::Refresh(UiContext& context) {
     std::string error;
     std::vector<uint8_t> value;
     if (!context.memory->Read(address, static_cast<size_t>(byteCount_), value, &error)) {
-        context.status = "Memory read failed: " + error;
-        bytes_.clear();
+        if (!quiet) context.status = "Memory read failed: " + error;
         return;
     }
     currentAddress_ = address;
+    previousBytes_ = bytes_;
     bytes_ = std::move(value);
-    context.status = "Read " + std::to_string(bytes_.size()) + " byte(s)";
+    lastLiveRefresh_ = std::chrono::steady_clock::now();
+    if (!quiet)
+        context.status = "Read " + std::to_string(bytes_.size()) + " byte(s)";
 }
 
 bool MemoryBrowserWorkspace::WriteBytes(UiContext& context) {
@@ -122,9 +129,16 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     if (id != targetId_) {
         targetId_ = id;
         bytes_.clear();
+        previousBytes_.clear();
         currentAddress_ = 0;
-        if (context.settings)
+        lastLiveRefresh_ = {};
+        if (context.settings) {
             byteCount_ = context.settings->Values().memoryReadSize;
+            const int configured = context.settings->Values().autoRefreshMs;
+            liveRateIndex_ = configured <= 150 ? 0 :
+                             configured <= 375 ? 1 :
+                             configured <= 750 ? 2 : 3;
+        }
         std::snprintf(address_, sizeof(address_), "0x%llX",
                       static_cast<unsigned long long>(session->MemoryRegions().empty()
                         ? 0ull : session->MemoryRegions().front().base));
@@ -152,6 +166,22 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Disassemble") && ParseAddress(currentAddress_)) {
         context.NavigateTo("disassembly", currentAddress_);
     }
+    ImGui::SameLine();
+    ImGui::Checkbox("Live", &liveRefresh_);
+    ImGui::SameLine();
+    const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
+    ImGui::SetNextItemWidth(90);
+    ImGui::Combo("##MemoryLiveRate", &liveRateIndex_,
+                 liveRates, IM_ARRAYSIZE(liveRates));
+
+    if (liveRefresh_ && currentAddress_ != 0 && !ImGui::IsAnyItemActive()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (lastLiveRefresh_.time_since_epoch().count() == 0 ||
+            now - lastLiveRefresh_ >=
+                std::chrono::milliseconds(LiveIntervalMs())) {
+            Refresh(context, true);
+        }
+    }
 
     ImGui::Spacing();
     const size_t rowWidth = context.settings
@@ -160,13 +190,14 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     if (ImGui::BeginChild("HexView", ImVec2(0, -118), ImGuiChildFlags_Borders)) {
         if (bytes_.empty()) {
             ImGui::TextDisabled("Enter an address and press Read.");
-        } else if (ImGui::BeginTable("HexTable", 3,
+        } else if (ImGui::BeginTable("HexTable", 4,
                                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                      ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                                      ImGui::GetContentRegionAvail())) {
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
-            ImGui::TableSetupColumn("Hex", ImGuiTableColumnFlags_WidthStretch, 0.72f);
+            ImGui::TableSetupColumn("Hex", ImGuiTableColumnFlags_WidthStretch, 0.68f);
             ImGui::TableSetupColumn("ASCII", ImGuiTableColumnFlags_WidthStretch, 0.28f);
+            ImGui::TableSetupColumn("Δ", ImGuiTableColumnFlags_WidthFixed, 28);
             ImGui::TableHeadersRow();
 
             for (size_t offset = 0; offset < bytes_.size(); offset += rowWidth) {
@@ -186,6 +217,23 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                 ImGui::TextUnformatted(HexBytes(bytes_.data() + offset, count).c_str());
                 ImGui::TableSetColumnIndex(2);
                 ImGui::TextUnformatted(Ascii(bytes_.data() + offset, count).c_str());
+                ImGui::TableSetColumnIndex(3);
+                bool changed = false;
+                if (previousBytes_.size() == bytes_.size()) {
+                    for (size_t i = 0; i < count; ++i) {
+                        if (previousBytes_[offset + i] != bytes_[offset + i]) {
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+                if (changed) {
+                    ImGui::TextUnformatted("*");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("One or more bytes changed since the previous live refresh.");
+                } else {
+                    ImGui::TextDisabled("-");
+                }
             }
             ImGui::EndTable();
         }

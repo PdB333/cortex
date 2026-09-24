@@ -3,6 +3,7 @@
 #include "workspace.h"
 #include "services/disassembly_service.h"
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,8 @@ public:
 
 private:
     bool ParseAddress(uint64_t& address) const;
-    void Decode(UiContext& context, uint64_t address);
+    void Decode(UiContext& context, uint64_t address, bool quiet = false);
+    int LiveIntervalMs() const;
     void Analyze(UiContext& context, const char* tool,
                  const char* argumentKey, const char* kind,
                  bool includeData = false);
@@ -29,6 +31,10 @@ private:
     std::string analysisResult_;
     std::string analysisError_;
     std::string targetId_;
+    bool liveRefresh_ = true;
+    bool followInstructionPointer_ = true;
+    int liveRateIndex_ = 2;
+    std::chrono::steady_clock::time_point lastLiveRefresh_{};
 };
 
 } // namespace cortex::ui

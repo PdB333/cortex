@@ -4,10 +4,33 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
+#include <cstring>
 
 namespace cortex::ui {
 namespace {
+
+uint64_t RegisterValue(
+        const target::ThreadRegisterSnapshot& snapshot,
+        const char* first, const char* second = nullptr) {
+    for (const auto& reg : snapshot.registers) {
+        std::string name = reg.name;
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        if (name == first || (second && name == second))
+            return reg.value;
+    }
+    return 0;
+}
+
+uint64_t ReadLittleEndian(const uint8_t* bytes, int size) {
+    uint64_t value = 0;
+    if (!bytes || size <= 0 || size > 8) return 0;
+    std::memcpy(&value, bytes, static_cast<size_t>(size));
+    return value;
+}
 
 const char* BreakpointKind(int index) {
     switch (index) {
@@ -19,6 +42,11 @@ const char* BreakpointKind(int index) {
 }
 
 } // namespace
+
+int DebuggerWorkspace::LiveIntervalMs() const {
+    static constexpr int rates[] = {100, 250, 500, 1000};
+    return rates[std::clamp(liveRateIndex_, 0, 3)];
+}
 
 bool DebuggerWorkspace::RequireMutation(UiContext& context) {
     if (context.mutationAllowed) return true;
@@ -47,7 +75,61 @@ void DebuggerWorkspace::SelectThread(UiContext& context, uint64_t threadId) {
         context.status = "Register read failed: " + error;
         return;
     }
+    RefreshStack(context);
     context.status = "Thread " + std::to_string(threadId);
+}
+
+void DebuggerWorkspace::RefreshStack(UiContext& context) {
+    stackBytes_.clear();
+    stackBase_ = 0;
+    stackError_.clear();
+    if (!context.debuggerModel || !context.memory) return;
+
+    const auto& snapshot = context.debuggerModel->Snapshot();
+    if (snapshot.threadId == 0 || snapshot.registers.empty()) return;
+
+    uint64_t sp = RegisterValue(snapshot, "rsp", "esp");
+    if (!sp) sp = RegisterValue(snapshot, "sp");
+    if (!sp) {
+        stackError_ = "stack_pointer_unavailable";
+        return;
+    }
+
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    stackEntrySize_ =
+        session && session->Target().architecture == target::Architecture::X86
+            ? 4 : 8;
+    stackBase_ = sp;
+
+    std::string error;
+    const size_t bytes = static_cast<size_t>(stackEntrySize_) * 40;
+    if (!context.memory->Read(stackBase_, bytes, stackBytes_, &error)) {
+        stackBytes_.clear();
+        stackError_ = error.empty() ? "stack_read_failed" : error;
+    }
+}
+
+void DebuggerWorkspace::RefreshLive(UiContext& context) {
+    if (!context.debuggerModel) return;
+    auto& debugger = *context.debuggerModel;
+    std::string error;
+
+    if (!debugger.RefreshThreads(&error)) {
+        stackError_ = "thread_refresh_failed:" + error;
+        return;
+    }
+
+    const uint64_t current = debugger.CurrentThread();
+    if (current != 0 && !debugger.SelectThread(current, &error)) {
+        stackError_ = "register_refresh_failed:" + error;
+        return;
+    }
+
+    if (debugger.Ready())
+        debugger.RefreshRuntime(nullptr);
+
+    RefreshStack(context);
+    lastLiveRefresh_ = std::chrono::steady_clock::now();
 }
 
 void DebuggerWorkspace::Draw(UiContext& context) {
@@ -64,8 +146,17 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             breakpointAction_ =
                 context.settings->Values().breakpointDefaultAction == "pause" ? 1 : 0;
             processGlobal_ = context.settings->Values().hardwareBreakpointsGlobal;
+            const int configured = context.settings->Values().autoRefreshMs;
+            liveRateIndex_ = configured <= 150 ? 0 :
+                             configured <= 375 ? 1 :
+                             configured <= 750 ? 2 : 3;
         }
+        stackBytes_.clear();
+        stackBase_ = 0;
+        stackError_.clear();
+        lastLiveRefresh_ = {};
         Refresh(context, false);
+        RefreshStack(context);
     }
 
     auto& debugger = *context.debuggerModel;
@@ -76,7 +167,26 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     ImGui::TextDisabled("backend: %s%s", backend.c_str(),
                         backend == "veh" ? " (in-process)" : " (external)");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) Refresh(context, debugger.Ready());
+    if (ImGui::SmallButton("Refresh")) {
+        Refresh(context, debugger.Ready());
+        RefreshStack(context);
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Live", &liveRefresh_);
+    ImGui::SameLine();
+    const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
+    ImGui::SetNextItemWidth(90);
+    ImGui::Combo("##DebuggerLiveRate", &liveRateIndex_,
+                 liveRates, IM_ARRAYSIZE(liveRates));
+
+    if (liveRefresh_ && !ImGui::IsAnyItemActive()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (lastLiveRefresh_.time_since_epoch().count() == 0 ||
+            now - lastLiveRefresh_ >=
+                std::chrono::milliseconds(LiveIntervalMs())) {
+            RefreshLive(context);
+        }
+    }
 
     ImGui::SameLine();
     if (!debugger.Ready()) {
@@ -161,7 +271,9 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("RegisterView", ImVec2(0, upperHeight), ImGuiChildFlags_Borders);
+    const float detailWidth = ImGui::GetContentRegionAvail().x;
+    const float registerWidth = std::max(280.0f, detailWidth * 0.48f);
+    ImGui::BeginChild("RegisterView", ImVec2(registerWidth, upperHeight), ImGuiChildFlags_Borders);
     ImGui::Text("Registers - TID %llu", static_cast<unsigned long long>(currentThread));
     ImGui::Separator();
     if (snapshot.registers.empty()) {
@@ -171,7 +283,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
                                  ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed, 110);
+        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed, 90);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (const auto& reg : snapshot.registers) {
@@ -180,6 +292,73 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             ImGui::TextUnformatted(reg.name.c_str());
             ImGui::TableSetColumnIndex(1);
             ImGui::Text("0x%llX", static_cast<unsigned long long>(reg.value));
+            if (ImGui::BeginPopupContextItem(reg.name.c_str())) {
+                AddressContextOptions options;
+                options.label = reg.name;
+                options.valueType = "u64";
+                options.valueSize = 8;
+                DrawAddressContextActions(context, reg.value, options);
+                ImGui::EndPopup();
+            }
+        }
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+    ImGui::BeginChild("StackView", ImVec2(0, upperHeight), ImGuiChildFlags_Borders);
+    ImGui::Text("Stack  SP=0x%llX",
+                static_cast<unsigned long long>(stackBase_));
+    ImGui::Separator();
+    if (!stackError_.empty()) {
+        ImGui::TextDisabled("%s", stackError_.c_str());
+    } else if (stackBytes_.empty()) {
+        ImGui::TextDisabled("Select a thread to read its stack.");
+    } else if (ImGui::BeginTable("StackTable", 2,
+                                 ImGuiTableFlags_RowBg |
+                                 ImGuiTableFlags_BordersInnerH |
+                                 ImGuiTableFlags_ScrollY,
+                                 ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 135);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (size_t offset = 0;
+             offset + static_cast<size_t>(stackEntrySize_) <= stackBytes_.size();
+             offset += static_cast<size_t>(stackEntrySize_)) {
+            const uint64_t slot = stackBase_ + offset;
+            const uint64_t value =
+                ReadLittleEndian(stackBytes_.data() + offset, stackEntrySize_);
+            ImGui::PushID(static_cast<int>(offset));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("0x%llX", static_cast<unsigned long long>(slot));
+            if (ImGui::BeginPopupContextItem("StackSlot")) {
+                AddressContextOptions options;
+                options.label = "Stack slot";
+                options.valueType = stackEntrySize_ == 4 ? "u32" : "u64";
+                options.valueSize = stackEntrySize_;
+                DrawAddressContextActions(context, slot, options);
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(1);
+            char valueLabel[24] = {};
+            std::snprintf(valueLabel, sizeof(valueLabel), "0x%llX",
+                          static_cast<unsigned long long>(value));
+            if (ImGui::Selectable(
+                    valueLabel, false,
+                    ImGuiSelectableFlags_AllowDoubleClick)) {
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && value)
+                    context.NavigateTo("memory-browser", value);
+            }
+            if (value && ImGui::BeginPopupContextItem("StackValue")) {
+                AddressContextOptions options;
+                options.label = "Stack value";
+                options.valueType = stackEntrySize_ == 4 ? "u32" : "u64";
+                options.valueSize = stackEntrySize_;
+                DrawAddressContextActions(context, value, options);
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
         }
         ImGui::EndTable();
     }

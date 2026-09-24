@@ -35,21 +35,28 @@ bool DisassemblyWorkspace::ParseAddress(uint64_t& address) const {
     }
 }
 
-void DisassemblyWorkspace::Decode(UiContext& context, uint64_t address) {
+int DisassemblyWorkspace::LiveIntervalMs() const {
+    static constexpr int rates[] = {100, 250, 500, 1000};
+    return rates[std::clamp(liveRateIndex_, 0, 3)];
+}
+
+void DisassemblyWorkspace::Decode(
+        UiContext& context, uint64_t address, bool quiet) {
     if (!context.disassembly) return;
     count_ = std::clamp(count_, 16, 1000);
     std::string error;
     std::vector<services::DisassemblyInstruction> rows;
     if (!context.disassembly->Decode(address, static_cast<size_t>(count_), rows, &error)) {
-        context.status = "Disassembly failed: " + error;
-        instructions_.clear();
+        if (!quiet) context.status = "Disassembly failed: " + error;
         return;
     }
     currentAddress_ = address;
     instructions_ = std::move(rows);
+    lastLiveRefresh_ = std::chrono::steady_clock::now();
     std::snprintf(address_, sizeof(address_), "0x%llX",
                   static_cast<unsigned long long>(address));
-    context.status = std::to_string(instructions_.size()) + " instruction(s)";
+    if (!quiet)
+        context.status = std::to_string(instructions_.size()) + " instruction(s)";
 }
 
 void DisassemblyWorkspace::Analyze(
@@ -102,6 +109,13 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
         analysisKind_.clear();
         analysisResult_.clear();
         analysisError_.clear();
+        lastLiveRefresh_ = {};
+        if (context.settings) {
+            const int configured = context.settings->Values().autoRefreshMs;
+            liveRateIndex_ = configured <= 150 ? 0 :
+                             configured <= 375 ? 1 :
+                             configured <= 750 ? 2 : 3;
+        }
     }
 
     uint64_t navigationAddress = 0;
@@ -137,6 +151,33 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     ImGui::SameLine();
     if (ImGui::Button("Structured CFG"))
         Analyze(context, "analysis_structure", "address", "Structured CFG");
+    ImGui::SameLine();
+    ImGui::Checkbox("Live", &liveRefresh_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Follow IP", &followInstructionPointer_);
+    ImGui::SameLine();
+    const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
+    ImGui::SetNextItemWidth(90);
+    ImGui::Combo("##DisasmLiveRate", &liveRateIndex_,
+                 liveRates, IM_ARRAYSIZE(liveRates));
+
+    const uint64_t instructionPointer =
+        context.debuggerModel
+            ? context.debuggerModel->Snapshot().instructionPointer
+            : 0;
+    const auto now = std::chrono::steady_clock::now();
+    const bool liveDue =
+        liveRefresh_ &&
+        (lastLiveRefresh_.time_since_epoch().count() == 0 ||
+         now - lastLiveRefresh_ >=
+             std::chrono::milliseconds(LiveIntervalMs()));
+
+    if (followInstructionPointer_ && instructionPointer != 0 &&
+        instructionPointer != currentAddress_) {
+        Decode(context, instructionPointer, true);
+    } else if (liveDue && currentAddress_ != 0 && !ImGui::IsAnyItemActive()) {
+        Decode(context, currentAddress_, true);
+    }
 
     if (!analysisKind_.empty() || !analysisError_.empty()) {
         ImGui::SameLine();
@@ -180,8 +221,11 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
             ImGui::TableNextRow();
 
             ImGui::TableSetColumnIndex(0);
-            char label[32] = {};
-            std::snprintf(label, sizeof(label), "0x%llX",
+            char label[40] = {};
+            const bool atIp =
+                context.debuggerModel &&
+                context.debuggerModel->Snapshot().instructionPointer == row.address;
+            std::snprintf(label, sizeof(label), atIp ? "> 0x%llX" : "0x%llX",
                           static_cast<unsigned long long>(row.address));
             if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
                 currentAddress_ = row.address;
