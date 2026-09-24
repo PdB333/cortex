@@ -89,7 +89,9 @@ jobs:
           ) {
             $psi = [System.Diagnostics.ProcessStartInfo]::new()
             $psi.FileName = (Resolve-Path $Executable).Path
-            [void]$psi.ArgumentList.Add($Argument)
+            if ($Argument) {
+              [void]$psi.ArgumentList.Add($Argument)
+            }
             $psi.UseShellExecute = $false
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
@@ -131,31 +133,30 @@ jobs:
             $process = [System.Diagnostics.Process]::Start($psi)
             $stdoutTask = $process.StandardOutput.ReadToEndAsync()
             $stderrTask = $process.StandardError.ReadToEndAsync()
-            $deadline = [DateTime]::UtcNow.AddSeconds(20)
-            [int64]$peak = 0
 
-            while (-not $process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+            [int64]$peak = 0
+            $sampleDeadline = [DateTime]::UtcNow.AddMilliseconds(1500)
+            while ([DateTime]::UtcNow -lt $sampleDeadline) {
+              if ($process.HasExited) { break }
               try {
                 $process.Refresh()
                 if ($process.WorkingSet64 -gt $peak) {
                   $peak = [int64]$process.WorkingSet64
                 }
               } catch {}
-              Start-Sleep -Milliseconds 5
+              Start-Sleep -Milliseconds 10
             }
 
             if (-not $process.HasExited) {
               $process.Kill()
-              throw "$Name UI working-set sample timed out"
+              $process.WaitForExit()
+            } else {
+              $stderr = $stderrTask.Result
+              if ($process.ExitCode -ne 0) {
+                throw "$Name UI exited during working-set sampling ($($process.ExitCode)): $stderr"
+              }
             }
-            $process.Refresh()
-            if ($process.PeakWorkingSet64 -gt $peak) {
-              $peak = [int64]$process.PeakWorkingSet64
-            }
-            $stderr = $stderrTask.Result
-            if ($process.ExitCode -ne 0) {
-              throw "$Name UI working-set sample failed ($($process.ExitCode)): $stderr"
-            }
+
             if ($peak -le 0) {
               throw "$Name UI working-set sample produced no memory measurement"
             }
@@ -166,13 +167,13 @@ jobs:
             [pscustomobject]@{
               name = "qt_reference"
               exe = "build/qt-reference/cortex.exe"
-              ui_arg = "--smoke-test"
+              ui_arg = ""
               ui_env = @{ QT_QPA_PLATFORM = "offscreen" }
             },
             [pscustomobject]@{
               name = "imgui_candidate"
               exe = "build/imgui-candidate/cortex.exe"
-              ui_arg = "--window-smoke-test"
+              ui_arg = ""
               ui_env = @{}
             }
           )

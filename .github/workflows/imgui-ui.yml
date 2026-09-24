@@ -170,9 +170,11 @@ jobs:
           $mcp = $null
           try {
             Start-Sleep -Milliseconds 750
-            & $exe inject "$($target.Id)" $corePath
-            if ($LASTEXITCODE -ne 0) { throw "ImGui injector command failed" }
+            & $exe inject "$($target.Id)" $corePath | Write-Host
 
+            # cortex.exe is a GUI-subsystem binary, so PowerShell's LASTEXITCODE is
+            # not a reliable injection verdict here. The private MCP token is the
+            # runtime's authoritative readiness signal.
             $tokenPath = Join-Path $root ("cortex.mcp.{0}.token" -f $target.Id)
             $ready = $false
             for ($attempt = 0; $attempt -lt 60; $attempt++) {
