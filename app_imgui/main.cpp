@@ -452,6 +452,8 @@ struct AppState {
     }
 };
 
+void DrawApp(AppState& app);
+
 int RunImGuiSmokeTest() {
     AppState app;
 
