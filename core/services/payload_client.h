@@ -25,6 +25,11 @@ public:
     bool Ready() const;
     uint64_t TargetProcessId() const;
 
+    // Checks whether the currently selected target can be instrumented with
+    // the runtime assets available beside the desktop application. This does
+    // not inject anything and is safe to call from UI enable/disable logic.
+    bool RuntimeSupportAvailable(std::string* reason = nullptr) const;
+
     // Connect only when Cortex instrumentation is already present in the
     // selected target. This never injects code and is suitable for passive UI
     // adapters such as the human prompt surface.

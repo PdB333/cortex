@@ -41,6 +41,8 @@ permissions:
 
 jobs:
   windows-x64:
+    needs:
+      - windows-x86-runtime
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
@@ -286,16 +288,24 @@ jobs:
             }
           }
 
+      - name: Download x86 cross-bitness support
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: build/x86-support
+
       - name: Stage x64 portable preview
         shell: msys2 {0}
         run: |
           set -euo pipefail
           rm -rf stage/x64
-          mkdir -p stage/x64/Cortex/runtime/x64 stage/x64/Cortex/e2e
+          mkdir -p stage/x64/Cortex/runtime/x64 stage/x64/Cortex/runtime/x86 stage/x64/Cortex/e2e
           cp build/imgui-ui/cortex.exe stage/x64/Cortex/cortex.exe
           cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
           cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/cortex_core.dll
           cp build/runtime-x64/cortex_test_target_x64.exe stage/x64/Cortex/e2e/cortex_test_target_x64.exe
+          cp build/x86-support/runtime/x86/cortex_core.dll stage/x64/Cortex/runtime/x86/cortex_core.dll
+          cp build/x86-support/runtime/x86/cortex_runtime_helper.exe stage/x64/Cortex/runtime/x86/cortex_runtime_helper.exe
           cp app_imgui/README_TESTING.txt stage/x64/Cortex/README_TESTING.txt
 
           for pass in 1 2 3 4 5 6; do
@@ -320,6 +330,8 @@ jobs:
           set -euo pipefail
           test -f stage/x64/Cortex/cortex.exe
           test -f stage/x64/Cortex/runtime/x64/cortex_core.dll
+          test -f stage/x64/Cortex/runtime/x86/cortex_core.dll
+          test -f stage/x64/Cortex/runtime/x86/cortex_runtime_helper.exe
           test -f stage/x64/Cortex/e2e/cortex_test_target_x64.exe
           missing=0
           while IFS= read -r -d '' pe; do

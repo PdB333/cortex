@@ -167,6 +167,28 @@ bool HostMatchesTargetArchitecture(target::Architecture architecture) {
 #endif
 }
 
+std::filesystem::path FindBootstrapHelper(
+        const std::string& runtimeDirectory,
+        const std::filesystem::path& assetDirectory,
+        target::Architecture architecture) {
+    const auto root = std::filesystem::u8path(runtimeDirectory);
+    std::vector<std::filesystem::path> candidates;
+    candidates.push_back(assetDirectory / "cortex_runtime_helper.exe");
+
+    if (architecture == target::Architecture::X86) {
+        candidates.push_back(root / "runtime" / "x86" / "cortex_runtime_helper.exe");
+        candidates.push_back(root / "x86" / "cortex_runtime_helper.exe");
+    }
+    candidates.push_back(root / "cortex_runtime_helper.exe");
+
+    std::error_code error;
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::is_regular_file(candidate, error)) return candidate;
+        error.clear();
+    }
+    return candidates.front();
+}
+
 bool InjectLibrary(DWORD pid, const std::filesystem::path& path, std::string* error) {
     HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
                                  PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
@@ -301,6 +323,66 @@ uint64_t PayloadClient::TargetProcessId() const {
     return verifiedProcessId_;
 }
 
+bool PayloadClient::RuntimeSupportAvailable(std::string* reason) const {
+    if (reason) reason->clear();
+
+    const auto session = sessions_.Active();
+    if (!session || !session->Alive()) {
+        SetError(reason, "no_active_session");
+        return false;
+    }
+
+    if (Ready() && TargetProcessId() == session->Target().processId)
+        return true;
+
+#if !defined(_WIN32)
+    SetError(reason, "payload_injection_not_supported_on_platform");
+    return false;
+#else
+    const auto target = session->Target();
+    if (target.platform != target::Platform::Windows) {
+        SetError(reason, "payload_injection_not_supported_on_target");
+        return false;
+    }
+
+    std::string runtimeDirectory;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        runtimeDirectory = runtimeDirectory_;
+    }
+    if (runtimeDirectory.empty()) {
+        SetError(reason, "payload_runtime_directory_missing");
+        return false;
+    }
+
+    const auto assetDirectory =
+        RuntimeAssetDirectory(runtimeDirectory, target.architecture);
+    const auto payloadPath = assetDirectory / "cortex_core.dll";
+    if (!std::filesystem::exists(payloadPath)) {
+        SetError(reason, "payload_binary_missing");
+        return false;
+    }
+
+    if (HostMatchesTargetArchitecture(target.architecture))
+        return true;
+
+#if defined(_WIN64)
+    if (target.architecture == target::Architecture::X86) {
+        const auto helper =
+            FindBootstrapHelper(runtimeDirectory, assetDirectory, target.architecture);
+        if (!std::filesystem::exists(helper)) {
+            SetError(reason, "payload_cross_bitness_helper_missing");
+            return false;
+        }
+        return true;
+    }
+#endif
+
+    SetError(reason, "payload_cross_bitness_helper_required");
+    return false;
+#endif
+}
+
 bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std::string* error, int attempts) {
 #if !defined(_WIN32)
     (void)target;
@@ -410,8 +492,10 @@ bool PayloadClient::InjectPayload(const target::TargetDescriptor& target, std::s
 
 #if defined(_WIN64)
     if (target.architecture == target::Architecture::X86) {
+        const auto helperPath =
+            FindBootstrapHelper(runtimeDirectory, assetDirectory, target.architecture);
         return RunBootstrapHelper(static_cast<DWORD>(target.processId),
-                                  assetDirectory / "cortex_runtime_helper.exe",
+                                  helperPath,
                                   payloadPath,
                                   error);
     }

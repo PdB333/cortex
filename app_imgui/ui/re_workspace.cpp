@@ -1,4 +1,5 @@
 #include "re_workspace.h"
+#include "address_context_menu.h"
 
 #include <imgui.h>
 
@@ -90,10 +91,17 @@ void ReWorkspace::Draw(UiContext& context) {
         Copy(trackAddress_.data(), trackAddress_.size(), buffer);
     }
 
+    std::string runtimeReason;
+    const bool runtimeSupported =
+        AddressRuntimeAvailable(context, runtimeReason);
+
     ImGui::TextUnformatted("Reverse Engineering");
     ImGui::SameLine();
     ImGui::TextDisabled(context.payload && context.payload->Ready()
-                            ? "runtime connected" : "runtime disconnected");
+                            ? "runtime connected"
+                            : (runtimeSupported
+                                ? "runtime available"
+                                : "runtime unavailable"));
     ImGui::SameLine();
     if (context.payload && !context.payload->Ready()) {
         if (ImGui::SmallButton("Connect existing")) {
@@ -104,7 +112,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 RefreshAll(context);
         }
         ImGui::SameLine();
-        ImGui::BeginDisabled(!context.mutationAllowed);
+        ImGui::BeginDisabled(!context.mutationAllowed || !runtimeSupported);
         if (ImGui::SmallButton("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
@@ -115,10 +123,18 @@ void ReWorkspace::Draw(UiContext& context) {
         ImGui::EndDisabled();
         ImGui::SameLine();
     }
+    ImGui::BeginDisabled(!runtimeSupported);
     if (ImGui::SmallButton("Refresh")) RefreshAll(context);
+    ImGui::EndDisabled();
+
+    if (!runtimeSupported) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", RuntimeSupportText(runtimeReason).c_str());
+    }
 
     ImGui::Separator();
 
+    ImGui::BeginDisabled(!runtimeSupported);
     if (ImGui::BeginTabBar("ReTabs")) {
         if (ImGui::BeginTabItem("Objects")) {
             ImGui::SetNextItemWidth(150);
@@ -574,6 +590,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
         ImGui::EndTabBar();
     }
+    ImGui::EndDisabled();
 }
 
 } // namespace cortex::ui
