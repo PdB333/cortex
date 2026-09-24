@@ -116,9 +116,7 @@ jobs:
           $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
           $configPath = Join-Path $root "cortex.ini"
 
-          @"
-http_api_enabled=true
-"@ | Set-Content -Encoding ascii $configPath
+          "http_api_enabled=true" | Set-Content -Encoding ascii $configPath
 
           Remove-Item $tokenPath -ErrorAction SilentlyContinue
           $target = Start-Process -FilePath $targetPath -PassThru
