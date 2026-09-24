@@ -44,6 +44,32 @@ jobs:
           cmake -S app -B build/qt-reference -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/qt-reference --parallel 2
 
+      - name: Deploy frozen Qt reference runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            DEPLOY=windeployqt6
+          else
+            DEPLOY=windeployqt
+          fi
+          "$DEPLOY" --release --qmldir app/qml --no-translations build/qt-reference/cortex.exe
+
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "build/qt-reference/$base" ]; then
+                  cp "$dep" "build/qt-reference/$base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find build/qt-reference -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
       - name: Build Dear ImGui candidate
         shell: msys2 {0}
         run: |
