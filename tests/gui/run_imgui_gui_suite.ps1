@@ -205,12 +205,52 @@ try {
             }
         }
     } | ConvertTo-Json -Compress -Depth 8
-    $mcp.StandardInput.WriteLine($promptRequest)
 
-    Invoke-CortexProcess "prompt-private-channel" @(
+    # Start the desktop presenter first. Its /prompt/active polling renews the
+    # external-presenter lease, so the test matches the real GUI lifecycle
+    # instead of racing prompt creation against presenter startup.
+    $promptPsi = [System.Diagnostics.ProcessStartInfo]::new()
+    $promptPsi.FileName = $CortexExe
+    $promptPsi.UseShellExecute = $false
+    $promptPsi.RedirectStandardOutput = $true
+    $promptPsi.RedirectStandardError = $true
+    $promptPsi.CreateNoWindow = $true
+    foreach ($argument in @(
         "--prompt-channel-smoke", "--pid", "$($x64A.Id)",
         "--answer", "gui-suite-answer"
-    ) 30000 | Out-Null
+    )) {
+        [void]$promptPsi.ArgumentList.Add($argument)
+    }
+
+    $promptWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $promptProcess = [System.Diagnostics.Process]::Start($promptPsi)
+    $promptStdoutTask = $promptProcess.StandardOutput.ReadToEndAsync()
+    $promptStderrTask = $promptProcess.StandardError.ReadToEndAsync()
+
+    Start-Sleep -Milliseconds 300
+    $mcp.StandardInput.WriteLine($promptRequest)
+
+    if (-not $promptProcess.WaitForExit(30000)) {
+        try { $promptProcess.Kill() } catch {}
+        $promptWatch.Stop()
+        Add-Result "prompt-private-channel" $false $promptWatch.Elapsed.TotalMilliseconds "" "timeout" -1
+        Save-Report
+        throw "prompt-private-channel timed out"
+    }
+
+    $promptWatch.Stop()
+    $promptStdout = $promptStdoutTask.Result
+    $promptStderr = $promptStderrTask.Result
+    $promptPassed =
+        $promptProcess.ExitCode -eq 0 -and
+        $promptStdout -match "PASS: ImGui prompt channel answered prompt"
+    Add-Result "prompt-private-channel" $promptPassed $promptWatch.Elapsed.TotalMilliseconds $promptStdout $promptStderr $promptProcess.ExitCode
+    if (-not $promptPassed) {
+        Save-Report
+        throw "prompt-private-channel failed ($($promptProcess.ExitCode)): $promptStderr $promptStdout"
+    }
+    Write-Host ("PASS prompt-private-channel ({0} ms)" -f [Math]::Round($promptWatch.Elapsed.TotalMilliseconds, 1))
+    if ($promptStdout) { Write-Host $promptStdout.Trim() }
 
     $promptLine = Read-McpLine
     $promptResponse = $promptLine | ConvertFrom-Json
