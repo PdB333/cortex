@@ -1,0 +1,491 @@
+name: Lightweight ImGui UI
+
+on:
+  push:
+    branches:
+      - next/lightweight-imgui-ui
+      - test/imgui-full-migration
+    paths:
+      - "app_imgui/**"
+      - "core/target/**"
+      - "core/services/**"
+      - "core/api/mcp_pipe_protocol.h"
+      - "runtime_helper/**"
+      - "host/**"
+      - "injector/**"
+      - "mcp_bridge/**"
+      - "tools/diagnostics_host/**"
+      - "tools/symbolize_main.cpp"
+      - "core/symbols/**"
+      - "app/cortex.rc"
+      - "app/resources/cortex.ico"
+      - "CMakeLists.txt"
+      - ".github/workflows/imgui-ui.yml"
+  pull_request:
+    paths:
+      - "app_imgui/**"
+      - "core/target/**"
+      - "core/services/**"
+      - "core/api/mcp_pipe_protocol.h"
+      - "runtime_helper/**"
+      - "CMakeLists.txt"
+      - ".github/workflows/imgui-ui.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lightweight-imgui-ui-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    needs:
+      - windows-x86-runtime
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Configure Cortex ImGui app
+        shell: msys2 {0}
+        run: cmake -S app_imgui -B build/imgui-ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build cortex.exe
+        shell: msys2 {0}
+        run: cmake --build build/imgui-ui --parallel 2
+
+      - name: CLI compatibility smoke
+        shell: pwsh
+        run: |
+          function Invoke-CortexCli([string[]]$Arguments) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path "build/imgui-ui/cortex.exe")
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($arg in $Arguments) { [void]$psi.ArgumentList.Add($arg) }
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) {
+              throw "cortex $($Arguments -join ' ') failed ($($process.ExitCode)): $stderr"
+            }
+            return $stdout
+          }
+
+          $version = Invoke-CortexCli @("--version")
+          if ($version -notmatch "0\.8\.0-dev-imgui") { throw "Unexpected version output: $version" }
+
+          $help = Invoke-CortexCli @("--help")
+          if ($help -notmatch "cortex mcp") { throw "MCP command missing from help" }
+          if ($help -notmatch "cortex diagnose") { throw "diagnose command missing from help" }
+
+          $smoke = Invoke-CortexCli @("--smoke-test")
+          if ($smoke -notmatch "PASS: deterministic ImGui application smoke") {
+            throw "Unexpected ImGui smoke output: $smoke"
+          }
+
+          $windowSmoke = Invoke-CortexCli @("--window-smoke-test")
+          if ($windowSmoke -notmatch "PASS: native Win32 D3D11 ImGui window smoke") {
+            throw "Unexpected native window smoke output: $windowSmoke"
+          }
+
+          $activitySmoke = Invoke-CortexCli @("--ai-activity-smoke")
+          if ($activitySmoke -notmatch "PASS: ImGui AI activity observed a cross-process MCP tool lifecycle") {
+            throw "Unexpected AI activity smoke output: $activitySmoke"
+          }
+
+          $exe = Resolve-Path "build/imgui-ui/cortex.exe"
+
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $exe
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardInput = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          [void]$psi.ArgumentList.Add("mcp")
+          [void]$psi.ArgumentList.Add("--tools")
+          [void]$psi.ArgumentList.Add("all")
+          $mcp = [System.Diagnostics.Process]::Start($psi)
+
+          $initialize = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci-host-smoke","version":"1"}}}'
+          $mcp.StandardInput.WriteLine($initialize)
+          $initLine = $mcp.StandardOutput.ReadLine()
+          if (-not $initLine) { throw "MCP initialize produced no response: $($mcp.StandardError.ReadToEnd())" }
+          $init = $initLine | ConvertFrom-Json
+          if ($init.id -ne 1 -or -not $init.result) { throw "Invalid MCP initialize response: $initLine" }
+
+          $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+          $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
+          $toolsLine = $mcp.StandardOutput.ReadLine()
+          if (-not $toolsLine) { throw "MCP tools/list produced no response" }
+          $tools = $toolsLine | ConvertFrom-Json
+          $names = @($tools.result.tools | ForEach-Object { $_.name })
+          foreach ($requiredTool in @("cortex_processes","cortex_attach","cortex_detach","cortex_targets","cortex_operations","cortex_operation_cancel","cortex_events")) {
+            if ($names -notcontains $requiredTool) {
+              throw "Targetless MCP host is missing $requiredTool. Tools: $($names -join ', ')"
+            }
+          }
+
+          $mcp.StandardInput.Close()
+          if (-not $mcp.WaitForExit(5000)) {
+            $mcp.Kill()
+            throw "Targetless MCP host did not exit after stdin close"
+          }
+          if ($mcp.ExitCode -ne 0) {
+            throw "Targetless MCP host exited $($mcp.ExitCode): $($mcp.StandardError.ReadToEnd())"
+          }
+
+      - name: Configure x64 Cortex runtime
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x64 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x64 runtime and E2E target
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+
+      - name: Validate native prompt and event channels
+        shell: pwsh
+        run: |
+          $appRoot = (Resolve-Path "build/imgui-ui").Path
+          $exe = Join-Path $appRoot "cortex.exe"
+          $runtimeRoot = (Resolve-Path "build/runtime-x64").Path
+          $targetPath = Join-Path $runtimeRoot "cortex_test_target_x64.exe"
+
+          # Mirror the portable layout: the x64 runtime DLL lives next to cortex.exe.
+          $corePath = Join-Path $appRoot "cortex_core.dll"
+          Copy-Item (Join-Path $runtimeRoot "cortex_core.dll") $corePath -Force
+          function Invoke-CortexChannelSmoke([string[]]$Arguments) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $exe
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.CreateNoWindow = $true
+            foreach ($argument in $Arguments) {
+              [void]$psi.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(15000)) {
+              $process.Kill()
+              throw "cortex $($Arguments -join ' ') timed out"
+            }
+            [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              Stdout = $stdoutTask.Result
+              Stderr = $stderrTask.Result
+            }
+          }
+
+          $target = Start-Process -FilePath $targetPath -PassThru
+          $mcp = $null
+          try {
+            Start-Sleep -Milliseconds 750
+            & $exe inject "$($target.Id)" $corePath | Write-Host
+
+            # cortex.exe is a GUI-subsystem binary, so PowerShell's LASTEXITCODE is
+            # not a reliable injection verdict here. The private MCP token is the
+            # runtime's authoritative readiness signal.
+            $tokenPath = Join-Path $appRoot ("cortex.mcp.{0}.token" -f $target.Id)
+            Remove-Item $tokenPath -ErrorAction SilentlyContinue
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 60; $attempt++) {
+              if (Test-Path $tokenPath) { $ready = $true; break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $ready) { throw "Private MCP token was not created: $tokenPath" }
+
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $exe
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath)) {
+              [void]$psi.ArgumentList.Add($arg)
+            }
+            $mcp = [System.Diagnostics.Process]::Start($psi)
+
+            function Invoke-McpLine([string]$Payload) {
+              $mcp.StandardInput.WriteLine($Payload)
+              $line = $mcp.StandardOutput.ReadLine()
+              if (-not $line) { throw "MCP produced no response: $($mcp.StandardError.ReadToEnd())" }
+              return ($line | ConvertFrom-Json)
+            }
+
+            $init = Invoke-McpLine '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"imgui-private-channel-smoke","version":"1"}}}'
+            if ($init.id -ne 1 -or -not $init.result) { throw "Invalid MCP initialize response" }
+            $mcp.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}')
+
+            $promptRequest = @{
+              jsonrpc = "2.0"
+              id = 2
+              method = "tools/call"
+              params = @{
+                name = "prompt_value_change"
+                arguments = @{
+                  label = "ImGui prompt E2E"
+                  current_value = "before"
+                  target_value = "after"
+                }
+              }
+            } | ConvertTo-Json -Compress -Depth 8
+            # prompt_value_change intentionally blocks until the human presenter answers.
+            # Send the request first, let the ImGui smoke answer it, then consume the MCP response.
+            $mcp.StandardInput.WriteLine($promptRequest)
+
+            $promptResult = Invoke-CortexChannelSmoke @(
+              "--prompt-channel-smoke","--pid","$($target.Id)","--answer","imgui-e2e"
+            )
+            if ($promptResult.ExitCode -ne 0 -or
+                $promptResult.Stdout -notmatch "PASS: ImGui prompt channel answered prompt") {
+              throw "Prompt channel smoke failed ($($promptResult.ExitCode)): $($promptResult.Stdout) $($promptResult.Stderr)"
+            }
+
+            $createdLine = $mcp.StandardOutput.ReadLine()
+            if (-not $createdLine) {
+              throw "MCP prompt request produced no response after ImGui answer: $($mcp.StandardError.ReadToEnd())"
+            }
+            $created = $createdLine | ConvertFrom-Json
+            if ($created.id -ne 2 -or $created.result.isError) {
+              throw "Private prompt MCP response failed: $createdLine"
+            }
+
+            $eventResult = Invoke-CortexChannelSmoke @(
+              "--event-channel-smoke","--pid","$($target.Id)","--expect","prompt.answered"
+            )
+            if ($eventResult.ExitCode -ne 0 -or
+                $eventResult.Stdout -notmatch "PASS: ImGui event channel observed prompt.answered") {
+              throw "Event channel smoke failed ($($eventResult.ExitCode)): $($eventResult.Stdout) $($eventResult.Stderr)"
+            }
+          } finally {
+            if ($mcp) {
+              try { $mcp.StandardInput.Close() } catch {}
+              if (-not $mcp.WaitForExit(3000)) { try { $mcp.Kill() } catch {} }
+              $mcp.Dispose()
+            }
+            if ($target -and -not $target.HasExited) {
+              Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Download x86 cross-bitness support
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: build/x86-support
+
+      - name: Stage x64 portable preview
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x64
+          mkdir -p stage/x64/Cortex/runtime/x64 stage/x64/Cortex/runtime/x86 stage/x64/Cortex/e2e
+          cp build/imgui-ui/cortex.exe stage/x64/Cortex/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/cortex_core.dll
+          cp build/runtime-x64/cortex_test_target_x64.exe stage/x64/Cortex/e2e/cortex_test_target_x64.exe
+          cp build/x86-support/runtime/x86/cortex_core.dll stage/x64/Cortex/runtime/x86/cortex_core.dll
+          cp build/x86-support/runtime/x86/cortex_runtime_helper.exe stage/x64/Cortex/runtime/x86/cortex_runtime_helper.exe
+          cp app_imgui/README_TESTING.txt stage/x64/Cortex/README_TESTING.txt
+
+          for pass in 1 2 3 4 5 6; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/x64/Cortex/$base" ]; then
+                  cp "$dep" "stage/x64/Cortex/$base"
+                  echo "Bundled dependency: $base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+      - name: Verify x64 portable preview
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          test -f stage/x64/Cortex/cortex.exe
+          test -f stage/x64/Cortex/runtime/x64/cortex_core.dll
+          test -f stage/x64/Cortex/runtime/x86/cortex_core.dll
+          test -f stage/x64/Cortex/runtime/x86/cortex_runtime_helper.exe
+          test -f stage/x64/Cortex/e2e/cortex_test_target_x64.exe
+          missing=0
+          while IFS= read -r -d '' pe; do
+            unresolved="$(ldd "$pe" 2>/dev/null | awk '/not found/ {print}' || true)"
+            if [ -n "$unresolved" ]; then
+              echo "Unresolved dependencies for $pe:"
+              echo "$unresolved"
+              missing=1
+            fi
+          done < <(find stage/x64/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+          [ "$missing" -eq 0 ]
+
+      - name: Upload x64 preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-x64
+          path: stage/x64/Cortex
+          if-no-files-found: error
+          retention-days: 7
+
+  windows-x86-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x86 MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >-
+            git
+            mingw-w64-i686-gcc
+            mingw-w64-i686-cmake
+            mingw-w64-i686-ninja
+
+      - name: Configure x86 Cortex runtime
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/runtime-x86 -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=OFF
+
+      - name: Build x86 runtime and E2E target
+        shell: msys2 {0}
+        run: cmake --build build/runtime-x86 --target core cortex_test_target --parallel 2
+
+      - name: Build private x86 bootstrap helper
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -municode runtime_helper/main.cpp
+          -o build/runtime-x86/cortex_runtime_helper.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Stage x86 assets
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/x86
+          mkdir -p stage/x86/runtime/x86 stage/x86/e2e
+          cp build/runtime-x86/cortex_core.dll stage/x86/runtime/x86/cortex_core.dll
+          cp build/runtime-x86/cortex_runtime_helper.exe stage/x86/runtime/x86/cortex_runtime_helper.exe
+          cp build/runtime-x86/cortex_test_target_x86.exe stage/x86/e2e/cortex_test_target_x86.exe
+          test -f stage/x86/runtime/x86/cortex_core.dll
+          test -f stage/x86/runtime/x86/cortex_runtime_helper.exe
+
+      - name: Upload x86 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: stage/x86
+          if-no-files-found: error
+          retention-days: 7
+
+  portable:
+    runs-on: windows-latest
+    needs:
+      - windows-x64
+      - windows-x86-runtime
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x64
+          path: bundle/Cortex
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-x86-runtime
+          path: bundle/x86
+
+      - name: Assemble portable bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bundle/Cortex/runtime/x86 | Out-Null
+          Copy-Item bundle/x86/runtime/x86/* bundle/Cortex/runtime/x86/
+          New-Item -ItemType Directory -Force -Path bundle/Cortex/e2e | Out-Null
+          Copy-Item bundle/x86/e2e/* bundle/Cortex/e2e/
+          Remove-Item -Recurse -Force bundle/x86
+
+          $required = @(
+            "bundle/Cortex/cortex.exe",
+            "bundle/Cortex/runtime/x64/cortex_core.dll",
+            "bundle/Cortex/cortex_core.dll",
+            "bundle/Cortex/runtime/x86/cortex_core.dll",
+            "bundle/Cortex/runtime/x86/cortex_runtime_helper.exe",
+            "bundle/Cortex/e2e/cortex_test_target_x64.exe",
+            "bundle/Cortex/e2e/cortex_test_target_x86.exe"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing portable asset: $path" }
+          }
+
+      - name: Validate portable dependency closure
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "bundle/Cortex/cortex.exe").Path
+          $oldPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+
+            foreach ($argument in @("--smoke-test", "--window-smoke-test")) {
+              $psi = [System.Diagnostics.ProcessStartInfo]::new()
+              $psi.FileName = $exe
+              [void]$psi.ArgumentList.Add($argument)
+              $psi.UseShellExecute = $false
+              $psi.RedirectStandardOutput = $true
+              $psi.RedirectStandardError = $true
+              $psi.CreateNoWindow = $true
+              $process = [System.Diagnostics.Process]::Start($psi)
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              if (-not $process.WaitForExit(15000)) {
+                $process.Kill()
+                throw "Portable $argument timed out"
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "Portable $argument failed ($($process.ExitCode)): $stderr"
+              }
+              Write-Host $stdout
+            }
+          } finally {
+            $env:PATH = $oldPath
+          }
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path bundle/Cortex -DestinationPath cortex-imgui-preview-windows-portable.zip -CompressionLevel Optimal
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-imgui-preview-windows-portable
+          path: cortex-imgui-preview-windows-portable.zip
+          if-no-files-found: error
+          retention-days: 7

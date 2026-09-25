@@ -3,7 +3,8 @@ name: Unified Cortex Prompt Contracts
 on:
   push:
     branches:
-      - next/unified-cortex-ui
+      - test/imgui-full-migration
+      - main
     paths:
       - "core/prompt/**"
       - "tests/prompt_queue_contract_tests.cpp"

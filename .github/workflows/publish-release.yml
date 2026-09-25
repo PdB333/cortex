@@ -5,9 +5,15 @@ on:
     branches:
       - main
     paths:
-      - "app/**"
+      - "app_imgui/**"
+      - "app/cortex.rc"
+      - "app/resources/**"
       - "core/**"
+      - "mcp_bridge/**"
       - "runtime_helper/**"
+      - "host/**"
+      - "injector/**"
+      - "tools/**"
       - "docs/**"
       - "CMakeLists.txt"
       - "README.md"
@@ -17,9 +23,15 @@ on:
       - ".github/workflows/publish-release.yml"
   pull_request:
     paths:
-      - "app/**"
+      - "app_imgui/**"
+      - "app/cortex.rc"
+      - "app/resources/**"
       - "core/**"
+      - "mcp_bridge/**"
       - "runtime_helper/**"
+      - "host/**"
+      - "injector/**"
+      - "tools/**"
       - "docs/**"
       - "CMakeLists.txt"
       - "README.md"
@@ -33,21 +45,21 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.7.0-${{ github.ref }}
+  group: publish-v0.8.0-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RELEASE_TAG: v0.7.0
+  RELEASE_TAG: v0.8.0
 
 jobs:
   windows-x64-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install x64 MinGW and Qt 6
+      - name: Install x64 MinGW
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -57,17 +69,15 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-qt6-base
-            mingw-w64-x86_64-qt6-declarative
-            mingw-w64-x86_64-qt6-tools
 
-      - name: Build unified application
+      - name: Build and smoke Dear ImGui application
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S app_imgui -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/ui --parallel 2
-          QT_QPA_PLATFORM=offscreen build/ui/cortex.exe --smoke-test
+          build/ui/cortex.exe --smoke-test
+          build/ui/cortex.exe --window-smoke-test
 
       - name: Build and test x64 runtime
         shell: msys2 {0}
@@ -85,13 +95,7 @@ jobs:
           mkdir -p stage/x64/Cortex/runtime/x64
           cp build/ui/cortex.exe stage/x64/Cortex/cortex.exe
           cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
-
-          if command -v windeployqt6 >/dev/null 2>&1; then
-            DEPLOY=windeployqt6
-          else
-            DEPLOY=windeployqt
-          fi
-          "$DEPLOY" --release --qmldir app/qml --no-translations stage/x64/Cortex/cortex.exe
+          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/cortex_core.dll
 
           for pass in 1 2 3 4 5 6 7 8; do
             copied=0
@@ -101,6 +105,7 @@ jobs:
                 base="$(basename "$dep")"
                 if [ ! -f "stage/x64/Cortex/$base" ]; then
                   cp "$dep" "stage/x64/Cortex/$base"
+                  echo "Bundled dependency: $base"
                   copied=1
                 fi
               done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
@@ -128,7 +133,7 @@ jobs:
           retention-days: 2
 
   windows-x86-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -178,7 +183,7 @@ jobs:
           retention-days: 2
 
   package:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
     needs: [windows-x64-stage, windows-x86-stage]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -208,6 +213,7 @@ jobs:
 
           foreach ($required in @(
             "cortex.exe",
+            "cortex_core.dll",
             "runtime\x64\cortex_core.dll",
             "runtime\x86\cortex_core.dll",
             "runtime\x86\cortex_runtime_helper.exe",
@@ -223,7 +229,7 @@ jobs:
 
           $versionStart = [System.Diagnostics.ProcessStartInfo]::new()
           $versionStart.FileName = Join-Path $bundle "cortex.exe"
-          $versionStart.ArgumentList.Add("--version")
+          [void]$versionStart.ArgumentList.Add("--version")
           $versionStart.UseShellExecute = $false
           $versionStart.RedirectStandardOutput = $true
           $versionStart.RedirectStandardError = $true
@@ -233,49 +239,67 @@ jobs:
           $versionError = $versionProcess.StandardError.ReadToEnd()
           $versionProcess.WaitForExit()
           Write-Host ("release version output: {0}" -f $versionText.Trim())
-          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "0\.7\.0") {
-            throw "release binary does not report v0.7.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
+          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "0\.8\.0") {
+            throw "release binary does not report v0.8.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
           }
 
           $oldPath = $env:PATH
           try {
             $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-            & (Join-Path $bundle "cortex.exe") --smoke-test
-            if ($LASTEXITCODE -ne 0) { throw "portable GUI smoke test failed" }
+            foreach ($argument in @("--smoke-test", "--window-smoke-test")) {
+              $start = [System.Diagnostics.ProcessStartInfo]::new()
+              $start.FileName = Join-Path $bundle "cortex.exe"
+              [void]$start.ArgumentList.Add($argument)
+              $start.UseShellExecute = $false
+              $start.RedirectStandardOutput = $true
+              $start.RedirectStandardError = $true
+              $start.CreateNoWindow = $true
+              $process = [System.Diagnostics.Process]::Start($start)
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              if (-not $process.WaitForExit(15000)) {
+                $process.Kill()
+                throw "portable $argument timed out"
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "portable $argument failed ($($process.ExitCode)): $stderr"
+              }
+              Write-Host $stdout
+            }
           } finally {
             $env:PATH = $oldPath
           }
 
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v0.7.0-windows-portable.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v0.8.0-windows-portable.zip" -CompressionLevel Optimal
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: cortex-v0.7.0-windows-portable
-          path: dist/cortex-v0.7.0-windows-portable.zip
+          name: cortex-v0.8.0-windows-portable
+          path: dist/cortex-v0.8.0-windows-portable.zip
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.7.0')
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.8.0')
     needs: package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download release archive
-        uses: actions/download-artifact@v4
-        with:
-          name: cortex-v0.7.0-windows-portable
-          path: dist
-
       - name: Extract release notes
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.7.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v0.8.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
+
+      - name: Download release archive
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-v0.8.0-windows-portable
+          path: dist
 
       - name: Publish GitHub release
         env:
@@ -291,4 +315,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
-            dist/cortex-v0.7.0-windows-portable.zip
+            dist/cortex-v0.8.0-windows-portable.zip

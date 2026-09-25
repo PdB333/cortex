@@ -16,6 +16,8 @@
 // HTTP-only args: --port 6969, --host 127.0.0.1.
 
 #include "api/mcp_pipe_protocol.h"
+#include "ai_activity_channel.h"
+#include "host_mode.h"
 #include "policy.h"
 
 #include <httplib.h>
@@ -25,6 +27,8 @@
 #include <io.h>
 #include <cstdio>
 #include <cstdint>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <fstream>
 #include <iomanip>
@@ -230,7 +234,91 @@ struct RunState {
     std::mutex activeMutex;
     std::condition_variable activeChanged;
     size_t active = 0;
+
+    std::mutex activityMutex;
+    std::atomic<uint64_t> activitySequence{1};
+    std::string activitySessionId;
+    std::string activityClientName;
+    std::string activityClientVersion;
 };
+
+uint64_t NowMs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+void RememberActivityClient(const std::shared_ptr<RunState>& state,
+                            const json& message) {
+    if (!state || !message.is_object() ||
+        message.value("method", std::string()) != "initialize")
+        return;
+
+    const json params = message.value("params", json::object());
+    const json client = params.is_object()
+        ? params.value("clientInfo", json::object())
+        : json::object();
+    if (!client.is_object()) return;
+
+    std::lock_guard<std::mutex> lock(state->activityMutex);
+    state->activityClientName = client.value("name", std::string());
+    state->activityClientVersion = client.value("version", std::string());
+}
+
+void PublishActivity(const std::shared_ptr<RunState>& state, json event) {
+    if (!state || state->activitySessionId.empty()) return;
+    event["schema"] = "cortex.ai.activity.v1";
+    event["session_id"] = state->activitySessionId;
+    event["timestamp_ms"] = NowMs();
+    event["sequence"] = state->activitySequence.fetch_add(1);
+
+    {
+        std::lock_guard<std::mutex> lock(state->activityMutex);
+        if (!state->activityClientName.empty())
+            event["client"] = state->activityClientName;
+        if (!state->activityClientVersion.empty())
+            event["client_version"] = state->activityClientVersion;
+    }
+    cortex::ai_activity::Publish(event.dump());
+}
+
+std::string ToolName(const json& message) {
+    if (!message.is_object() ||
+        message.value("method", std::string()) != "tools/call")
+        return {};
+    const json params = message.value("params", json::object());
+    return params.is_object() ? params.value("name", std::string()) : std::string();
+}
+
+bool ResponseFailed(const std::string& response) {
+    if (response.empty()) return false;
+    try {
+        const json parsed = json::parse(response);
+        return parsed.is_object() &&
+               (parsed.contains("error") ||
+                (parsed.contains("result") && parsed["result"].is_object() &&
+                 parsed["result"].value("isError", false)));
+    } catch (...) {
+        return false;
+    }
+}
+
+void PublishToolActivity(const std::shared_ptr<RunState>& state,
+                         const json& message,
+                         const char* phase,
+                         uint64_t durationMs = 0) {
+    const std::string tool = ToolName(message);
+    if (tool.empty()) return;
+
+    json event = {
+        {"kind", "tool"},
+        {"phase", phase ? phase : ""},
+        {"tool", tool},
+        {"request_id", MessageId(message)}
+    };
+    if (durationMs) event["duration_ms"] = durationMs;
+    PublishActivity(state, std::move(event));
+}
 
 void WriteOutput(const std::shared_ptr<RunState>& state, const std::string& response) {
     if (response.empty()) return;
@@ -272,6 +360,12 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
     // avoiding a race while the runtime rotates to its next pipe instance.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     auto state = std::make_shared<RunState>();
+    state->activitySessionId = session;
+    PublishActivity(state, {
+        {"kind", "session"},
+        {"phase", "started"},
+        {"summary", "AI/MCP session started"}
+    });
     constexpr size_t kMaxConcurrentRequests = 64;
 
     std::string line;
@@ -293,6 +387,8 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
             }).dump());
             continue;
         }
+
+        RememberActivityClient(state, message);
 
         // Cancellation bypasses the worker limit and is dispatched on the
         // reader thread, so it can reach the runtime while another pipe is
@@ -309,23 +405,35 @@ int RunNative(const std::string& token, const std::string& toolProfile) {
             continue;
         }
 
+        PublishToolActivity(state, message, "started");
         try {
             std::thread([state, pipeName, token, toolProfile, session, message] {
+                const uint64_t started = GetTickCount64();
                 std::string response;
                 if (!NativeRoundTrip(pipeName, token, toolProfile, session, message, response)) {
                     response = BridgeError(MessageId(message), "cortex_unreachable",
                                            "Cortex native MCP transport is unreachable").dump();
                 }
+                const bool failed = ResponseFailed(response);
+                PublishToolActivity(
+                    state, message, failed ? "failed" : "completed",
+                    GetTickCount64() - started);
                 WriteOutput(state, response);
                 ReleaseWorker(state);
             }).detach();
         } catch (const std::exception& error) {
+            PublishToolActivity(state, message, "failed");
             ReleaseWorker(state);
             WriteOutput(state, BridgeError(MessageId(message), "worker_start_failed", error.what()).dump());
         }
     }
 
     WaitForWorkers(state);
+    PublishActivity(state, {
+        {"kind", "session"},
+        {"phase", "ended"},
+        {"summary", "AI/MCP session ended"}
+    });
     return 0;
 }
 
@@ -342,6 +450,12 @@ int RunHttp(const std::string& host,
     const std::string session = MakeSessionId();
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     auto state = std::make_shared<RunState>();
+    state->activitySessionId = session;
+    PublishActivity(state, {
+        {"kind", "session"},
+        {"phase", "started"},
+        {"summary", "AI/MCP session started"}
+    });
     constexpr size_t kMaxConcurrentRequests = 64;
 
     std::string line;
@@ -364,6 +478,8 @@ int RunHttp(const std::string& host,
             continue;
         }
 
+        RememberActivityClient(state, message);
+
         // Use an independent connection for cancellation so the fallback
         // transport preserves the same responsive cancellation semantics as
         // native mode instead of blocking behind an active POST /mcp.
@@ -379,29 +495,55 @@ int RunHttp(const std::string& host,
             continue;
         }
 
+        PublishToolActivity(state, message, "started");
         try {
             std::thread([state, host, port, token, toolProfile, session, message] {
+                const uint64_t started = GetTickCount64();
                 std::string response;
                 if (!HttpRoundTrip(host, port, token, toolProfile, session, message, response)) {
                     response = BridgeError(MessageId(message), "cortex_unreachable",
                                            "Cortex HTTP MCP transport is unreachable").dump();
                 }
+                const bool failed = ResponseFailed(response);
+                PublishToolActivity(
+                    state, message, failed ? "failed" : "completed",
+                    GetTickCount64() - started);
                 WriteOutput(state, response);
                 ReleaseWorker(state);
             }).detach();
         } catch (const std::exception& error) {
+            PublishToolActivity(state, message, "failed");
             ReleaseWorker(state);
             WriteOutput(state, BridgeError(MessageId(message), "worker_start_failed", error.what()).dump());
         }
     }
 
     WaitForWorkers(state);
+    PublishActivity(state, {
+        {"kind", "session"},
+        {"phase", "ended"},
+        {"summary", "AI/MCP session ended"}
+    });
     return 0;
+}
+
+bool UseBridgeCompatibilityMode(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i] ? argv[i] : "";
+        if (argument == "--token" || argument == "--token-file" ||
+            argument == "--transport" || argument == "--host" ||
+            argument == "--port" || argument == "--dll")
+            return true;
+    }
+    return false;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
+    if (!UseBridgeCompatibilityMode(argc, argv))
+        return RunFullMcpHost(argc, argv, ExecutableDir());
+
     std::string host = "127.0.0.1";
     std::string token;
     std::string tokenFile;

@@ -114,6 +114,11 @@ jobs:
           $tokenPath = Join-Path $root "cortex.token"
           $semanticTests = (Resolve-Path "tests/semantic_mcp_e2e.ps1").Path
           $nativeTests = (Resolve-Path "tests/native_mcp_stdio_e2e.ps1").Path
+          $configPath = Join-Path $root "cortex.ini"
+
+          "http_api_enabled=true" | Set-Content -Encoding ascii $configPath
+
+          Remove-Item $tokenPath -ErrorAction SilentlyContinue
           $target = Start-Process -FilePath $targetPath -PassThru
           try {
             Start-Sleep -Seconds 2
@@ -138,7 +143,15 @@ jobs:
             & $semanticTests -BaseUrl "http://127.0.0.1:6969" -TokenPath $tokenPath
             if (-not $?) { throw "HTTP MCP semantic E2E failed" }
 
-            & $nativeTests -HostPath $hostPath -TokenPath $tokenPath
+            $mcpTokenPath = Join-Path $root ("cortex.mcp.{0}.token" -f $target.Id)
+            $mcpReady = $false
+            for ($attempt = 0; $attempt -lt 40; $attempt++) {
+              if (Test-Path $mcpTokenPath) { $mcpReady = $true; break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $mcpReady) { throw "Private MCP token was not created at $mcpTokenPath" }
+
+            & $nativeTests -HostPath $hostPath -TokenPath $mcpTokenPath
             if (-not $?) { throw "Native stdio MCP E2E failed" }
           } finally {
             if (-not $target.HasExited) { Stop-Process -Id $target.Id -Force }

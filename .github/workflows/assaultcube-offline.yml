@@ -3,9 +3,14 @@ name: AssaultCube Offline E2E
 on:
   push:
     branches:
-      - next/unified-cortex-ui
+      - test/imgui-full-migration
+      - main
     paths:
-      - "app/**"
+      - "app_imgui/**"
+      - "app/windows_debug_provider.*"
+      - "app/windows_debugger_backend.*"
+      - "app/veh_debug_provider.*"
+      - "app/debug_provider.h"
       - "core/**"
       - "runtime_helper/**"
       - "ci/assaultcube_offline_e2e_v3.ps1"
@@ -50,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install x64 MinGW and Qt 6
+      - name: Install x64 MinGW
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -60,13 +65,10 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-qt6-base
-            mingw-w64-x86_64-qt6-declarative
-            mingw-w64-x86_64-qt6-tools
 
-      - name: Configure Cortex application
+      - name: Configure Cortex Dear ImGui application
         shell: msys2 {0}
-        run: cmake -S app -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S app_imgui -B build/ui -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
 
       - name: Build cortex.exe
         shell: msys2 {0}
@@ -79,13 +81,6 @@ jobs:
           rm -rf stage/x64
           mkdir -p stage/x64/CortexPreview
           cp build/ui/cortex.exe stage/x64/CortexPreview/cortex.exe
-
-          if command -v windeployqt6 >/dev/null 2>&1; then
-            DEPLOY=windeployqt6
-          else
-            DEPLOY=windeployqt
-          fi
-          "$DEPLOY" --release --qmldir app/qml --no-translations stage/x64/CortexPreview/cortex.exe
 
           for pass in 1 2 3 4 5 6 7 8; do
             copied=0

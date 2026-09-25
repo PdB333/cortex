@@ -1,0 +1,251 @@
+#include "disassembly_workspace.h"
+#include "address_context_menu.h"
+
+#include <imgui.h>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cstdio>
+#include <iomanip>
+#include <sstream>
+
+namespace cortex::ui {
+namespace {
+
+std::string FormatBytes(const std::vector<uint8_t>& bytes) {
+    std::ostringstream out;
+    out << std::hex << std::uppercase << std::setfill('0');
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i) out << ' ';
+        out << std::setw(2) << static_cast<unsigned>(bytes[i]);
+    }
+    return out.str();
+}
+
+} // namespace
+
+bool DisassemblyWorkspace::ParseAddress(uint64_t& address) const {
+    try {
+        size_t used = 0;
+        const std::string text(address_);
+        address = std::stoull(text, &used, 0);
+        return used == text.size() && address != 0;
+    } catch (...) {
+        return false;
+    }
+}
+
+int DisassemblyWorkspace::LiveIntervalMs() const {
+    static constexpr int rates[] = {100, 250, 500, 1000};
+    return rates[std::clamp(liveRateIndex_, 0, 3)];
+}
+
+void DisassemblyWorkspace::Decode(
+        UiContext& context, uint64_t address, bool quiet) {
+    if (!context.disassembly) return;
+    count_ = std::clamp(count_, 16, 1000);
+    std::string error;
+    std::vector<services::DisassemblyInstruction> rows;
+    if (!context.disassembly->Decode(address, static_cast<size_t>(count_), rows, &error)) {
+        if (!quiet) context.status = "Disassembly failed: " + error;
+        return;
+    }
+    currentAddress_ = address;
+    instructions_ = std::move(rows);
+    lastLiveRefresh_ = std::chrono::steady_clock::now();
+    std::snprintf(address_, sizeof(address_), "0x%llX",
+                  static_cast<unsigned long long>(address));
+    if (!quiet)
+        context.status = std::to_string(instructions_.size()) + " instruction(s)";
+}
+
+void DisassemblyWorkspace::Analyze(
+        UiContext& context, const char* tool,
+        const char* argumentKey, const char* kind,
+        bool includeData) {
+    if (!context.payload || !tool || !argumentKey || !kind) return;
+    const std::string address = address_;
+    if (address.empty() || address == "0x0") {
+        analysisKind_ = kind;
+        analysisResult_.clear();
+        analysisError_ = "analysis_address_required";
+        context.status = analysisError_;
+        return;
+    }
+
+    nlohmann::json arguments = {{argumentKey, address}};
+    if (std::string(tool) == "analysis_xrefs")
+        arguments["include_data"] = includeData;
+
+    nlohmann::json output;
+    std::string error;
+    if (!context.payload->CallTool(tool, arguments, output, &error)) {
+        analysisKind_ = kind;
+        analysisResult_.clear();
+        analysisError_ = error.empty() ? "analysis_failed" : error;
+        context.status = std::string(kind) + " analysis failed: " + analysisError_;
+        return;
+    }
+
+    const auto result = output.find("result");
+    analysisResult_ =
+        (result != output.end() ? *result : output).dump(2);
+    analysisKind_ = kind;
+    analysisError_.clear();
+    context.status = std::string(kind) + " analysis complete";
+}
+
+void DisassemblyWorkspace::Draw(UiContext& context) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) {
+        ImGui::TextDisabled("Select a process to disassemble memory.");
+        return;
+    }
+
+    if (targetId_ != session->Target().id) {
+        targetId_ = session->Target().id;
+        instructions_.clear();
+        currentAddress_ = 0;
+        analysisKind_.clear();
+        analysisResult_.clear();
+        analysisError_.clear();
+        lastLiveRefresh_ = {};
+        if (context.settings) {
+            const int configured = context.settings->Values().autoRefreshMs;
+            liveRateIndex_ = configured <= 150 ? 0 :
+                             configured <= 375 ? 1 :
+                             configured <= 750 ? 2 : 3;
+        }
+    }
+
+    uint64_t navigationAddress = 0;
+    if (context.ConsumeNavigation("disassembly", navigationAddress))
+        Decode(context, navigationAddress);
+
+    ImGui::TextUnformatted("Disassembler");
+    ImGui::SameLine();
+    ImGui::TextDisabled(cortex::target::ArchitectureName(session->Target().architecture));
+    ImGui::Spacing();
+
+    ImGui::SetNextItemWidth(240);
+    ImGui::InputTextWithHint("##DisasmAddress", "0x7FF...", address_, sizeof(address_));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputInt("Count", &count_, 16, 64);
+    ImGui::SameLine();
+    if (ImGui::Button("Go")) {
+        uint64_t address = 0;
+        if (ParseAddress(address)) Decode(context, address);
+        else context.status = "Invalid disassembly address";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Memory") && currentAddress_) {
+        context.NavigateTo("memory-browser", currentAddress_);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("CFG"))
+        Analyze(context, "analysis_cfg", "address", "CFG");
+    ImGui::SameLine();
+    if (ImGui::Button("Xrefs"))
+        Analyze(context, "analysis_xrefs", "target", "Xrefs", true);
+    ImGui::SameLine();
+    if (ImGui::Button("Structured CFG"))
+        Analyze(context, "analysis_structure", "address", "Structured CFG");
+    ImGui::SameLine();
+    ImGui::Checkbox("Live", &liveRefresh_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Follow IP", &followInstructionPointer_);
+    ImGui::SameLine();
+    const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
+    ImGui::SetNextItemWidth(90);
+    ImGui::Combo("##DisasmLiveRate", &liveRateIndex_,
+                 liveRates, IM_ARRAYSIZE(liveRates));
+
+    const uint64_t instructionPointer =
+        context.debuggerModel
+            ? context.debuggerModel->Snapshot().instructionPointer
+            : 0;
+    const auto now = std::chrono::steady_clock::now();
+    const bool liveDue =
+        liveRefresh_ &&
+        (lastLiveRefresh_.time_since_epoch().count() == 0 ||
+         now - lastLiveRefresh_ >=
+             std::chrono::milliseconds(LiveIntervalMs()));
+
+    if (followInstructionPointer_ && instructionPointer != 0 &&
+        instructionPointer != currentAddress_) {
+        Decode(context, instructionPointer, true);
+    } else if (liveDue && currentAddress_ != 0 && !ImGui::IsAnyItemActive()) {
+        Decode(context, currentAddress_, true);
+    }
+
+    if (!analysisKind_.empty() || !analysisError_.empty()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear analysis")) {
+            analysisKind_.clear();
+            analysisResult_.clear();
+            analysisError_.clear();
+        }
+    }
+
+    ImGui::Spacing();
+
+    if (!analysisKind_.empty() || !analysisError_.empty()) {
+        ImGui::BeginChild("DisassemblyAnalysis", ImVec2(0, 170), ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(analysisKind_.empty() ? "Analysis" : analysisKind_.c_str());
+        ImGui::Separator();
+        if (!analysisError_.empty())
+            ImGui::TextWrapped("Error: %s", analysisError_.c_str());
+        else
+            ImGui::TextWrapped("%s", analysisResult_.c_str());
+        ImGui::EndChild();
+        ImGui::Spacing();
+    }
+    if (instructions_.empty()) {
+        ImGui::TextDisabled("Enter an address, or open one from Modules / Memory.");
+        return;
+    }
+
+    if (ImGui::BeginTable("DisassemblyTable", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                          ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
+                          ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
+        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, 190);
+        ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (size_t i = 0; i < instructions_.size(); ++i) {
+            const auto& row = instructions_[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            char label[40] = {};
+            const bool atIp =
+                context.debuggerModel &&
+                context.debuggerModel->Snapshot().instructionPointer == row.address;
+            std::snprintf(label, sizeof(label), atIp ? "> 0x%llX" : "0x%llX",
+                          static_cast<unsigned long long>(row.address));
+            if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
+                currentAddress_ = row.address;
+            }
+            if (ImGui::BeginPopupContextItem()) {
+                AddressContextOptions options;
+                options.valueType = "u8";
+                options.valueSize = std::max(1, static_cast<int>(row.bytes.size()));
+                DrawAddressContextActions(context, row.address, options);
+                ImGui::EndPopup();
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(FormatBytes(row.bytes).c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(row.text.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
+} // namespace cortex::ui
