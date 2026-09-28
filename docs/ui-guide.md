@@ -1,138 +1,146 @@
 # Cortex UI guide
 
-This is the user-facing reference for the unified Qt 6 / QML interface on `next/unified-cortex-ui`.
+This is the user-facing reference for the Cortex v0.8 desktop application (Dear ImGui on Win32 + Direct3D 11). For a first session, start with [Getting started](getting-started.md).
 
 ## Layout
 
-Cortex keeps four areas visible: **top bar**, **sidebar**, **main workspace** and **bottom panel**. The current target and Mutation state stay visible while address-centric actions move between tools.
+Cortex has a menu bar, a two-row header, a dock area and a status line. The current target and the write permission stay visible while address-centric actions move between tools.
 
-### Top bar
+### Header
 
-- **Select target...** opens process selection; Refresh updates discovery. Selecting another process keeps existing sessions attached and makes the chosen process active. The picker marks `ACTIVE` / `ATTACHED` targets and can detach one session independently.
-- **Paused: N** appears when threads are paused and opens Debugger.
-- **Mutation** toggles state-changing permission.
-- **Settings** opens application settings.
-- **Command** opens the Command Palette.
+- Row 1: **Select process** / **Change process** opens the process picker; the target (process, PID, architecture) and a chip per attached session follow. On the right: AI activity status, the **Read-only / Writes allowed** toggle and **Detach**.
+- Row 2: the workspace presets, **Go to...** and, once a debugger is attached, **Pause**, **Continue**, **Step** and **Over**.
+
+The picker filters by process name, window title or PID. Attaching another process keeps the existing sessions; a session chip's menu activates or detaches it.
+
+### Dock area and presets
+
+Every workspace is a dockable window: drag its tab to move it, drag a splitter to resize, close it with its `x`. **View** opens or closes any workspace; **Workspace** or the header buttons apply a preset, which rebuilds the layout:
+
+| Preset | Left | Center | Right |
+|---|---|---|---|
+| Memory | Addresses, Modules | Memory, Memory viewer | Watches |
+| Debug | Modules, Watches | Disassembler, Memory viewer | Debugger, Patches |
+| RE | Project, Symbols, Structures / Pointer Maps, Snapshots, Modules | Reverse Engineering, Disassembler, Memory viewer | Patches, Instrumentation / Advanced |
+| Trace | Watches | Trace, Disassembler | Debugger, Memory viewer |
+| Automation | Scripts, Input | Actions, Events / Console | Watches, Advanced |
+| Runtime | Modules, Sessions, Settings | Advanced, Diagnostics, Network | Screenshots, Instrumentation / Actions, Watches |
+
+The bottom panel is open in every preset. The layout is saved per user and restored at the next start.
+
+### Fonts and scaling
+
+The UI uses Segoe UI, with Cascadia Mono or Consolas for addresses, bytes, instructions and code. Everything follows the monitor's DPI, including when the window moves to a monitor with a different scale.
 
 ## Shortcuts
 
 | Shortcut | Behavior |
 |---|---|
-| `Ctrl+Shift+P`, `Ctrl+K` | Command Palette |
-| `Ctrl+J` | Toggle bottom panel |
-| `Ctrl+G` | Go to address, `module+offset`, or symbol |
-| `Ctrl+F` | Open Scanner and focus search |
-| `Ctrl+B` | Add a software breakpoint in address-aware views |
-| `Space` | Freeze/unfreeze selected Address entry |
-| `F2` | Edit selected Address entry |
-| `Delete` | Remove selected Address entry when Mutation is enabled |
+| `Ctrl+Shift+P`, `Ctrl+K` | Command palette |
+| `Ctrl+G` | Go to address, `module+offset`, symbol, Project name or pointer path |
+| `Alt+Left`, `Alt+Right` | Back / forward through visited locations |
+| `Ctrl+B` | Software breakpoint on the selected Addresses entry |
+| `Space` | Freeze/unfreeze the selected Addresses entry |
+| `F2` | Edit the selected Addresses entry |
+| `Delete` | Remove the selected Addresses entry |
+
+`Ctrl+B`, `Space` and `Delete` require writes allowed.
 
 ## Shared address actions
 
-Addresses, Scanner, Memory, Disassembly and debugger disassembly share a context menu. Depending on state/permissions it includes:
+Addresses, scan results, the Memory viewer, the Disassembler and the debugger's registers and stack share one context menu. Depending on state and permissions it includes:
 
-- Browse memory
-- Disassemble
-- Open in RE
-- Add to Addresses
-- Add software breakpoint
-- Find what writes
-- Find what accesses (page watch)
-- Pointer scan
-- Open in Structures
-- Track object in RE
-- Detect C++ subobjects
-- Snapshot 64 bytes
-- Copy address
-- Copy module+offset
+- **Open / follow**: Browse memory, Disassemble, Open in RE, Pointer Maps, Structures
+- **Monitor**: Add live watch, Find what accesses (page watch), Snapshot 64 bytes
+- **Debugger**: Software breakpoint, HW execute / write / read-write breakpoint
+- **Reverse engineering**: Find what writes, Track object, Detect C++ subobjects, Add to Addresses
+- **Copy**: Address, Module + offset
 
 Source-specific actions such as Remove appear only where applicable.
 
-## TARGET
+## Runtime connection
+
+Workspaces backed by the in-target runtime show its state and two buttons: **Connect existing** attaches to a runtime that is already loaded (read-only, never injects) and **Enable runtime** loads it (a write). Settings can load it automatically after attach.
+
+## Target
 
 ### Overview
 
-Shows platform, architecture, active-session state, discovered process count, attached-target count and Mutation state. It also exposes Refresh targets, Detach, **Detach all** when several targets are attached, and the Mutation toggle.
+Target summary with shortcuts to the process picker, Memory, Debugger and Sessions. Open it from **View**.
 
-Memory, Scanner, Debugger, RE and the other workspaces always operate on the **active** target. Switching the active target resets target-specific UI/runtime state but does not detach the other sessions.
+### Sessions
+
+Attached targets with **Activate**, **Detach** and **Detach all**. Every workspace operates on the active target; switching resets target-specific UI state without detaching the others.
 
 ### Addresses
 
-The primary CE-like working table. Columns are **Description, Address, Type, Value, State, Notes**. Live values are backed by Cortex watches.
-
-Double-click opens Memory. Buttons and the context menu connect the selected entry to Memory, Disassembly, RE, writer analysis and other address actions. `Space`, `F2`, `Delete` and `Ctrl+B` are available here.
+The primary working table. Columns are **Description, Address, Type, Value, State, Notes**. Live values are backed by runtime watches. The selected entry offers Memory, Disasm, RE, Watch live / Stop live, Freeze value, Find writer, Edit and Remove.
 
 ### Project
 
-Persistent target knowledge: named addresses, pointer paths, notes/tags and project-backed information intended to survive sessions.
+Persistent target knowledge in three tabs: **Addresses**, **Pointer paths** and **Notes**.
 
-### RE
+### Reverse Engineering
 
-Runtime reverse-engineering workspace with tracked objects, Quick Analysis, last-writer analysis, C++ subobject detection, transition/write tracing, in-game tests/experiments with rollback, persistent facts, sessions/checkpoints and advanced analysis payloads. Advanced JSON/Ghidra-oriented controls can be hidden by default in Settings.
+Tabs: **Objects** (tracked objects with liveness and field-change events, per-object analysis), **Analysis** (find last writer, detect C++ subobjects), **Transition** (trace a state transition), **Experiments** (run a test, optionally with rollback), **Sessions** (facts, checkpoints and rollback, run export and diff) and **Interop** (Ghidra export/import, breakpoint templates).
 
-## INSPECT
+## Inspect
 
 ### Memory
 
-Hex/ASCII viewer with 16 bytes per row, address navigation, refresh and shared address actions. The write strip is visually marked as a Mutation action and requires Mutation permission.
+The **Value scan** panel (First scan, Next scan, New scan; Exact value, Changed, Unchanged, Increased, Decreased) with its results, and a local address list. Results beyond **Maximum scan results** are dropped and the scan is marked **limit reached**. Double-click a result to prepare an Addresses entry.
 
-### Scanner
+### Memory viewer
 
-Exact and comparative scans. Current comparative modes are **Changed, Unchanged, Increased, Decreased**. Double-click adds a result to Addresses; right-click opens address actions. `Ctrl+F` focuses this workspace.
+Address, hex and ASCII columns with configurable size, live refresh and a change column. **Write bytes at the current address** requires writes allowed.
 
-### Pointers
+### Disassembler
 
-Captures pointer maps around a target address and intersects multiple maps to rank stable pointer paths. Capture depth and max offset are configurable per capture.
-
-### Disassembly
-
-Address navigation with Back/Forward history plus **CFG, Xrefs, Structured CFG** analysis. Instruction rows expose shared address actions and `Ctrl+B`.
+Address navigation, Follow IP, live refresh, and **CFG**, **Xrefs** and **Structured CFG** analysis. Instruction rows expose the shared address actions.
 
 ### Structures
 
-Defines/deletes typed structures, reads an instance at an address, writes fields with Mutation permission and provides structure inference from candidate addresses.
+Tabs: **Definition** (define and delete typed structures), **Read / write** (read an instance, write fields with writes allowed) and **Infer** (infer a layout from candidate addresses).
+
+### Pointer Maps
+
+**Capture** pointer maps around an address, then **Intersect selected** maps to rank stable pointer paths.
 
 ### Modules
 
-Lists module name, base, size and path. Double-click opens Disassembly at the module base.
+Name, base, size and path, with a filter. Double-click opens the Disassembler at the module base.
 
 ### Symbols
 
-Resolves addresses to symbols and symbol names to addresses. Results include module/RVA and symbol metadata and can open Memory or Disassembly.
+Resolves addresses to symbols and names to addresses, with module/RVA details; results open in the Memory viewer or the Disassembler.
 
 ### Snapshots
 
-Captures ranges, lists snapshots, diffs snapshot IDs, finds the last change for an address/range and supports Rewind/Delete with Mutation permission.
+**Capture snapshot**, **Diff selected snapshots**, **Last change** for an address or range, and **Rewind** / **Delete** with writes allowed.
 
-## DEBUG
+## Debug
 
 ### Debugger
 
-Combines runtime enable/refresh, paused-thread selection, instruction pointer, nearby disassembly, registers, breakpoints, **Pause**, **Continue**, **Step Into**, **Step Over** and **Breakpoint @ IP**.
+Backend, **Attach debugger**, threads (and threads paused on a breakpoint), registers and stack of the selected thread, **Pause**, **Continue**, **Step Into**, **Step Over**, **Disassemble IP**, and the breakpoint list with hit counters, thread coverage and a hit log. Threads, registers and stack are readable before the debugger is attached; control requires writes allowed. On a narrow panel the stack moves below threads and registers.
 
-Target-control actions require Mutation permission.
+### Trace
 
-### Breakpoints
-
-Lists breakpoint address, kind, action, hits and thread coverage. New breakpoints may include an optional TID. Breakpoint defaults live in Settings.
-
-### Traces
-
-Starts bounded per-thread traces, lists sessions, loads events and can stop/delete traces. Events expose instruction bytes and register state.
+**Start trace** on a thread (or **Use debugger thread**), stop, delete, list sessions and reload events with instruction bytes and registers.
 
 ### Patches
 
-Tracked target modifications with original/current state and revert support. Runtime patch services cover the patch modes exposed by Cortex; reverting requires Mutation permission.
+Tracked target modifications (raw bytes, NOP, assembly, detour, trampoline, code cave) with original/current state and **Revert**.
 
 ### Watches
 
-Live typed watches and freezes. A Watch observes; a Freeze holds a value and therefore changes target state.
+Runtime watches and freezes. A watch observes; a freeze holds a value and therefore changes target state.
 
-### Hooks
+### Instrumentation
 
-Instrumentation workspace for allocation observation, page-access/page-guard watches, event snapshots and renderer/instrumentation state. Renderer hooks are internal instrumentation and do not display an injected Cortex UI.
+**Page access** watches and **Allocations** observation, with runtime state and events.
 
-## OBSERVE
+## Observe
 
 ### Network
 
@@ -140,73 +148,57 @@ Observed network events with direction, socket, size and preview.
 
 ### Screenshots
 
-Triggers target capture through the available capture backend.
+Captures the target through the available capture backend.
 
 ### Diagnostics
 
-Runtime, transport/API, tool-catalog and renderer/instrumentation health. Use this first when a runtime-backed feature is unavailable.
+Tabs: **Status**, **Health**, **Crash report**, **Report**, **Symbolized**, **Hooks** and **Breadcrumbs**. Use it first when a runtime-backed feature is unavailable.
 
-## AUTOMATE
+### Events / Console
+
+The runtime **Events** stream and the **API log**.
+
+## Automate
 
 ### Scripts
 
-Lua catalog/editor/runner with create, save, run, delete, timeout and output controls.
+Lua editor and catalog: **Save**, **Run buffer**, **Run saved**, **Delete**, with output.
 
 ### Input
 
-Key taps, recorded sequence replay and text input through Cortex input services.
+**Run sequence** of key taps, **Start recording** / **Stop recording**, **Replay recording**, and job control.
 
 ### Actions
 
-Reversible action journal/checkpoint view with refresh, rollback-all and clear-history controls where allowed.
+The reversible action journal: **Rollback to** a point, **Rollback all** and **Clear history**, with writes allowed.
 
-## APP
+### Advanced
+
+The runtime tool catalog, in **Primitives**, **All tools** or **Semantic** mode, with a filter, JSON arguments and result display (**Call**). Mutating tools require writes allowed. MCP clients use the same catalog through `cortex.exe mcp`.
+
+## App
 
 ### Settings
 
-Current options include:
+Five sections, saved as they change: **Runtime & diagnostics**, **Memory & scanner**, **Debugger & trace**, **Projects & sessions** and **MCP & AI activity**. **Reset technical defaults** restores them. The settings file is in `%LOCALAPPDATA%\Cortex`, or beside `cortex.exe` when a `cortex.portable` file is present.
 
-- compact density;
-- mouse-wheel speed;
-- persistent scrollbars;
-- restore last section;
-- remember window layout/bottom panel state;
-- show advanced RE tools by default;
-- live auto-refresh interval;
-- default breakpoint action;
-- process-global hardware breakpoints by default.
-
-Mutation always starts disabled after attach and is intentionally not configurable as an automatic default.
-
-## AI
-
-### MCP
-
-Primitive tool catalog with JSON arguments/result display. Mutating tools require Mutation permission. MCP is also available directly through `cortex.exe mcp`.
-
-### Semantic
-
-Uses the MCP workspace in semantic-only mode to present the compact semantic tool surface instead of the complete primitive catalog.
-
-### Sessions
-
-Current target/session state, runtime-state export and detach actions.
+Writes allowed always starts off after attach and is intentionally not configurable as an automatic default.
 
 ## Bottom panel
 
-Toggle with `Ctrl+J`. Tabs are:
+Tabs:
 
 - **Events** — runtime event stream
-- **Console** — API/runtime logs
+- **Console** — API/runtime log
 - **Breakpoints** — quick breakpoint context
 - **Watches** — quick watch context
-- **MCP Calls** — MCP activity
+- **AI Activity** — MCP sessions and tool calls from AI clients
 - **Diagnostics** — compact health/status
 
-Events and Console poll according to the configured auto-refresh interval while active.
+A tab is hidden while the same content is open as a full workspace; the panel then lists it under "open as full panels". **Auto refresh runtime** polls at the interval set in Settings.
 
-## Mutation model
+## Write permission model
 
-Cortex keeps observation and mutation distinct. Simply attaching and exploring should remain read-oriented until Mutation is explicitly enabled. UI controllers and lower execution layers enforce the permission for state-changing operations.
+Cortex keeps observation and state changes distinct. Attaching and exploring stay read-only until **Writes allowed** is switched on. The application models enforce the permission for every mutating call, independently of which buttons the UI enables, and the runtime checks the `mutation_permission` flag on its side.
 
 For a first-session walkthrough, see [Getting started](getting-started.md).

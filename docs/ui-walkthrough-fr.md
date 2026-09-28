@@ -1,115 +1,101 @@
 # Procédure illustrée — Cortex UI
 
-Cette procédure montre le parcours principal de la version Qt/QML de Cortex : sélectionner une cible, scanner une valeur, conserver une adresse, naviguer dans la mémoire et le désassemblage, puis passer aux outils RE.
+Cette procédure montre le parcours principal de l'application de bureau Cortex : sélectionner une cible, scanner une valeur, conserver une adresse, naviguer dans la mémoire et le désassemblage, utiliser le débogueur, puis passer aux outils RE.
 
-Les captures ci-dessous ont été réalisées directement sur le build Windows unifié de Cortex avec une petite cible locale de démonstration (`AAA_CortexGuideTarget.exe`). La valeur `123456789` et les adresses visibles sont uniquement des données de démonstration.
+Les captures ont été réalisées avec Cortex v0.8 (Dear ImGui) attaché à la cible de test du dépôt, `cortex_test_target_x64.exe`. La valeur scannée `0xDEADBEEF` (`-559038737` en entier signé 32 bits) et les adresses visibles sont uniquement des données de démonstration.
 
 > Utilise Cortex uniquement sur un logiciel ou un système que tu possèdes ou que tu es autorisé à inspecter.
 
+## La fenêtre en un coup d'œil
+
+- **Barre de menus** : File (choisir un processus, détacher), Edit (palette de commandes, Go To, Settings), Debug, Tools, Workspace (presets), View (ouvrir ou fermer chaque espace de travail, précédent/suivant), Help.
+- **En-tête, ligne 1** : la cible (processus, PID, architecture), l'interrupteur **Read-only / Writes allowed** et **Detach**.
+- **En-tête, ligne 2** : les six presets d'espaces de travail, **Go to...**, puis les commandes du débogueur une fois celui-ci attaché.
+- **Zone d'ancrage** : chaque espace de travail est une fenêtre ancrable. Glisse un onglet pour le déplacer, un séparateur pour redimensionner ; la disposition est enregistrée par utilisateur.
+- **Panneau du bas** : Events, Console, Breakpoints, Watches, AI Activity et Diagnostics.
+- **Ligne d'état** : le résultat de la dernière action, précédé du preset actif.
+
 ## 1. Lancer Cortex et choisir une cible
 
-Lance `cortex.exe`, puis clique sur le sélecteur de processus dans la barre supérieure. Tu peux utiliser le champ de recherche pour filtrer par nom, PID ou chemin.
+Lance `cortex.exe`, puis clique **Select process** (ou **File > Select process...**). Le champ de recherche filtre par nom de processus, titre de fenêtre ou PID.
 
 ![Sélection de la cible](images/ui-walkthrough/01-select-target.png)
 
-Clique sur le processus voulu. Cortex effectue l'attachement et conserve ensuite le nom de la cible dans la barre supérieure et dans la barre d'état.
+Sélectionne une ligne et clique **Attach**, ou double-clique la ligne.
 
-Tu peux ensuite rouvrir le sélecteur et attacher un second processus. Cortex garde les deux sessions ouvertes, marque la cible affichée comme **ACTIVE** et l'autre comme **ATTACHED**. Cliquer sur une cible déjà attachée la rend active sans détacher l'autre.
+Tu peux rouvrir le sélecteur et attacher un second processus. Cortex garde les deux sessions et passe de l'une à l'autre depuis l'en-tête sans en détacher aucune.
 
 ## 2. Vérifier l'attachement
 
-Dans **Overview**, vérifie au minimum :
+Après l'attachement, l'en-tête affiche le nom du processus, son PID et son architecture, et le preset **Memory** s'ouvre : Addresses et Modules à gauche, Memory et le Memory viewer au centre, Watches à droite.
 
-- le nom du processus ;
-- la plateforme et l'architecture ;
-- **Session: Attached** ;
-- **Mutation: Disabled** au départ.
+![Cible attachée](images/ui-walkthrough/02-attached.png)
 
-![Cible attachée](images/ui-walkthrough/02-attached-overview.png)
-
-Cortex démarre volontairement en mode observation. Tant que tu lis, scannes ou désassembles sans modifier la cible, laisse **Mutation off**.
+L'interrupteur indique **Read-only**. Cortex démarre en mode observation : lire, scanner, désassembler et inspecter fonctionnent sans écriture, et rien n'est injecté dans la cible.
 
 ## 3. Scanner une valeur
 
-Ouvre **Scanner** dans la sidebar ou presse `Ctrl+F`.
+Le panneau **Value scan** de l'espace **Memory** lance les scans exacts et comparatifs.
 
-Pour un scan classique :
-
-1. choisis le type (`i32`, `i64`, `f32`, etc.) ;
+1. choisis le type (`Int32`, `Int64`, `Float`, `Double`, `String`, `Bytes`) ;
 2. saisis la valeur actuelle ;
-3. clique **New Scan** ;
-4. fais évoluer la valeur dans la cible si nécessaire ;
-5. utilise **Next Scan** avec une nouvelle valeur ou un mode comparatif : Changed, Unchanged, Increased ou Decreased.
+3. clique **First scan** ;
+4. fais évoluer la valeur dans la cible ;
+5. clique **Next scan** avec une nouvelle valeur exacte ou un mode comparatif : Changed, Unchanged, Increased ou Decreased ;
+6. **New scan** repart de zéro.
 
-Dans la capture de démonstration, Cortex trouve quatre occurrences de la valeur `123456789`.
+Dans la démonstration, Cortex a trouvé 29 occurrences de `-559038737`.
 
-![Résultats du Scanner](images/ui-walkthrough/03-scanner-results.png)
+![Résultats du scan](images/ui-walkthrough/03-value-scan.png)
 
-Un clic droit sur un résultat donne directement accès aux actions liées à cette adresse. Un double-clic envoie l'adresse vers **Addresses**.
+Quand un scan atteint la limite de résultats configurée, le compteur est suivi de **limit reached** et la ligne d'état précise que les autres correspondances n'ont pas été conservées ; affine la valeur ou augmente **Maximum scan results** dans Settings.
 
-### Mutation et ajout dans Addresses
-
-Avec **Mutation off**, Cortex peut ouvrir l'adresse dans le workspace Addresses sans effectuer l'écriture persistante associée au projet. Active **Mutation** uniquement au moment où tu veux enregistrer/modifier l'état Cortex ou la cible.
+Clic droit sur un résultat : menu d'adresse partagé. Double-clic : prépare une entrée **Addresses**.
 
 ## 4. Utiliser Addresses comme table de travail
 
-**Addresses** est le centre du workflow de type Cheat Engine. Une entrée contient :
+**Addresses** est la table de travail persistante du projet de la cible. Chaque entrée a une description, une adresse, un type, une valeur live, un état et des notes.
 
-- Description ;
-- Address ;
-- Type ;
-- Value ;
-- State ;
-- Notes.
+Le double-clic sur un résultat remplit l'adresse ; ajoute une description et clique **Add**. Ajouter au projet est une écriture : passe d'abord l'interrupteur de l'en-tête sur **Writes allowed** (le bouton **Add** reste désactivé sinon).
 
-Dans la capture suivante, l'entrée de démonstration s'appelle `Demo health`. Le live watch a été activé afin que Cortex suive sa valeur.
+Sélectionne une entrée pour accéder à ses actions : **Memory**, **Disasm**, **RE**, **Watch live**, **Freeze value**, **Find writer**, **Edit** et **Remove**. Avec **Watch live**, le runtime rafraîchit la valeur et l'état passe à `live` ; la surveillance apparaît aussi dans l'espace Watches.
 
-![Table Addresses](images/ui-walkthrough/04-addresses-live.png)
+![Table Addresses avec valeur live](images/ui-walkthrough/04-addresses-live.png)
 
-Raccourcis utiles dans Addresses :
+Raccourcis dans Addresses :
 
 | Raccourci | Action |
 |---|---|
-| `Space` | Freeze / unfreeze |
-| `F2` | Modifier l'entrée |
-| `Delete` | Supprimer l'entrée lorsque Mutation est autorisée |
-| `Ctrl+B` | Ajouter un software breakpoint lorsque le runtime est disponible |
+| `Space` | Geler / dégeler l'entrée sélectionnée (écritures autorisées) |
+| `F2` | Modifier l'entrée sélectionnée |
+| `Delete` | Supprimer l'entrée sélectionnée (écritures autorisées) |
+| `Ctrl+B` | Poser un breakpoint logiciel sur l'entrée sélectionnée (écritures autorisées) |
 
-Un double-clic sur une entrée ouvre la mémoire à cette adresse.
+## 5. Utiliser le menu d'adresse partagé
 
-## 5. Exploiter le menu contextuel d'adresse
-
-Le même menu d'adresse est utilisé dans **Addresses**, **Scanner**, **Memory**, **Disassembly** et le désassemblage du Debugger.
+Le même menu est disponible depuis Addresses, les résultats de scan, le Memory viewer, le Disassembler, les registres et la pile du débogueur.
 
 ![Menu contextuel d'adresse](images/ui-walkthrough/05-address-context-menu.png)
 
-Selon la cible et les permissions, tu peux notamment :
+Il est organisé par intention :
 
-- Browse memory ;
-- Disassemble ;
-- Open in RE ;
-- Add to Addresses ;
-- Add software breakpoint ;
-- Find what writes ;
-- Find what accesses ;
-- Pointer scan ;
-- Open in Structures ;
-- Track object in RE ;
-- Detect C++ subobjects ;
-- créer un snapshot local ;
-- copier l'adresse ou `module+offset`.
+- **Open / follow** : Browse memory, Disassemble, Open in RE, Pointer Maps, Structures ;
+- **Monitor** : Add live watch, Find what accesses (page watch), Snapshot 64 bytes ;
+- **Debugger** : breakpoint logiciel, breakpoints matériels exécution / écriture / lecture-écriture ;
+- **Reverse engineering** : Find what writes, Track object, Detect C++ subobjects, Add to Addresses ;
+- **Copy** : l'adresse absolue ou la forme `module+offset`.
 
-Ce menu est le moyen le plus rapide de continuer l'analyse sans recopier les adresses entre les outils.
+Les actions qui modifient la cible sont désactivées tant que l'en-tête indique Read-only.
 
 ## 6. Inspecter la mémoire
 
-Dans **Memory**, Cortex affiche la mémoire en lignes de 16 octets avec vue hexadécimale et ASCII.
+Le **Memory viewer** affiche adresse, hexadécimal et ASCII, 16 octets par ligne par défaut. **Live** relit à l'intervalle choisi, et les octets modifiés sont signalés dans la colonne **Δ**.
 
-![Vue mémoire](images/ui-walkthrough/06-memory-view.png)
+![Memory viewer](images/ui-walkthrough/06-memory-view.png)
 
-Le bloc **Write** est volontairement séparé et marqué comme action de Mutation. Pour une simple inspection, ne l'utilise pas.
+La ligne **Write bytes at the current address** est une écriture ; elle n'est active qu'avec **Writes allowed**.
 
-Tu peux également utiliser `Ctrl+G` pour aller directement vers :
+`Ctrl+G` (ou **Go to...**) ouvre Go To. Il accepte :
 
 ```text
 0x7FF612340000
@@ -117,124 +103,104 @@ game.exe+0x1234
 KnownSymbolName
 ```
 
-Le popup Go To permet d'ouvrir le résultat dans Memory, Disassembly, RE ou Addresses.
+et ouvre l'emplacement dans le Memory viewer ou le Disassembler. `Alt+Gauche` et `Alt+Droite` naviguent dans l'historique des emplacements.
 
-## 7. Passer au désassemblage
+## 7. Passer au Disassembler
 
-**Disassembly** permet de naviguer dans le code autour d'une adresse, avec historique Back / Forward.
+Le preset **Debug** place Modules et Watches à gauche, le Disassembler et le Memory viewer au centre, le Debugger et Patches à droite.
 
-![Désassemblage](images/ui-walkthrough/07-disassembly.png)
+![Disassembler et débogueur](images/ui-walkthrough/07-disassembly.png)
 
-Les actions d'analyse principales sont :
+Le Disassembler affiche adresse, octets et instruction. **Follow IP** le cale sur le pointeur d'instruction du thread sélectionné (`>` marque l'instruction courante). Actions d'analyse :
 
-- **CFG** — graphe de contrôle ;
-- **Xrefs** — références vers/depuis la zone analysée ;
-- **Structured CFG** — analyse structurée de la fonction ;
-- clic droit — même menu contextuel d'adresse que dans les autres workspaces.
+- **CFG** : graphe de flot de contrôle de la fonction ;
+- **Xrefs** : références vers et depuis la zone analysée ;
+- **Structured CFG** : analyse structurée de la fonction ;
+- clic droit : le menu d'adresse partagé.
 
-`Ctrl+B` peut poser un software breakpoint lorsque Mutation et le runtime sont disponibles.
+## 8. Utiliser le débogueur
 
-## 8. Utiliser le Debugger
+Le Debugger liste les threads, les registres et la pile du thread sélectionné, visibles avant même d'attacher un débogueur. Clic droit sur un registre ou une valeur de pile : menu d'adresse ; double-clic sur une valeur de pile : navigation mémoire.
 
-Dans **Debugger**, **Enable Runtime** active l'instrumentation nécessaire lorsque celle-ci n'est pas encore connectée.
+Clique **Attach debugger** pour contrôler la cible. L'en-tête affiche alors **Pause**, **Continue**, **Step** et **Over**, les mêmes commandes que l'espace Debugger et le menu **Debug**.
 
-Le workspace regroupe notamment :
+![Débogueur attaché](images/ui-walkthrough/08-debugger.png)
 
-- threads et threads pausés ;
-- instruction pointer ;
-- registres ;
-- désassemblage autour de l'IP ;
-- breakpoints ;
-- **Pause**, **Continue**, **Step Into** et **Step Over**.
+L'espace Debugger regroupe :
 
-Les actions de contrôle de la cible nécessitent Mutation.
+- les threads, et ceux arrêtés sur un breakpoint ;
+- les registres et la pile du thread sélectionné ;
+- les breakpoints avec compteurs et journal des hits ;
+- **Pause**, **Continue**, **Step Into**, **Step Over** et **Disassemble IP**.
 
-![Debugger](images/ui-walkthrough/08-debugger.png)
+Le contrôle de la cible exige **Writes allowed**. Quand le panneau est étroit, la pile passe sous les threads et les registres.
 
-## 9. Continuer dans RE
+## 9. Continuer vers RE
 
-Pour l'analyse runtime plus poussée, ouvre l'adresse dans **RE**.
+Le preset **RE** ouvre Reverse Engineering au centre ; Project, Symbols, Structures, Pointer maps, Snapshots et Modules à gauche ; Instrumentation, Patches et les outils runtime à droite.
 
-![Workspace RE](images/ui-walkthrough/09-re-workspace.png)
+![Espace RE](images/ui-walkthrough/09-re-workspace.png)
 
-Le workspace RE fournit notamment :
+Les onglets de l'espace RE :
 
-- tracked objects ;
-- Quick Analysis ;
-- Last writer ;
-- détection de sous-objets C++ ;
-- trace des écritures / transitions ;
-- faits RE persistants ;
-- expériences avec rollback ;
-- sessions et checkpoints ;
-- outils avancés JSON/Ghidra lorsqu'ils sont affichés.
+- **Objects** : objets suivis (adresse ou chemin de pointeurs, taille, structure facultative) avec état de vie, événements de modification des champs et analyse par objet ;
+- **Analysis** : dernier écrivain, détection des sous-objets C++ ;
+- **Transition** : traçage d'une transition d'état ;
+- **Experiments** : test contrôlé, avec rollback automatique en option ;
+- **Sessions** : faits RE, checkpoints et rollback, export et diff des runs ;
+- **Interop** : export et import Ghidra, modèles de breakpoints.
 
-Le parcours recommandé est :
+Progression recommandée :
 
 ```text
-Scanner -> Addresses -> Memory / Disassembly -> RE
-                           |             |
-                           +-> Pointers <-+
-                           +-> Structures
-                           +-> Debugger
+Value scan -> Addresses -> Memory viewer / Disassembler -> RE
+                              |                 |
+                              +-> Pointer maps <-+
+                              +-> Structures
+                              +-> Debugger
 ```
 
-## 10. Régler l'interface
+## 10. Configurer l'interface
 
-Le bouton **Settings** dans la barre supérieure ouvre les préférences de l'application.
+Ouvre **Edit > Settings**. Les changements sont enregistrés immédiatement ; le chemin du fichier de réglages est affiché en haut.
 
 ![Settings](images/ui-walkthrough/10-settings.png)
 
-Les réglages actuels comprennent notamment :
+Sections :
 
-- densité compacte ;
-- vitesse de la molette ;
-- scrollbars persistantes ;
-- restauration de la dernière section ;
-- mémorisation du layout ;
-- affichage des outils RE avancés ;
-- intervalle d'auto-refresh ;
-- action par défaut des nouveaux breakpoints ;
-- comportement des hardware breakpoints.
+- **Runtime & diagnostics** : chargement automatique du runtime après attachement, API HTTP héritée, diagnostics runtime, minidumps, dossier des crashs, chemin de recherche des symboles, nombre de frames ;
+- **Memory & scanner** : octets par ligne, taille de lecture, type de scan par défaut, nombre maximal de résultats ;
+- **Debugger & trace** : backend du débogueur, action par défaut des breakpoints, breakpoints matériels globaux au processus, budget de pas et taille de page des traces ;
+- **Projects & sessions** : dossiers des projets et des exports de session, rétention de l'historique ;
+- **MCP & AI activity** : profil d'outils MCP par défaut, historique d'activité IA, statut IA dans l'en-tête, rafraîchissement automatique.
 
-**Mutation n'est volontairement pas mémorisée comme préférence activée.** Après un nouvel attach, elle repart désactivée.
+**Writes allowed n'est volontairement pas mémorisé.** Chaque nouvel attachement démarre en lecture seule.
+
+Les réglages et la disposition sont stockés dans `%LOCALAPPDATA%\Cortex`. Crée un fichier vide `cortex.portable` à côté de `cortex.exe` pour les garder à côté de l'exécutable.
 
 ## Raccourcis globaux
 
 | Raccourci | Action |
 |---|---|
-| `Ctrl+F` | Scanner + focus sur la valeur |
-| `Ctrl+G` | Go To global |
-| `Ctrl+Shift+P` ou `Ctrl+K` | Command Palette |
-| `Ctrl+J` | Afficher/masquer le bottom panel |
-| `Ctrl+B` | Breakpoint dans les vues compatibles |
+| `Ctrl+G` | Go To |
+| `Ctrl+Shift+P` ou `Ctrl+K` | Palette de commandes |
+| `Alt+Gauche` / `Alt+Droite` | Précédent / suivant |
+| `Ctrl+B` | Breakpoint sur l'entrée Addresses sélectionnée |
 
-## Bottom panel
+## Panneau du bas
 
-Le panneau inférieur contient :
+Le panneau du bas contient Events, Console, Breakpoints, Watches, AI Activity et Diagnostics. Quand l'un d'eux est déjà ouvert comme espace de travail complet, son onglet est masqué et le panneau le signale sous « open as full panels », pour ne jamais afficher deux fois les mêmes données.
 
-- Events ;
-- Console ;
-- Breakpoints ;
-- Watches ;
-- MCP Calls ;
-- Diagnostics.
+## Checklist de validation rapide
 
-Il permet de garder les informations live visibles sans quitter le workspace principal.
-
-## Checklist rapide pour tester un build
-
-- [ ] sélectionner puis attacher une cible ;
-- [ ] vérifier Overview ;
-- [ ] faire un New Scan puis un Next Scan ;
-- [ ] envoyer une adresse vers Addresses ;
-- [ ] vérifier la valeur live ;
-- [ ] essayer `Ctrl+G` ;
-- [ ] ouvrir Memory et Disassembly ;
-- [ ] tester un changement réversible avec Mutation sur une cible sûre ;
-- [ ] activer le runtime et vérifier Debugger ;
-- [ ] ouvrir une adresse dans RE ;
+- [ ] sélectionner et attacher une cible ;
+- [ ] vérifier l'en-tête : processus, PID, architecture, Read-only ;
+- [ ] lancer un First scan puis un Next scan ;
+- [ ] ajouter une adresse utile dans Addresses et la surveiller en live ;
+- [ ] tester `Ctrl+G` ;
+- [ ] ouvrir le Memory viewer et le Disassembler ;
+- [ ] autoriser les écritures et tester uniquement un changement sûr et réversible ;
+- [ ] attacher le débogueur et faire avancer un thread pas à pas ;
+- [ ] suivre un objet dans RE ;
 - [ ] détacher puis rattacher proprement ;
 - [ ] fermer Cortex sans crash.
-
-Pour la référence complète de chaque workspace, voir [Cortex UI guide](ui-guide.md). Pour le parcours sans captures, voir [Getting started](getting-started.md).

@@ -1,79 +1,70 @@
 # Getting started with Cortex UI
 
-This guide describes the current unified Qt/QML application on `next/unified-cortex-ui`.
+This guide describes the Cortex v0.8 desktop application (Dear ImGui on Win32 + Direct3D 11).
 
 For a screenshot-based walkthrough, see [Illustrated UI walkthrough](ui-walkthrough.md). A [French translation](ui-walkthrough-fr.md) is also available.
 
 ## 1. Get a testable build
 
-For the migration branch, use the artifact produced by the latest green **Unified Cortex UI Preview** workflow.
+Use the `cortex-v0.8.0-windows-portable.zip` release asset or, for a branch build, the `cortex-imgui-preview-windows-portable` artifact of the latest green **Lightweight ImGui UI** workflow run.
 
-Download `cortex-unified-ui-preview-windows`, extract the entire archive and keep its directory structure intact. Cortex needs the Qt dependencies and the internal `runtime/x64` and `runtime/x86` assets shipped beside `cortex.exe`.
-
-The preview is not a published release. The current public v0.6.0 release predates the unified UI.
+Extract the entire archive and keep its directory structure intact. Cortex needs the `cortex_core.dll` runtime beside `cortex.exe` and the `runtime/x64` and `runtime/x86` assets. No Qt or other runtime has to be installed.
 
 ## 2. Launch Cortex
 
 Run `cortex.exe`.
 
-The top bar contains the target picker, target metadata, paused-thread status, Mutation state, Settings and Command Palette access. Leave **Mutation off** while you are only observing.
+The header shows the target, the **Read-only / Writes allowed** toggle, **Detach**, the six workspace presets and **Go to...**. Leave it on **Read-only** while you are only observing.
+
+Settings and the window layout are kept in `%LOCALAPPDATA%\Cortex`. To keep them beside `cortex.exe` instead (portable use), create an empty file named `cortex.portable` next to it.
 
 ## 3. Select and attach a target
 
-Use **Select target...** in the top bar, refresh the process list if necessary, then choose the authorized process to inspect.
+Click **Select process** (or **File > Select process...**), use **Refresh** if necessary, then select the authorized process and click **Attach** or double-click it.
 
-After attach, **Overview** shows platform, architecture, session state and Mutation state. Cortex starts in observation mode; runtime instrumentation is enabled only when a feature needs it.
+After attach, the header shows the process, PID and architecture, and the **Memory** preset opens. Cortex starts in observation mode; the runtime is loaded into the target only when a feature that needs it is used with writes allowed.
 
-You may attach another process from the same picker. Cortex keeps both sessions open and marks one as **ACTIVE**; selecting an already attached process switches the UI back to it without reattaching. Address, Scanner, Debugger and RE workspaces always follow the active target. Use the `x` action in the picker to detach one target, or **Detach all** from Overview.
+You may attach another process from the same picker. Cortex keeps both sessions; selecting an already attached process switches the UI back to it without reattaching. Workspaces always follow the active target. **Detach** in the header or **File > Detach active target** detaches the active one.
 
-## 4. Find a value with Scanner
+## 4. Find a value
 
-Press **`Ctrl+F`** to open Scanner and focus its value field.
-
-Typical exact-value workflow:
+The **Value scan** panel is part of the **Memory** workspace.
 
 1. Choose the value type.
 2. Enter the current value.
-3. Run **New Scan**.
+3. Run **First scan**.
 4. Change the value in the target if appropriate.
 5. Choose Changed, Unchanged, Increased, Decreased, or enter another exact value.
-6. Run **Next Scan** until the result set is useful.
+6. Run **Next scan** until the result set is useful; **New scan** starts over.
 
-Double-click a result to add it to **Addresses**. Right-click a result to use address actions without saving it first.
+A scan that hits **Maximum scan results** (Settings) is marked **limit reached**.
+
+Double-click a result to prepare an **Addresses** entry. Right-click a result to use address actions without saving it first.
 
 ## 5. Work from Addresses
 
-**Addresses** is the main persistent working table. It contains Description, Address, Type, live Value, State and Notes.
+**Addresses** is the persistent working table of the target's project. It contains Description, Address, Type, live Value, State and Notes. Adding, editing and removing entries are writes.
 
 Useful interactions:
 
-- double-click an entry to browse Memory;
+- select an entry for Memory, Disasm, RE, Watch live, Freeze value, Find writer, Edit and Remove;
 - right-click for the complete address action menu;
 - `Space` freezes/unfreezes the selected entry;
 - `F2` edits it;
-- `Delete` removes it when Mutation is enabled;
-- `Ctrl+B` adds a software breakpoint when runtime and Mutation permission are available.
+- `Delete` removes it when writes are allowed;
+- `Ctrl+B` adds a software breakpoint when writes are allowed.
 
-Addresses may be absolute or stable `module+offset` expressions where appropriate.
+Addresses may be absolute or stable `module+offset` expressions.
 
 ## 6. Shared address menu
 
-The common menu is available from Addresses, Scanner, Memory, Disassembly and debugger disassembly. Depending on runtime state and permissions it provides:
+The common menu is available from Addresses, scan results, the Memory viewer, the Disassembler and the debugger's registers and stack. Depending on runtime state and permissions it provides:
 
-- Browse memory
-- Disassemble
-- Open in RE
-- Add to Addresses
-- Add software breakpoint
-- Find what writes
-- Find what accesses (page watch)
-- Pointer scan
-- Open in Structures
-- Track object in RE
-- Detect C++ subobjects
-- Snapshot 64 bytes
-- Copy address
-- Copy module+offset
+- **Open / follow**: Browse memory, Disassemble, Open in RE, Pointer Maps, Structures
+- **Monitor**: Add live watch, Find what accesses (page watch), Snapshot 64 bytes
+- **Debugger**: software and hardware execute / write / read-write breakpoints
+- **Reverse engineering**: Find what writes, Track object, Detect C++ subobjects, Add to Addresses
+- **Copy**: address, module + offset
 - Remove, where the source supports removal
 
 ## 7. Navigate with Ctrl+G
@@ -86,98 +77,96 @@ game.exe+0x1234
 KnownSymbolName
 ```
 
-A resolved location can be opened in Memory, Disassembly, RE or Addresses. When opening Addresses, Cortex selects a matching saved entry when one exists; otherwise it prepares a new entry around the resolved address.
+Project names and pointer paths resolve too. A resolved location opens in the Memory viewer or the Disassembler. `Alt+Left` / `Alt+Right` go back and forward through visited locations.
 
-## 8. Mutation
+## 8. Write permission
 
-Mutation is an explicit safety permission.
+**Writes allowed** is an explicit safety permission, enforced by the application for every state-changing call.
 
-### Mutation off
+### Read-only
 
-Use this for normal observation: memory reads, scans, disassembly, modules, symbols, diagnostics and other non-state-changing inspection.
+Use this for normal observation: memory reads, scans, disassembly, modules, symbols, diagnostics and other non-state-changing inspection. Read-only workspaces connect to a runtime that is already loaded but never inject one.
 
-### Mutation on
+### Writes allowed
 
-Enable it only when you intend to perform a state-changing operation, for example:
+Switch it on only when you intend to perform a state-changing operation, for example:
 
-- memory writes;
-- freezes;
+- loading the runtime into the target;
+- memory writes and freezes;
+- Addresses and Project edits;
 - patches and reverts;
-- breakpoint/control operations requiring target mutation;
+- breakpoints and thread control;
 - snapshot rewind;
 - mutating/native MCP operations;
 - RE experiments that modify the target.
 
-Mutation starts disabled after attach and is deliberately not an always-on setting.
+Every new attach starts read-only; the permission is deliberately not an always-on setting.
 
-## 9. Memory and Disassembly
+## 9. Memory viewer and Disassembler
 
-**Memory** shows 16 bytes per row with hex and ASCII views. The write strip is visually separated as a Mutation action. Right-click an address for shared actions.
+The **Memory viewer** shows 16 bytes per row (configurable) with hex and ASCII columns, a live refresh and a change column. The byte-write row is enabled only with writes allowed. Right-click an address for shared actions.
 
-**Disassembly** supports address navigation and Back/Forward history, plus CFG, xrefs and structured CFG analysis. Right-click instructions to continue analysis elsewhere.
+The **Disassembler** supports address navigation, Follow IP and Back/Forward history, plus CFG, Xrefs and Structured CFG analysis. Right-click instructions to continue analysis elsewhere.
 
 ## 10. Debugger
 
-Debugger exposes runtime state, threads, paused-thread selection, registers, nearby disassembly, breakpoints, **Pause**, **Continue**, **Step Into** and **Step Over**.
+The Debugger lists threads, registers and stack of the selected thread, breakpoints with hit counters and a hit log, and **Pause**, **Continue**, **Step Into**, **Step Over** and **Disassemble IP**. Threads, registers and stack can be inspected before the debugger is attached.
 
-If runtime instrumentation is not active, use **Enable Runtime**. Target-control actions require Mutation permission.
+Click **Attach debugger** to control the target; the header then shows Pause, Continue, Step and Over. Target-control actions require writes allowed. The backend (external Windows debugger or in-process VEH) is chosen in Settings.
 
 **Pause** takes ownership of one suspension only when the selected thread is running; it refuses to steal an existing external suspension. **Step Over** runs a `call` to its return site using a temporary per-thread hardware breakpoint, with a bounded single-step fallback if no debug-register slot is available.
 
 ## 11. Save useful knowledge
 
-Use **Project** for persistent target knowledge such as named addresses, pointer paths and notes. Use **Addresses** for the active CE-like table and Project for broader information that should survive sessions.
+Use **Project** for persistent target knowledge such as named addresses, pointer paths and notes. Use **Addresses** for the active working table and Project for broader information that should survive sessions.
 
 ## 12. Reverse engineering workflow
 
-For deeper runtime analysis, open an address in **RE**. RE supports tracked objects, last-writer analysis, C++ subobject detection, transition/write tracing, persistent facts, experiments with rollback, sessions/checkpoints and advanced payload editors.
+For deeper runtime analysis, open an address in **RE** or apply the **RE** preset. RE supports tracked objects, last-writer analysis, C++ subobject detection, transition tracing, persistent facts, experiments with rollback, sessions/checkpoints, run export and diff, and Ghidra interop.
 
 Recommended progression:
 
 ```text
-Scanner -> Addresses -> Memory/Disassembly -> RE
-                           |                 |
-                           +-> Pointer/Struct+
+Value scan -> Addresses -> Memory viewer/Disassembler -> RE
+                              |                  |
+                              +-> Pointer maps/Structures
 ```
 
 ## 13. Bottom panel
 
-Toggle it with **`Ctrl+J`**. Tabs are Events, Console, Breakpoints, Watches, MCP Calls and Diagnostics.
+Tabs are Events, Console, Breakpoints, Watches, AI Activity and Diagnostics. A tab is hidden while the same content is open as a full workspace. Close or reopen the panel from **View**.
 
 ## 14. Settings
 
-Settings currently cover:
+**Edit > Settings** has five sections, saved as you change them:
 
-- compact density;
-- mouse wheel speed;
-- persistent scrollbars;
-- restore last section;
-- remember window layout;
-- show advanced RE tools by default;
-- live-data auto-refresh interval;
-- default breakpoint action;
-- process-global hardware-breakpoint behavior.
+- Runtime & diagnostics (automatic runtime load after attach, diagnostics, minidumps, symbol path);
+- Memory & scanner (bytes per row, read size, default scan type, maximum scan results);
+- Debugger & trace (backend, default breakpoint action, process-global hardware breakpoints, trace budgets);
+- Projects & sessions (storage and export directories, retention);
+- MCP & AI activity (default MCP tool profile, AI activity history and header status, UI auto refresh).
 
-Mutation is not configurable as an automatically enabled preference.
+Write permission is not configurable as an automatically enabled preference.
 
 ## 15. Manual validation checklist
 
-Automated CI is extensive, but a preview still needs real authorized target testing before release.
+Automated CI is extensive, but a release still needs real authorized target testing.
 
 - [ ] launch the complete portable bundle;
 - [ ] select/attach, detach and reattach cleanly;
-- [ ] run an exact scan and a comparative Next Scan;
+- [ ] run an exact scan and a comparative Next scan;
 - [ ] double-click a result into Addresses;
 - [ ] confirm live Address values refresh;
 - [ ] test `Ctrl+G` with absolute and `module+offset` addresses;
-- [ ] use Memory and Disassembly context menus;
-- [ ] enable Mutation and test a reversible write/freeze on a safe value;
+- [ ] use Memory viewer and Disassembler context menus;
+- [ ] allow writes and test a reversible write/freeze on a safe value;
 - [ ] add/remove a breakpoint and exercise Continue/Step Into on a controlled target;
 - [ ] create/diff a snapshot and test rewind only where safe;
 - [ ] exercise Project persistence across detach/reattach;
-- [ ] check RE quick analysis on a known object/address;
+- [ ] track an object and run a quick analysis in RE;
 - [ ] verify bottom Events/Console/Diagnostics remain responsive;
-- [ ] verify clean shutdown after runtime instrumentation has been enabled.
+- [ ] move the window to a monitor with a different scale and check the UI rescales;
+- [ ] verify clean shutdown after the runtime has been loaded.
 
 Ideally validate at least one x64 and one x86 target.
 

@@ -9,28 +9,32 @@ count as UI parity.
 
 Legend: [x] done, [~] in progress/partial, [ ] not migrated.
 
-### 1. IDE shell, docking and navigation — IN PROGRESS
+### 1. IDE shell, docking and navigation — DONE
 - [x] Win32 + DirectX 11 Dear ImGui application
 - [x] persistent ImGui layout file
-- [x] process picker and target attach\n- [x] Overview target/session dashboard
+- [x] process picker and target attach
+- [x] Overview target/session dashboard
 - [x] explicit mutation gate
-- [~] dockable IDE shell and workspace presets
+- [x] dockable IDE shell and workspace presets (header row with target, write gate, debugger controls and presets; RE and Runtime presets split their side docks)
 - [x] command palette (Ctrl+Shift+P / Ctrl+K)
 - [x] Go To (Ctrl+G): address, module offset, Project names/pointer paths and symbols
 - [x] shared address context menu across Scanner / Addresses / Memory / Disassembly / debugger hit-log
-- [x] dockable bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics)
+- [x] dockable bottom panel (Events / Console / Breakpoints / Watches / AI / Diagnostics); a tab hides while the same content is open as a full workspace
 - [x] global keyboard shortcuts + address navigation history (Alt+Left / Alt+Right)
+- [x] TrueType fonts (Segoe UI, Cascadia Mono/Consolas for data) and per-monitor DPI scaling
+- [x] long runtime operations on a background worker with a progress card
+- [x] settings and dock layout in %LOCALAPPDATA%\Cortex (`cortex.portable` keeps them beside the executable)
 
-Target presets:
-- Memory: Scanner + Addresses + Memory viewer + Watches
-- Debug: Disassembly + Registers/Threads + Breakpoints + Memory
-- RE: Disassembly + RE objects + Structures + Symbols + Project
-- Trace: Disassembly + Trace events + Registers + Watches
-- Automation: Scripts + Input + Actions + Events
-- Runtime: Hooks + Network + Diagnostics + MCP/AI
+Presets (see `WorkspaceRegistry::ApplyPreset`):
+- Memory: Memory (value scan) + Addresses + Memory browser + Modules + Watches
+- Debug: Disassembly + Debugger + Patches + Memory browser + Modules + Watches
+- RE: RE + Disassembly + Patches + Memory browser + Modules + Project + Symbols + Structures + Pointer maps + Snapshots + Instrumentation + Runtime
+- Trace: Disassembly + Debugger + Trace + Memory browser + Watches
+- Automation: Scripts + Input + Actions + Events + Watches + Runtime
+- Runtime: Runtime + Diagnostics + Network + Screenshots + Instrumentation + Actions + Watches + Modules + Sessions + Settings
 
 ### 2. Application state, settings and sessions
-- [~] toolkit-neutral application model layer (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity, Prompt and Patches models ported)
+- [x] toolkit-neutral application model layer: runtime-backed models share `RuntimeModelBase` (connect, write gate, tool calls) over the `RuntimeTransport` interface and are unit-tested against a scripted transport (`tests/app_models_tests.cpp`) (Settings, Debugger, Project, Symbols, Structures, Pointer Maps, Snapshots, RE, Instrumentation, Watches, Actions, Network, Diagnostics, Scripts, Input, Screenshot, Runtime Events, AI Activity, Prompt and Patches models ported)
 - [x] persistent Settings store + direct ImGui Settings UI with runtime, scanner, debugger, trace, AI and MCP consumers wired
 - [x] multi-target/session manager UI
 - [x] target capability summary in Sessions
@@ -97,10 +101,11 @@ Target presets:
 - [x] x64/x86 runtime + private x86 helper E2E
 - [x] deterministic headless + native Win32/D3D11 window smoke modes run in CI
 - [x] portable dependency-closure + clean-PATH headless/window validation
-- [~] automated Qt-vs-ImGui size/startup/peak-working-set benchmark added; evidence pending CI
+- [x] automated Qt-vs-ImGui size/startup/peak-working-set benchmark runs in CI (`ui-migration-benchmarks.yml`; results in the run summary)
 - [x] Windows Dear ImGui v0.8 candidate packaging and guarded release workflow
 - [x] v0.8 platform scope decided: Windows x64 desktop; Linux desktop renderer explicitly deferred (see `PLATFORM_SCOPE.md`)
-- [ ] remove Qt/QML only after the parity matrix is green
+- [x] MCP E2E sweeps every read-only tool in the manifest (no 5xx allowed)
+- [ ] remove Qt/QML (`app/`) — the parity matrix is green; do it in a separate change after this branch merges. Shared code it used (debugger backends, icon) already lives in `host/debugger/` and `resources/windows/`
 
 ## Qt reference surface
 
