@@ -47,6 +47,7 @@
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
+#include "services/user_data.h"
 #include "ui/fonts.h"
 #include "ui/theme.h"
 #include "ui/widgets.h"
@@ -2226,7 +2227,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.IniFilename = windowSmoke ? nullptr : "cortex-ui.ini";
+    // The window layout is per-user state; keep it out of the working
+    // directory (see UserDataDirectory).
+    static std::string layoutPath;
+    if (!windowSmoke) {
+        const std::filesystem::path appDirectory = std::filesystem::u8path(ExecutableDirectory());
+        layoutPath = cortex::services::UserDataFile(
+            appDirectory, cortex::services::UserDataDirectory(appDirectory), "cortex-ui.ini").u8string();
+    }
+    io.IniFilename = windowSmoke ? nullptr : layoutPath.c_str();
 
     cortex::ui::LoadFonts();
     cortex::ui::ApplyDpiScale(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));

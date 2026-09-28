@@ -6,6 +6,7 @@
 #include "services/crash_report_service.h"
 #include "services/operation_manager.h"
 #include "services/payload_client.h"
+#include "services/user_data.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
 #include "target/session_manager.h"
@@ -157,7 +158,8 @@ bool ValidateGeneration(const TargetRuntimePtr&r,const json&a,std::string&code,s
 json DesktopSettings(const std::string& runtimeDirectory) {
     if (runtimeDirectory.empty()) return json::object();
     try {
-        std::ifstream input(std::filesystem::u8path(runtimeDirectory) / "cortex-ui-settings.json");
+        const std::filesystem::path appDirectory = std::filesystem::u8path(runtimeDirectory);
+        std::ifstream input(cortex::services::UserDataDirectory(appDirectory) / "cortex-ui-settings.json");
         if (!input) return json::object();
         json document;
         input >> document;

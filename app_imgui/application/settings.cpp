@@ -1,5 +1,7 @@
 #include "settings.h"
 
+#include "services/user_data.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -110,7 +112,8 @@ bool UpdateIni(const std::filesystem::path& path,
 
 SettingsStore::SettingsStore(std::string applicationDirectory)
     : root_(std::filesystem::u8path(applicationDirectory)),
-      path_(root_ / "cortex-ui-settings.json") {
+      path_(services::UserDataFile(root_, services::UserDataDirectory(root_),
+                                   "cortex-ui-settings.json")) {
     Load(nullptr);
     SyncRuntimeConfig(nullptr);
 }

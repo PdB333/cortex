@@ -400,9 +400,15 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
     }
 
     const auto assetDirectory = RuntimeAssetDirectory(runtimeDirectory, target.architecture);
-    const auto privateTokenPath = assetDirectory /
-        ("cortex.mcp." + std::to_string(target.processId) + ".token");
-    std::string token = ReadTokenFile(privateTokenPath);
+    const std::string tokenFileName =
+        "cortex.mcp." + std::to_string(target.processId) + ".token";
+    std::string token = ReadTokenFile(assetDirectory / tokenFileName);
+    // The runtime writes its token beside the DLL that was injected. A runtime
+    // injected from the application root (`cortex inject`, older layouts)
+    // therefore leaves it there even when runtime/<arch> exists.
+    const auto applicationDirectory = std::filesystem::u8path(runtimeDirectory);
+    if (token.empty() && assetDirectory != applicationDirectory)
+        token = ReadTokenFile(applicationDirectory / tokenFileName);
     if (token.empty()) token = ReadTokenFile(assetDirectory / "cortex.token"); // pre-multi-target runtime compatibility
     if (token.empty()) {
         SetError(error, "payload_token_unavailable");
