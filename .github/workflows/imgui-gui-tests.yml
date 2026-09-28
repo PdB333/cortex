@@ -224,7 +224,6 @@ jobs:
           rm -rf stage/Cortex
           mkdir -p stage/Cortex/runtime/x64 stage/Cortex/runtime/x86 stage/Cortex/e2e
           cp build/gui-release/cortex.exe stage/Cortex/cortex.exe
-          cp build/runtime-x64/cortex_core.dll stage/Cortex/cortex_core.dll
           cp build/runtime-x64/cortex_core.dll stage/Cortex/runtime/x64/cortex_core.dll
           cp build/x86-fixture/runtime/x86/cortex_core.dll stage/Cortex/runtime/x86/cortex_core.dll
           cp build/x86-fixture/runtime/x86/cortex_runtime_helper.exe stage/Cortex/runtime/x86/cortex_runtime_helper.exe
@@ -256,6 +255,57 @@ jobs:
             ./tests/gui/run_imgui_gui_suite.ps1               -CortexExe "stage/Cortex/cortex.exe"               -X64Target "stage/Cortex/e2e/cortex_test_target_x64.exe"               -X86Target "stage/Cortex/e2e/cortex_test_target_x86.exe"               -ReportPath "build/gui-report-portable.json"
           } finally {
             $env:PATH = $oldPath
+          }
+
+      - name: Inject a 32-bit target from the command line
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $cortex = Join-Path $bundle "cortex.exe"
+          function Invoke-Cortex([string[]]$Arguments) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $cortex
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($arg in $Arguments) { [void]$psi.ArgumentList.Add($arg) }
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdout = $process.StandardOutput.ReadToEnd()
+            $stderr = $process.StandardError.ReadToEnd()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill()
+              throw "cortex $($Arguments -join ' ') timed out"
+            }
+            return [pscustomobject]@{ Code = $process.ExitCode; Output = "$stdout$stderr" }
+          }
+
+          # A game folder holding a 64-bit dbghelp.dll: when the runtime's
+          # imports resolve, Windows looks in the game's folder before System32.
+          $game = Join-Path $env:RUNNER_TEMP "cortex-x86-game"
+          New-Item -ItemType Directory -Force -Path $game | Out-Null
+          Copy-Item (Join-Path $bundle "e2e/cortex_test_target_x86.exe") (Join-Path $game "game32.exe") -Force
+          Copy-Item "$env:SystemRoot/System32/dbghelp.dll" (Join-Path $game "dbghelp.dll") -Force
+
+          $target = Start-Process -FilePath (Join-Path $game "game32.exe") -WorkingDirectory $game -PassThru
+          try {
+            Start-Sleep -Seconds 2
+
+            $wrong = Invoke-Cortex @("inject", "$($target.Id)", (Join-Path $bundle "runtime/x64/cortex_core.dll"))
+            if ($wrong.Code -eq 0 -or $wrong.Output -notmatch "is built for x64, but pid") {
+              throw "A 64-bit DLL was not refused clearly for a 32-bit target: $($wrong.Output)"
+            }
+
+            $inject = Invoke-Cortex @("inject", "$($target.Id)")
+            if ($inject.Code -ne 0) { throw "cortex inject failed on a 32-bit target: $($inject.Output)" }
+            $token = Join-Path $bundle ("runtime/x86/cortex.mcp.{0}.token" -f $target.Id)
+            $deadline = (Get-Date).AddSeconds(20)
+            while (-not (Test-Path $token) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+            if (-not (Test-Path $token)) {
+              throw "The x86 runtime did not start ($token is missing): $($inject.Output)"
+            }
+            Write-Host $inject.Output
+          } finally {
+            Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue
           }
 
       - name: Publish GUI test summary

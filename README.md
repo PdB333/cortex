@@ -171,11 +171,13 @@ The desktop runs in its own process and draws nothing inside the target. The run
 ```text
 Cortex/
 ├─ cortex.exe                      desktop, CLI and MCP
-├─ cortex_core.dll                 x64 runtime for direct injection
 └─ runtime/
-   ├─ x64/cortex_core.dll
-   └─ x86/cortex_core.dll, cortex_runtime_helper.exe
+   ├─ x64/cortex_core.dll          runtime for 64-bit targets
+   └─ x86/cortex_core.dll          runtime for 32-bit targets
+      x86/cortex_runtime_helper.exe
 ```
+
+There is one runtime per architecture because Windows cannot load a 64-bit DLL into a 32-bit process, or the reverse. You never pick one: the desktop, `cortex.exe mcp` and `cortex.exe inject <pid>` read the target's architecture and use the matching runtime, going through the private x86 helper for 32-bit targets.
 
 Settings (`cortex-ui-settings.json`) and the dock layout (`cortex-ui.ini`) live in `%LOCALAPPDATA%\Cortex`. Create an empty `cortex.portable` beside `cortex.exe` to keep them next to the executable; files from an earlier version are copied over on first start.
 

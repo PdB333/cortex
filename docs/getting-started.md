@@ -8,7 +8,7 @@ For a screenshot-based walkthrough, see [Illustrated UI walkthrough](ui-walkthro
 
 Use the `cortex-v0.8.0-windows-portable.zip` release asset or, for a branch build, the `cortex-imgui-preview-windows-portable` artifact of the latest green **Lightweight ImGui UI** workflow run.
 
-Extract the entire archive and keep its directory structure intact. Cortex needs the `cortex_core.dll` runtime beside `cortex.exe` and the `runtime/x64` and `runtime/x86` assets. No Qt or other runtime has to be installed.
+Extract the entire archive and keep its directory structure intact. Cortex needs the `runtime/x64` and `runtime/x86` folders beside `cortex.exe`: one runtime per architecture, because Windows cannot load a 64-bit DLL into a 32-bit game or the reverse. Cortex picks the right one for each target. No Qt or other runtime has to be installed.
 
 ## 2. Launch Cortex
 

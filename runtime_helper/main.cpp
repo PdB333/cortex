@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include "../core/process/remote_loader.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cwctype>
@@ -10,33 +12,6 @@
 #include <string>
 
 namespace {
-
-std::wstring Lower(std::wstring value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t character) {
-        return static_cast<wchar_t>(std::towlower(character));
-    });
-    return value;
-}
-
-uintptr_t RemoteModuleBase(DWORD pid, const wchar_t* wanted) {
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (snapshot == INVALID_HANDLE_VALUE) return 0;
-
-    MODULEENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    uintptr_t result = 0;
-    const std::wstring wantedLower = Lower(wanted ? wanted : L"");
-    if (Module32FirstW(snapshot, &entry)) {
-        do {
-            if (Lower(entry.szModule) == wantedLower) {
-                result = reinterpret_cast<uintptr_t>(entry.modBaseAddr);
-                break;
-            }
-        } while (Module32NextW(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return result;
-}
 
 std::wstring AbsolutePath(const std::wstring& path) {
     DWORD required = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
@@ -49,67 +24,11 @@ std::wstring AbsolutePath(const std::wstring& path) {
 }
 
 bool InjectLibrary(DWORD pid, const std::wstring& dllPath) {
-    HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
-                                 PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
-                                 FALSE, pid);
-    if (!process) {
-        std::wcerr << L"cortex runtime helper: OpenProcess failed: " << GetLastError() << L'\n';
-        return false;
-    }
-
-    const SIZE_T byteSize = (dllPath.size() + 1) * sizeof(wchar_t);
-    LPVOID remotePath = VirtualAllocEx(process, nullptr, byteSize,
-                                       MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remotePath) {
-        std::wcerr << L"cortex runtime helper: VirtualAllocEx failed: " << GetLastError() << L'\n';
-        CloseHandle(process);
-        return false;
-    }
-
-    SIZE_T written = 0;
-    if (!WriteProcessMemory(process, remotePath, dllPath.c_str(), byteSize, &written) || written != byteSize) {
-        std::wcerr << L"cortex runtime helper: WriteProcessMemory failed: " << GetLastError() << L'\n';
-        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
-        CloseHandle(process);
-        return false;
-    }
-
-    HMODULE localKernel = GetModuleHandleW(L"kernel32.dll");
-    FARPROC localLoadLibrary = localKernel ? GetProcAddress(localKernel, "LoadLibraryW") : nullptr;
-    const uintptr_t remoteKernel = RemoteModuleBase(pid, L"kernel32.dll");
-    if (!localKernel || !localLoadLibrary || remoteKernel == 0) {
-        std::wcerr << L"cortex runtime helper: LoadLibraryW resolution failed\n";
-        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
-        CloseHandle(process);
-        return false;
-    }
-
-    const uintptr_t loadLibraryRva = reinterpret_cast<uintptr_t>(localLoadLibrary) -
-                                     reinterpret_cast<uintptr_t>(localKernel);
-    const auto remoteLoadLibrary = reinterpret_cast<LPTHREAD_START_ROUTINE>(remoteKernel + loadLibraryRva);
-    HANDLE thread = CreateRemoteThread(process, nullptr, 0, remoteLoadLibrary, remotePath, 0, nullptr);
-    if (!thread) {
-        std::wcerr << L"cortex runtime helper: CreateRemoteThread failed: " << GetLastError() << L'\n';
-        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
-        CloseHandle(process);
-        return false;
-    }
-
-    const DWORD wait = WaitForSingleObject(thread, 15000);
-    DWORD exitCode = 0;
-    const bool loaded = wait == WAIT_OBJECT_0 &&
-                        GetExitCodeThread(thread, &exitCode) &&
-                        exitCode != 0;
-    if (!loaded) {
-        std::wcerr << L"cortex runtime helper: payload load failed";
-        if (wait == WAIT_TIMEOUT) std::wcerr << L" (timeout)";
-        std::wcerr << L'\n';
-    }
-
-    CloseHandle(thread);
-    VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
-    CloseHandle(process);
-    return loaded;
+    std::string error;
+    if (cortex::remote_loader::InjectSameBitness(pid, dllPath, 15000, &error)) return true;
+    std::wcerr << L"cortex runtime helper: payload load failed: "
+               << std::wstring(error.begin(), error.end()) << L'\n';
+    return false;
 }
 
 } // namespace
@@ -147,6 +66,23 @@ int wmain(int argc, wchar_t** argv) {
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         std::wcerr << L"cortex runtime helper: payload not found\n";
         return 3;
+    }
+
+    // This helper is the 32-bit loader: both the target and the payload must
+    // be x86, or LoadLibraryW fails with an unhelpful error.
+    using cortex::remote_loader::Machine;
+    const Machine payloadMachine = cortex::remote_loader::FileMachine(dllPath);
+    if (payloadMachine != Machine::Unknown && payloadMachine != Machine::X86) {
+        std::wcerr << L"cortex runtime helper: payload is not a 32-bit DLL\n";
+        return 5;
+    }
+    if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, *pid)) {
+        const Machine targetMachine = cortex::remote_loader::ProcessMachine(process);
+        CloseHandle(process);
+        if (targetMachine != Machine::Unknown && targetMachine != Machine::X86) {
+            std::wcerr << L"cortex runtime helper: target is not a 32-bit process\n";
+            return 5;
+        }
     }
 
     return InjectLibrary(*pid, dllPath) ? 0 : 4;

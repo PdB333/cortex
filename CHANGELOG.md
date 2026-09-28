@@ -20,6 +20,9 @@ All notable changes to Cortex are documented in this file.
 - A newly tracked RE object shows its resolved address and liveness immediately.
 - The desktop finds the runtime token when the runtime was injected from the application root instead of `runtime/<arch>`.
 - Value scans report when the result limit was reached.
+- `cortex inject <pid>` works on 32-bit targets: it reads the target's architecture, uses `runtime\x86\cortex_core.dll` through the private x86 helper, and refuses a DLL of the wrong architecture with a clear message instead of failing inside the target. Without a DLL path it no longer looks in the current directory.
+- Every injection path loads `dbghelp.dll`, `opengl32.dll` (and `d3d8.dll` for 32-bit targets) from System32 before the runtime when the target has not loaded them, so a copy of the wrong architecture or a proxy DLL in the game's folder can no longer break or hijack the runtime's imports.
+- The portable bundle carries one runtime per architecture, in `runtime/x64` and `runtime/x86`; the extra x64 copy at the bundle root is gone.
 
 ### MCP
 

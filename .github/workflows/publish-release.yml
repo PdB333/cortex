@@ -93,7 +93,6 @@ jobs:
           mkdir -p stage/x64/Cortex/runtime/x64
           cp build/ui/cortex.exe stage/x64/Cortex/cortex.exe
           cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/runtime/x64/cortex_core.dll
-          cp build/runtime-x64/cortex_core.dll stage/x64/Cortex/cortex_core.dll
 
           for pass in 1 2 3 4 5 6 7 8; do
             copied=0
@@ -211,7 +210,6 @@ jobs:
 
           foreach ($required in @(
             "cortex.exe",
-            "cortex_core.dll",
             "runtime\x64\cortex_core.dll",
             "runtime\x86\cortex_core.dll",
             "runtime\x86\cortex_runtime_helper.exe",
@@ -224,6 +222,7 @@ jobs:
             if (-not (Test-Path $path)) { throw "missing release asset: $required" }
             if ((Get-Item $path).Length -eq 0) { throw "empty release asset: $required" }
           }
+          if (Test-Path (Join-Path $bundle "cortex_core.dll")) { throw "cortex_core.dll must not be at the bundle root" }
 
           $versionStart = [System.Diagnostics.ProcessStartInfo]::new()
           $versionStart.FileName = Join-Path $bundle "cortex.exe"

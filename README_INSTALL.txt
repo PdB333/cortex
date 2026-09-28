@@ -17,8 +17,8 @@ INSTALLATION
 
        C:\Cortex\
 
-3. Do not move cortex.exe on its own. Keep cortex_core.dll and the runtime
-   folder next to the executable.
+3. Do not move cortex.exe on its own. Keep the runtime folder next to the
+   executable.
 
 4. Run:
 
@@ -77,9 +77,6 @@ WHAT IS IN THE ARCHIVE
 cortex.exe
     The Cortex application (desktop UI and CLI/MCP modes).
 
-cortex_core.dll
-    64-bit instrumentation runtime used for direct injection.
-
 runtime\x64\cortex_core.dll
     Instrumentation runtime for 64-bit targets.
 
@@ -89,6 +86,10 @@ runtime\x86\cortex_core.dll
 runtime\x86\cortex_runtime_helper.exe
     Private helper used automatically for 32-bit targets.
 
+    You never choose between x64 and x86: Cortex reads the target's
+    architecture and uses the matching runtime, including for
+    "cortex.exe inject <pid>".
+
 README.md, CHANGELOG.md, LICENSE, docs
     Documentation, history, license and technical guides.
 
@@ -96,7 +97,7 @@ TROUBLESHOOTING
 ---------------
 
 - If cortex.exe does not start, check that the whole archive was extracted
-  and that cortex_core.dll and the runtime folder are present.
+  and that the runtime folder is present.
 - If a target cannot be opened, check its architecture and the process's
   Windows rights. Only use elevated privileges when the target requires them.
 - If a write, breakpoint or control operation is refused, switch the header

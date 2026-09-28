@@ -61,7 +61,7 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex --prompt-channel-smoke  Answer a private prompt for --pid\n"
         "  cortex --event-channel-smoke   Observe a runtime event for --pid\n"
         "  cortex mcp [options]           Run the native/HTTP MCP stdio bridge\n"
-        "  cortex inject <target> [dll]   Inject cortex_core.dll\n"
+        "  cortex inject <target> [dll]   Load the x86/x64 runtime matching the target\n"
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
         "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
         "  cortex analyze <directory>     Analyze a crash directory\n"
