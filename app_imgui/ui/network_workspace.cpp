@@ -1,4 +1,5 @@
 #include "network_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -21,7 +22,7 @@ void NetworkWorkspace::Refresh(UiContext& context, bool reportStatus) {
 void NetworkWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.networkModel) {
-        ImGui::TextDisabled("Select a process to inspect runtime network traffic.");
+        HintText("Select a process to inspect runtime network traffic.");
         return;
     }
     if (targetId_ != session->Target().id) {

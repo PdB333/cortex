@@ -1,4 +1,5 @@
 #include "snapshots_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -21,7 +22,7 @@ void Copy(char* destination, size_t capacity, const char* source) {
 void SnapshotsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.snapshotsModel) {
-        ImGui::TextDisabled("Select a process to capture memory snapshots.");
+        HintText("Select a process to capture memory snapshots.");
         return;
     }
 

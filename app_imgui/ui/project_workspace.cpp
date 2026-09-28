@@ -1,4 +1,5 @@
 #include "project_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -117,7 +118,7 @@ bool ProjectWorkspace::Navigate(UiContext& context, const std::string& expressio
 void ProjectWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.projectModel) {
-        ImGui::TextDisabled("Select a process to use persistent project knowledge.");
+        HintText("Select a process to use persistent project knowledge.");
         return;
     }
 
@@ -131,8 +132,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::TextUnformatted("Persistent target knowledge");
-    ImGui::SameLine();
-    ImGui::TextDisabled("addresses, pointer paths and notes");
+    Subtitle("addresses, pointer paths and notes");
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) Refresh(context);
 

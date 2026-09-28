@@ -1,4 +1,5 @@
 #include "modules_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -36,7 +37,7 @@ void ModulesWorkspace::Refresh(UiContext& context) {
 void ModulesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        ImGui::TextDisabled("Select a process to inspect modules.");
+        HintText("Select a process to inspect modules.");
         return;
     }
 

@@ -1,4 +1,5 @@
 #include "runtime_workspace.h"
+#include "widgets.h"
 
 #include "api/mcp_contract.h"
 #include "api/semantic_tools.h"
@@ -173,7 +174,7 @@ void RuntimeWorkspace::CallSelected(UiContext& context) {
 void RuntimeWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.payload) {
-        ImGui::TextDisabled("Select a process to use advanced runtime tools.");
+        HintText("Select a process to use advanced runtime tools.");
         return;
     }
 
@@ -195,8 +196,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::TextUnformatted("Advanced runtime");
-    ImGui::SameLine();
-    ImGui::TextDisabled("Primitive + semantic Cortex tool catalog");
+    Subtitle("Primitive + semantic Cortex tool catalog");
     ImGui::Spacing();
 
     if (!context.payload->Ready()) {
@@ -242,7 +242,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
 
     if (tools_.empty()) {
         ImGui::Dummy(ImVec2(0, 15));
-        ImGui::TextWrapped("Enable or connect the runtime to load advanced Cortex tools.");
+        HintText("Enable or connect the runtime to load advanced Cortex tools.");
         return;
     }
 

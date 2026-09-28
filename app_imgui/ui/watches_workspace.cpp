@@ -1,4 +1,5 @@
 #include "watches_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -34,7 +35,7 @@ void WatchesWorkspace::Refresh(UiContext& context, bool reportStatus) {
 void WatchesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.watchesModel) {
-        ImGui::TextDisabled("Select a process to use runtime watches.");
+        HintText("Select a process to use runtime watches.");
         return;
     }
 

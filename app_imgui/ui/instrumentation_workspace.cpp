@@ -1,4 +1,5 @@
 #include "instrumentation_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -23,7 +24,7 @@ bool InstrumentationWorkspace::Navigate(UiContext& context,
 void InstrumentationWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.instrumentationModel) {
-        ImGui::TextDisabled("Select a process to use instrumentation.");
+        HintText("Select a process to use instrumentation.");
         return;
     }
 

@@ -1,4 +1,5 @@
 #include "symbols_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -24,7 +25,7 @@ bool SymbolsWorkspace::Navigate(UiContext& context, const std::string& address,
 void SymbolsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.symbolsModel) {
-        ImGui::TextDisabled("Select a process to resolve symbols.");
+        HintText("Select a process to resolve symbols.");
         return;
     }
 

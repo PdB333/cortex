@@ -1,4 +1,5 @@
 #include "events_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -25,7 +26,7 @@ void EventsWorkspace::Refresh(UiContext& context, bool reportStatus) {
 void EventsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.runtimeEventsModel) {
-        ImGui::TextDisabled("Select a process to inspect runtime events.");
+        HintText("Select a process to inspect runtime events.");
         return;
     }
 

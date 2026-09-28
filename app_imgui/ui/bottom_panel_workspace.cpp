@@ -1,4 +1,5 @@
 #include "bottom_panel_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -61,7 +62,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabItem("Events")) {
         if (!session) {
-            ImGui::TextDisabled("Select a process to inspect runtime events.");
+            HintText("Select a process to inspect runtime events.");
         } else if (!context.runtimeEventsModel) {
             ImGui::TextDisabled("Runtime event model unavailable.");
         } else if (ImGui::BeginTable(
@@ -97,7 +98,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabItem("Console")) {
         if (!session) {
-            ImGui::TextDisabled("Select a process to inspect the runtime API log.");
+            HintText("Select a process to inspect the runtime API log.");
         } else if (context.runtimeEventsModel) {
             ImGui::BeginChild("BottomConsole", ImVec2(0, 0), ImGuiChildFlags_Borders);
             for (const auto& line : context.runtimeEventsModel->ApiLog())
@@ -109,7 +110,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabItem("Breakpoints")) {
         if (!session || !context.debuggerModel) {
-            ImGui::TextDisabled("Select a process to inspect breakpoints.");
+            HintText("Select a process to inspect breakpoints.");
         } else {
             const auto& rows = context.debuggerModel->Breakpoints();
             ImGui::Text("%zu breakpoint(s)", rows.size());
@@ -147,7 +148,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabItem("Watches")) {
         if (!session || !context.watchesModel) {
-            ImGui::TextDisabled("Select a process to inspect watches.");
+            HintText("Select a process to inspect watches.");
         } else {
             if (ImGui::SmallButton("Refresh watches")) {
                 std::string error;
@@ -242,7 +243,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabItem("Diagnostics")) {
         if (!session || !context.diagnosticsModel) {
-            ImGui::TextDisabled("Select a process to inspect diagnostics.");
+            HintText("Select a process to inspect diagnostics.");
         } else {
             if (ImGui::SmallButton("Refresh diagnostics")) {
                 std::string error;

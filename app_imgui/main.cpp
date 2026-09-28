@@ -1819,10 +1819,29 @@ void ActivateAttachedTarget(
                     " (PID " + std::to_string(target.processId) + ")";
 }
 
-void DrawSessionStrip(AppState& app) {
-    const auto attached = app.sessions.AttachedTargets();
-    if (attached.empty()) return;
+constexpr ImVec4 kWriteAccent(0.93f, 0.69f, 0.29f, 1.0f);
 
+void DetachTarget(AppState& app, const cortex::target::TargetDescriptor& target, bool wasActive) {
+    app.sessions.Detach(target.id);
+    if (!wasActive) return;
+    const auto remaining = app.sessions.AttachedTargets();
+    if (!remaining.empty()) {
+        app.sessions.Activate(remaining.front().id);
+        app.OnAttached(remaining.front(), false);
+    } else {
+        ResetTargetState(app);
+    }
+}
+
+// Session chips only earn their space once more than one target is attached;
+// the active target is already named in the first header row.
+void DrawSessionChips(AppState& app) {
+    const auto attached = app.sessions.AttachedTargets();
+    if (attached.size() < 2) return;
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
     ImGui::TextDisabled("Sessions");
     for (const auto& target : attached) {
         ImGui::SameLine();
@@ -1834,7 +1853,7 @@ void DrawSessionStrip(AppState& app) {
 
         const std::string label =
             target.name + " [" + std::to_string(target.processId) + "]";
-        if (ImGui::SmallButton(label.c_str()))
+        if (ImGui::Button(label.c_str()))
             ActivateAttachedTarget(app, target);
 
         if (active) ImGui::PopStyleColor();
@@ -1842,151 +1861,143 @@ void DrawSessionStrip(AppState& app) {
         if (ImGui::BeginPopupContextItem("SessionMenu")) {
             if (!active && ImGui::MenuItem("Activate"))
                 ActivateAttachedTarget(app, target);
-            if (ImGui::MenuItem("Detach")) {
-                const bool wasActive = active;
-                app.sessions.Detach(target.id);
-                if (wasActive) {
-                    const auto remaining = app.sessions.AttachedTargets();
-                    if (!remaining.empty()) {
-                        app.sessions.Activate(remaining.front().id);
-                        app.OnAttached(remaining.front(), false);
-                    } else {
-                        ResetTargetState(app);
-                    }
-                }
-            }
+            if (ImGui::MenuItem("Detach"))
+                DetachTarget(app, target, active);
             ImGui::EndPopup();
         }
         ImGui::PopID();
     }
 }
 
-void DrawQuickToolbar(AppState& app) {
-    const bool attached = static_cast<bool>(app.sessions.Active());
-
-    if (ImGui::SmallButton("+ Process"))
-        app.ui.requestProcessPicker = true;
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Sessions"))
-        app.workspaces.Select("sessions");
+void DrawDebugControls(AppState& app) {
+    if (!app.sessions.Active() || !app.debuggerModel.Ready()) return;
 
     ImGui::SameLine();
-    ImGui::BeginDisabled(!attached);
-    if (ImGui::SmallButton("Memory"))
-        app.workspaces.Select("memory-browser");
+    ImGui::TextDisabled("|");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Disasm"))
-        app.workspaces.Select("disassembly");
+    ImGui::BeginDisabled(!app.ui.mutationAllowed ||
+                         app.debuggerModel.CurrentThread() == 0);
+    std::string error;
+    if (ImGui::Button("Pause") && !app.debuggerModel.Pause(&error))
+        app.ui.status = "Pause failed: " + error;
     ImGui::SameLine();
-    if (ImGui::SmallButton("Debugger"))
-        app.workspaces.Select("debugger");
+    if (ImGui::Button("Continue") && !app.debuggerModel.Resume(&error))
+        app.ui.status = "Continue failed: " + error;
     ImGui::SameLine();
-    if (ImGui::SmallButton("Modules"))
-        app.workspaces.Select("modules");
+    if (ImGui::Button("Step") && !app.debuggerModel.Step(2000, &error))
+        app.ui.status = "Step failed: " + error;
     ImGui::SameLine();
-    if (ImGui::SmallButton("Runtime"))
-        app.workspaces.Select("runtime");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Go to"))
-        app.requestGoTo = true;
+    if (ImGui::Button("Over") && !app.debuggerModel.StepOver(5000, &error))
+        app.ui.status = "Step over failed: " + error;
     ImGui::EndDisabled();
+}
 
-    if (attached && app.debuggerModel.Ready()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("| debug");
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!app.ui.mutationAllowed ||
-                             app.debuggerModel.CurrentThread() == 0);
-        if (ImGui::SmallButton("Pause")) {
-            std::string error;
-            if (!app.debuggerModel.Pause(&error))
-                app.ui.status = "Pause failed: " + error;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Continue")) {
-            std::string error;
-            if (!app.debuggerModel.Resume(&error))
-                app.ui.status = "Continue failed: " + error;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Step")) {
-            std::string error;
-            if (!app.debuggerModel.Step(2000, &error))
-                app.ui.status = "Step failed: " + error;
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Over")) {
-            std::string error;
-            if (!app.debuggerModel.StepOver(5000, &error))
-                app.ui.status = "Step over failed: " + error;
-        }
-        ImGui::EndDisabled();
+std::string AiStatusText(const AppState& app) {
+    if (!app.settings.Values().showAiActivityInTitleBar) return {};
+    if (app.aiActivityModel.Connected()) {
+        return "AI " + std::to_string(app.aiActivityModel.SessionCount()) + " session(s) / " +
+               std::to_string(app.aiActivityModel.ActiveTaskCount()) + " active";
+    }
+    return app.aiActivityModel.Listening() ? "AI idle" : "AI listener unavailable";
+}
+
+// The write gate is the app's main safety control, so it must read clearly in
+// both states: an outlined "Read-only" box, or an amber "Writes allowed".
+void DrawWriteGate(AppState& app) {
+    const bool on = app.ui.mutationAllowed;
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, on ? kWriteAccent : ImVec4(0.42f, 0.47f, 0.53f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_CheckMark, kWriteAccent);
+    if (on) ImGui::PushStyleColor(ImGuiCol_Text, kWriteAccent);
+    ImGui::Checkbox(on ? "Writes allowed###AllowWrites" : "Read-only###AllowWrites",
+                    &app.ui.mutationAllowed);
+    if (on) ImGui::PopStyleColor();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Allow writes: required for edits, freeze and runtime injection.\n"
+                          "Read-only inspection stays available either way.");
     }
 }
 
+float WriteGateWidth(const AppState& app) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const char* label = app.ui.mutationAllowed ? "Writes allowed" : "Read-only";
+    return ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+}
+
+// Two fixed rows. Nothing is inserted or removed when a target attaches, so
+// controls never move under the cursor.
 void DrawHeader(AppState& app) {
     const auto session = app.sessions.Active();
+    const ImGuiStyle& style = ImGui::GetStyle();
 
-    ImGui::SetWindowFontScale(1.22f);
+    // Row 1: identity, target, and the right-aligned safety/AI cluster.
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("CORTEX");
-    ImGui::SetWindowFontScale(1.0f);
-
-    ImGui::SameLine(120.0f);
-    if (ImGui::Button(session ? "Change process" : "Select process", ImVec2(150, 34))) {
+    ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
+    if (ImGui::Button(session ? "Change process" : "Select process"))
         app.ui.requestProcessPicker = true;
-    }
 
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
     if (session) {
         const auto& target = session->Target();
-        ImGui::Text("%s  |  PID %llu  |  %s  |  %zu session(s)",
+        ImGui::Text("%s  |  PID %llu  |  %s",
                     target.name.c_str(),
                     static_cast<unsigned long long>(target.processId),
-                    cortex::target::ArchitectureName(target.architecture),
-                    app.sessions.SessionCount());
-
-        const float rightWidth = 240.0f;
-        const float available = ImGui::GetContentRegionAvail().x;
-        if (available > rightWidth) {
-            ImGui::SameLine(ImGui::GetCursorPosX() + available - rightWidth);
-        }
-
-        ImGui::Checkbox("Allow writes", &app.ui.mutationAllowed);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Required for edits, freeze and runtime injection. Read-only inspection stays available.");
-        }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Detach")) {
-            ResetTargetState(app);
+                    cortex::target::ArchitectureName(target.architecture));
+        if (!app.payload.Ready()) {
+            std::string runtimeReason;
+            if (!app.payload.RuntimeSupportAvailable(&runtimeReason)) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("|  runtime: %s",
+                    cortex::ui::RuntimeSupportText(runtimeReason).c_str());
+            }
         }
     } else {
-        ImGui::SameLine();
         ImGui::TextDisabled("No process attached");
     }
 
-    if (app.settings.Values().showAiActivityInTitleBar) {
+    const std::string aiText = AiStatusText(app);
+    float clusterWidth = 0.0f;
+    if (!aiText.empty()) clusterWidth += ImGui::CalcTextSize(aiText.c_str()).x + style.ItemSpacing.x * 2.0f;
+    if (session) {
+        clusterWidth += WriteGateWidth(app) + style.ItemSpacing.x;
+        clusterWidth += ImGui::CalcTextSize("Detach").x + style.FramePadding.x * 2.0f;
+    }
+    const float rightEdge = ImGui::GetWindowContentRegionMax().x;
+    ImGui::SameLine();
+    const float clusterStart = rightEdge - clusterWidth;
+    if (clusterStart > ImGui::GetCursorPosX()) ImGui::SetCursorPosX(clusterStart);
+
+    if (!aiText.empty()) {
+        ImGui::AlignTextToFramePadding();
+        if (app.aiActivityModel.Connected()) ImGui::TextUnformatted(aiText.c_str());
+        else ImGui::TextDisabled("%s", aiText.c_str());
+        if (session) ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+    }
+    if (session) {
+        DrawWriteGate(app);
         ImGui::SameLine();
-        if (app.aiActivityModel.Connected()) {
-            ImGui::Text("AI %zu session(s) / %zu active",
-                        app.aiActivityModel.SessionCount(),
-                        app.aiActivityModel.ActiveTaskCount());
-        } else {
-            ImGui::TextDisabled(app.aiActivityModel.Listening()
-                                    ? "AI idle" : "AI listener unavailable");
-        }
+        if (ImGui::Button("Detach")) ResetTargetState(app);
     }
 
-    DrawSessionStrip(app);
-
-    if (session && !app.payload.Ready()) {
-        std::string runtimeReason;
-        if (!app.payload.RuntimeSupportAvailable(&runtimeReason)) {
-            ImGui::TextDisabled("Runtime support: %s",
-                cortex::ui::RuntimeSupportText(runtimeReason).c_str());
-        }
-    }
-
-    DrawQuickToolbar(app);
+    // Row 2: layouts, navigation, debugger control and extra sessions.
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Workspace");
+    ImGui::SameLine();
+    app.workspaces.DrawPresetButtons();
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!session);
+    if (ImGui::Button("Go to...")) app.requestGoTo = true;
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Go to an address, module offset or symbol (Ctrl+G)");
+    ImGui::EndDisabled();
+    DrawDebugControls(app);
+    DrawSessionChips(app);
     ImGui::Separator();
 }
 
@@ -2124,11 +2135,6 @@ void DrawApp(AppState& app) {
     }
 
     DrawHeader(app);
-
-    ImGui::TextDisabled("Workspace");
-    ImGui::SameLine();
-    app.workspaces.DrawPresetButtons();
-    ImGui::Separator();
 
     const float statusHeight = ImGui::GetTextLineHeightWithSpacing() + 12.0f;
     ImVec2 dockSize = ImGui::GetContentRegionAvail();

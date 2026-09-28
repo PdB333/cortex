@@ -1,4 +1,5 @@
 #include "patches_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -9,7 +10,7 @@ namespace cortex::ui {
 void PatchesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.patchesModel) {
-        ImGui::TextDisabled("Select a process to inspect or apply patches.");
+        HintText("Select a process to inspect or apply patches.");
         return;
     }
 

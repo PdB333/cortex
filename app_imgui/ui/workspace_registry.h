@@ -39,7 +39,7 @@ public:
             if (id == entry.workspace->Id()) {
                 const bool wasOpen = entry.open;
                 entry.open = true;
-                pendingFocus_ = id;
+                RequestFocus(id);
                 if (!wasOpen) layoutDirty_ = true;
                 return true;
             }
@@ -83,6 +83,7 @@ public:
     void CloseAll() {
         for (auto& entry : entries_) entry.open = false;
         pendingFocus_.clear();
+        pendingFocusFrames_ = 0;
     }
 
     bool ValidateUnique(std::string* error = nullptr) const {
@@ -155,7 +156,7 @@ public:
 
         SetOpen("bottom", true);
         preset_ = preset;
-        pendingFocus_ = PrimaryWorkspace(preset);
+        RequestFocus(PrimaryWorkspace(preset));
         if (rebuildLayout) layoutDirty_ = true;
     }
 
@@ -183,8 +184,8 @@ public:
             WorkspacePreset::Runtime
         };
 
-        // Preset labels ("Memory", "Runtime") also appear in the quick toolbar of
-        // the same window; scope them so both buttons keep distinct IDs.
+        // Preset labels ("Memory", "Runtime") can collide with other buttons of
+        // the header window; scope them so every button keeps a distinct ID.
         ImGui::PushID("WorkspacePresets");
         for (size_t i = 0; i < IM_ARRAYSIZE(presets); ++i) {
             if (i != 0) ImGui::SameLine();
@@ -323,9 +324,13 @@ public:
             }
             ImGui::End();
 
-            if (pendingFocus_ == entry.workspace->Id())
-                pendingFocus_.clear();
         }
+
+        // A window docked by a layout rebuild only joins its node on its first
+        // Begin, so a single-frame focus request can land before the tab exists
+        // and another tab of the node stays selected. Repeat it briefly.
+        if (pendingFocusFrames_ > 0 && --pendingFocusFrames_ == 0)
+            pendingFocus_.clear();
     }
 
 private:
@@ -344,6 +349,11 @@ private:
             case WorkspacePreset::Runtime: return "runtime";
         }
         return "memory";
+    }
+
+    void RequestFocus(const std::string& id) {
+        pendingFocus_ = id;
+        pendingFocusFrames_ = 3;
     }
 
     void DockMany(ImGuiID node,
@@ -366,6 +376,7 @@ private:
     std::vector<Entry> entries_;
     WorkspacePreset preset_ = WorkspacePreset::Memory;
     std::string pendingFocus_;
+    int pendingFocusFrames_ = 0;
     bool initialLayoutChecked_ = false;
     bool layoutDirty_ = false;
 };

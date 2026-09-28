@@ -1,4 +1,5 @@
 #include "memory_browser_workspace.h"
+#include "widgets.h"
 #include "address_context_menu.h"
 
 #include <imgui.h>
@@ -121,7 +122,7 @@ bool MemoryBrowserWorkspace::WriteBytes(UiContext& context) {
 void MemoryBrowserWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        ImGui::TextDisabled("Select a process to browse memory.");
+        HintText("Select a process to browse memory.");
         return;
     }
 
@@ -151,8 +152,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::TextUnformatted("Memory viewer");
-    ImGui::SameLine();
-    ImGui::TextDisabled("Direct external-process view");
+    Subtitle("Direct external-process view");
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(240);

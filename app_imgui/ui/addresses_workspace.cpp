@@ -1,4 +1,5 @@
 #include "addresses_workspace.h"
+#include "widgets.h"
 #include "address_context_menu.h"
 
 #include <imgui.h>
@@ -297,7 +298,7 @@ void AddressesWorkspace::HandleShortcuts(UiContext& context) {
 void AddressesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.projectModel || !context.watchesModel) {
-        ImGui::TextDisabled("Select a process to use persistent Addresses.");
+        HintText("Select a process to use persistent Addresses.");
         return;
     }
 
@@ -327,8 +328,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::TextUnformatted("Address Table");
-    ImGui::SameLine();
-    ImGui::TextDisabled("persistent Project addresses + runtime values");
+    Subtitle("persistent Project addresses + runtime values");
     ImGui::SameLine();
     if (ImGui::SmallButton("Refresh")) RefreshAll(context, true);
 

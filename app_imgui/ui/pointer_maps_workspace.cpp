@@ -1,4 +1,5 @@
 #include "pointer_maps_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -21,7 +22,7 @@ void PointerMapsWorkspace::SyncSelection(UiContext& context) {
 void PointerMapsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.pointerMapsModel) {
-        ImGui::TextDisabled("Select a process to capture pointer maps.");
+        HintText("Select a process to capture pointer maps.");
         return;
     }
 

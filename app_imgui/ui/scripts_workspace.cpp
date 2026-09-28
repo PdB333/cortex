@@ -1,4 +1,5 @@
 #include "scripts_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -23,7 +24,7 @@ void ScriptsWorkspace::SyncEditor(UiContext& context) {
 void ScriptsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.scriptsModel) {
-        ImGui::TextDisabled("Select a process to use Lua scripts.");
+        HintText("Select a process to use Lua scripts.");
         return;
     }
     if (targetId_ != session->Target().id) {
