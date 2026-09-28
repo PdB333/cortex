@@ -183,6 +183,17 @@ inline void DrawAddressContextActions(
             ImGui::EndDisabled();
         };
 
+        ImGui::BeginDisabled(debuggerDisabled);
+        if (ImGui::MenuItem("Find out what writes to this address")) {
+            context.accessFinderRequests.push_back({address, std::clamp(valueSize, 1, 8), true});
+            context.requestWorkspace = "access-finder";
+        }
+        if (ImGui::MenuItem("Find out what accesses this address")) {
+            context.accessFinderRequests.push_back({address, std::clamp(valueSize, 1, 8), false});
+            context.requestWorkspace = "access-finder";
+        }
+        ImGui::EndDisabled();
+        ImGui::Separator();
         addBreakpoint("Software breakpoint", "software", 1);
         addBreakpoint("HW execute breakpoint", "hw_execute", 1);
         addBreakpoint("HW write breakpoint", "hw_write",

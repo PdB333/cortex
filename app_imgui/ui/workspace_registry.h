@@ -136,7 +136,7 @@ public:
                 OpenMany({"memory", "addresses", "memory-browser", "tools", "modules", "watches"});
                 break;
             case WorkspacePreset::Debug:
-                OpenMany({"disassembly", "debugger", "patches", "memory-browser", "modules", "watches"});
+                OpenMany({"disassembly", "debugger", "patches", "access-finder", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::ReverseEngineering:
                 OpenMany({"re", "disassembly", "patches", "memory-browser", "tools", "modules", "project", "symbols",
@@ -266,7 +266,7 @@ public:
             case WorkspacePreset::Debug:
                 DockMany(left, {"modules", "watches"}, docked);
                 DockMany(center, {"disassembly", "memory-browser"}, docked);
-                DockMany(right, {"debugger", "patches"}, docked);
+                DockMany(right, {"debugger", "patches", "access-finder"}, docked);
                 break;
 
             case WorkspacePreset::ReverseEngineering: {

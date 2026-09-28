@@ -264,7 +264,8 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "modules", "debugger", "runtime", "sessions", "settings", "project",
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
-    "scripts", "input", "screenshots", "patches", "events", "trace", "tools"
+    "scripts", "input", "screenshots", "patches", "events", "trace", "tools",
+    "access-finder"
 };
 
 
@@ -472,13 +473,58 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
         return false;
     }
     uint64_t health = 0;
-    for (const auto& entry : image.exports)
+    uint64_t frame = 0;
+    for (const auto& entry : image.exports) {
         if (entry.name == "g_cortex_health") health = module.base + entry.rva;
+        if (entry.name == "g_cortex_frame") frame = module.base + entry.rva;
+    }
+
+    // Find out what writes to the frame counter: a log-mode hardware
+    // breakpoint through the access finder workspace.
+    if (frame && app.debuggerModel.Ready()) {
+        app.ui.mutationAllowed = true;
+        app.ui.accessFinderRequests.push_back({frame, 4, true});
+        app.workspaces.Select("access-finder");
+        size_t hits = 0;
+        for (int attempt = 0; attempt < 20 && hits == 0; ++attempt) {
+            if (!RenderGuiStable(app, error, true)) return false;
+            Sleep(150);
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+                if (breakpoint.address == frame && breakpoint.kind == "hw_write") hits = breakpoint.hitCount;
+            std::vector<DebugBreakpointLogEntry> entries;
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints()) {
+                if (breakpoint.address != frame) continue;
+                std::string logError;
+                if (app.debuggerModel.LoadBreakpointLog(breakpoint.id, 0, 16, entries, &logError))
+                    hits = std::max(hits, entries.size());
+            }
+        }
+        for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+            if (breakpoint.address == frame) app.debuggerModel.RemoveBreakpoint(breakpoint.id, nullptr);
+        // Hits still queued for the removed breakpoint must not reach the
+        // target: it keeps running.
+        Sleep(300);
+        app.ui.mutationAllowed = false;
+        if (!session->Alive()) {
+            error = "target_died_after_access_finder";
+            return false;
+        }
+        if (hits == 0) {
+            error = "access_finder_recorded_no_write";
+            return false;
+        }
+        summary += " frame_writes=" + std::to_string(hits);
+    }
 
     size_t scanHits = 0;
     if (health) {
         int32_t value = 0;
-        if (!session->ReadMemory(health, &value, sizeof(value), nullptr)) {
+        bool read = false;
+        for (int attempt = 0; attempt < 5 && !read; ++attempt) {
+            read = session->ReadMemory(health, &value, sizeof(value), nullptr);
+            if (!read) Sleep(100);
+        }
+        if (!read) {
             error = "health_read_failed";
             return false;
         }

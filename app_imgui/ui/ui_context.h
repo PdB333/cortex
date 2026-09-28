@@ -53,6 +53,14 @@ struct PendingAddressEntry {
     unsigned pointerSize = 8;
 };
 
+// "Find out what writes to / accesses this address": a hardware breakpoint
+// in log mode whose hits are counted per instruction.
+struct AccessFinderRequest {
+    uint64_t address = 0;
+    int size = 4;
+    bool writesOnly = true;
+};
+
 struct UiContext {
     target::SessionManager* sessions = nullptr;
     services::MemoryService* memory = nullptr;
@@ -93,6 +101,7 @@ struct UiContext {
     // Entries for the Memory address list, and the Memory tools tab to show
     // with the next navigation to "tools".
     std::vector<PendingAddressEntry> pendingAddresses;
+    std::vector<AccessFinderRequest> accessFinderRequests;
     std::string toolsTabRequest;
     std::string status = "Select a process to begin";
 

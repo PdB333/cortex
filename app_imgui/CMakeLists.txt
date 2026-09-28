@@ -129,6 +129,7 @@ add_executable(cortex_imgui WIN32
     ui/settings_workspace.cpp
     ui/trace_workspace.cpp
     ui/tools_workspace.cpp
+    ui/access_finder_workspace.cpp
     ui/theme.cpp
     ui/fonts.cpp
 

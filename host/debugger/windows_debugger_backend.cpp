@@ -98,6 +98,10 @@ struct WindowsDebuggerBackend::Impl {
     int nextBreakpointId = 1;
     std::map<int, Breakpoint> bps;
     bool hwSlotUsed[4] = {false, false, false, false};
+    // When each debug-register slot was last released. A thread can report
+    // a hit on a slot after its breakpoint was removed (the event was
+    // already queued); those traps are ours and must not reach the target.
+    std::chrono::steady_clock::time_point slotReleasedAt[4] = {};
     std::map<DWORD, int> pendingSoftwareRearm;
     std::map<DWORD, TempStepOver> tempStepOvers;
     std::map<DWORD, HANDLE> manualPaused;
@@ -649,6 +653,11 @@ struct WindowsDebuggerBackend::Impl {
             if (rearmId >= 0) setExecutionState(thread, std::nullopt, false, false, nullptr);
             CloseHandle(thread);
             if (rearmId >= 0) return DBG_CONTINUE;
+            if (slot >= 0) {
+                std::lock_guard<std::mutex> lock(mutex);
+                if (std::chrono::steady_clock::now() - slotReleasedAt[slot] < std::chrono::seconds(5))
+                    return DBG_CONTINUE;
+            }
             return DBG_EXCEPTION_NOT_HANDLED;
         }
 
@@ -1035,7 +1044,10 @@ bool WindowsDebuggerBackend::removeBreakpoint(int id, std::string* error) {
         }
         bp = it->second;
         impl_->bps.erase(it);
-        if (bp.hwSlot >= 0) impl_->hwSlotUsed[bp.hwSlot] = false;
+        if (bp.hwSlot >= 0) {
+            impl_->hwSlotUsed[bp.hwSlot] = false;
+            impl_->slotReleasedAt[bp.hwSlot] = std::chrono::steady_clock::now();
+        }
         for (auto pending = impl_->pendingSoftwareRearm.begin(); pending != impl_->pendingSoftwareRearm.end();) {
             if (pending->second == id) pending = impl_->pendingSoftwareRearm.erase(pending);
             else ++pending;
