@@ -47,12 +47,19 @@ private:
         FreezeMode freezeMode = FreezeMode::Always;
         bool readable = true;
         bool selected = false;
-        // Pointer entries follow module+baseOffset -> offsets on every refresh.
+        // module+baseOffset entries (static addresses and pointer bases) are
+        // resolved on every refresh, then the offsets are followed. Without
+        // a module, baseOffset is an absolute pointer base.
         bool pointer = false;
         std::string module;
         uint64_t baseOffset = 0;
         std::vector<uint32_t> offsets;
         unsigned pointerSize = 8;
+        // Cheat tables: group headers, nesting, and an address Cortex could
+        // not parse (a symbol), kept as written.
+        bool group = false;
+        int depth = 0;
+        std::string expression;
     };
 
     // Layout
@@ -99,7 +106,11 @@ private:
     void SaveEntryToProject(UiContext& context, const AddressEntry& entry);
     std::string FormatEntry(const AddressEntry& entry) const;
     bool HasAddress(uint64_t address, services::ScanDataType type) const;
-    bool ResolvePointer(UiContext& context, AddressEntry& entry);
+    bool ResolveEntry(UiContext& context, AddressEntry& entry);
+    void MakeStatic(AddressEntry& entry) const;
+    void OpenTable(UiContext& context);
+    void SaveTable(UiContext& context);
+    void SelectEntry(size_t index);
     void TakePendingAddresses(UiContext& context);
     std::string PointerText(const AddressEntry& entry) const;
 
@@ -162,6 +173,10 @@ private:
     int addTypeIndex_ = static_cast<int>(services::ScanDataType::Int32);
     int addLength_ = 16;
     bool addUtf16_ = false;
+    bool addPointer_ = false;
+    char addOffsets_[128] = {};
+    size_t selectionAnchor_ = 0;
+    std::string tablePath_;
 };
 
 } // namespace cortex::ui

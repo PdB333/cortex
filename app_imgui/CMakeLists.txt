@@ -80,6 +80,7 @@ add_executable(cortex_imgui WIN32
     desktop_ui.cpp
     application/settings.cpp
     application/hotkeys.cpp
+    application/cheat_table.cpp
     application/runtime_model_base.cpp
     application/ai_activity_model.cpp
     application/debugger_model.cpp
@@ -130,6 +131,7 @@ add_executable(cortex_imgui WIN32
     ui/trace_workspace.cpp
     ui/tools_workspace.cpp
     ui/access_finder_workspace.cpp
+    ui/file_dialog.cpp
     ui/theme.cpp
     ui/fonts.cpp
 
@@ -206,6 +208,7 @@ target_link_libraries(cortex_imgui PRIVATE
     windowscodecs
     ole32
     crypt32
+    comdlg32
 )
 
 if(MINGW)
@@ -240,6 +243,7 @@ if(BUILD_TESTING)
     add_executable(cortex_app_models_tests
         ../tests/app_models_tests.cpp
         application/hotkeys.cpp
+        application/cheat_table.cpp
         application/runtime_model_base.cpp
         application/actions_model.cpp
         application/patches_model.cpp

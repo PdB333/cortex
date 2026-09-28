@@ -2,6 +2,7 @@
 // runtime transport so they need no target process, pipe or Windows API.
 
 #include "application/actions_model.h"
+#include "application/cheat_table.h"
 #include "application/hotkeys.h"
 #include "application/patches_model.h"
 #include "application/prompt_model.h"
@@ -114,6 +115,100 @@ int main() {
     };
 
     using namespace cortex::application;
+
+    // Cheat Engine tables: entries, groups, pointers (last offset listed
+    // first), strings and byte arrays; scripts are counted, not imported.
+    {
+        const std::string xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>"Player"</Description>
+      <GroupHeader>1</GroupHeader>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>1</ID>
+          <Description>"Health &amp; armor"</Description>
+          <ShowAsHex>1</ShowAsHex>
+          <VariableType>4 Bytes</VariableType>
+          <Address>"Tutorial-i386.exe"+001FD660</Address>
+          <Offsets>
+            <Offset>18</Offset>
+            <Offset>0</Offset>
+            <Offset>14</Offset>
+            <Offset>C</Offset>
+          </Offsets>
+        </CheatEntry>
+        <CheatEntry>
+          <ID>2</ID>
+          <Description>"Name"</Description>
+          <VariableType>String</VariableType>
+          <Length>12</Length>
+          <Unicode>1</Unicode>
+          <Address>00401000</Address>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>3</ID>
+      <Description>"Infinite ammo"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript><![CDATA[[ENABLE]
+nop 5
+[DISABLE]]]></AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>4</ID>
+      <Description>"Code"</Description>
+      <VariableType>Array of byte</VariableType>
+      <Length>4</Length>
+      <ShowAsSigned>0</ShowAsSigned>
+      <Address>game.exe+10</Address>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols/>
+  <LuaScript>print("hi")</LuaScript>
+</CheatTable>)";
+        CheatTable table;
+        std::string error;
+        check(ParseCheatTable(xml, table, &error), "a Cheat Engine table parses");
+        check(table.entries.size() == 4 && table.scripts == 1, "entries are read and scripts counted");
+        if (table.entries.size() == 4) {
+            const auto& group = table.entries[0];
+            const auto& health = table.entries[1];
+            check(group.groupHeader && group.description == "Player" && group.depth == 0, "group header");
+            check(health.depth == 1 && health.description == "Health & armor" && health.showAsHex,
+                  "entities, nesting and hex display");
+            check(health.offsets == std::vector<uint32_t>({0xC, 0x14, 0x0, 0x18}), "offsets are applied base first");
+            check(table.entries[2].variableType == "String" && table.entries[2].unicode &&
+                  table.entries[2].length == 12, "UTF-16 strings keep their length");
+            check(table.entries[3].depth == 0 && !table.entries[3].showAsSigned, "entries after a group");
+        }
+        check(table.luaScript == "print(\"hi\")", "the table's Lua script is kept");
+
+        std::string module;
+        uint64_t offset = 0;
+        check(ParseCheatAddress("\"Tutorial-i386.exe\"+001FD660", module, offset) &&
+              module == "Tutorial-i386.exe" && offset == 0x1FD660, "quoted module addresses");
+        check(ParseCheatAddress("game.exe+10", module, offset) && module == "game.exe" && offset == 0x10,
+              "plain module addresses");
+        check(ParseCheatAddress("7FF6A1B20010", module, offset) && module.empty() && offset == 0x7FF6A1B20010ull,
+              "absolute addresses");
+        check(!ParseCheatAddress("player_base", module, offset), "symbols are not addresses");
+        check(FormatCheatAddress("game.exe", 0x10) == "\"game.exe\"+00000010", "module addresses format like CE");
+
+        CheatTable again;
+        check(ParseCheatTable(WriteCheatTable(table), again, &error) && again.entries.size() == 4,
+              "a written table reads back");
+        if (again.entries.size() == 4) {
+            check(again.entries[1].offsets == table.entries[1].offsets && again.entries[1].depth == 1,
+                  "pointers and groups survive a round trip");
+            check(again.entries[1].description == "Health & armor", "descriptions are escaped");
+        }
+        check(!ParseCheatTable("<Other/>", again, &error), "other XML is refused");
+        check(!ParseCheatTable("<CheatTable><CheatEntries>", again, &error), "truncated XML is refused");
+    }
 
     // Global hotkey chords round-trip and reject what RegisterHotKey cannot take.
     {

@@ -3,6 +3,8 @@
 #include "address_context_menu.h"
 
 #include "process/process_control.h"
+#include "application/cheat_table.h"
+#include "file_dialog.h"
 
 #include <imgui.h>
 
@@ -472,6 +474,7 @@ void MemoryWorkspace::AddResultsToList(const std::vector<size_t>& rows) {
         entry.description = "No description";
         entry.lastValue.assign(scan_->Value(row), scan_->Value(row) + entry.size);
         entry.frozenValue = entry.lastValue;
+        MakeStatic(entry);
         addresses_.push_back(std::move(entry));
     }
 }
@@ -540,7 +543,7 @@ std::string MemoryWorkspace::FormatEntry(const AddressEntry& entry) const {
 std::string MemoryWorkspace::PointerText(const AddressEntry& entry) const {
     char buffer[32] = {};
     std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
-    std::string text = entry.module + buffer;
+    std::string text = entry.module.empty() ? Hex(entry.baseOffset) : entry.module + buffer;
     for (const auto offset : entry.offsets) {
         std::snprintf(buffer, sizeof(buffer), " -> %X", offset);
         text += buffer;
@@ -548,12 +551,17 @@ std::string MemoryWorkspace::PointerText(const AddressEntry& entry) const {
     return text;
 }
 
-bool MemoryWorkspace::ResolvePointer(UiContext& context, AddressEntry& entry) {
-    const target::ModuleInfo* module = nullptr;
-    for (const auto& candidate : modules_)
-        if (Lower(candidate.name) == Lower(entry.module)) module = &candidate;
-    if (!module || !context.memory) return false;
-    uint64_t address = module->base + entry.baseOffset;
+bool MemoryWorkspace::ResolveEntry(UiContext& context, AddressEntry& entry) {
+    if (entry.group || !entry.expression.empty() || !context.memory) return false;
+    if (entry.module.empty() && entry.offsets.empty()) return true;
+    uint64_t address = entry.baseOffset;
+    if (!entry.module.empty()) {
+        const target::ModuleInfo* module = nullptr;
+        for (const auto& candidate : modules_)
+            if (Lower(candidate.name) == Lower(entry.module)) module = &candidate;
+        if (!module) return false;
+        address = module->base + entry.baseOffset;
+    }
     for (const auto offset : entry.offsets) {
         std::vector<uint8_t> bytes;
         std::string error;
@@ -567,6 +575,126 @@ bool MemoryWorkspace::ResolvePointer(UiContext& context, AddressEntry& entry) {
     return true;
 }
 
+// An absolute address inside a module becomes module+offset, which stays
+// valid after the game restarts.
+void MemoryWorkspace::MakeStatic(AddressEntry& entry) const {
+    if (!entry.module.empty() || !entry.offsets.empty() || entry.group) return;
+    if (const auto* module = ModuleFor(entry.address)) {
+        entry.module = module->name;
+        entry.baseOffset = entry.address - module->base;
+    }
+}
+
+void MemoryWorkspace::SelectEntry(size_t index) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.KeyShift && selectionAnchor_ < addresses_.size()) {
+        const size_t from = std::min(selectionAnchor_, index);
+        const size_t to = std::max(selectionAnchor_, index);
+        for (size_t i = 0; i < addresses_.size(); ++i) addresses_[i].selected = i >= from && i <= to;
+        return;
+    }
+    if (io.KeyCtrl) {
+        addresses_[index].selected = !addresses_[index].selected;
+    } else {
+        for (auto& entry : addresses_) entry.selected = false;
+        addresses_[index].selected = true;
+    }
+    selectionAnchor_ = index;
+}
+
+void MemoryWorkspace::OpenTable(UiContext& context) {
+    std::string path = tablePath_;
+    if (!ShowOpenFileDialog(L"Cheat tables (*.CT)\0*.CT\0All files\0*.*\0", path)) return;
+    application::CheatTable table;
+    std::string error;
+    if (!application::LoadCheatTable(path, table, &error)) {
+        context.status = "Open table failed: " + error;
+        return;
+    }
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    const unsigned pointerSize = session && session->Target().architecture == target::Architecture::X86 ? 4u : 8u;
+    size_t imported = 0;
+    for (const auto& item : table.entries) {
+        AddressEntry entry;
+        entry.description = item.description.empty() ? "No description" : item.description;
+        entry.depth = item.depth;
+        entry.group = item.groupHeader;
+        entry.hex = item.showAsHex;
+        entry.unsignedValue = !item.showAsSigned;
+        entry.utf16 = item.unicode;
+        entry.pointerSize = pointerSize;
+        if (!entry.group) {
+            const std::string& type = item.variableType;
+            entry.type = type == "Byte" ? ScanDataType::Byte : type == "2 Bytes" ? ScanDataType::Int16
+                       : type == "8 Bytes" ? ScanDataType::Int64 : type == "Float" ? ScanDataType::Float
+                       : type == "Double" ? ScanDataType::Double : type == "String" ? ScanDataType::String
+                       : type == "Array of byte" ? ScanDataType::ByteArray : ScanDataType::Int32;
+            const size_t fixed = ValueScanner::TypeSize(entry.type);
+            entry.size = fixed ? fixed
+                : static_cast<size_t>(std::max(1, item.length)) * (entry.type == ScanDataType::String && item.unicode ? 2 : 1);
+            entry.offsets = item.offsets;
+            entry.pointer = !item.offsets.empty();
+            std::string module;
+            uint64_t offset = 0;
+            if (application::ParseCheatAddress(item.address, module, offset)) {
+                entry.module = module;
+                entry.baseOffset = offset;
+                if (module.empty() && !entry.pointer) entry.address = offset;
+            } else {
+                entry.expression = item.address;
+            }
+        }
+        addresses_.push_back(std::move(entry));
+        ++imported;
+    }
+    tablePath_ = path;
+    lastAddressRefresh_ = {};
+    context.status = "Opened " + std::to_string(imported) + " entr" + (imported == 1 ? "y" : "ies") + " from " + path;
+    if (table.scripts) context.status += "; " + std::to_string(table.scripts) + " Auto Assembler script(s) not imported";
+    if (table.unsupported) context.status += "; " + std::to_string(table.unsupported) + " unsupported entr(ies) skipped";
+}
+
+void MemoryWorkspace::SaveTable(UiContext& context) {
+    std::string path = tablePath_;
+    if (!ShowSaveFileDialog(L"Cheat tables (*.CT)\0*.CT\0All files\0*.*\0", L"CT", path)) return;
+    application::CheatTable table;
+    for (const auto& entry : addresses_) {
+        application::CheatTableEntry item;
+        item.description = entry.description;
+        item.depth = entry.depth;
+        item.groupHeader = entry.group;
+        item.showAsHex = entry.hex;
+        item.showAsSigned = !entry.unsignedValue;
+        item.unicode = entry.utf16;
+        if (!entry.group) {
+            switch (entry.type) {
+                case ScanDataType::Byte: item.variableType = "Byte"; break;
+                case ScanDataType::Int16: item.variableType = "2 Bytes"; break;
+                case ScanDataType::Int64: item.variableType = "8 Bytes"; break;
+                case ScanDataType::Float: item.variableType = "Float"; break;
+                case ScanDataType::Double: item.variableType = "Double"; break;
+                case ScanDataType::String: item.variableType = "String"; break;
+                case ScanDataType::ByteArray: item.variableType = "Array of byte"; break;
+                default: item.variableType = "4 Bytes"; break;
+            }
+            item.length = static_cast<int>(entry.type == ScanDataType::String && entry.utf16 ? entry.size / 2 : entry.size);
+            item.offsets = entry.offsets;
+            if (!entry.expression.empty()) item.address = entry.expression;
+            else if (!entry.module.empty() || entry.pointer) item.address = application::FormatCheatAddress(entry.module, entry.baseOffset);
+            else item.address = application::FormatCheatAddress("", entry.address);
+        }
+        table.entries.push_back(std::move(item));
+    }
+    std::string error;
+    if (!application::SaveCheatTable(path, table, &error)) {
+        context.status = "Save table failed: " + error;
+        return;
+    }
+    tablePath_ = path;
+    context.status = "Saved " + std::to_string(table.entries.size()) + " entr" +
+                     (table.entries.size() == 1 ? "y" : "ies") + " to " + path;
+}
+
 void MemoryWorkspace::TakePendingAddresses(UiContext& context) {
     if (context.pendingAddresses.empty()) return;
     for (auto& pending : context.pendingAddresses) {
@@ -575,11 +703,12 @@ void MemoryWorkspace::TakePendingAddresses(UiContext& context) {
         entry.type = pending.type;
         entry.size = std::max<size_t>(1, ValueScanner::TypeSize(pending.type));
         entry.address = pending.address;
-        entry.pointer = !pending.module.empty();
+        entry.pointer = !pending.offsets.empty();
         entry.module = pending.module;
-        entry.baseOffset = pending.baseOffset;
+        entry.baseOffset = pending.module.empty() && !entry.pointer ? pending.address : pending.baseOffset;
         entry.offsets = pending.offsets;
         entry.pointerSize = pending.pointerSize;
+        MakeStatic(entry);
         addresses_.push_back(std::move(entry));
     }
     context.pendingAddresses.clear();
@@ -596,7 +725,8 @@ void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
     for (auto& entry : addresses_) {
         std::vector<uint8_t> value;
         std::string error;
-        if (entry.pointer && !ResolvePointer(context, entry)) {
+        if (entry.group) continue;
+        if (!ResolveEntry(context, entry)) {
             entry.readable = false;
             continue;
         }
@@ -621,42 +751,64 @@ void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
 
 bool MemoryWorkspace::AddManualAddress(UiContext& context) {
     if (!context.memory) return false;
-    uint64_t address = 0;
-    if (!ResolveAddress(context, addAddress_, address)) {
+    AddressEntry entry;
+    std::string module;
+    uint64_t offset = 0;
+    if (!application::ParseCheatAddress(addAddress_, module, offset)) {
         context.status = "Enter a hexadecimal address or module+offset";
         return false;
     }
-    const auto type = static_cast<ScanDataType>(addTypeIndex_);
-    if (HasAddress(address, type)) {
+    entry.module = module;
+    entry.baseOffset = offset;
+    if (module.empty()) entry.address = offset;
+    if (addPointer_) {
+        std::string token;
+        for (const char ch : std::string(addOffsets_) + " ") {
+            if (std::isxdigit(static_cast<unsigned char>(ch)) || ch == 'x' || ch == 'X') {
+                token += ch;
+                continue;
+            }
+            uint64_t value = 0;
+            if (!token.empty() && ParseHex(token, value)) entry.offsets.push_back(static_cast<uint32_t>(value));
+            token.clear();
+        }
+        if (entry.offsets.empty()) {
+            context.status = "Enter the pointer offsets, in the order they are applied (hex)";
+            return false;
+        }
+        entry.pointer = true;
+    }
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    entry.pointerSize = session && session->Target().architecture == target::Architecture::X86 ? 4u : 8u;
+    entry.type = static_cast<ScanDataType>(addTypeIndex_);
+    entry.size = ValueScanner::TypeSize(entry.type);
+    if (!entry.size) {
+        const int length = std::clamp(addLength_, 1, 4096);
+        entry.size = static_cast<size_t>(length) * (entry.type == ScanDataType::String && addUtf16_ ? 2 : 1);
+    }
+    entry.utf16 = entry.type == ScanDataType::String && addUtf16_;
+    entry.description = *addDescription_ ? std::string(addDescription_) : "No description";
+    RefreshModules(context, true);
+    if (!ResolveEntry(context, entry)) {
+        context.status = module.empty() ? "The pointer chain cannot be followed" : "Module " + module + " is not loaded";
+        return false;
+    }
+    if (!entry.pointer && entry.module.empty() && HasAddress(entry.address, entry.type)) {
         context.status = "Address is already in the list";
         return false;
     }
-    size_t size = ValueScanner::TypeSize(type);
-    if (!size) {
-        const int length = std::clamp(addLength_, 1, 4096);
-        size = static_cast<size_t>(length) * (type == ScanDataType::String && addUtf16_ ? 2 : 1);
-    }
     std::vector<uint8_t> value;
     std::string error;
-    if (!context.memory->Read(address, size, value, &error)) {
-        context.status = "Unable to read address: " + error;
-        return false;
-    }
-    AddressEntry entry;
-    entry.address = address;
-    entry.type = type;
-    entry.size = size;
-    entry.utf16 = type == ScanDataType::String && addUtf16_;
-    entry.description = *addDescription_ ? std::string(addDescription_) : "No description";
+    entry.readable = context.memory->Read(entry.address, entry.size, value, &error);
     entry.lastValue = value;
     entry.frozenValue = value;
     addresses_.push_back(std::move(entry));
-    context.status = "Address added";
+    context.status = addresses_.back().readable ? "Address added" : "Address added; it cannot be read right now";
     return true;
 }
 
 void MemoryWorkspace::BeginValueEdit(size_t index) {
-    if (index >= addresses_.size()) return;
+    if (index >= addresses_.size() || addresses_[index].group) return;
     editAddressIndex_ = static_cast<int>(index);
     const std::string current = FormatEntry(addresses_[index]);
     std::snprintf(editValue_, sizeof(editValue_), "%s", current.c_str());
@@ -1172,7 +1324,13 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
     ImGui::TextDisabled("(%zu)", addresses_.size());
     FlowSameLine(ButtonWidth("+ Add address"));
     if (ImGui::Button("+ Add address")) openAddAddress_ = true;
+    FlowSameLine(ButtonWidth("Open table..."));
+    if (ImGui::Button("Open table...")) OpenTable(context);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add the entries of a Cheat Engine table (.CT)");
     if (!addresses_.empty()) {
+        FlowSameLine(ButtonWidth("Save table..."));
+        if (ImGui::Button("Save table...")) SaveTable(context);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Save the list as a Cheat Engine table (.CT)");
         FlowSameLine(ButtonWidth("Clear"));
         if (ImGui::Button("Clear")) {
             addresses_.clear();
@@ -1207,9 +1365,28 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
             ImGui::PushID(static_cast<int>(i));
             ImGui::TableNextRow();
 
+            // Children of a group header follow it with a greater depth.
+            size_t groupEnd = i + 1;
+            if (entry.group)
+                while (groupEnd < addresses_.size() && addresses_[groupEnd].depth > entry.depth) ++groupEnd;
+
             ImGui::TableSetColumnIndex(0);
             ImGui::BeginDisabled(!context.mutationAllowed);
-            if (ImGui::Checkbox("##Freeze", &entry.freeze) && entry.freeze) entry.frozenValue = entry.lastValue;
+            if (entry.group) {
+                bool all = groupEnd > i + 1;
+                for (size_t child = i + 1; child < groupEnd; ++child)
+                    all &= addresses_[child].group || addresses_[child].freeze;
+                if (ImGui::Checkbox("##Freeze", &all)) {
+                    for (size_t child = i + 1; child < groupEnd; ++child) {
+                        auto& item = addresses_[child];
+                        if (item.group) continue;
+                        if (all && !item.freeze) item.frozenValue = item.lastValue;
+                        item.freeze = all;
+                    }
+                }
+            } else if (ImGui::Checkbox("##Freeze", &entry.freeze) && entry.freeze) {
+                entry.frozenValue = entry.lastValue;
+            }
             ImGui::EndDisabled();
             if (entry.freeze && entry.freezeMode != FreezeMode::Always) {
                 ImGui::SameLine(0, Px(2));
@@ -1220,37 +1397,47 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
                                                           : "Allow writes to freeze values");
 
             ImGui::TableSetColumnIndex(1);
+            if (entry.depth > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(14) * static_cast<float>(entry.depth));
             std::array<char, 160> description{};
             std::snprintf(description.data(), description.size(), "%s", entry.description.c_str());
             ImGui::SetNextItemWidth(-1);
+            if (entry.group) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
             if (ImGui::InputText("##Description", description.data(), description.size(),
                                  ImGuiInputTextFlags_EnterReturnsTrue))
                 entry.description = description.data();
             if (ImGui::IsItemDeactivatedAfterEdit()) entry.description = description.data();
+            if (entry.group) ImGui::PopStyleColor();
 
             ImGui::TableSetColumnIndex(2);
-            bool isStatic = false;
-            const std::string addressText = entry.pointer
-                ? "P->" + (entry.readable ? Hex(entry.address) : std::string("????????"))
+            bool isStatic = !entry.module.empty() && !entry.pointer;
+            char staticText[64] = {};
+            if (isStatic) std::snprintf(staticText, sizeof(staticText), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
+            const std::string addressText = entry.group ? std::string()
+                : !entry.expression.empty() ? entry.expression
+                : entry.pointer ? "P->" + (entry.readable ? Hex(entry.address) : std::string("????????"))
+                : isStatic ? entry.module + staticText
                 : AddressText(entry.address, isStatic);
-            if (isStatic || entry.pointer) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
+            if (!entry.expression.empty()) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            else if (isStatic || entry.pointer) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
             {
                 MonoFont mono;
-                ImGui::Selectable(addressText.c_str(), entry.selected);
+                if (ImGui::Selectable((addressText + "##Address").c_str(), entry.selected)) SelectEntry(i);
             }
-            if (isStatic || entry.pointer) ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                ImGui::SetTooltip("%s", entry.pointer ? PointerText(entry).c_str() : Hex(entry.address).c_str());
+            if (!entry.expression.empty() || isStatic || entry.pointer) ImGui::PopStyleColor();
+            if (!entry.group && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                ImGui::SetTooltip("%s", !entry.expression.empty() ? "A symbol Cortex cannot resolve; kept for the table"
+                                        : entry.pointer ? PointerText(entry).c_str() : Hex(entry.address).c_str());
             ImGui::OpenPopupOnItemClick("EntryMenu");
 
             ImGui::TableSetColumnIndex(3);
-            const std::string typeText = std::string(ValueScanner::TypeName(entry.type)) +
-                (entry.type == ScanDataType::String && entry.utf16 ? " (UTF-16)" : "");
+            const std::string typeText = entry.group ? std::string("Group")
+                : std::string(ValueScanner::TypeName(entry.type)) +
+                      (entry.type == ScanDataType::String && entry.utf16 ? " (UTF-16)" : "");
             ImGui::TextUnformatted(typeText.c_str());
             ImGui::OpenPopupOnItemClick("EntryMenu");
 
             ImGui::TableSetColumnIndex(4);
-            const std::string value = FormatEntry(entry);
+            const std::string value = entry.group ? std::string() : FormatEntry(entry);
             const bool changed = entry.readable && entry.freeze && entry.lastValue != entry.frozenValue;
             if (changed) ImGui::PushStyleColor(ImGuiCol_Text, ChangedValueColor());
             if (ImGui::Selectable(value.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
@@ -1265,7 +1452,15 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
             }
 
             ImGui::OpenPopupOnItemClick("EntryMenu");
-            if (ImGui::BeginPopup("EntryMenu")) {
+            if (entry.group && ImGui::BeginPopup("EntryMenu")) {
+                if (ImGui::MenuItem("Remove the group header")) remove = true;
+                if (ImGui::MenuItem("Remove the group and its entries")) {
+                    addresses_.erase(addresses_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                                     addresses_.begin() + static_cast<std::ptrdiff_t>(groupEnd));
+                    remove = true;
+                }
+                ImGui::EndPopup();
+            } else if (!entry.group && ImGui::BeginPopup("EntryMenu")) {
                 ImGui::BeginDisabled(!context.mutationAllowed);
                 if (ImGui::MenuItem("Edit value...")) BeginValueEdit(i);
                 if (ImGui::MenuItem(entry.freeze ? "Unfreeze" : "Freeze", "Space")) {
@@ -1326,6 +1521,30 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
         }
         ImGui::EndTable();
     }
+
+    // Keyboard actions on the selected entries.
+    const bool anySelected = std::any_of(addresses_.begin(), addresses_.end(),
+                                         [](const AddressEntry& entry) { return entry.selected; });
+    if (anySelected && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+            addresses_.erase(std::remove_if(addresses_.begin(), addresses_.end(),
+                                            [](const AddressEntry& entry) { return entry.selected; }),
+                             addresses_.end());
+            context.status = "Selected entries removed";
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
+            if (!context.mutationAllowed) {
+                context.status = "Allow writes to freeze values";
+            } else {
+                for (auto& entry : addresses_) {
+                    if (!entry.selected || entry.group) continue;
+                    entry.freeze = !entry.freeze;
+                    if (entry.freeze) entry.frozenValue = entry.lastValue;
+                }
+            }
+        } else if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+            for (auto& entry : addresses_) entry.selected = true;
+        }
+    }
     ImGui::EndChild();
 }
 
@@ -1338,6 +1557,8 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
         addTypeIndex_ = static_cast<int>(ScanDataType::Int32);
         addLength_ = 16;
         addUtf16_ = false;
+        addPointer_ = false;
+        addOffsets_[0] = '\0';
     }
     ImGui::SetNextWindowSize(ImVec2(Px(430), 0), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Add address", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1350,6 +1571,13 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
         ImGui::TextDisabled("Type");
         ImGui::SetNextItemWidth(-1);
         TypeCombo("##ManualType", &addTypeIndex_, false);
+        ImGui::Checkbox("Pointer", &addPointer_);
+        if (addPointer_) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##ManualOffsets", "offsets in hex, base first: 10 48", addOffsets_,
+                                     sizeof(addOffsets_));
+        }
         const auto type = static_cast<ScanDataType>(addTypeIndex_);
         if (IsText(type)) {
             ImGui::TextDisabled(type == ScanDataType::String ? "Length (characters)" : "Length (bytes)");
@@ -1478,7 +1706,7 @@ void MemoryWorkspace::Draw(UiContext& context) {
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float upperHeight = std::clamp(
-        available.y * 0.60f, std::min(Px(260.0f), available.y),
+        available.y * 0.55f, std::min(Px(260.0f), available.y),
         std::max(Px(260.0f), available.y - ImGui::GetFrameHeightWithSpacing() * 5.0f));
     const float scanPanelWidth = std::clamp(available.x * 0.30f, Px(270.0f), Px(380.0f));
     const float resultsWidth = std::max(Px(160.0f), available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
