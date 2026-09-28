@@ -139,16 +139,21 @@ try {
     ) 45000 | Out-Null
 
     $appRoot = Split-Path -Parent $CortexExe
-    $corePath = Join-Path $appRoot "cortex_core.dll"
+    # The runtime writes its private token beside the injected DLL, and the
+    # desktop client reads it from runtime/x64 whenever that directory exists.
+    # Inject the same copy the app would load so both sides agree on the path.
+    $runtimeRoot = Join-Path $appRoot "runtime/x64"
+    if (-not (Test-Path (Join-Path $runtimeRoot "cortex_core.dll"))) { $runtimeRoot = $appRoot }
+    $corePath = Join-Path $runtimeRoot "cortex_core.dll"
     if (-not (Test-Path $corePath)) {
-        throw "missing x64 runtime beside cortex.exe: $corePath"
+        throw "missing x64 runtime for cortex.exe: $corePath"
     }
 
     Invoke-CortexProcess "inject-x64-private-channel" @(
         "inject", "$($x64A.Id)", $corePath
     ) 30000 | Out-Null
 
-    $tokenPath = Join-Path $appRoot ("cortex.mcp.{0}.token" -f $x64A.Id)
+    $tokenPath = Join-Path $runtimeRoot ("cortex.mcp.{0}.token" -f $x64A.Id)
     if (-not (Wait-ForFile $tokenPath 15000)) {
         throw "private MCP token was not created: $tokenPath"
     }

@@ -39,6 +39,7 @@ bool PromptModel::Refresh(std::string* error) {
     if (!payload_.Ready() && !payload_.TryConnectExisting(&connectError)) {
         ClearPrompt();
         lastError_.clear();
+        if (error) *error = connectError.empty() ? "runtime_not_connected" : connectError;
         return false;
     }
 
