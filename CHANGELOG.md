@@ -34,7 +34,9 @@ All notable changes to Cortex are documented in this file.
 - The integrated E2E validates `/schema/validate` and calls every read-only GET tool of the manifest, failing on any 5xx.
 - The P1-P4, prompt-contract and diagnostics M1-M7 workflows are grouped as jobs of `.github/workflows/contracts.yml`.
 
-## [v0.7.0] - 2026-09-21
+## [v0.7.0] - 2026-09-21 (not published)
+
+This Qt/QML release was prepared but never published; its changes ship as part of v0.8.0, which replaces the Qt desktop with the native Dear ImGui application.
 
 ### Unified desktop application
 
