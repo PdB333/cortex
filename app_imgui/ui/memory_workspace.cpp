@@ -498,7 +498,7 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
                             const std::string addressText = address;
                             const std::string label = "Scan " + addressText;
                             const std::string notes =
-                                "Scanner value: " + FormatValue(result.value, kind);
+                                "Scan value: " + FormatValue(result.value, kind);
                             std::string error;
                             if (!context.projectModel->SetAddress(
                                     label, addressText, PersistentAddressType(kind),
@@ -569,7 +569,10 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     const float buttonHeight = ImGui::GetFrameHeight() * 1.25f;
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const float fullWidth = ImGui::GetContentRegionAvail().x;
-    const float primaryWidth = firstScanDone_ ? (fullWidth - spacing) * 0.5f : fullWidth;
+    // Side by side only when both labels fit; otherwise stack full width.
+    const bool pairFits = (fullWidth - spacing) * 0.5f >=
+                          std::max(ButtonWidth("Next scan"), ButtonWidth("New scan"));
+    const float primaryWidth = firstScanDone_ && pairFits ? (fullWidth - spacing) * 0.5f : fullWidth;
     ImGui::BeginDisabled(scanRunning_);
     if (ImGui::Button(firstScanDone_ ? "Next scan" : "First scan",
                       ImVec2(primaryWidth, buttonHeight))) {
@@ -621,7 +624,7 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
     if (addresses_.empty()) {
         ImGui::Dummy(ImVec2(0, Px(12)));
-        HintText("Use + Add address for local scratch entries; Scanner saves go to Addresses.");
+        HintText("Use + Add address for local scratch entries; double-clicked scan results go to Addresses.");
         ImGui::EndChild();
         return;
     }
@@ -807,8 +810,10 @@ void MemoryWorkspace::Draw(UiContext& context) {
         std::max(available.y * 0.56f, scanPanelMin), Px(260.0f),
         std::max(Px(260.0f), available.y - ImGui::GetFrameHeightWithSpacing() * 5.0f));
     const float scanPanelWidth = std::clamp(available.x * 0.28f, Px(260.0f), Px(360.0f));
+    // A narrow panel shrinks the results (their table scrolls horizontally)
+    // rather than the scan controls.
     const float resultsWidth = std::max(
-        Px(300.0f), available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
+        Px(160.0f), available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
 
     ImGui::BeginGroup();
     ImGui::BeginChild("ResultsColumn", ImVec2(resultsWidth, upperHeight),

@@ -190,8 +190,8 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         }
     }
 
-    ImGui::SameLine();
     if (!debugger.Ready()) {
+        FlowSameLine(ButtonWidth("Attach debugger"));
         const bool injectionNeedsPermission = backend == "veh" && !context.mutationAllowed;
         ImGui::BeginDisabled(injectionNeedsPermission);
         if (ImGui::Button("Attach debugger")) {
@@ -205,6 +205,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         }
         ImGui::EndDisabled();
     } else {
+        FlowSameLine(TextWidth("attached"));
         ImGui::TextDisabled("attached");
     }
 
@@ -247,7 +248,12 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     const float upperHeight = std::clamp(ImGui::GetContentRegionAvail().y * 0.48f, Px(230.0f), Px(420.0f));
-    const float threadWidth = Px(220.0f);
+    // Threads | registers | stack side by side when there is room;
+    // otherwise the stack moves below the other two.
+    const bool wide = ImGui::GetContentRegionAvail().x >= Px(740.0f);
+    const float threadWidth =
+        wide ? Px(220.0f) : std::min(Px(170.0f), ImGui::GetContentRegionAvail().x * 0.4f);
+    const float stackHeight = wide ? upperHeight : upperHeight * 0.7f;
 
     ImGui::BeginChild("ThreadList", ImVec2(threadWidth, upperHeight), ImGuiChildFlags_Borders);
     if (!debugger.PausedThreads().empty()) {
@@ -274,7 +280,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     ImGui::SameLine();
 
     const float detailWidth = ImGui::GetContentRegionAvail().x;
-    const float registerWidth = std::max(280.0f, detailWidth * 0.48f);
+    const float registerWidth = wide ? std::max(Px(280.0f), detailWidth * 0.48f) : 0.0f;
     ImGui::BeginChild("RegisterView", ImVec2(registerWidth, upperHeight), ImGuiChildFlags_Borders);
     ImGui::Text("Registers - TID %llu", static_cast<unsigned long long>(currentThread));
     ImGui::Separator();
@@ -285,7 +291,8 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
                                  ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed,
+                                TextWidth("EFLAGS") + ImGui::GetStyle().CellPadding.x * 2.0f);
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (const auto& reg : snapshot.registers) {
@@ -307,8 +314,8 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndChild();
 
-    ImGui::SameLine();
-    ImGui::BeginChild("StackView", ImVec2(0, upperHeight), ImGuiChildFlags_Borders);
+    if (wide) ImGui::SameLine();
+    ImGui::BeginChild("StackView", ImVec2(0, stackHeight), ImGuiChildFlags_Borders);
     ImGui::Text("Stack  SP=0x%llX",
                 static_cast<unsigned long long>(stackBase_));
     ImGui::Separator();

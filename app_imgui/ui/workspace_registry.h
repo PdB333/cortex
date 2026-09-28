@@ -247,8 +247,11 @@ public:
             ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
         const ImGuiID left =
             ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
-        const ImGuiID right =
-            ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
+        // The debugger (threads, registers, stack) needs a wider side column.
+        const bool wideRight =
+            preset_ == WorkspacePreset::Debug || preset_ == WorkspacePreset::Trace;
+        const ImGuiID right = ImGui::DockBuilderSplitNode(
+            center, ImGuiDir_Right, wideRight ? 0.40f : 0.28f, nullptr, &center);
 
         std::vector<std::string> docked;
         DockMany(bottom, {"bottom"}, docked);

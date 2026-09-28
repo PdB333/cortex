@@ -145,6 +145,9 @@ int TrackObject(const std::string& name,const json& addressSpec,const std::strin
         createdId=g_nextTrackId++;Track t;t.id=createdId;t.name=name;t.addressSpec=addressSpec;t.pointerPath=pointerPath;t.structName=structName;t.size=size;t.persist=persist;g_tracks[createdId]=std::move(t);
     }
     if(persist)PersistTracks();
+    // Sample once now so the first listing shows the resolved address and
+    // liveness instead of waiting for the next tracker pass.
+    SampleTrack(createdId);
     return createdId;
 }
 bool RemoveTrack(int id){bool persist=false;{std::lock_guard<std::mutex> lock(g_mutex);auto it=g_tracks.find(id);if(it==g_tracks.end())return false;persist=it->second.persist;g_tracks.erase(it);}if(persist)PersistTracks();return true;}

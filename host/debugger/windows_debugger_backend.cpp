@@ -126,10 +126,19 @@ struct WindowsDebuggerBackend::Impl {
     bool snapshotFromHandle(HANDLE thread, DWORD tid,
                             cortex::target::ThreadRegisterSnapshot& out,
                             std::string* error = nullptr) const {
+        return SnapshotFromHandle(thread, tid, target.architecture, out, error);
+    }
+
+    // Reads a suspended thread's registers for a target of the given
+    // architecture; usable before the debugger is attached.
+    static bool SnapshotFromHandle(HANDLE thread, DWORD tid,
+                                   cortex::target::Architecture architecture,
+                                   cortex::target::ThreadRegisterSnapshot& out,
+                                   std::string* error) {
         out = {};
         out.threadId = tid;
 #if defined(_WIN64)
-        if (targetIsWow64X86()) {
+        if (architecture == cortex::target::Architecture::X86) {
             WOW64_CONTEXT c{};
             c.ContextFlags = WOW64_CONTEXT_FULL | WOW64_CONTEXT_DEBUG_REGISTERS;
             if (!Wow64GetThreadContext(thread, &c)) {
@@ -144,7 +153,7 @@ struct WindowsDebuggerBackend::Impl {
             Push(out.registers, "EIP", c.Eip); Push(out.registers, "EFLAGS", c.EFlags);
             return true;
         }
-        if (target.architecture != cortex::target::Architecture::X64) {
+        if (architecture != cortex::target::Architecture::X64) {
             SetError(error, "register_architecture_not_supported");
             return false;
         }
@@ -166,7 +175,7 @@ struct WindowsDebuggerBackend::Impl {
         Push(out.registers, "RIP", c.Rip); Push(out.registers, "EFLAGS", c.EFlags);
         return true;
 #else
-        if (target.architecture != cortex::target::Architecture::X86) {
+        if (architecture != cortex::target::Architecture::X86) {
             SetError(error, "register_bitness_not_supported");
             return false;
         }
@@ -1108,6 +1117,17 @@ bool WindowsDebuggerBackend::readRegisters(uint64_t threadId,
         if (manual != impl_->manualPaused.end())
             return impl_->snapshotFromHandle(manual->second, static_cast<DWORD>(threadId), snapshot, error);
     }
+    // Registers can be read before the debugger attaches (thread list,
+    // register view); the architecture then comes from the active session.
+    cortex::target::Architecture architecture;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mutex);
+        architecture = impl_->target.architecture;
+    }
+    if (architecture == cortex::target::Architecture::Unknown) {
+        const auto session = impl_->sessions.Active();
+        if (session) architecture = session->Target().architecture;
+    }
     HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION,
                                FALSE, static_cast<DWORD>(threadId));
     if (!thread) {
@@ -1119,7 +1139,8 @@ bool WindowsDebuggerBackend::readRegisters(uint64_t threadId,
         CloseHandle(thread);
         return false;
     }
-    const bool ok = impl_->snapshotFromHandle(thread, static_cast<DWORD>(threadId), snapshot, error);
+    const bool ok = Impl::SnapshotFromHandle(thread, static_cast<DWORD>(threadId), architecture,
+                                             snapshot, error);
     ResumeThread(thread);
     CloseHandle(thread);
     return ok;

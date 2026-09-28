@@ -494,7 +494,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
     ImGui::Separator();
 
     if (rows.empty()) {
-        HintText("No addresses yet. Double-click a Scanner result or add one above.");
+        HintText("No addresses yet. Double-click a Memory scan result or add one above.");
         HandleShortcuts(context);
         return;
     }
