@@ -4,8 +4,10 @@
 #include "services/memory_tools.h"
 #include "services/pointer_scanner.h"
 #include "services/signature.h"
+#include "services/assembler.h"
 #include "target/module_provider.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -25,7 +27,7 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols };
+    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler };
 
     void Reset(const std::string& targetId);
     void RefreshModules(UiContext& context);
@@ -119,6 +121,30 @@ private:
     char symbolSearch_[96] = {};
     std::vector<std::pair<std::string, uint64_t>> symbolMatches_;
     std::string symbolSearched_;
+
+    // Assembler
+    int assemblerMode_ = 0;             // 0 = assemble & write, 1 = code injection
+    char assemblerAddress_[96] = {};
+    std::array<char, 16384> assemblerSource_ = {};
+    std::vector<uint8_t> assembledBytes_;
+    uint64_t assembledAt_ = 0;
+    std::string assemblerInfo_;
+    bool assemblerError_ = false;
+    // Code injection record, for Restore.
+    struct Injection {
+        uint64_t site = 0;
+        uint64_t cave = 0;
+        size_t caveSize = 0;
+        std::vector<uint8_t> original;
+        std::string description;
+    };
+    std::vector<Injection> injections_;
+    int injectSteal_ = 5;
+
+    void DrawAssembler(UiContext& context);
+    bool AssembleCurrent(UiContext& context, uint64_t address, services::AssembleBlockResult& result, std::string& error);
+    int StealLength(UiContext& context, uint64_t address, int minimum) const;
+    bool InjectCode(UiContext& context, uint64_t address, std::string& error);
 };
 
 } // namespace cortex::ui

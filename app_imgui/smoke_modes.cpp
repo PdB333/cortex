@@ -4,6 +4,9 @@
 #include "desktop_app.h"
 #include "ui/address_resolver.h"
 
+#include "services/assembler.h"
+#include "process/remote_memory.h"
+
 namespace cortex::desktop {
 
 bool AttachSmokeTarget(AppState& app, DWORD pid, std::string& error) {
@@ -475,9 +478,11 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
     }
     uint64_t health = 0;
     uint64_t frame = 0;
+    uint64_t stepOver = 0;
     for (const auto& entry : image.exports) {
         if (entry.name == "g_cortex_health") health = module.base + entry.rva;
         if (entry.name == "g_cortex_frame") frame = module.base + entry.rva;
+        if (entry.name == "CortexStepOverCaller") stepOver = module.base + entry.rva;
     }
 
     // Find out what writes to the frame counter: a log-mode hardware
@@ -617,6 +622,104 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
     summary += " pe_sections=" + std::to_string(image.sections.size()) + " exports=" +
                std::to_string(image.exports.size()) + " scan_hits=" + std::to_string(scanHits) +
                " signature=" + std::to_string(signature.bytes.size()) + "B";
+
+    // Code injection: a trampoline at CortexStepOverCaller (called every
+    // frame) that forces the health value, then a restore. Exercises the
+    // assembler, instruction relocation and remote allocation end to end.
+    if (stepOver && health) {
+        const bool x64 = session->Target().architecture != cortex::target::Architecture::X86;
+        const uint64_t pid = session->Target().processId;
+        const uint32_t magic = 0x2B2B;
+
+        auto evaluate = [health](const std::string& text, uint64_t& value, std::string&) {
+            if (text == "health") { value = health; return true; }
+            return false;
+        };
+        auto assemble = [&](const std::string& text, uint64_t at, std::vector<uint8_t>& out) {
+            services::AssembleRequest request;
+            request.text = text;
+            request.address = at;
+            request.x64 = x64;
+            request.evaluate = evaluate;
+            std::string message;
+            return services::AssembleLine(request, out, &message);
+        };
+
+        std::vector<uint8_t> original;
+        if (app.memory.Read(stepOver, 16, original, &error)) {
+            uint64_t cave = 0;
+            if (cortex::remote_memory::Allocate(pid, 512, stepOver, cave, &error)) {
+                std::vector<uint8_t> siteJump;
+                char caveHex[24] = {};
+                std::snprintf(caveHex, sizeof(caveHex), "%llX", static_cast<unsigned long long>(cave));
+                assemble(std::string("jmp ") + caveHex, stepOver, siteJump);
+                int steal = static_cast<int>(siteJump.size());
+                std::vector<services::DisassemblyInstruction> decoded;
+                if (app.disassembly.Decode(stepOver, 8, decoded, nullptr)) {
+                    int length = 0;
+                    for (const auto& instruction : decoded) {
+                        length += static_cast<int>(instruction.bytes.size());
+                        if (length >= static_cast<int>(siteJump.size())) break;
+                    }
+                    steal = std::max(steal, length);
+                }
+                std::vector<uint8_t> stolen;
+                app.memory.Read(stepOver, static_cast<size_t>(steal), stolen, nullptr);
+
+                std::vector<uint8_t> caveBytes;
+                char magicHex[16] = {};
+                std::snprintf(magicHex, sizeof(magicHex), "%X", magic);
+                assemble(std::string("mov dword [health],") + magicHex, cave, caveBytes);
+                std::vector<uint8_t> relocated;
+                std::string relocateError;
+                if (!services::RelocateCode(stolen.data(), stolen.size(), stepOver, cave + caveBytes.size(), x64,
+                                            relocated, &relocateError)) {
+                    error = "inject_relocate_failed:" + relocateError;
+                    cortex::remote_memory::Free(pid, cave, nullptr);
+                    return false;
+                }
+                caveBytes.insert(caveBytes.end(), relocated.begin(), relocated.end());
+                std::vector<uint8_t> jumpBack;
+                char backHex[24] = {};
+                std::snprintf(backHex, sizeof(backHex), "%llX",
+                              static_cast<unsigned long long>(stepOver + steal));
+                assemble(std::string("jmp ") + backHex, cave + caveBytes.size(), jumpBack);
+                caveBytes.insert(caveBytes.end(), jumpBack.begin(), jumpBack.end());
+
+                std::vector<uint8_t> patch = siteJump;
+                patch.resize(static_cast<size_t>(steal), 0x90);
+
+                if (!cortex::remote_memory::WriteCode(pid, cave, caveBytes.data(), caveBytes.size(), &error) ||
+                    !cortex::remote_memory::WriteCode(pid, stepOver, patch.data(), patch.size(), &error)) {
+                    cortex::remote_memory::Free(pid, cave, nullptr);
+                    error = "inject_write_failed:" + error;
+                    return false;
+                }
+
+                bool forced = false;
+                for (int attempt = 0; attempt < 40 && !forced; ++attempt) {
+                    Sleep(25);
+                    uint32_t value = 0;
+                    if (session->ReadMemory(health, &value, 4, nullptr) && value == magic) forced = true;
+                }
+
+                // Restore and confirm the target keeps running.
+                cortex::remote_memory::WriteCode(pid, stepOver, original.data(), original.size(), nullptr);
+                Sleep(60);
+                cortex::remote_memory::Free(pid, cave, nullptr);
+                Sleep(120);
+                if (!session->Alive()) {
+                    error = "target_died_after_injection";
+                    return false;
+                }
+                if (!forced) {
+                    error = "injection_did_not_take_effect";
+                    return false;
+                }
+                summary += " injection=ok";
+            }
+        }
+    }
 
     app.ui.toolsTabRequest = "pointers";
     app.ui.NavigateTo("tools", health ? health : codeAddress);

@@ -186,6 +186,7 @@ add_executable(cortex_imgui WIN32
     ../core/services/pointer_scanner.cpp
     ../core/services/signature.cpp
     ../core/services/instruction_operands.cpp
+    ../core/services/assembler.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -310,6 +311,7 @@ if(BUILD_TESTING)
         ../core/services/pointer_scanner.cpp
         ../core/services/signature.cpp
         ../core/services/instruction_operands.cpp
+        ../core/services/assembler.cpp
     )
     target_include_directories(cortex_memory_tools_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
     target_link_libraries(cortex_memory_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
@@ -336,4 +338,17 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_lua_engine_tests COMMAND cortex_lua_engine_tests)
     set_tests_properties(cortex_lua_engine_tests PROPERTIES TIMEOUT 60)
+
+    # The x86/x64 text assembler on top of the Zydis encoder.
+    add_executable(cortex_assembler_tests
+        ../tests/assembler_tests.cpp
+        ../core/services/assembler.cpp
+    )
+    target_include_directories(cortex_assembler_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_assembler_tests PRIVATE Zydis)
+    if(MINGW)
+        target_link_options(cortex_assembler_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_assembler_tests COMMAND cortex_assembler_tests)
+    set_tests_properties(cortex_assembler_tests PROPERTIES TIMEOUT 60)
 endif()

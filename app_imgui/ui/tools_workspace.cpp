@@ -3,6 +3,8 @@
 #include "widgets.h"
 #include "address_context_menu.h"
 
+#include "process/remote_memory.h"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -1127,6 +1129,279 @@ void ToolsWorkspace::DrawSymbols(UiContext& context) {
     }
 }
 
+// ------------------------------------------------------------------ assembler
+
+// Whole instructions covering at least `minimum` bytes, so the trampoline
+// does not cut an instruction in half.
+int ToolsWorkspace::StealLength(UiContext& context, uint64_t address, int minimum) const {
+    if (!context.disassembly) return minimum;
+    std::vector<services::DisassemblyInstruction> instructions;
+    std::string error;
+    if (!context.disassembly->Decode(address, 12, instructions, &error)) return minimum;
+    int length = 0;
+    for (const auto& instruction : instructions) {
+        length += static_cast<int>(instruction.bytes.size());
+        if (length >= minimum) break;
+    }
+    return length >= minimum ? length : minimum;
+}
+
+bool ToolsWorkspace::AssembleCurrent(UiContext& context, uint64_t address,
+                                     services::AssembleBlockResult& result, std::string& error) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    services::AssembleRequest request;
+    request.text = assemblerSource_.data();
+    request.address = address;
+    request.x64 = !session || session->Target().architecture != target::Architecture::X86;
+    request.evaluate = [&context](const std::string& text, uint64_t& value, std::string& message) {
+        if (EvaluateContextAddress(context, text, value, &message)) return true;
+        if (message.empty()) message = "Unknown symbol: " + text;
+        return false;
+    };
+    return services::AssembleBlock(request, result, &error);
+}
+
+// A classic trampoline: a jmp at the site into a cave that runs the new
+// code, the original instructions, then jumps back after them.
+bool ToolsWorkspace::InjectCode(UiContext& context, uint64_t site, std::string& error) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session || !context.memory) {
+        error = "No target";
+        return false;
+    }
+    const uint64_t pid = session->Target().processId;
+    const bool x64 = session->Target().architecture != target::Architecture::X86;
+
+    auto assembleLine = [&](const std::string& text, uint64_t at, std::vector<uint8_t>& bytes) {
+        services::AssembleRequest request;
+        request.text = text;
+        request.address = at;
+        request.x64 = x64;
+        request.evaluate = [&context](const std::string& name, uint64_t& value, std::string& message) {
+            return EvaluateContextAddress(context, name, value, &message);
+        };
+        std::string message;
+        return services::AssembleLine(request, bytes, &message);
+    };
+
+    // A cave big enough for the new code, the stolen bytes and a jump back.
+    const size_t sourceLength = std::strlen(assemblerSource_.data());
+    const size_t caveSize = std::max<size_t>(512, sourceLength * 2) + 96;
+    uint64_t cave = 0;
+    if (!cortex::remote_memory::Allocate(pid, caveSize, site, cave, &error)) return false;
+
+    auto bail = [&](const std::string& message) {
+        cortex::remote_memory::Free(pid, cave, nullptr);
+        error = message;
+        return false;
+    };
+
+    // The jump that will sit at the site tells us how many bytes to steal.
+    std::vector<uint8_t> siteJump;
+    {
+        char target[32] = {};
+        std::snprintf(target, sizeof(target), "%llX", static_cast<unsigned long long>(cave));
+        if (!assembleLine(std::string("jmp ") + target, site, siteJump)) return bail("Cannot encode the jump to the cave");
+    }
+    int steal = std::max<int>(injectSteal_, static_cast<int>(siteJump.size()));
+    steal = StealLength(context, site, steal);
+
+    std::vector<uint8_t> original;
+    std::string readError;
+    if (!context.memory->Read(site, static_cast<size_t>(steal), original, &readError) ||
+        original.size() != static_cast<size_t>(steal))
+        return bail("Cannot read the original bytes: " + readError);
+
+    // The cave: new code, the original instructions, a jump back.
+    std::vector<uint8_t> caveBytes;
+    if (sourceLength) {
+        services::AssembleBlockResult result;
+        std::string assembleError;
+        services::AssembleRequest request;
+        request.text = assemblerSource_.data();
+        request.address = cave;
+        request.x64 = x64;
+        request.evaluate = [&context](const std::string& name, uint64_t& value, std::string& message) {
+            return EvaluateContextAddress(context, name, value, &message);
+        };
+        if (!services::AssembleBlock(request, result, &assembleError)) return bail(assembleError);
+        caveBytes = std::move(result.bytes);
+    }
+    // Relocate the replaced instructions so their relative branches and
+    // RIP-relative operands still reach the same targets from the cave.
+    std::vector<uint8_t> relocated;
+    std::string relocateError;
+    if (!services::RelocateCode(original.data(), original.size(), site, cave + caveBytes.size(), x64, relocated,
+                                &relocateError))
+        return bail("Cannot relocate the replaced code: " + relocateError);
+    caveBytes.insert(caveBytes.end(), relocated.begin(), relocated.end());
+    std::vector<uint8_t> jumpBack;
+    char back[32] = {};
+    std::snprintf(back, sizeof(back), "%llX", static_cast<unsigned long long>(site + steal));
+    if (!assembleLine(std::string("jmp ") + back, cave + caveBytes.size(), jumpBack))
+        return bail("Cannot encode the jump back");
+    caveBytes.insert(caveBytes.end(), jumpBack.begin(), jumpBack.end());
+    if (caveBytes.size() > caveSize) return bail("The code is larger than the cave");
+
+    if (!cortex::remote_memory::WriteCode(pid, cave, caveBytes.data(), caveBytes.size(), &error))
+        return bail("Cannot write the cave: " + error);
+
+    // The site: the jump to the cave, padded with NOPs to the steal length.
+    std::vector<uint8_t> patch = siteJump;
+    patch.resize(static_cast<size_t>(steal), 0x90);
+    if (!cortex::remote_memory::WriteCode(pid, site, patch.data(), patch.size(), &error))
+        return bail("Cannot patch the site: " + error);
+
+    injections_.push_back({site, cave, caveSize, original, std::string(assemblerAddress_)});
+    assemblerError_ = false;
+    assemblerInfo_ = "Injected at " + Hex(site) + ": " + std::to_string(steal) + " byte(s) replaced, cave at " +
+                     Hex(cave);
+    return true;
+}
+
+void ToolsWorkspace::DrawAssembler(UiContext& context) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    const bool x64 = !session || session->Target().architecture != target::Architecture::X86;
+    const uint64_t pid = session ? session->Target().processId : 0;
+
+    ImGui::RadioButton("Assemble && write", &assemblerMode_, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Code injection", &assemblerMode_, 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s)", x64 ? "x64" : "x86");
+
+    ImGui::TextDisabled(assemblerMode_ == 0 ? "Write bytes at" : "Inject at");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(260));
+    ImGui::InputTextWithHint("##AsmAddress", "game.exe+1234 or an expression", assemblerAddress_,
+                             sizeof(assemblerAddress_));
+    uint64_t address = 0;
+    const bool haveAddress = *assemblerAddress_ && Resolve(context, assemblerAddress_, address);
+    ImGui::SameLine();
+    if (haveAddress) {
+        MonoText("= %s", AddressText(address).c_str());
+    } else if (*assemblerAddress_) {
+        ImGui::TextColored(WarningTextColor(), "unresolved");
+    } else {
+        ImGui::TextDisabled("enter an address");
+    }
+
+    if (assemblerMode_ == 1) {
+        ImGui::SetNextItemWidth(Px(120));
+        if (ImGui::InputInt("Bytes to replace", &injectSteal_)) injectSteal_ = std::clamp(injectSteal_, 5, 64);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Auto") && haveAddress) injectSteal_ = StealLength(context, address, x64 ? 5 : 5);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Round up to whole instructions at the address");
+    }
+
+    HintText(assemblerMode_ == 0
+                 ? "Intel syntax, one instruction per line. Numbers are hex (10 = 0x10, #16 decimal). "
+                   "Labels end in ':'. Module names, exports and symbols resolve as addresses."
+                 : "The code runs in a cave Cortex allocates near the address. Original instructions are "
+                   "preserved and control returns after them. Relative operands in the replaced bytes may "
+                   "need adjusting.");
+
+    const float editorHeight = std::max(Px(140.0f), ImGui::GetContentRegionAvail().y - Px(150.0f));
+    {
+        MonoFont mono;
+        ImGui::InputTextMultiline("##AsmSource", assemblerSource_.data(), assemblerSource_.size(),
+                                  ImVec2(-1, editorHeight), ImGuiInputTextFlags_AllowTabInput);
+    }
+
+    const bool writes = context.mutationAllowed;
+    if (assemblerMode_ == 0) {
+        if (ImGui::Button("Assemble", ImVec2(Px(120), 0)) && haveAddress) {
+            services::AssembleBlockResult result;
+            std::string error;
+            assemblerError_ = !AssembleCurrent(context, address, result, error);
+            if (assemblerError_) {
+                assembledBytes_.clear();
+                assemblerInfo_ = error;
+            } else {
+                assembledBytes_ = result.bytes;
+                assembledAt_ = address;
+                assemblerInfo_ = std::to_string(result.bytes.size()) + " byte(s) assembled at " + Hex(address);
+            }
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!writes || assembledBytes_.empty() || !haveAddress || address != assembledAt_);
+        if (ImGui::Button("Write to target", ImVec2(Px(150), 0))) {
+            std::string error;
+            const bool ok = cortex::remote_memory::WriteCode(pid, address, assembledBytes_.data(),
+                                                             assembledBytes_.size(), &error);
+            assemblerError_ = !ok;
+            assemblerInfo_ = ok ? "Wrote " + std::to_string(assembledBytes_.size()) + " byte(s) to " + Hex(address)
+                                : "Write failed: " + error;
+            if (ok) context.status = assemblerInfo_;
+        }
+        ImGui::EndDisabled();
+        if (!writes) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Allow writes to patch the target");
+        }
+    } else {
+        ImGui::BeginDisabled(!writes || !haveAddress);
+        if (ImGui::Button("Inject", ImVec2(Px(120), 0))) {
+            std::string error;
+            if (InjectCode(context, address, error)) {
+                context.status = assemblerInfo_;
+            } else {
+                assemblerError_ = true;
+                assemblerInfo_ = error;
+            }
+        }
+        ImGui::EndDisabled();
+        if (!writes) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Allow writes to inject");
+        }
+    }
+
+    if (!assemblerInfo_.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, assemblerError_ ? ChangedValueColor() : StaticAddressColor());
+        ImGui::TextWrapped("%s", assemblerInfo_.c_str());
+        ImGui::PopStyleColor();
+        if (!assemblerError_ && !assembledBytes_.empty() && assemblerMode_ == 0) {
+            MonoFont mono;
+            std::string hex;
+            char byte[4] = {};
+            for (size_t i = 0; i < assembledBytes_.size() && i < 64; ++i) {
+                std::snprintf(byte, sizeof(byte), "%02X ", assembledBytes_[i]);
+                hex += byte;
+            }
+            if (assembledBytes_.size() > 64) hex += "...";
+            ImGui::TextWrapped("%s", hex.c_str());
+        }
+    }
+
+    // Active injections, with Restore.
+    if (!injections_.empty()) {
+        ImGui::SeparatorText(("Active injections (" + std::to_string(injections_.size()) + ")").c_str());
+        for (size_t i = 0; i < injections_.size();) {
+            auto& injection = injections_[i];
+            ImGui::PushID(static_cast<int>(i));
+            MonoText("%s -> cave %s (%zu bytes)", Hex(injection.site).c_str(), Hex(injection.cave).c_str(),
+                     injection.original.size());
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!writes);
+            bool removed = false;
+            if (ImGui::SmallButton("Restore")) {
+                std::string error;
+                const bool ok = cortex::remote_memory::WriteCode(pid, injection.site, injection.original.data(),
+                                                                injection.original.size(), &error);
+                if (ok) cortex::remote_memory::Free(pid, injection.cave, nullptr);
+                context.status = ok ? "Injection at " + Hex(injection.site) + " restored"
+                                    : "Restore failed: " + error;
+                removed = ok;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            if (removed) injections_.erase(injections_.begin() + static_cast<std::ptrdiff_t>(i));
+            else ++i;
+        }
+    }
+}
+
 // ------------------------------------------------------------------ frame
 
 void ToolsWorkspace::Draw(UiContext& context) {
@@ -1149,6 +1424,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
                    : context.toolsTabRequest == "signature" ? Tab::Signature
                    : context.toolsTabRequest == "pe" ? Tab::Pe
                    : context.toolsTabRequest == "symbols" ? Tab::Symbols
+                   : context.toolsTabRequest == "assembler" ? Tab::Assembler
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
@@ -1184,6 +1460,10 @@ void ToolsWorkspace::Draw(UiContext& context) {
     }
     if (ImGui::BeginTabItem("Symbols", nullptr, flags(Tab::Symbols))) {
         DrawSymbols(context);
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Assembler", nullptr, flags(Tab::Assembler))) {
+        DrawAssembler(context);
         ImGui::EndTabItem();
     }
     ImGui::EndTabBar();
