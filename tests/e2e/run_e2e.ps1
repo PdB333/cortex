@@ -72,6 +72,8 @@ function Wait-For {
     throw "Timed out waiting for $Description"
 }
 
+$script:HasOperationTimeout = (Get-Command Invoke-WebRequest).Parameters.ContainsKey("OperationTimeoutSeconds")
+
 function Request-Json {
     param(
         [string]$Method,
@@ -90,6 +92,9 @@ function Request-Json {
         TimeoutSec = 10
         SkipHttpErrorCheck = $true
     }
+    # From PowerShell 7.4, -TimeoutSec only bounds the connection; a response
+    # that stops sending data would otherwise wait forever.
+    if ($script:HasOperationTimeout) { $request.OperationTimeoutSeconds = 30 }
     if ($null -ne $Body) {
         $request.ContentType = $ContentType
         $request.Body = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 -Compress }
@@ -247,7 +252,8 @@ Run-Scenario "api-memory-security" {
         # Read-only sweep: every GET tool must answer without a server error
         # and leave the runtime healthy. Required query parameters are filled
         # from the fixture; tools that need an object id or a live thread are
-        # covered by their own scenarios.
+        # covered by their own scenarios, and /events is a never-ending
+        # Server-Sent Events stream.
         $queryValues = @{
             address = $fixture.Manifest.anchor
             module = "cortex_test_target_$Architecture.exe"
@@ -257,6 +263,7 @@ Run-Scenario "api-memory-security" {
         $skipped = @()
         foreach ($tool in @($tools)) {
             if ($tool.method -ne "GET" -or $tool.path -match "\{") { continue }
+            if ($tool.name -eq "events") { $skipped += "events (stream)"; continue }
             $query = @()
             $fillable = $true
             if ($tool.query) {
