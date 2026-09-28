@@ -202,6 +202,14 @@ bool SettingsStore::Load(std::string* error) {
         values_.aiActivityHistoryLimit = Clamp(getInt("aiActivityHistoryLimit", 300), 50, 2000);
         values_.showAiActivityInTitleBar = getBool("showAiActivityInTitleBar", true);
         values_.autoRefreshMs = Clamp(getInt("autoRefreshMs", 750), 100, 10000);
+        const auto hotkeys = document.find("hotkeys");
+        if (hotkeys != document.end() && hotkeys->is_object()) {
+            for (auto item = hotkeys->begin(); item != hotkeys->end(); ++item)
+                if (item.value().is_string() && !item.value().get<std::string>().empty())
+                    values_.hotkeys[item.key()] = item.value().get<std::string>();
+        }
+        values_.autoAttachEnabled = getBool("autoAttachEnabled", false);
+        values_.autoAttachProcesses = getString("autoAttachProcesses");
         return true;
     } catch (const std::exception& ex) {
         if (error) *error = std::string("settings_load_failed:") + ex.what();
@@ -244,7 +252,10 @@ bool SettingsStore::Save(std::string* error) const {
             {"mcpToolProfile", values_.mcpToolProfile},
             {"aiActivityHistoryLimit", values_.aiActivityHistoryLimit},
             {"showAiActivityInTitleBar", values_.showAiActivityInTitleBar},
-            {"autoRefreshMs", values_.autoRefreshMs}
+            {"autoRefreshMs", values_.autoRefreshMs},
+            {"hotkeys", values_.hotkeys},
+            {"autoAttachEnabled", values_.autoAttachEnabled},
+            {"autoAttachProcesses", values_.autoAttachProcesses}
         };
         std::ofstream output(path_, std::ios::trunc);
         if (!output) {

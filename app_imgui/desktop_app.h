@@ -11,6 +11,7 @@
 #include "application/input_model.h"
 #include "application/network_model.h"
 #include "application/debugger_model.h"
+#include "application/hotkeys.h"
 #include "application/settings.h"
 #include "application/project_model.h"
 #include "application/patches_model.h"
@@ -68,6 +69,7 @@
 #include "target/catalog.h"
 #include "target/local_backend.h"
 #include "target/session_manager.h"
+#include "process/process_control.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -86,6 +88,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -174,6 +177,17 @@ struct AppState {
     char goToExpression[160] = {};
     char promptAnswer[512] = {};
     int promptAnswerId = -1;
+
+    // Main window (main.cpp), for hotkeys and Bring Cortex to the front.
+    void* window = nullptr;
+    cortex::application::HotkeyRegistrar hotkeys;
+    // Processes suspended with Pause target; resumed on detach and exit.
+    std::set<uint64_t> pausedPids;
+    // Last process other than Cortex that had the foreground window.
+    uint64_t lastForegroundPid = 0;
+    // Auto-attach skips the process the user detached from.
+    uint64_t autoAttachSkipPid = 0;
+    std::chrono::steady_clock::time_point lastAutoAttach{};
 
     // Declared last so it is destroyed first: its future waits for a running
     // task, which may still use the models above.
@@ -265,6 +279,10 @@ struct AppState {
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 
+    ~AppState() {
+        for (const auto pid : pausedPids) cortex::process_control::Resume(pid);
+    }
+
     void OnAttached(const cortex::target::TargetDescriptor& target,
                     bool selectMemory = true) {
         payload.Reset();
@@ -336,6 +354,9 @@ inline bool SmokeArgValue(const std::vector<std::string>& args,
 // Desktop UI (desktop_ui.cpp).
 void DrawApp(AppState& app);
 void HandleGlobalShortcuts(AppState& app);
+// Runs a hotkey or palette command (see HotkeyActions): target commands
+// here, the rest in the workspaces.
+void DispatchCommand(AppState& app, const std::string& command);
 void ResetTargetState(AppState& app);
 void NavigateTo(AppState& app, uint64_t address, const char* workspace);
 bool ParseAddressToken(const std::string& text, uint64_t& value, int defaultBase = 0);

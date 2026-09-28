@@ -79,6 +79,7 @@ add_executable(cortex_imgui WIN32
     cli.cpp
     desktop_ui.cpp
     application/settings.cpp
+    application/hotkeys.cpp
     application/runtime_model_base.cpp
     application/ai_activity_model.cpp
     application/debugger_model.cpp
@@ -233,6 +234,7 @@ if(BUILD_TESTING)
     # process, pipe or window needed.
     add_executable(cortex_app_models_tests
         ../tests/app_models_tests.cpp
+        application/hotkeys.cpp
         application/runtime_model_base.cpp
         application/actions_model.cpp
         application/patches_model.cpp

@@ -1341,6 +1341,53 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
     }
 }
 
+void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& command) {
+    if (command == "scan_cancel") {
+        CancelScan();
+        return;
+    }
+    if (command == "scan_undo") {
+        UndoScan(context);
+        return;
+    }
+    if (command == "freeze_toggle_all") {
+        if (!context.mutationAllowed) {
+            context.status = "Allow writes to freeze values";
+            return;
+        }
+        const bool freeze = std::any_of(addresses_.begin(), addresses_.end(),
+                                        [](const AddressEntry& entry) { return !entry.freeze; });
+        for (auto& entry : addresses_) {
+            if (freeze && !entry.freeze) entry.frozenValue = entry.lastValue;
+            entry.freeze = freeze;
+        }
+        context.status = freeze ? "Address list frozen" : "Address list unfrozen";
+        return;
+    }
+
+    ScanCompare compare = compare_;
+    if (command == "scan_exact") compare = ScanCompare::Exact;
+    else if (command == "scan_increased") compare = ScanCompare::Increased;
+    else if (command == "scan_decreased") compare = ScanCompare::Decreased;
+    else if (command == "scan_changed") compare = ScanCompare::Changed;
+    else if (command == "scan_unchanged") compare = ScanCompare::Unchanged;
+    else if (command != "scan_next") return;
+
+    const bool relative = compare != ScanCompare::Exact && command != "scan_next";
+    if (relative && (!scan_ || IsText(scan_->type) && compare != ScanCompare::Changed &&
+                                   compare != ScanCompare::Unchanged)) {
+        context.status = scan_ ? "This comparison does not apply to the current scan"
+                               : "Run a first scan before a relative next scan";
+        return;
+    }
+    if (scanRunning_) {
+        context.status = "A scan is already running";
+        return;
+    }
+    compare_ = compare;
+    StartScan(context);
+}
+
 void MemoryWorkspace::Draw(UiContext& context) {
     PollScan(context);
 

@@ -79,6 +79,8 @@ void CleanupDeviceD3D() {
 // Set by WM_DPICHANGED and applied between frames, never while ImGui is
 // building a frame.
 float gPendingDpiScale = 0.0f;
+// WM_HOTKEY ids received since the last frame.
+std::vector<int> gHotkeyIds;
 
 LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
@@ -105,6 +107,9 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                          SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
         }
+        case WM_HOTKEY:
+            gHotkeyIds.push_back(static_cast<int>(wParam));
+            return 0;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -128,9 +133,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     ImGui_ImplWin32_EnableDpiAwareness();
 
+    // Class icons for the title bar, taskbar and Alt+Tab (the executable's
+    // own icon only covers Explorer).
+    auto loadIcon = [hInstance](int width, int height) {
+        return static_cast<HICON>(LoadImageW(hInstance, L"IDI_CORTEX_ICON", IMAGE_ICON,
+                                             width, height, LR_DEFAULTCOLOR));
+    };
     WNDCLASSEXW wc{
         sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, hInstance,
-        nullptr, nullptr, nullptr, nullptr, L"CortexWindow", nullptr
+        loadIcon(GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
+        LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)), nullptr, nullptr, L"CortexWindow",
+        loadIcon(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON))
     };
     RegisterClassExW(&wc);
 
@@ -176,6 +189,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGui_ImplDX11_Init(gDevice, gDeviceContext);
 
     AppState app;
+    app.window = hwnd;
     if (!windowSmoke) {
         app.ui.runInBackground = [&app](std::string label, std::function<void()> work) {
             // A task started while another runs (not reachable from the UI,
@@ -200,6 +214,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             if (msg.message == WM_QUIT) done = true;
         }
         if (done) break;
+
+        if (!windowSmoke) {
+            app.ui.hotkeyFailures = app.hotkeys.Apply(hwnd, app.settings.Values().hotkeys);
+            for (const int id : gHotkeyIds) {
+                const std::string action = app.hotkeys.ActionFor(id);
+                if (!action.empty() && !app.background.Active()) DispatchCommand(app, action);
+            }
+        }
+        gHotkeyIds.clear();
 
         if (gPendingDpiScale > 0.0f) {
             cortex::ui::ApplyDpiScale(gPendingDpiScale);

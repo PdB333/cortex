@@ -3,6 +3,7 @@
 #include "workspace.h"
 
 #include <array>
+#include <string>
 
 namespace cortex::ui {
 
@@ -15,12 +16,15 @@ public:
 private:
     void SyncBuffers(UiContext& context);
     void Save(UiContext& context);
+    bool DrawHotkeys(UiContext& context);
 
     bool buffersInitialized_ = false;
     std::array<char, 512> crashDirectory_ = {};
     std::array<char, 512> symbolPath_ = {};
     std::array<char, 512> projectDirectory_ = {};
     std::array<char, 512> sessionDirectory_ = {};
+    std::array<char, 512> autoAttachProcesses_ = {};
+    std::string capturingHotkey_;
 };
 
 } // namespace cortex::ui

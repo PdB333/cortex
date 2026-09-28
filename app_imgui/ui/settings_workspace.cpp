@@ -1,9 +1,12 @@
 #include "settings_workspace.h"
 #include "widgets.h"
 
+#include "application/hotkeys.h"
+
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace cortex::ui {
@@ -35,6 +38,7 @@ void SettingsWorkspace::SyncBuffers(UiContext& context) {
     Copy(symbolPath_, value.diagnosticsSymbolPath);
     Copy(projectDirectory_, value.projectDirectory);
     Copy(sessionDirectory_, value.sessionDirectory);
+    Copy(autoAttachProcesses_, value.autoAttachProcesses);
     buffersInitialized_ = true;
 }
 
@@ -138,6 +142,94 @@ bool ComboRow(SettingsGrid& grid, const char* label, const char* id,
     return true;
 }
 
+namespace {
+
+// Letters, digits and editing keys need a modifier: a bare global hotkey
+// would take the key away from every other program.
+bool NeedsModifier(const std::string& key) {
+    if (key.size() >= 2 && key[0] == 'F' && std::isdigit(static_cast<unsigned char>(key[1]))) return false;
+    if (key.rfind("Keypad", 0) == 0) return false;
+    return key != "Pause" && key != "ScrollLock" && key != "Insert" && key != "Home" && key != "End" &&
+           key != "PageUp" && key != "PageDown" && key != "PrintScreen";
+}
+
+bool IsModifierKey(ImGuiKey key) {
+    return key == ImGuiKey_LeftCtrl || key == ImGuiKey_RightCtrl || key == ImGuiKey_LeftShift ||
+           key == ImGuiKey_RightShift || key == ImGuiKey_LeftAlt || key == ImGuiKey_RightAlt ||
+           key == ImGuiKey_LeftSuper || key == ImGuiKey_RightSuper || key == ImGuiKey_ReservedForModCtrl ||
+           key == ImGuiKey_ReservedForModShift || key == ImGuiKey_ReservedForModAlt ||
+           key == ImGuiKey_ReservedForModSuper;
+}
+
+} // namespace
+
+bool SettingsWorkspace::DrawHotkeys(UiContext& context) {
+    auto& bindings = context.settings->Values().hotkeys;
+    bool changed = false;
+    HintText("System-wide shortcuts that work while the game has the focus. Click a shortcut and press "
+             "the keys; Escape cancels, Backspace clears.");
+
+    // Record a chord for the row being captured.
+    if (!capturingHotkey_.empty()) {
+        const ImGuiIO& io = ImGui::GetIO();
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            capturingHotkey_.clear();
+        } else if (ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !io.KeyCtrl && !io.KeyAlt && !io.KeyShift) {
+            bindings.erase(capturingHotkey_);
+            capturingHotkey_.clear();
+            changed = true;
+        } else {
+            for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
+                const auto imguiKey = static_cast<ImGuiKey>(key);
+                if (IsModifierKey(imguiKey) || !ImGui::IsKeyPressed(imguiKey, false)) continue;
+                const std::string name = ImGui::GetKeyName(imguiKey);
+                std::string chord;
+                if (io.KeyCtrl) chord += "Ctrl+";
+                if (io.KeyAlt) chord += "Alt+";
+                if (io.KeyShift) chord += "Shift+";
+                if (io.KeySuper) chord += "Win+";
+                application::HotkeyChord parsed;
+                if (!application::ParseHotkeyChord(chord + name, parsed)) continue;
+                if (chord.empty() && NeedsModifier(name)) {
+                    context.status = "Add Ctrl, Alt or Shift to " + name + ": alone it would block that key everywhere";
+                    break;
+                }
+                bindings[capturingHotkey_] = application::FormatHotkeyChord(parsed);
+                capturingHotkey_.clear();
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    SettingsGrid grid("HotkeySettings");
+    if (!grid.Open()) return changed;
+    for (const auto& action : application::HotkeyActions()) {
+        grid.Row(action.label);
+        ImGui::PushID(action.id);
+        const auto found = bindings.find(action.id);
+        const bool capturing = capturingHotkey_ == action.id;
+        const std::string label = capturing ? std::string("Press the keys...")
+            : (found == bindings.end() ? std::string("Not set") : found->second);
+        const bool failed = std::find(context.hotkeyFailures.begin(), context.hotkeyFailures.end(),
+                                      action.id) != context.hotkeyFailures.end();
+        if (failed) ImGui::PushStyleColor(ImGuiCol_Text, WarningTextColor());
+        if (ImGui::Button(label.c_str(), ImVec2(-1, 0))) capturingHotkey_ = capturing ? std::string() : action.id;
+        if (failed) ImGui::PopStyleColor();
+        if (failed && ImGui::IsItemHovered())
+            ImGui::SetTooltip("Windows refused this shortcut: another program already uses it.");
+        if (found != bindings.end() && ImGui::BeginPopupContextItem("HotkeyMenu")) {
+            if (ImGui::MenuItem("Clear")) {
+                bindings.erase(action.id);
+                changed = true;
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+    return changed;
+}
+
 void SettingsWorkspace::Draw(UiContext& context) {
     if (!context.settings) {
         ImGui::TextDisabled("Settings store unavailable.");
@@ -201,6 +293,18 @@ void SettingsWorkspace::Draw(UiContext& context) {
                               &value.scanResultRefreshMs, 100, 10000);
         }
     }
+
+    if (ImGui::CollapsingHeader("Process attach", ImGuiTreeNodeFlags_DefaultOpen)) {
+        SettingsGrid grid("AttachSettings");
+        if (grid.Open()) {
+            changed |= CheckboxRow(grid, "Attach automatically when a process starts", "##AutoAttach",
+                                   &value.autoAttachEnabled);
+            changed |= PathRow(grid, "Process names (comma separated)", "##AutoAttachNames", "game.exe, other.exe",
+                               autoAttachProcesses_, value.autoAttachProcesses);
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Hotkeys", ImGuiTreeNodeFlags_DefaultOpen)) changed |= DrawHotkeys(context);
 
     if (ImGui::CollapsingHeader("Debugger & trace", ImGuiTreeNodeFlags_DefaultOpen)) {
         SettingsGrid grid("DebuggerSettings");

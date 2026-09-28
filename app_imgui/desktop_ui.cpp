@@ -3,6 +3,8 @@
 
 #include "desktop_app.h"
 
+#include <tlhelp32.h>
+
 namespace cortex::desktop {
 
 std::string Trim(std::string value) {
@@ -103,7 +105,16 @@ void NavigateTo(AppState& app, uint64_t address, const char* workspace) {
     app.ui.NavigateTo(workspace ? workspace : "memory-browser", address);
 }
 
+// Resumes a process Cortex suspended with Pause target.
+void ReleasePause(AppState& app, uint64_t pid) {
+    if (app.pausedPids.erase(pid) > 0) cortex::process_control::Resume(pid);
+}
+
 void ResetTargetState(AppState& app) {
+    if (const auto session = app.sessions.Active()) {
+        ReleasePause(app, session->Target().processId);
+        app.autoAttachSkipPid = session->Target().processId;
+    }
     app.debuggerModel.Reset();
     app.projectModel.Reset();
     app.symbolsModel.Reset();
@@ -168,12 +179,14 @@ enum class CommandAction {
     ViewSettings,
     NavigateBack,
     NavigateForward,
-    GoTo
+    GoTo,
+    Dispatch
 };
 
 struct CommandEntry {
     const char* label;
     CommandAction action;
+    const char* command = nullptr;  // for Dispatch
 };
 
 constexpr CommandEntry kCommands[] = {
@@ -213,7 +226,17 @@ constexpr CommandEntry kCommands[] = {
     {"View: Settings", CommandAction::ViewSettings},
     {"Navigate: Back", CommandAction::NavigateBack},
     {"Navigate: Forward", CommandAction::NavigateForward},
-    {"Navigate: Go to address", CommandAction::GoTo}
+    {"Navigate: Go to address", CommandAction::GoTo},
+    {"Target: Pause / resume the process", CommandAction::Dispatch, "pause_target"},
+    {"Target: Attach to the foreground process", CommandAction::Dispatch, "attach_foreground"},
+    {"Scan: Next scan", CommandAction::Dispatch, "scan_next"},
+    {"Scan: Next scan, increased value", CommandAction::Dispatch, "scan_increased"},
+    {"Scan: Next scan, decreased value", CommandAction::Dispatch, "scan_decreased"},
+    {"Scan: Next scan, changed value", CommandAction::Dispatch, "scan_changed"},
+    {"Scan: Next scan, unchanged value", CommandAction::Dispatch, "scan_unchanged"},
+    {"Scan: Undo the last scan", CommandAction::Dispatch, "scan_undo"},
+    {"Scan: Cancel the running scan", CommandAction::Dispatch, "scan_cancel"},
+    {"Address list: Freeze / unfreeze all", CommandAction::Dispatch, "freeze_toggle_all"}
 };
 
 bool CommandMatches(const char* label, const char* filter) {
@@ -221,9 +244,12 @@ bool CommandMatches(const char* label, const char* filter) {
     return Lower(label ? label : "").find(Lower(filter)) != std::string::npos;
 }
 
-void ExecuteCommand(AppState& app, CommandAction action) {
+void ExecuteCommand(AppState& app, CommandAction action, const char* command = nullptr) {
     using cortex::ui::WorkspacePreset;
     switch (action) {
+        case CommandAction::Dispatch:
+            if (command) DispatchCommand(app, command);
+            break;
         case CommandAction::PresetMemory: app.workspaces.ApplyPreset(WorkspacePreset::Memory); break;
         case CommandAction::PresetDebug: app.workspaces.ApplyPreset(WorkspacePreset::Debug); break;
         case CommandAction::PresetRE: app.workspaces.ApplyPreset(WorkspacePreset::ReverseEngineering); break;
@@ -336,7 +362,7 @@ void DrawCommandPalette(AppState& app) {
         if (!CommandMatches(command.label, app.commandFilter)) continue;
         if (!firstMatch) firstMatch = &command;
         if (ImGui::Selectable(command.label)) {
-            ExecuteCommand(app, command.action);
+            ExecuteCommand(app, command.action, command.command);
             ImGui::CloseCurrentPopup();
             break;
         }
@@ -344,7 +370,7 @@ void DrawCommandPalette(AppState& app) {
     ImGui::EndChild();
 
     if (enter && firstMatch) {
-        ExecuteCommand(app, firstMatch->action);
+        ExecuteCommand(app, firstMatch->action, firstMatch->command);
         ImGui::CloseCurrentPopup();
     }
 
@@ -619,6 +645,8 @@ void ActivateAttachedTarget(
 constexpr ImVec4 kWriteAccent(0.93f, 0.69f, 0.29f, 1.0f);
 
 void DetachTarget(AppState& app, const cortex::target::TargetDescriptor& target, bool wasActive) {
+    ReleasePause(app, target.processId);
+    app.autoAttachSkipPid = target.processId;
     app.sessions.Detach(target.id);
     if (!wasActive) return;
     const auto remaining = app.sessions.AttachedTargets();
@@ -627,6 +655,141 @@ void DetachTarget(AppState& app, const cortex::target::TargetDescriptor& target,
         app.OnAttached(remaining.front(), false);
     } else {
         ResetTargetState(app);
+    }
+}
+
+// Attaches (or switches back) to a process id.
+bool AttachProcessId(AppState& app, uint64_t pid, const std::string& verb) {
+    for (const auto& target : app.sessions.AttachedTargets()) {
+        if (target.processId != pid) continue;
+        ActivateAttachedTarget(app, target);
+        return true;
+    }
+    app.RefreshTargets();
+    for (const auto& target : app.targets) {
+        if (target.processId != pid) continue;
+        std::string error;
+        if (!app.sessions.Attach(target, &error)) {
+            app.ui.status = "Attach failed: " + error;
+            return false;
+        }
+        app.OnAttached(target);
+        app.ui.status = verb + target.name + " (PID " + std::to_string(pid) + ")";
+        return true;
+    }
+    app.ui.status = "Process " + std::to_string(pid) + " was not found";
+    return false;
+}
+
+void TogglePauseTarget(AppState& app) {
+    const auto session = app.sessions.Active();
+    if (!session) {
+        app.ui.status = "Select a process first";
+        return;
+    }
+    const uint64_t pid = session->Target().processId;
+    std::string error;
+    if (app.pausedPids.count(pid)) {
+        if (!cortex::process_control::Resume(pid, &error)) {
+            app.ui.status = "Resume failed: " + error;
+            return;
+        }
+        app.pausedPids.erase(pid);
+        app.ui.status = "Target resumed";
+        return;
+    }
+    if (!app.ui.mutationAllowed) {
+        app.ui.status = "Allow writes to pause the target";
+        return;
+    }
+    if (!cortex::process_control::Suspend(pid, &error)) {
+        app.ui.status = "Pause failed: " + error;
+        return;
+    }
+    app.pausedPids.insert(pid);
+    app.ui.status = "Target paused: every thread is suspended until Resume target";
+}
+
+void AttachForegroundProcess(AppState& app) {
+    if (app.lastForegroundPid == 0) {
+        app.ui.status = "Bring the target window to the front first, then use the hotkey";
+        return;
+    }
+    AttachProcessId(app, app.lastForegroundPid, "Attached to the foreground process ");
+}
+
+void TrackForegroundProcess(AppState& app) {
+    HWND foreground = GetForegroundWindow();
+    if (!foreground) return;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(foreground, &pid);
+    if (pid != 0 && pid != GetCurrentProcessId()) app.lastForegroundPid = pid;
+}
+
+std::string NarrowName(const wchar_t* text) {
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+    if (bytes <= 1) return {};
+    std::string result(static_cast<size_t>(bytes - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), bytes, nullptr, nullptr);
+    return result;
+}
+
+// Settings > Process attach: attach as soon as a listed process runs.
+void AutoAttach(AppState& app) {
+    const auto& values = app.settings.Values();
+    if (!values.autoAttachEnabled || app.sessions.Active()) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - app.lastAutoAttach < std::chrono::seconds(2)) return;
+    app.lastAutoAttach = now;
+
+    std::vector<std::string> names;
+    std::string current;
+    for (const char ch : values.autoAttachProcesses + ",") {
+        if (ch == ',' || ch == ';') {
+            current = Lower(Trim(current));
+            if (!current.empty()) {
+                names.push_back(current);
+                if (current.size() < 4 || current.compare(current.size() - 4, 4, ".exe") != 0)
+                    names.push_back(current + ".exe");
+            }
+            current.clear();
+        } else {
+            current += ch;
+        }
+    }
+    if (names.empty()) return;
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    uint64_t match = 0;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID == GetCurrentProcessId() || entry.th32ProcessID == app.autoAttachSkipPid) continue;
+            const std::string name = Lower(NarrowName(entry.szExeFile));
+            if (std::find(names.begin(), names.end(), name) != names.end()) {
+                match = entry.th32ProcessID;
+                break;
+            }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    if (match) AttachProcessId(app, match, "Auto-attached to ");
+}
+
+void DispatchCommand(AppState& app, const std::string& command) {
+    if (command == "pause_target") {
+        TogglePauseTarget(app);
+    } else if (command == "attach_foreground") {
+        AttachForegroundProcess(app);
+    } else if (command == "show_cortex") {
+        HWND window = static_cast<HWND>(app.window);
+        if (!window) return;
+        if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
+        SetForegroundWindow(window);
+    } else if (!command.empty()) {
+        app.ui.commands.push_back(command);
     }
 }
 
@@ -749,6 +912,10 @@ void DrawHeader(AppState& app) {
                     target.name.c_str(),
                     static_cast<unsigned long long>(target.processId),
                     cortex::target::ArchitectureName(target.architecture));
+        if (app.ui.targetPaused) {
+            ImGui::SameLine();
+            ImGui::TextColored(kWriteAccent, "PAUSED");
+        }
         if (!app.payload.Ready()) {
             std::string runtimeReason;
             if (!app.payload.RuntimeSupportAvailable(&runtimeReason)) {
@@ -798,6 +965,19 @@ void DrawHeader(AppState& app) {
     if (ImGui::Button("Go to...")) app.requestGoTo = true;
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("Go to an address, module offset or symbol (Ctrl+G)");
+    ImGui::SameLine();
+    const bool paused = app.ui.targetPaused;
+    if (paused) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.38f, 0.10f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.66f, 0.46f, 0.13f, 1.0f));
+    }
+    if (ImGui::Button(paused ? "Resume target###PauseTarget" : "Pause target###PauseTarget"))
+        TogglePauseTarget(app);
+    if (paused) ImGui::PopStyleColor(2);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(paused ? "Every thread of the target is suspended. Resume it here."
+                                 : "Suspend every thread of the target (needs Writes allowed).\n"
+                                   "A global hotkey can be set in Settings > Hotkeys.");
     ImGui::EndDisabled();
     DrawDebugControls(app);
     DrawSessionChips(app);
@@ -865,6 +1045,12 @@ void DrawApp(AppState& app) {
     }
 
     app.aiActivityModel.Poll(app.settings.Values().aiActivityHistoryLimit);
+    TrackForegroundProcess(app);
+    AutoAttach(app);
+    {
+        const auto session = app.sessions.Active();
+        app.ui.targetPaused = session && app.pausedPids.count(session->Target().processId) > 0;
+    }
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -890,8 +1076,15 @@ void DrawApp(AppState& app) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Select process..."))
                 app.ui.requestProcessPicker = true;
+            if (ImGui::MenuItem("Attach to foreground process", nullptr, false, app.lastForegroundPid != 0))
+                AttachForegroundProcess(app);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("The last window used before Cortex. Bind a global hotkey in\n"
+                                  "Settings > Hotkeys to attach straight from the game.");
             const bool attached = static_cast<bool>(app.sessions.Active());
             ImGui::BeginDisabled(!attached);
+            if (ImGui::MenuItem(app.ui.targetPaused ? "Resume target" : "Pause target"))
+                TogglePauseTarget(app);
             if (ImGui::MenuItem("Detach active target")) {
                 ResetTargetState(app);
             }

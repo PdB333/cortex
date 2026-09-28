@@ -22,6 +22,7 @@ public:
     const char* Id() const override { return "memory"; }
     const char* Title() const override { return "Memory"; }
     void Draw(UiContext& context) override;
+    void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
     struct ScanTask {

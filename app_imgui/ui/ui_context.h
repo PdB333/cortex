@@ -70,6 +70,13 @@ struct UiContext {
 
     bool mutationAllowed = false;
     bool requestProcessPicker = false;
+    // Commands from global hotkeys and the command palette (see
+    // HotkeyActions), delivered to every workspace before drawing.
+    std::vector<std::string> commands;
+    // The active target is suspended by Pause target.
+    bool targetPaused = false;
+    // Hotkey actions whose chord could not be registered.
+    std::vector<std::string> hotkeyFailures;
     std::string status = "Select a process to begin";
 
     // Lightweight cross-workspace navigation. A workspace can request another

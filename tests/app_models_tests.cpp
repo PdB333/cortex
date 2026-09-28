@@ -2,6 +2,7 @@
 // runtime transport so they need no target process, pipe or Windows API.
 
 #include "application/actions_model.h"
+#include "application/hotkeys.h"
 #include "application/patches_model.h"
 #include "application/prompt_model.h"
 #include "application/runtime_events_model.h"
@@ -113,6 +114,32 @@ int main() {
     };
 
     using namespace cortex::application;
+
+    // Global hotkey chords round-trip and reject what RegisterHotKey cannot take.
+    {
+        HotkeyChord chord;
+        check(ParseHotkeyChord("Ctrl+Alt+F5", chord) && chord.modifiers == 3 && chord.virtualKey == 0x74,
+              "Ctrl+Alt+F5 parses");
+        check(FormatHotkeyChord(chord) == "Ctrl+Alt+F5", "Ctrl+Alt+F5 formats back");
+        check(ParseHotkeyChord("shift + keypad1", chord) && chord.modifiers == 4 && chord.virtualKey == 0x61,
+              "chords ignore case and spaces");
+        check(FormatHotkeyChord(chord) == "Shift+Keypad1", "keypad keys keep their ImGui name");
+        check(ParseHotkeyChord("Win+Ctrl+Z", chord) && FormatHotkeyChord(chord) == "Ctrl+Win+Z",
+              "modifiers format in a fixed order");
+        check(!ParseHotkeyChord("Ctrl+Alt", chord), "a chord needs a key");
+        check(!ParseHotkeyChord("Ctrl+A+B", chord), "a chord has one key");
+        check(!ParseHotkeyChord("Ctrl+Nope", chord), "unknown keys are rejected");
+        check(!ParseHotkeyChord("", chord), "empty chords are rejected");
+        bool unique = true;
+        for (size_t i = 0; i < HotkeyActions().size(); ++i)
+            for (size_t j = i + 1; j < HotkeyActions().size(); ++j)
+                unique &= std::string(HotkeyActions()[i].id) != HotkeyActions()[j].id;
+        check(unique, "hotkey action ids are unique");
+
+        HotkeyRegistrar registrar;
+        const auto failures = registrar.Apply(nullptr, {{"pause_target", "Ctrl+Bogus"}});
+        check(failures.size() == 1 && failures.front() == "pause_target", "invalid bindings are reported");
+    }
 
     // Mutation gate: no runtime present and writes not allowed -> nothing is
     // injected and no tool is called.

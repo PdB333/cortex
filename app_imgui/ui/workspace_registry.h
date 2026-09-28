@@ -322,6 +322,12 @@ public:
     }
 
     void DrawDockWindows(UiContext& context) {
+        if (!context.commands.empty()) {
+            const auto commands = std::move(context.commands);
+            context.commands.clear();
+            for (const auto& command : commands)
+                for (auto& entry : entries_) entry.workspace->HandleCommand(context, command);
+        }
         if (!context.requestWorkspace.empty()) {
             Select(context.requestWorkspace);
             context.requestWorkspace.clear();

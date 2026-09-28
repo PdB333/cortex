@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <string>
 
 namespace cortex::application {
@@ -43,6 +44,13 @@ struct Settings {
     bool showAiActivityInTitleBar = true;
 
     int autoRefreshMs = 750;
+
+    // Global hotkeys: action id (see HotkeyActions) -> "Ctrl+Alt+F5".
+    std::map<std::string, std::string> hotkeys;
+    // Attach automatically when one of these processes starts (names
+    // separated by commas or semicolons) and nothing is attached.
+    bool autoAttachEnabled = false;
+    std::string autoAttachProcesses;
 };
 
 class SettingsStore {
