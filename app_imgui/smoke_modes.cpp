@@ -265,7 +265,7 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
     "scripts", "input", "screenshots", "patches", "events", "trace", "tools",
-    "access-finder"
+    "access-finder", "lua"
 };
 
 
@@ -553,6 +553,21 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         scanHits = first->Size();
+
+        // The desktop Lua engine reads the same value through a module+offset
+        // expression, without the runtime.
+        cortex::application::LuaRunOptions lua;
+        lua.session = session;
+        lua.modules = [&app]() { return app.modules.List(nullptr); };
+        char script[160] = {};
+        std::snprintf(script, sizeof(script), "return readInteger(\"%s+%llX\", true)", module.name.c_str(),
+                      static_cast<unsigned long long>(health - module.base));
+        const auto luaResult = cortex::application::RunDesktopLua(script, lua);
+        if (!luaResult.ok || luaResult.returned.empty()) {
+            error = "lua_read_failed:" + luaResult.error;
+            return false;
+        }
+        summary += " lua=" + luaResult.returned;
 
         services::PointerScanOptions pointerOptions;
         pointerOptions.target = health;

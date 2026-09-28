@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           count="$(grep -c 'workspaces.Add<cortex::ui::' app_imgui/desktop_app.h)"
-          test "$count" -eq 30
+          test "$count" -eq 31
           grep -q 'GUI workspace suite' app_imgui/smoke_modes.cpp
           grep -q 'ValidateOpenWindowsDocked' app_imgui/ui/workspace_registry.h
           grep -q -- '--gui-cross-bitness-suite' app_imgui/cli.cpp

@@ -12,6 +12,7 @@
 #include "application/network_model.h"
 #include "application/debugger_model.h"
 #include "application/hotkeys.h"
+#include "application/lua_engine.h"
 #include "application/settings.h"
 #include "application/project_model.h"
 #include "application/patches_model.h"
@@ -54,6 +55,7 @@
 #include "ui/trace_workspace.h"
 #include "ui/tools_workspace.h"
 #include "ui/access_finder_workspace.h"
+#include "ui/lua_workspace.h"
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
@@ -280,6 +282,7 @@ struct AppState {
         workspaces.Add<cortex::ui::TraceWorkspace>();
         workspaces.Add<cortex::ui::ToolsWorkspace>();
         workspaces.Add<cortex::ui::AccessFinderWorkspace>();
+        workspaces.Add<cortex::ui::LuaWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 

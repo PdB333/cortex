@@ -52,6 +52,27 @@ set(ZYDIS_BUILD_DOXYGEN OFF CACHE INTERNAL "")
 set(ZYDIS_BUILD_MAN OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(zydis)
 
+# Lua 5.4.7 for the desktop Lua engine, compiled as C++ so errors raised
+# from C++ callbacks unwind instead of longjmp-ing over destructors.
+FetchContent_Declare(
+    lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        1ab3208a1fceb12fca8f24ba57d6e13c5bff15e3
+)
+FetchContent_MakeAvailable(lua)
+set(CORTEX_LUA_SOURCES
+    lapi.c lauxlib.c lbaselib.c lcode.c lcorolib.c lctype.c ldblib.c
+    ldebug.c ldo.c ldump.c lfunc.c lgc.c linit.c liolib.c llex.c
+    lmathlib.c lmem.c loadlib.c lobject.c lopcodes.c loslib.c
+    lparser.c lstate.c lstring.c lstrlib.c ltable.c ltablib.c ltm.c
+    lundump.c lutf8lib.c lvm.c lzio.c
+)
+list(TRANSFORM CORTEX_LUA_SOURCES PREPEND ${lua_SOURCE_DIR}/)
+set_source_files_properties(${CORTEX_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(cortex_desktop_lua STATIC ${CORTEX_LUA_SOURCES})
+target_include_directories(cortex_desktop_lua PUBLIC ${lua_SOURCE_DIR})
+target_compile_definitions(cortex_desktop_lua PUBLIC LUA_COMPAT_5_3)
+
 add_library(cortex_imgui_vendor STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -81,6 +102,8 @@ add_executable(cortex_imgui WIN32
     application/settings.cpp
     application/hotkeys.cpp
     application/cheat_table.cpp
+    application/address_expression.cpp
+    application/lua_engine.cpp
     application/runtime_model_base.cpp
     application/ai_activity_model.cpp
     application/debugger_model.cpp
@@ -132,6 +155,7 @@ add_executable(cortex_imgui WIN32
     ui/tools_workspace.cpp
     ui/access_finder_workspace.cpp
     ui/file_dialog.cpp
+    ui/lua_workspace.cpp
     ui/theme.cpp
     ui/fonts.cpp
 
@@ -191,6 +215,7 @@ target_compile_definitions(cortex_imgui PRIVATE
 
 target_link_libraries(cortex_imgui PRIVATE
     cortex_imgui_vendor
+    cortex_desktop_lua
     nlohmann_json::nlohmann_json
     Zydis
     d3d11
@@ -290,4 +315,22 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_memory_tools_tests COMMAND cortex_memory_tools_tests)
     set_tests_properties(cortex_memory_tools_tests PROPERTIES TIMEOUT 60)
+
+    # The desktop Lua engine and address expressions against a fake process.
+    add_executable(cortex_lua_engine_tests
+        ../tests/lua_engine_tests.cpp
+        application/lua_engine.cpp
+        application/address_expression.cpp
+        ../core/services/value_scanner.cpp
+    )
+    target_include_directories(cortex_lua_engine_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_lua_engine_tests PRIVATE cortex_desktop_lua)
+    if(MINGW)
+        target_link_options(cortex_lua_engine_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_lua_engine_tests COMMAND cortex_lua_engine_tests)
+    set_tests_properties(cortex_lua_engine_tests PROPERTIES TIMEOUT 60)
 endif()
