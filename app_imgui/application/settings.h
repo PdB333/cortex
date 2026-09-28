@@ -16,8 +16,17 @@ struct Settings {
 
     int memoryBytesPerRow = 16;
     int memoryReadSize = 256;
+    // byte, i16, i32, i64, f32, f64, string, bytes or all
     std::string defaultScanType = "i32";
-    int maxScanResults = 5000;
+    int maxScanResults = 1000000;
+    bool scanFastScan = true;
+    bool scanPauseTarget = false;
+    int scanThreads = 0;  // 0 = one per hardware thread
+    bool scanPrivateMemory = true;
+    bool scanImageMemory = true;
+    bool scanMappedMemory = false;
+    std::string scanFloatRounding = "rounded";  // rounded, extreme, truncated, exact
+    int scanResultRefreshMs = 500;
 
     std::string debuggerBackend = "windows";
     std::string breakpointDefaultAction = "log";

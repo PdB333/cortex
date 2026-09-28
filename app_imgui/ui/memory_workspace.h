@@ -1,7 +1,8 @@
 #pragma once
 
 #include "workspace.h"
-#include "services/scan_service.h"
+#include "services/value_scanner.h"
+#include "target/module_provider.h"
 
 #include <atomic>
 #include <chrono>
@@ -9,7 +10,10 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+struct ImGuiMultiSelectIO;
 
 namespace cortex::ui {
 
@@ -20,70 +24,134 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    struct ScanTaskResult {
-        bool ok = false;
+    struct ScanTask {
+        services::ScanStatePtr state;
         std::string error;
-        std::vector<services::ScanResult> results;
-        bool limitReached = false;
+        std::string pauseError;
     };
+
+    enum class FreezeMode : uint8_t { Always = 0, AllowIncrease, AllowDecrease };
 
     struct AddressEntry {
         uint64_t address = 0;
-        services::ScanValueKind kind = services::ScanValueKind::I32;
+        services::ScanDataType type = services::ScanDataType::Int32;
+        size_t size = 4;              // String and Array of bytes length
+        bool utf16 = false;
+        bool hex = false;
+        bool unsignedValue = false;
         std::string description;
         std::vector<uint8_t> lastValue;
         std::vector<uint8_t> frozenValue;
         bool freeze = false;
+        FreezeMode freezeMode = FreezeMode::Always;
+        bool readable = true;
+        bool selected = false;
     };
 
+    // Layout
     void DrawWelcome(UiContext& context);
     void DrawResults(UiContext& context, float height);
     void DrawScanPanel(UiContext& context, float height);
+    void DrawScanOptions(UiContext& context);
     void DrawAddressList(UiContext& context);
     void DrawDialogs(UiContext& context);
+
+    // Scanning
+    void ApplyDefaults(UiContext& context);
+    void ResetForTarget(UiContext& context, const std::string& targetId);
     void PollScan(UiContext& context);
     void StartScan(UiContext& context);
-    void ResetForTarget(const std::string& targetId);
     void NewScan(UiContext& context);
-    void RefreshAddressValues(UiContext& context);
+    void UndoScan(UiContext& context);
+    void CancelScan();
+    services::ScanDataType SelectedType() const;
+    services::ScanQuery BuildQuery() const;
+    bool BuildOptions(UiContext& context, services::ScanOptions& options, std::string& error) const;
+    std::vector<services::ScanCompare> AvailableCompares() const;
+    void SetScan(services::ScanStatePtr state);
 
-    std::vector<uint8_t> EncodeValue(std::string& error) const;
-    std::vector<uint8_t> EncodeText(const char* text, services::ScanValueKind kind,
-                                    std::string& error) const;
-    std::string FormatValue(const std::vector<uint8_t>& value,
-                            services::ScanValueKind kind) const;
-    services::ScanValueKind SelectedKind() const;
-    services::ScanComparison SelectedComparison() const;
-    void AddAddress(const services::ScanResult& result);
+    // Results
+    void RefreshModules(UiContext& context, bool force = false);
+    const target::ModuleInfo* ModuleFor(uint64_t address) const;
+    std::string AddressText(uint64_t address, bool& isStatic) const;
+    bool ResolveAddress(UiContext& context, const std::string& text, uint64_t& address);
+    const std::vector<uint8_t>& LiveValue(UiContext& context, size_t index);
+    std::string FormatHit(const uint8_t* data, size_t index) const;
+    std::vector<size_t> ActionRows(size_t clicked) const;
+    void ApplySelection(ImGuiMultiSelectIO* io);
+    void AddResultsToList(const std::vector<size_t>& rows);
+    void SaveResultsToProject(UiContext& context, const std::vector<size_t>& rows);
+    void RemoveResults(UiContext& context, const std::vector<size_t>& rows);
+    void CopyResults(const std::vector<size_t>& rows) const;
+
+    // Address list
+    void RefreshAddressValues(UiContext& context);
     bool AddManualAddress(UiContext& context);
     bool CommitValueEdit(UiContext& context);
     void BeginValueEdit(size_t index);
-    void NavigateAddress(UiContext& context, uint64_t address, const char* workspace);
-    void FindWriter(UiContext& context, uint64_t address);
-    bool HasAddress(uint64_t address) const;
+    void SaveEntryToProject(UiContext& context, const AddressEntry& entry);
+    std::string FormatEntry(const AddressEntry& entry) const;
+    bool HasAddress(uint64_t address, services::ScanDataType type) const;
 
-    char scanValue_[160] = "100";
-    int typeIndex_ = 0;
-    int comparisonIndex_ = 0;
-    bool firstScanDone_ = false;
-    bool scanLimitReached_ = false;
+    // Scan inputs
+    char scanValue_[256] = "100";
+    char scanValue2_[256] = "";
+    int typeIndex_ = static_cast<int>(services::ScanDataType::Int32);
+    services::ScanCompare compare_ = services::ScanCompare::Exact;
+    bool hex_ = false;
+    bool unsigned_ = false;
+    bool invert_ = false;
+    bool compareToFirst_ = false;
+    bool utf16_ = false;
+    bool caseSensitive_ = false;
+    int rounding_ = 0;
+
+    // Memory scan options
+    int regionIndex_ = 0;             // 0 = all memory, n = modules_[n - 1]
+    char start_[24] = "0";
+    char stop_[24] = "7FFFFFFFFFFF";
+    services::ScanTristate writable_ = services::ScanTristate::Yes;
+    services::ScanTristate executable_ = services::ScanTristate::Any;
+    services::ScanTristate copyOnWrite_ = services::ScanTristate::No;
+    bool fastScan_ = true;
+    int alignment_ = 0;
+    bool pauseWhileScanning_ = false;
+    bool includePrivate_ = true;
+    bool includeImage_ = true;
+    bool includeMapped_ = false;
+
+    // Scan state
+    services::ScanStatePtr scan_;
+    services::ScanStatePtr undo_;
     bool scanRunning_ = false;
-    std::string activeTargetId_;
-
-    std::vector<services::ScanResult> scanResults_;
-    std::vector<AddressEntry> addresses_;
-
-    std::future<ScanTaskResult> scanFuture_;
+    bool scanWasFirst_ = false;
+    std::future<ScanTask> scanFuture_;
     std::shared_ptr<std::atomic_bool> scanCancel_;
-    std::chrono::steady_clock::time_point lastAddressRefresh_{};
+    std::shared_ptr<services::ScanProgress> scanProgress_;
+    std::string activeTargetId_;
+    std::string lastScanError_;
 
+    // Results view
+    std::vector<uint8_t> selected_;
+    int selectedCount_ = 0;
+    std::unordered_map<size_t, std::vector<uint8_t>> liveCache_;
+    std::chrono::steady_clock::time_point lastLiveRefresh_{};
+    std::vector<target::ModuleInfo> modules_;
+    std::chrono::steady_clock::time_point lastModuleRefresh_{};
+    bool focusValue_ = false;
+
+    // Address list
+    std::vector<AddressEntry> addresses_;
+    std::chrono::steady_clock::time_point lastAddressRefresh_{};
     bool openAddAddress_ = false;
     bool openEditValue_ = false;
     int editAddressIndex_ = -1;
-    char editValue_[256] = {};
-    char addAddress_[64] = {};
+    char editValue_[512] = {};
+    char addAddress_[128] = {};
     char addDescription_[160] = {};
-    int addTypeIndex_ = 0;
+    int addTypeIndex_ = static_cast<int>(services::ScanDataType::Int32);
+    int addLength_ = 16;
+    bool addUtf16_ = false;
 };
 
 } // namespace cortex::ui

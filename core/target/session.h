@@ -10,12 +10,23 @@
 
 namespace cortex::target {
 
+enum class MemoryRegionType : uint8_t {
+    Unknown = 0,
+    Private,
+    Image,
+    Mapped
+};
+
 struct MemoryRegion {
     uint64_t base = 0;
     uint64_t size = 0;
     bool readable = false;
     bool writable = false;
     bool executable = false;
+    bool copyOnWrite = false;
+    MemoryRegionType type = MemoryRegionType::Unknown;
+    // Native protection flags (PAGE_* on Windows), 0 when not reported.
+    uint32_t protection = 0;
 };
 
 class Session {

@@ -149,7 +149,9 @@ public:
         while (address < maximum) { MEMORY_BASIC_INFORMATION info{}; const SIZE_T queried = VirtualQueryEx(process_, reinterpret_cast<LPCVOID>(address), &info, sizeof(info)); if (queried == 0) break;
             const auto base = reinterpret_cast<uintptr_t>(info.BaseAddress); if (info.State == MEM_COMMIT && info.RegionSize > 0) {
                 MemoryRegion region; region.base = static_cast<uint64_t>(base); region.size = static_cast<uint64_t>(info.RegionSize);
-                region.readable = RegionReadable(info.Protect); region.writable = region.readable && RegionWritable(info.Protect); region.executable = region.readable && RegionExecutable(info.Protect); regions.push_back(region); }
+                region.readable = RegionReadable(info.Protect); region.writable = region.readable && RegionWritable(info.Protect); region.executable = region.readable && RegionExecutable(info.Protect);
+                region.copyOnWrite = (info.Protect & 0xff) == PAGE_WRITECOPY || (info.Protect & 0xff) == PAGE_EXECUTE_WRITECOPY; region.protection = info.Protect;
+                region.type = info.Type == MEM_IMAGE ? MemoryRegionType::Image : info.Type == MEM_MAPPED ? MemoryRegionType::Mapped : info.Type == MEM_PRIVATE ? MemoryRegionType::Private : MemoryRegionType::Unknown; regions.push_back(region); }
             const uintptr_t next = base + info.RegionSize; if (next <= address) break; address = next; }
         return regions;
     }
@@ -193,7 +195,10 @@ public:
     std::vector<MemoryRegion> MemoryRegions() const override {
         std::vector<MemoryRegion> regions; std::ifstream maps("/proc/" + std::to_string(target_.processId) + "/maps"); std::string line;
         while (std::getline(maps, line)) { std::istringstream stream(line); std::string range, permissions; if (!(stream >> range >> permissions)) continue; const auto dash = range.find('-'); if (dash == std::string::npos) continue;
-            try { const uint64_t begin = std::stoull(range.substr(0, dash), nullptr, 16); const uint64_t end = std::stoull(range.substr(dash + 1), nullptr, 16); if (end <= begin) continue; MemoryRegion region; region.base = begin; region.size = end - begin; region.readable = permissions.size() > 0 && permissions[0] == 'r'; region.writable = permissions.size() > 1 && permissions[1] == 'w'; region.executable = permissions.size() > 2 && permissions[2] == 'x'; regions.push_back(region); } catch (...) {} }
+            try { const uint64_t begin = std::stoull(range.substr(0, dash), nullptr, 16); const uint64_t end = std::stoull(range.substr(dash + 1), nullptr, 16); if (end <= begin) continue; MemoryRegion region; region.base = begin; region.size = end - begin; region.readable = permissions.size() > 0 && permissions[0] == 'r'; region.writable = permissions.size() > 1 && permissions[1] == 'w'; region.executable = permissions.size() > 2 && permissions[2] == 'x';
+                std::string offset, device, inode, path; stream >> offset >> device >> inode; std::getline(stream >> std::ws, path);
+                const bool shared = permissions.size() > 3 && permissions[3] == 's';
+                region.type = shared ? MemoryRegionType::Mapped : (!path.empty() && path.front() == '/') ? MemoryRegionType::Image : MemoryRegionType::Private; regions.push_back(region); } catch (...) {} }
         return regions;
     }
 private:

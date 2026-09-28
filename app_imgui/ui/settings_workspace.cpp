@@ -183,10 +183,22 @@ void SettingsWorkspace::Draw(UiContext& context) {
             changed |= ComboRow(grid, "Default memory read size", "##ReadSize",
                                 readSizeNames, readSizes, value.memoryReadSize);
 
-            static const char* const scanTypes[] = {"i32", "i64", "f32", "f64", "string", "bytes"};
+            static const char* const scanTypes[] = {"byte", "i16", "i32", "i64", "f32", "f64", "string", "bytes", "all"};
             changed |= ComboRow(grid, "Default scan type", "##ScanType", scanTypes, value.defaultScanType);
-            changed |= IntRow(grid, "Maximum scan results", "##MaxScanResults",
-                              &value.maxScanResults, 100, 50000);
+            changed |= IntRow(grid, "Maximum listed scan results", "##MaxScanResults",
+                              &value.maxScanResults, 100, 10000000);
+            static const char* const roundings[] = {"rounded", "extreme", "truncated", "exact"};
+            changed |= ComboRow(grid, "Default float rounding", "##FloatRounding", roundings,
+                                value.scanFloatRounding);
+            changed |= CheckboxRow(grid, "Fast scan (aligned values only)", "##FastScan", &value.scanFastScan);
+            changed |= CheckboxRow(grid, "Pause the target while scanning", "##PauseScan", &value.scanPauseTarget);
+            changed |= IntRow(grid, "Scan threads (0 = automatic)", "##ScanThreads", &value.scanThreads, 0, 32);
+            changed |= CheckboxRow(grid, "Scan private memory (MEM_PRIVATE)", "##ScanPrivate",
+                                   &value.scanPrivateMemory);
+            changed |= CheckboxRow(grid, "Scan module images (MEM_IMAGE)", "##ScanImage", &value.scanImageMemory);
+            changed |= CheckboxRow(grid, "Scan mapped files (MEM_MAPPED)", "##ScanMapped", &value.scanMappedMemory);
+            changed |= IntRow(grid, "Scan result refresh (ms)", "##ScanRefresh",
+                              &value.scanResultRefreshMs, 100, 10000);
         }
     }
 

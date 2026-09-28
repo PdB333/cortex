@@ -36,10 +36,18 @@ std::string Lower(std::string value) {
 std::string NormalizeScanType(std::string value) {
     value = Lower(value);
     static const std::vector<std::string> allowed = {
-        "i32", "i64", "f32", "f64", "string", "bytes"
+        "byte", "i16", "i32", "i64", "f32", "f64", "string", "bytes", "all"
     };
     return std::find(allowed.begin(), allowed.end(), value) != allowed.end() ? value : "i32";
 }
+
+std::string NormalizeRounding(std::string value) {
+    value = Lower(value);
+    return value == "extreme" || value == "truncated" || value == "exact" ? value : "rounded";
+}
+
+// Version 2 raised the result limit from 5000 to a million.
+constexpr int kSettingsVersion = 2;
 
 std::string NormalizeBackend(std::string value) {
     return Lower(value) == "veh" ? "veh" : "windows";
@@ -168,7 +176,17 @@ bool SettingsStore::Load(std::string* error) {
         const int readSize = getInt("memoryReadSize", 256);
         values_.memoryReadSize = IsOneOf(readSize, {128, 256, 512, 1024, 2048, 4096}) ? readSize : 256;
         values_.defaultScanType = NormalizeScanType(getString("defaultScanType", "i32"));
-        values_.maxScanResults = Clamp(getInt("maxScanResults", 5000), 100, 50000);
+        int maxScanResults = getInt("maxScanResults", 1000000);
+        if (getInt("settingsVersion", 1) < 2 && maxScanResults == 5000) maxScanResults = 1000000;
+        values_.maxScanResults = Clamp(maxScanResults, 100, 10000000);
+        values_.scanFastScan = getBool("scanFastScan", true);
+        values_.scanPauseTarget = getBool("scanPauseTarget", false);
+        values_.scanThreads = Clamp(getInt("scanThreads", 0), 0, 32);
+        values_.scanPrivateMemory = getBool("scanPrivateMemory", true);
+        values_.scanImageMemory = getBool("scanImageMemory", true);
+        values_.scanMappedMemory = getBool("scanMappedMemory", false);
+        values_.scanFloatRounding = NormalizeRounding(getString("scanFloatRounding", "rounded"));
+        values_.scanResultRefreshMs = Clamp(getInt("scanResultRefreshMs", 500), 100, 10000);
 
         values_.debuggerBackend = NormalizeBackend(getString("debuggerBackend", "windows"));
         values_.breakpointDefaultAction = NormalizeBreakpointAction(getString("breakpointDefaultAction", "log"));
@@ -195,6 +213,7 @@ bool SettingsStore::Save(std::string* error) const {
     if (error) error->clear();
     try {
         json document = {
+            {"settingsVersion", kSettingsVersion},
             {"autoLoadRuntimeOnAttach", values_.autoLoadRuntimeOnAttach},
             {"httpApiEnabled", values_.httpApiEnabled},
             {"diagnosticsEnabled", values_.diagnosticsEnabled},
@@ -206,6 +225,14 @@ bool SettingsStore::Save(std::string* error) const {
             {"memoryReadSize", values_.memoryReadSize},
             {"defaultScanType", values_.defaultScanType},
             {"maxScanResults", values_.maxScanResults},
+            {"scanFastScan", values_.scanFastScan},
+            {"scanPauseTarget", values_.scanPauseTarget},
+            {"scanThreads", values_.scanThreads},
+            {"scanPrivateMemory", values_.scanPrivateMemory},
+            {"scanImageMemory", values_.scanImageMemory},
+            {"scanMappedMemory", values_.scanMappedMemory},
+            {"scanFloatRounding", values_.scanFloatRounding},
+            {"scanResultRefreshMs", values_.scanResultRefreshMs},
             {"debuggerBackend", values_.debuggerBackend},
             {"breakpointDefaultAction", values_.breakpointDefaultAction},
             {"hardwareBreakpointsGlobal", values_.hardwareBreakpointsGlobal},

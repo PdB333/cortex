@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <cstdarg>
+#include <string>
 #include <utility>
 
 namespace cortex::ui {
@@ -76,6 +77,33 @@ inline float CheckboxWidth(const char* label) {
 }
 
 inline float TextWidth(const char* text) { return ImGui::CalcTextSize(text).x; }
+
+// Value colors shared by scan results, the address list and the memory
+// viewer: a value that changed since it was last seen, and an address inside
+// a module image (static across restarts as module+offset).
+inline ImVec4 ChangedValueColor() { return ImVec4(0.97f, 0.38f, 0.35f, 1.0f); }
+inline ImVec4 StaticAddressColor() { return ImVec4(0.40f, 0.83f, 0.49f, 1.0f); }
+inline ImVec4 WarningTextColor() { return ImVec4(0.93f, 0.69f, 0.29f, 1.0f); }
+
+// Checkbox with a third, indeterminate state: checked = only yes, empty =
+// only no, dash = either. Clicking cycles yes -> no -> either.
+template <typename Tristate>
+bool TristateCheckbox(const char* label, Tristate* state, Tristate yes, Tristate no, Tristate any) {
+    bool checked = *state == yes;
+    const bool mixed = *state == any;
+    if (mixed) ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, true);
+    const bool clicked = ImGui::Checkbox(label, &checked);
+    if (mixed) ImGui::PopItemFlag();
+    if (clicked) *state = *state == yes ? no : (*state == no ? any : yes);
+    return clicked;
+}
+
+// "1234567" -> "1,234,567"
+inline std::string GroupDigits(unsigned long long value) {
+    std::string digits = std::to_string(value);
+    for (int i = static_cast<int>(digits.size()) - 3; i > 0; i -= 3) digits.insert(static_cast<size_t>(i), ",");
+    return digits;
+}
 
 // SameLine() for inline forms and toolbars: keeps the next item on the current
 // line only when it fits, otherwise lets it wrap to a new line instead of

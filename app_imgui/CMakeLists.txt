@@ -151,7 +151,7 @@ add_executable(cortex_imgui WIN32
     ../core/target/thread_provider.cpp
 
     ../core/services/memory_service.cpp
-    ../core/services/scan_service.cpp
+    ../core/services/value_scanner.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -252,4 +252,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_app_models_tests COMMAND cortex_app_models_tests)
     set_tests_properties(cortex_app_models_tests PROPERTIES TIMEOUT 30)
+
+    # Value scanner against an in-memory fake process.
+    add_executable(cortex_value_scanner_tests
+        ../tests/value_scanner_tests.cpp
+        ../core/services/value_scanner.cpp
+    )
+    target_include_directories(cortex_value_scanner_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_value_scanner_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_value_scanner_tests COMMAND cortex_value_scanner_tests)
+    set_tests_properties(cortex_value_scanner_tests PROPERTIES TIMEOUT 60)
 endif()
