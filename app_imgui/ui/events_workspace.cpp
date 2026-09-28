@@ -79,8 +79,8 @@ void EventsWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
                                   ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 70);
-                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 120);
+                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(70));
+                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(120));
                 ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.28f);
                 ImGui::TableSetupColumn("Data", ImGuiTableColumnFlags_WidthStretch, 0.72f);
                 ImGui::TableHeadersRow();

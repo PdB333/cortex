@@ -243,13 +243,13 @@ void RuntimeWorkspace::Draw(UiContext& context) {
     ApplyPreset(context);
 
     if (tools_.empty()) {
-        ImGui::Dummy(ImVec2(0, 15));
+        ImGui::Dummy(ImVec2(0, Px(15)));
         HintText("Enable or connect the runtime to load advanced Cortex tools.");
         return;
     }
 
     static const char* modes[] = {"Primitives", "All tools", "Semantic"};
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(Px(130));
     if (ImGui::Combo("##RuntimeMode", &modeIndex_, modes, IM_ARRAYSIZE(modes)) &&
         modeIndex_ <= 1 && context.settings) {
         context.settings->Values().mcpToolProfile =
@@ -258,8 +258,8 @@ void RuntimeWorkspace::Draw(UiContext& context) {
         if (!context.settings->SaveAndSync(&error))
             context.status = "MCP profile save failed: " + error;
     }
-    FlowSameLine(260);
-    ImGui::SetNextItemWidth(260);
+    FlowSameLine(Px(260));
+    ImGui::SetNextItemWidth(Px(260));
     ImGui::InputTextWithHint("##RuntimeFilter", "Filter tools...",
                              filter_.data(), filter_.size());
 
@@ -272,7 +272,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     const float left =
-        std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, 300.0f, 460.0f);
+        std::clamp(ImGui::GetContentRegionAvail().x * 0.34f, Px(300.0f), Px(460.0f));
 
     ImGui::BeginChild("ToolCatalog", ImVec2(left, 0), ImGuiChildFlags_Borders);
     for (size_t i = 0; i < tools_.size(); ++i) {
@@ -313,12 +313,12 @@ void RuntimeWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
     ImGui::TextDisabled("Arguments (JSON)");
-    ImGui::InputTextMultiline("##ToolArguments", arguments_.data(), arguments_.size(),
+    MonoInputTextMultiline("##ToolArguments", arguments_.data(), arguments_.size(),
                               ImVec2(-1, 160));
 
     const bool blocked = tool.mutationRequired && !context.mutationAllowed;
     ImGui::BeginDisabled(blocked);
-    if (ImGui::Button("Call", ImVec2(140, 36))) CallSelected(context);
+    if (ImGui::Button("Call", ImVec2(Px(140), Px(36)))) CallSelected(context);
     ImGui::EndDisabled();
     if (blocked) {
         FlowSameLine(TextWidth("Enable writes to call this tool"));

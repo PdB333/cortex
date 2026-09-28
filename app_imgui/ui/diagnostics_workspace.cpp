@@ -64,9 +64,9 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable,
-                          ImVec2(0, 180))) {
+                          ImVec2(0, Px(180)))) {
         ImGui::TableSetupColumn("Hook", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Installed", ImGuiTableColumnFlags_WidthFixed, 85);
+        ImGui::TableSetupColumn("Installed", ImGuiTableColumnFlags_WidthFixed, Px(85));
         ImGui::TableSetupColumn("Backend", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (const auto& hook : context.diagnosticsModel->Hooks()) {

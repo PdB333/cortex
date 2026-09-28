@@ -141,23 +141,23 @@ void ReWorkspace::Draw(UiContext& context) {
     ImGui::BeginDisabled(!runtimeConnected);
     if (ImGui::BeginTabBar("ReTabs")) {
         if (ImGui::BeginTabItem("Objects")) {
-            ImGui::SetNextItemWidth(150);
+            ImGui::SetNextItemWidth(Px(150));
             ImGui::InputTextWithHint("##ReTrackName", "Name",
                                      trackName_.data(), trackName_.size());
-            FlowSameLine(180);
-            ImGui::SetNextItemWidth(180);
+            FlowSameLine(Px(180));
+            ImGui::SetNextItemWidth(Px(180));
             ImGui::InputTextWithHint("##ReTrackAddress", "Address",
                                      trackAddress_.data(), trackAddress_.size());
-            FlowSameLine(180);
-            ImGui::SetNextItemWidth(180);
+            FlowSameLine(Px(180));
+            ImGui::SetNextItemWidth(Px(180));
             ImGui::InputTextWithHint("##ReTrackPath", "Pointer path",
                                      trackPointerPath_.data(), trackPointerPath_.size());
-            FlowSameLine(130);
-            ImGui::SetNextItemWidth(130);
+            FlowSameLine(Px(130));
+            ImGui::SetNextItemWidth(Px(130));
             ImGui::InputTextWithHint("##ReTrackStruct", "Struct",
                                      trackStruct_.data(), trackStruct_.size());
-            FlowSameLine(90);
-            ImGui::SetNextItemWidth(90);
+            FlowSameLine(Px(90));
+            ImGui::SetNextItemWidth(Px(90));
             ImGui::InputInt("Size##ReTrack", &trackSize_);
             trackSize_ = std::clamp(trackSize_, 1, 1024 * 1024);
             FlowSameLine(CheckboxWidth("Persist"));
@@ -183,14 +183,14 @@ void ReWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
-                                  ImVec2(0, 300))) {
-                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 65);
+                                  ImVec2(0, Px(300)))) {
+                ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, Px(65));
                 ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.22f);
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.20f);
-                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(70));
                 ImGui::TableSetupColumn("Pointer path", ImGuiTableColumnFlags_WidthStretch, 0.24f);
                 ImGui::TableSetupColumn("Struct", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 135);
+                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(135));
                 ImGui::TableHeadersRow();
 
                 for (const auto& row : context.reModel->Tracks()) {
@@ -258,15 +258,15 @@ void ReWorkspace::Draw(UiContext& context) {
                 Copy(analysisAddress_.data(), analysisAddress_.size(), selected.c_str());
             }
 
-            ImGui::SetNextItemWidth(260);
+            ImGui::SetNextItemWidth(Px(260));
             ImGui::InputTextWithHint("##ReAnalysisAddress", "Address / module+RVA / symbol",
                                      analysisAddress_.data(), analysisAddress_.size());
-            FlowSameLine(90);
-            ImGui::SetNextItemWidth(90);
+            FlowSameLine(Px(90));
+            ImGui::SetNextItemWidth(Px(90));
             ImGui::InputInt("Size##ReAnalysis", &analysisSize_);
             analysisSize_ = std::clamp(analysisSize_, 1, 4096);
-            FlowSameLine(110);
-            ImGui::SetNextItemWidth(110);
+            FlowSameLine(Px(110));
+            ImGui::SetNextItemWidth(Px(110));
             ImGui::InputInt("Timeout ms", &analysisTimeoutMs_);
             analysisTimeoutMs_ = std::clamp(analysisTimeoutMs_, 100, 120000);
 
@@ -282,8 +282,8 @@ void ReWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndDisabled();
 
-            FlowSameLine(100);
-            ImGui::SetNextItemWidth(100);
+            FlowSameLine(Px(100));
+            ImGui::SetNextItemWidth(Px(100));
             ImGui::InputInt("Object size", &subobjectSize_);
             subobjectSize_ = std::clamp(subobjectSize_, 1, 1024 * 1024);
             FlowSameLine(ButtonWidth("Detect C++ subobjects"));
@@ -311,7 +311,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Transition")) {
             ImGui::TextDisabled("Transition-trace request JSON");
-            ImGui::InputTextMultiline("##ReTransitionJson", transitionJson_.data(),
+            MonoInputTextMultiline("##ReTransitionJson", transitionJson_.data(),
                                       transitionJson_.size(), ImVec2(-1, 300));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Trace transition")) {
@@ -333,7 +333,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Experiments")) {
             ImGui::TextDisabled("Controlled test / experiment JSON");
-            ImGui::InputTextMultiline("##ReExperimentJson", experimentJson_.data(),
+            MonoInputTextMultiline("##ReExperimentJson", experimentJson_.data(),
                                       experimentJson_.size(), ImVec2(-1, 330));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Run test")) {
@@ -366,7 +366,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Sessions")) {
             ImGui::TextUnformatted("Persistent fact");
-            ImGui::SetNextItemWidth(220);
+            ImGui::SetNextItemWidth(Px(220));
             ImGui::InputTextWithHint("##ReFactKey", "Fact key",
                                      factKey_.data(), factKey_.size());
             ImGui::SameLine();
@@ -388,7 +388,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
             ImGui::Separator();
             ImGui::TextUnformatted("Checkpoint / rollback");
-            ImGui::SetNextItemWidth(180);
+            ImGui::SetNextItemWidth(Px(180));
             ImGui::InputTextWithHint("##ReCheckpointLabel", "Label",
                                      checkpointLabel_.data(), checkpointLabel_.size());
             ImGui::SameLine();
@@ -413,7 +413,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 if (selectedCheckpoint_ < 0 ||
                     selectedCheckpoint_ >= static_cast<int>(checkpoints.size()))
                     selectedCheckpoint_ = 0;
-                ImGui::SetNextItemWidth(280);
+                ImGui::SetNextItemWidth(Px(280));
                 if (ImGui::BeginCombo("##ReCheckpointCombo",
                                       checkpoints[static_cast<size_t>(selectedCheckpoint_)].label.c_str())) {
                     for (size_t i = 0; i < checkpoints.size(); ++i) {
@@ -482,7 +482,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 if (sessionB_ < 0 || sessionB_ >= static_cast<int>(sessions.size()))
                     sessionB_ = sessions.size() > 1 ? 1 : 0;
 
-                ImGui::SetNextItemWidth(240);
+                ImGui::SetNextItemWidth(Px(240));
                 if (ImGui::BeginCombo("Run A", sessions[static_cast<size_t>(sessionA_)].id.c_str())) {
                     for (size_t i = 0; i < sessions.size(); ++i) {
                         if (ImGui::Selectable(sessions[i].id.c_str(),
@@ -491,8 +491,8 @@ void ReWorkspace::Draw(UiContext& context) {
                     }
                     ImGui::EndCombo();
                 }
-                FlowSameLine(240);
-                ImGui::SetNextItemWidth(240);
+                FlowSameLine(Px(240));
+                ImGui::SetNextItemWidth(Px(240));
                 if (ImGui::BeginCombo("Run B", sessions[static_cast<size_t>(sessionB_)].id.c_str())) {
                     for (size_t i = 0; i < sessions.size(); ++i) {
                         if (ImGui::Selectable(sessions[i].id.c_str(),
@@ -528,7 +528,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Interop")) {
             ImGui::TextUnformatted("Ghidra");
-            ImGui::SetNextItemWidth(220);
+            ImGui::SetNextItemWidth(Px(220));
             ImGui::InputTextWithHint("##ReGhidraName", "Optional export name",
                                      ghidraName_.data(), ghidraName_.size());
             FlowSameLine(ButtonWidth("Export Cortex -> Ghidra"));
@@ -541,7 +541,7 @@ void ReWorkspace::Draw(UiContext& context) {
             }
 
             ImGui::TextDisabled("Ghidra import JSON");
-            ImGui::InputTextMultiline("##ReGhidraImport", ghidraImportJson_.data(),
+            MonoInputTextMultiline("##ReGhidraImport", ghidraImportJson_.data(),
                                       ghidraImportJson_.size(), ImVec2(-1, 180));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Import Ghidra data")) {
@@ -556,7 +556,7 @@ void ReWorkspace::Draw(UiContext& context) {
 
             ImGui::Separator();
             ImGui::TextUnformatted("Breakpoint templates");
-            ImGui::InputTextMultiline("##ReBreakpointTemplates",
+            MonoInputTextMultiline("##ReBreakpointTemplates",
                                       breakpointTemplatesJson_.data(),
                                       breakpointTemplatesJson_.size(),
                                       ImVec2(-1, 180));

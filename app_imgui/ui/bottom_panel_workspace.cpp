@@ -93,8 +93,8 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
                        ImGuiTableFlags_Resizable |
                        ImGuiTableFlags_ScrollY,
                        ImGui::GetContentRegionAvail())) {
-            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 65);
-            ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 105);
+            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(65));
+            ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(105));
             ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.30f);
             ImGui::TableSetupColumn("Data", ImGuiTableColumnFlags_WidthStretch, 0.70f);
             ImGui::TableHeadersRow();
@@ -142,10 +142,10 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
                     ImGuiTableFlags_Resizable |
                     ImGuiTableFlags_ScrollY,
                     ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 45);
-                ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
-                ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 110);
-                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(45));
+                ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(145));
+                ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(110));
+                ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, Px(70));
                 ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableHeadersRow();
                 for (const auto& bp : rows) {
@@ -153,7 +153,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
                     ImGui::TableSetColumnIndex(0);
                     ImGui::Text("%d", bp.id);
                     ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("0x%llX", static_cast<unsigned long long>(bp.address));
+                    MonoText("0x%llX", static_cast<unsigned long long>(bp.address));
                     ImGui::TableSetColumnIndex(2);
                     ImGui::TextUnformatted(bp.kind.c_str());
                     ImGui::TableSetColumnIndex(3);
@@ -189,7 +189,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
                     ImGui::GetContentRegionAvail())) {
                 ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch, 0.28f);
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 90);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(90));
                 ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.42f);
                 ImGui::TableHeadersRow();
                 for (const auto& watch : context.watchesModel->Watches()) {
@@ -226,10 +226,10 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
                     ImGuiTableFlags_Resizable |
                     ImGuiTableFlags_ScrollY,
                     ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 110);
-                ImGui::TableSetupColumn("Client", ImGuiTableColumnFlags_WidthFixed, 140);
-                ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 75);
-                ImGui::TableSetupColumn("Phase", ImGuiTableColumnFlags_WidthFixed, 85);
+                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(110));
+                ImGui::TableSetupColumn("Client", ImGuiTableColumnFlags_WidthFixed, Px(140));
+                ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(75));
+                ImGui::TableSetupColumn("Phase", ImGuiTableColumnFlags_WidthFixed, Px(85));
                 ImGui::TableSetupColumn("Tool", ImGuiTableColumnFlags_WidthStretch, 0.35f);
                 ImGui::TableSetupColumn("Summary", ImGuiTableColumnFlags_WidthStretch, 0.65f);
                 ImGui::TableHeadersRow();

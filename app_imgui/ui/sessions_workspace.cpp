@@ -85,13 +85,13 @@ void SessionsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, Px(70.0f));
         ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_WidthStretch, 0.22f);
-        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-        ImGui::TableSetupColumn("Arch", ImGuiTableColumnFlags_WidthFixed, 72.0f);
-        ImGui::TableSetupColumn("Generation", ImGuiTableColumnFlags_WidthFixed, 94.0f);
+        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, Px(80.0f));
+        ImGui::TableSetupColumn("Arch", ImGuiTableColumnFlags_WidthFixed, Px(72.0f));
+        ImGui::TableSetupColumn("Generation", ImGuiTableColumnFlags_WidthFixed, Px(94.0f));
         ImGui::TableSetupColumn("Capabilities", ImGuiTableColumnFlags_WidthStretch, 0.55f);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(170.0f));
         ImGui::TableHeadersRow();
 
         const std::string activeId = context.sessions->ActiveTargetId();

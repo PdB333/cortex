@@ -66,16 +66,16 @@ void PatchesWorkspace::Draw(UiContext& context) {
     static const char* modes[] = {
         "Raw bytes", "NOP", "Assemble", "Detour", "Trampoline", "Code cave"
     };
-    ImGui::SetNextItemWidth(125);
+    ImGui::SetNextItemWidth(Px(125));
     ImGui::Combo("##PatchMode", &mode_, modes, IM_ARRAYSIZE(modes));
-    FlowSameLine(180);
-    ImGui::SetNextItemWidth(180);
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(180));
     ImGui::InputTextWithHint("##PatchAddress",
                              mode_ == 5 ? "Near address" : "Address (0x...)",
                              address_.data(), address_.size());
     // The value field takes whatever the row leaves after label and apply,
     // but never less than a usable width; below that it wraps to its own row.
-    const float valueWidth = std::max(200.0f, ImGui::GetContentRegionAvail().x - 360.0f);
+    const float valueWidth = std::max(Px(200.0f), ImGui::GetContentRegionAvail().x - Px(360.0f));
     FlowSameLine(valueWidth);
     ImGui::SetNextItemWidth(std::min(valueWidth, ImGui::GetContentRegionAvail().x));
     const char* hint =
@@ -85,15 +85,15 @@ void PatchesWorkspace::Draw(UiContext& context) {
         mode_ == 5 ? "Allocation size" : "Target address";
     ImGui::InputTextWithHint("##PatchValue", hint, value_.data(), value_.size());
 
-    FlowSameLine(140);
+    FlowSameLine(Px(140));
     if (mode_ <= 2) {
-        ImGui::SetNextItemWidth(140);
+        ImGui::SetNextItemWidth(Px(140));
         ImGui::InputTextWithHint("##PatchLabel", "Label", label_.data(), label_.size());
-        FlowSameLine(100);
+        FlowSameLine(Px(100));
     }
 
     if (mode_ == 3 || mode_ == 4) {
-        ImGui::SetNextItemWidth(100);
+        ImGui::SetNextItemWidth(Px(100));
         ImGui::InputInt(mode_ == 3 ? "JMP size" : "Min overwrite", &extra_);
         extra_ = std::max(5, extra_);
         FlowSameLine(ButtonWidth("Assemble / write"));
@@ -150,19 +150,19 @@ void PatchesWorkspace::Draw(UiContext& context) {
     ImGui::Spacing();
 
     int revertId = -1;
-    const float resultHeight = 135.0f;
+    const float resultHeight = Px(135.0f);
     if (BeginDataTable("PatchTable", 6,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImVec2(0, -resultHeight))) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 50);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(50));
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.18f);
         ImGui::TableSetupColumn("Original", ImGuiTableColumnFlags_WidthStretch, 0.22f);
         ImGui::TableSetupColumn("Current", ImGuiTableColumnFlags_WidthStretch, 0.22f);
         ImGui::TableSetupColumn("Label / Gateway", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 75);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(75));
         ImGui::TableHeadersRow();
 
         for (const auto& patch : context.patchesModel->Patches()) {

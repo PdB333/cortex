@@ -82,8 +82,8 @@ void ActionsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    FlowSameLine(180);
-    ImGui::SetNextItemWidth(180);
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(180));
     ImGui::InputScalar("Rollback checkpoint", ImGuiDataType_U64, &rollbackCheckpoint_);
     ImGui::SameLine();
     ImGui::BeginDisabled(!context.mutationAllowed ||
@@ -105,8 +105,8 @@ void ActionsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 90);
-        ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 150);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, Px(150));
         ImGui::TableSetupColumn("Reversible action", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 

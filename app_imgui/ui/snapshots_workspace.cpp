@@ -73,11 +73,11 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    ImGui::SetNextItemWidth(220);
+    ImGui::SetNextItemWidth(Px(220));
     ImGui::InputTextWithHint("##SnapshotLabel", "Optional label",
                              label_.data(), label_.size());
     ImGui::TextDisabled("Ranges JSON");
-    ImGui::InputTextMultiline("##SnapshotRanges", rangesJson_.data(),
+    MonoInputTextMultiline("##SnapshotRanges", rangesJson_.data(),
                               rangesJson_.size(), ImVec2(-1, 100));
     ImGui::BeginDisabled(!context.payload || !context.payload->Ready());
     if (ImGui::Button("Capture snapshot")) {
@@ -93,7 +93,7 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     const float tableHeight =
-        std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, 180.0f, 320.0f);
+        std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, Px(180.0f), Px(320.0f));
 
     int rewindId = -1;
     int deleteId = -1;
@@ -103,13 +103,13 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImVec2(0, tableHeight))) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 50);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(50));
         ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 120);
-        ImGui::TableSetupColumn("Ranges", ImGuiTableColumnFlags_WidthFixed, 70);
-        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, 90);
-        ImGui::TableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 110);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 150);
+        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(120));
+        ImGui::TableSetupColumn("Ranges", ImGuiTableColumnFlags_WidthFixed, Px(70));
+        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(150));
         ImGui::TableHeadersRow();
 
         for (const auto& snap : context.snapshotsModel->Snapshots()) {
@@ -129,7 +129,7 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
             const bool isFrom = fromId_ == snap.id;
             const bool isTo = toId_ == snap.id;
             if (ImGui::SmallButton(isFrom ? "From*" : "From")) fromId_ = snap.id;
-            ImGui::SameLine();
+            FlowSameLine(std::max(ButtonWidth("To*"), ButtonWidth("To")));
             if (ImGui::SmallButton(isTo ? "To*" : "To")) toId_ = snap.id;
             ImGui::TableSetColumnIndex(6);
             ImGui::BeginDisabled(!context.mutationAllowed);
@@ -172,12 +172,12 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    FlowSameLine(180);
-    ImGui::SetNextItemWidth(180);
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(180));
     ImGui::InputTextWithHint("##LastChangeAddress", "Address",
                              lastChangeAddress_.data(), lastChangeAddress_.size());
-    FlowSameLine(90);
-    ImGui::SetNextItemWidth(90);
+    FlowSameLine(Px(90));
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::InputInt("Size##LastChange", &lastChangeSize_);
     lastChangeSize_ = std::clamp(lastChangeSize_, 1, 4096);
     FlowSameLine(ButtonWidth("Last change"));

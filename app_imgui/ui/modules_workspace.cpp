@@ -51,7 +51,7 @@ void ModulesWorkspace::Draw(UiContext& context) {
     FlowSameLine(ButtonWidth("Refresh"));
     if (ImGui::Button("Refresh")) Refresh(context);
     ImGui::Spacing();
-    ImGui::SetNextItemWidth(360);
+    ImGui::SetNextItemWidth(Px(360));
     ImGui::InputTextWithHint("##ModuleFilter", "Filter modules...", filter_, sizeof(filter_));
     ImGui::Spacing();
 
@@ -60,8 +60,8 @@ void ModulesWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
         ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-        ImGui::TableSetupColumn("Base", ImGuiTableColumnFlags_WidthFixed, 145);
-        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 110);
+        ImGui::TableSetupColumn("Base", ImGuiTableColumnFlags_WidthFixed, Px(145));
+        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(110));
         ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.55f);
         ImGui::TableHeadersRow();
 
@@ -88,9 +88,9 @@ void ModulesWorkspace::Draw(UiContext& context) {
                 ImGui::EndPopup();
             }
             ImGui::TableSetColumnIndex(1);
-            ImGui::Text("0x%llX", static_cast<unsigned long long>(module.base));
+            MonoText("0x%llX", static_cast<unsigned long long>(module.base));
             ImGui::TableSetColumnIndex(2);
-            ImGui::Text("0x%llX", static_cast<unsigned long long>(module.size));
+            MonoText("0x%llX", static_cast<unsigned long long>(module.size));
             ImGui::TableSetColumnIndex(3);
             ImGui::TextUnformatted(module.path.c_str());
             ImGui::PopID();

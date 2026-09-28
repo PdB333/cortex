@@ -3,6 +3,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 #include <sstream>
 
 namespace cortex::ui {
@@ -30,8 +32,8 @@ void OverviewWorkspace::Draw(UiContext& context) {
 
     if (!session) {
         HintText("Choose a process from the target picker to begin.");
-        ImGui::Dummy(ImVec2(0, 18));
-        if (ImGui::Button("Select process", ImVec2(180, 38)))
+        ImGui::Dummy(ImVec2(0, Px(18)));
+        if (ImGui::Button("Select process", ImVec2(Px(180), Px(38))))
             context.requestProcessPicker = true;
         return;
     }
@@ -48,8 +50,8 @@ void OverviewWorkspace::Draw(UiContext& context) {
     if (BeginDataTable("OverviewTarget", 2,
                           ImGuiTableFlags_SizingFixedFit |
                           ImGuiTableFlags_BordersInnerH,
-                          ImVec2(0, 220))) {
-        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, 150);
+                          ImVec2(0, Px(220)))) {
+        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, Px(150));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
 
         auto row = [](const char* key, const std::string& value) {
@@ -76,7 +78,7 @@ void OverviewWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Change process")) context.requestProcessPicker = true;
     FlowSameLine(ButtonWidth("Sessions"));
     if (ImGui::Button("Sessions")) context.requestWorkspace = "sessions";
-    ImGui::SameLine();
+    FlowSameLine(std::max(ButtonWidth("Disable writes"), ButtonWidth("Enable writes")));
     if (ImGui::Button(context.mutationAllowed ? "Disable writes" : "Enable writes"))
         context.mutationAllowed = !context.mutationAllowed;
     FlowSameLine(ButtonWidth("Memory"));

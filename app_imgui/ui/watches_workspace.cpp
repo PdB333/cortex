@@ -85,15 +85,15 @@ void WatchesWorkspace::Draw(UiContext& context) {
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Watch");
-    FlowSameLine(170);
-    ImGui::SetNextItemWidth(170);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(170));
     ImGui::InputTextWithHint("##WatchAddress", "Address",
                              watchAddress_.data(), watchAddress_.size());
-    FlowSameLine(95);
-    ImGui::SetNextItemWidth(95);
+    FlowSameLine(Px(95));
+    ImGui::SetNextItemWidth(Px(95));
     ImGui::Combo("##WatchType", &watchType_, kWatchTypes, IM_ARRAYSIZE(kWatchTypes));
-    FlowSameLine(170);
-    ImGui::SetNextItemWidth(170);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(170));
     ImGui::InputTextWithHint("##WatchLabel", "Label",
                              watchLabel_.data(), watchLabel_.size());
     FlowSameLine(ButtonWidth("Add watch"));
@@ -114,23 +114,23 @@ void WatchesWorkspace::Draw(UiContext& context) {
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Freeze");
-    FlowSameLine(160);
-    ImGui::SetNextItemWidth(160);
+    FlowSameLine(Px(160));
+    ImGui::SetNextItemWidth(Px(160));
     ImGui::InputTextWithHint("##FreezeAddress", "Address",
                              freezeAddress_.data(), freezeAddress_.size());
-    FlowSameLine(95);
-    ImGui::SetNextItemWidth(95);
+    FlowSameLine(Px(95));
+    ImGui::SetNextItemWidth(Px(95));
     ImGui::Combo("##FreezeType", &freezeType_, kFreezeTypes, IM_ARRAYSIZE(kFreezeTypes));
-    FlowSameLine(125);
-    ImGui::SetNextItemWidth(125);
+    FlowSameLine(Px(125));
+    ImGui::SetNextItemWidth(Px(125));
     ImGui::InputTextWithHint("##FreezeValue", "Value",
                              freezeValue_.data(), freezeValue_.size());
-    FlowSameLine(135);
-    ImGui::SetNextItemWidth(135);
+    FlowSameLine(Px(135));
+    ImGui::SetNextItemWidth(Px(135));
     ImGui::InputTextWithHint("##FreezeLabel", "Label",
                              freezeLabel_.data(), freezeLabel_.size());
-    FlowSameLine(100);
-    ImGui::SetNextItemWidth(100);
+    FlowSameLine(Px(100));
+    ImGui::SetNextItemWidth(Px(100));
     ImGui::InputInt("TTL ms", &freezeTtlMs_);
     freezeTtlMs_ = std::max(0, freezeTtlMs_);
     ImGui::SameLine();
@@ -157,10 +157,10 @@ void WatchesWorkspace::Draw(UiContext& context) {
     // Side by side when both lists get a readable width, stacked otherwise.
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const bool sideBySide = avail.x >= 2.0f * 300.0f + spacing;
+    const bool sideBySide = avail.x >= 2.0f * Px(300.0f) + spacing;
     const ImVec2 watchSize = sideBySide
         ? ImVec2((avail.x - spacing) * 0.5f, 0.0f)
-        : ImVec2(0.0f, std::max(140.0f, (avail.y - ImGui::GetStyle().ItemSpacing.y) * 0.5f));
+        : ImVec2(0.0f, std::max(Px(140.0f), (avail.y - ImGui::GetStyle().ItemSpacing.y) * 0.5f));
 
     int deleteWatch = -1;
     ImGui::BeginChild("WatchList", watchSize, ImGuiChildFlags_Borders);
@@ -172,11 +172,11 @@ void WatchesWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(45));
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 65);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(65));
         ImGui::TableSetupColumn("Value / Label", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, Px(70));
         ImGui::TableHeadersRow();
         for (const auto& row : context.watchesModel->Watches()) {
             ImGui::PushID(row.id);
@@ -212,12 +212,12 @@ void WatchesWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(45));
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.25f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 65);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(65));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.25f);
         ImGui::TableSetupColumn("Label / TTL", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, Px(70));
         ImGui::TableHeadersRow();
         for (const auto& row : context.watchesModel->Freezes()) {
             ImGui::PushID(row.id);

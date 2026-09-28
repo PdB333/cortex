@@ -55,8 +55,8 @@ public:
         const float available = ImGui::GetContentRegionAvail().x;
         // Below this width a label column would wrap every word, so each row
         // stacks its label above a full-width control instead.
-        stacked_ = available < 460.0f;
-        controlWidth_ = std::clamp(available * 0.42f, 170.0f, 340.0f);
+        stacked_ = available < Px(460.0f);
+        controlWidth_ = std::clamp(available * 0.42f, Px(170.0f), Px(340.0f));
         open_ = ImGui::BeginTable(id, stacked_ ? 1 : 2,
                                   ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX);
         if (open_ && !stacked_) {

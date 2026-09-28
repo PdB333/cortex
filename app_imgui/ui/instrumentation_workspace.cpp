@@ -88,15 +88,15 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabBar("InstrumentationTabs")) {
         if (ImGui::BeginTabItem("Page access")) {
-            ImGui::SetNextItemWidth(220);
+            ImGui::SetNextItemWidth(Px(220));
             ImGui::InputTextWithHint("##PageWatchAddress", "Address / expression",
                                      pageAddress_.data(), pageAddress_.size());
-            FlowSameLine(100);
-            ImGui::SetNextItemWidth(100);
+            FlowSameLine(Px(100));
+            ImGui::SetNextItemWidth(Px(100));
             ImGui::InputInt("Size##PageWatch", &pageSize_);
             pageSize_ = std::clamp(pageSize_, 1, 64 * 1024 * 1024);
-            FlowSameLine(180);
-            ImGui::SetNextItemWidth(180);
+            FlowSameLine(Px(180));
+            ImGui::SetNextItemWidth(Px(180));
             ImGui::InputTextWithHint("##PageWatchLabel", "Optional label",
                                      pageLabel_.data(), pageLabel_.size());
             FlowSameLine(ButtonWidth("Watch page access"));
@@ -118,12 +118,12 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
-                                  ImVec2(0, 190))) {
-                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 50);
+                                  ImVec2(0, Px(190)))) {
+                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(50));
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.32f);
-                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 90);
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(90));
                 ImGui::TableSetupColumn("Label", ImGuiTableColumnFlags_WidthStretch, 0.38f);
-                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(80));
                 ImGui::TableHeadersRow();
                 for (const auto& watch : context.instrumentationModel->PageAccessWatches()) {
                     ImGui::PushID(watch.id);
@@ -161,13 +161,13 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
                                   ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 105);
-                ImGui::TableSetupColumn("Watch", ImGuiTableColumnFlags_WidthFixed, 55);
-                ImGui::TableSetupColumn("Access", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(105));
+                ImGui::TableSetupColumn("Watch", ImGuiTableColumnFlags_WidthFixed, Px(55));
+                ImGui::TableSetupColumn("Access", ImGuiTableColumnFlags_WidthFixed, Px(70));
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.18f);
                 ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch, 0.18f);
-                ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 80);
-                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 55);
+                ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, Px(80));
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(55));
                 ImGui::TableSetupColumn("Before -> After", ImGuiTableColumnFlags_WidthStretch, 0.25f);
                 ImGui::TableSetupColumn("Context", ImGuiTableColumnFlags_WidthStretch, 0.25f);
                 ImGui::TableHeadersRow();
@@ -215,8 +215,8 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Allocations")) {
             ImGui::Checkbox("Allocation watch enabled", &allocationEnabled_);
-            FlowSameLine(160);
-            ImGui::SetNextItemWidth(160);
+            FlowSameLine(Px(160));
+            ImGui::SetNextItemWidth(Px(160));
             ImGui::InputScalar("Minimum size", ImGuiDataType_U64, &allocationMinSize_);
             FlowSameLine(ButtonWidth("Apply allocation watch"));
             ImGui::BeginDisabled(!context.mutationAllowed);
@@ -240,10 +240,10 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
                                   ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 115);
+                ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(115));
                 ImGui::TableSetupColumn("API", ImGuiTableColumnFlags_WidthStretch, 0.22f);
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100);
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(100));
                 ImGui::TableSetupColumn("Flags", ImGuiTableColumnFlags_WidthStretch, 0.20f);
                 ImGui::TableHeadersRow();
                 for (const auto& event : context.instrumentationModel->AllocationEvents()) {
@@ -260,7 +260,7 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
                     ImGui::TableSetColumnIndex(3);
                     ImGui::Text("%llu", static_cast<unsigned long long>(event.size));
                     ImGui::TableSetColumnIndex(4);
-                    ImGui::Text("0x%llX", static_cast<unsigned long long>(event.flags));
+                    MonoText("0x%llX", static_cast<unsigned long long>(event.flags));
                 }
                 ImGui::EndTable();
             }

@@ -87,8 +87,8 @@ void InputWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    FlowSameLine(110);
-    ImGui::SetNextItemWidth(110);
+    FlowSameLine(Px(110));
+    ImGui::SetNextItemWidth(Px(110));
     ImGui::Combo("Mode", &modeIndex_, kModes, IM_ARRAYSIZE(kModes));
     FlowSameLine(ButtonWidth("Run sequence"));
 
@@ -154,7 +154,7 @@ void InputWorkspace::Draw(UiContext& context) {
                 context.inputModel->StepCount());
 
     ImGui::TextDisabled("Sequence JSON");
-    ImGui::InputTextMultiline("##InputSequenceJson", stepsJson_.data(),
+    MonoInputTextMultiline("##InputSequenceJson", stepsJson_.data(),
                               stepsJson_.size(), ImGui::GetContentRegionAvail());
 }
 

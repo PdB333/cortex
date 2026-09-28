@@ -88,7 +88,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    const float leftWidth = 230.0f;
+    const float leftWidth = Px(230.0f);
     ImGui::BeginChild("StructureList", ImVec2(leftWidth, 0), ImGuiChildFlags_Borders);
     ImGui::Text("Definitions (%zu)", context.structuresModel->Definitions().size());
     ImGui::Separator();
@@ -118,11 +118,11 @@ void StructuresWorkspace::Draw(UiContext& context) {
     ImGui::BeginChild("StructureEditor", ImVec2(0, 0), ImGuiChildFlags_Borders);
     if (ImGui::BeginTabBar("StructureTabs")) {
         if (ImGui::BeginTabItem("Definition")) {
-            ImGui::SetNextItemWidth(260);
+            ImGui::SetNextItemWidth(Px(260));
             ImGui::InputTextWithHint("##StructureName", "Structure name",
                                      name_.data(), name_.size());
             ImGui::TextDisabled("Fields JSON");
-            ImGui::InputTextMultiline("##StructureFields", fieldsJson_.data(),
+            MonoInputTextMultiline("##StructureFields", fieldsJson_.data(),
                                       fieldsJson_.size(), ImVec2(-1, 210));
 
             ImGui::BeginDisabled(!context.mutationAllowed);
@@ -156,7 +156,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
         }
 
         if (ImGui::BeginTabItem("Read / write")) {
-            ImGui::SetNextItemWidth(260);
+            ImGui::SetNextItemWidth(Px(260));
             ImGui::InputTextWithHint("##StructureAddress", "Address / runtime expression",
                                      address_.data(), address_.size());
             ImGui::SameLine();
@@ -179,7 +179,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
-                                  ImVec2(0, 220))) {
+                                  ImVec2(0, Px(220)))) {
                 ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthStretch, 0.30f);
                 ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.45f);
                 ImGui::TableSetupColumn("Error", ImGuiTableColumnFlags_WidthStretch, 0.25f);
@@ -197,7 +197,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
             }
 
             ImGui::TextDisabled("Write values JSON");
-            ImGui::InputTextMultiline("##StructureValues", valuesJson_.data(),
+            MonoInputTextMultiline("##StructureValues", valuesJson_.data(),
                                       valuesJson_.size(), ImVec2(-1, 130));
             ImGui::BeginDisabled(!context.mutationAllowed ||
                                  context.structuresModel->SelectedName().empty() ||
@@ -218,9 +218,9 @@ void StructuresWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Infer")) {
             ImGui::TextDisabled("Instance addresses JSON");
-            ImGui::InputTextMultiline("##StructureInstances", instancesJson_.data(),
+            MonoInputTextMultiline("##StructureInstances", instancesJson_.data(),
                                       instancesJson_.size(), ImVec2(-1, 120));
-            ImGui::SetNextItemWidth(140);
+            ImGui::SetNextItemWidth(Px(140));
             ImGui::InputInt("Size", &inferSize_);
             inferSize_ = std::clamp(inferSize_, 4, 1024 * 1024);
             FlowSameLine(CheckboxWidth("Define result"));
@@ -252,11 +252,11 @@ void StructuresWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_ScrollY,
                                   ImGui::GetContentRegionAvail())) {
                 ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthStretch, 0.20f);
-                ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 80);
-                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 60);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 90);
-                ImGui::TableSetupColumn("Confidence", ImGuiTableColumnFlags_WidthFixed, 90);
-                ImGui::TableSetupColumn("Distinct", ImGuiTableColumnFlags_WidthFixed, 70);
+                ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, Px(80));
+                ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(60));
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(90));
+                ImGui::TableSetupColumn("Confidence", ImGuiTableColumnFlags_WidthFixed, Px(90));
+                ImGui::TableSetupColumn("Distinct", ImGuiTableColumnFlags_WidthFixed, Px(70));
                 ImGui::TableSetupColumn("Evidence", ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableHeadersRow();
                 for (const auto& row : context.structuresModel->InferenceFields()) {
@@ -264,7 +264,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
                     ImGui::TableSetColumnIndex(0);
                     ImGui::TextUnformatted(row.name.c_str());
                     ImGui::TableSetColumnIndex(1);
-                    ImGui::Text("0x%llX", static_cast<unsigned long long>(row.offset));
+                    MonoText("0x%llX", static_cast<unsigned long long>(row.offset));
                     ImGui::TableSetColumnIndex(2);
                     ImGui::Text("%llu", static_cast<unsigned long long>(row.byteSize));
                     ImGui::TableSetColumnIndex(3);

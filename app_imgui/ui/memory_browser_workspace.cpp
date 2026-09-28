@@ -156,10 +156,10 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     Subtitle("Direct external-process view");
     ImGui::Spacing();
 
-    ImGui::SetNextItemWidth(240);
+    ImGui::SetNextItemWidth(Px(240));
     ImGui::InputTextWithHint("##MemoryAddress", "0x7FF...", address_, sizeof(address_));
-    FlowSameLine(110);
-    ImGui::SetNextItemWidth(110);
+    FlowSameLine(Px(110));
+    ImGui::SetNextItemWidth(Px(110));
     ImGui::InputInt("Bytes", &byteCount_, 16, 256);
     FlowSameLine(ButtonWidth("Read"));
     if (ImGui::Button("Read")) Refresh(context);
@@ -171,7 +171,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     ImGui::Checkbox("Live", &liveRefresh_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
-    ImGui::SetNextItemWidth(90);
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::Combo("##MemoryLiveRate", &liveRateIndex_,
                  liveRates, IM_ARRAYSIZE(liveRates));
 
@@ -195,17 +195,17 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                      ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                                      ImGui::GetContentRegionAvail())) {
-            ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
+            ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(145));
             ImGui::TableSetupColumn("Hex", ImGuiTableColumnFlags_WidthStretch, 0.68f);
             ImGui::TableSetupColumn("ASCII", ImGuiTableColumnFlags_WidthStretch, 0.28f);
-            ImGui::TableSetupColumn("Δ", ImGuiTableColumnFlags_WidthFixed, 28);
+            ImGui::TableSetupColumn("Δ", ImGuiTableColumnFlags_WidthFixed, Px(28));
             ImGui::TableHeadersRow();
 
             for (size_t offset = 0; offset < bytes_.size(); offset += rowWidth) {
                 const size_t count = std::min(rowWidth, bytes_.size() - offset);
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
-                ImGui::Text("0x%llX",
+                MonoText("0x%llX",
                             static_cast<unsigned long long>(currentAddress_ + offset));
                 if (ImGui::BeginPopupContextItem()) {
                     AddressContextOptions options;
@@ -215,9 +215,9 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
                     ImGui::EndPopup();
                 }
                 ImGui::TableSetColumnIndex(1);
-                ImGui::TextUnformatted(HexBytes(bytes_.data() + offset, count).c_str());
+                MonoTextUnformatted(HexBytes(bytes_.data() + offset, count).c_str());
                 ImGui::TableSetColumnIndex(2);
-                ImGui::TextUnformatted(Ascii(bytes_.data() + offset, count).c_str());
+                MonoTextUnformatted(Ascii(bytes_.data() + offset, count).c_str());
                 ImGui::TableSetColumnIndex(3);
                 bool changed = false;
                 if (previousBytes_.size() == bytes_.size()) {
@@ -246,7 +246,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     ImGui::InputTextWithHint("##WriteBytes", "90 90 90", writeBytes_, sizeof(writeBytes_));
     FlowSameLine(ButtonWidth("Write"));
     ImGui::BeginDisabled(!context.mutationAllowed);
-    if (ImGui::Button("Write", ImVec2(100, 0))) WriteBytes(context);
+    if (ImGui::Button("Write", ImVec2(Px(100), 0))) WriteBytes(context);
     ImGui::EndDisabled();
 }
 

@@ -60,15 +60,15 @@ void SymbolsWorkspace::Draw(UiContext& context) {
     ImGui::Separator();
 
     const char* modes[] = {"Resolve address", "Lookup name"};
-    ImGui::SetNextItemWidth(140);
+    ImGui::SetNextItemWidth(Px(140));
     ImGui::Combo("##SymbolMode", &mode_, modes, IM_ARRAYSIZE(modes));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-190);
     ImGui::InputTextWithHint("##SymbolQuery",
                              mode_ == 0 ? "0x... / address" : "symbol name",
                              query_.data(), query_.size());
-    ImGui::SameLine();
-    if (ImGui::Button(mode_ == 0 ? "Resolve" : "Lookup", ImVec2(100, 0))) {
+    FlowSameLine(std::max(ButtonWidth("Resolve"), ButtonWidth("Lookup")));
+    if (ImGui::Button(mode_ == 0 ? "Resolve" : "Lookup", ImVec2(Px(100), 0))) {
         std::string error;
         const bool ok = mode_ == 0
             ? context.symbolsModel->Resolve(query_.data(), &error)
@@ -105,7 +105,7 @@ void SymbolsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 150);
+        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, Px(150));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
 
         auto field = [](const char* name, const std::string& value) {

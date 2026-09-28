@@ -77,19 +77,19 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(Px(130));
     ImGui::InputTextWithHint("##PointerMapName", "Map name",
                              name_.data(), name_.size());
-    FlowSameLine(190);
-    ImGui::SetNextItemWidth(190);
+    FlowSameLine(Px(190));
+    ImGui::SetNextItemWidth(Px(190));
     ImGui::InputTextWithHint("##PointerMapTarget", "Target address/expression",
                              target_.data(), target_.size());
-    FlowSameLine(90);
-    ImGui::SetNextItemWidth(90);
+    FlowSameLine(Px(90));
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::InputInt("Depth", &maxDepth_);
     maxDepth_ = std::clamp(maxDepth_, 1, 16);
-    FlowSameLine(110);
-    ImGui::SetNextItemWidth(110);
+    FlowSameLine(Px(110));
+    ImGui::SetNextItemWidth(Px(110));
     ImGui::InputInt("Max offset", &maxOffset_);
     maxOffset_ = std::clamp(maxOffset_, 1, 1 << 20);
     ImGui::SameLine();
@@ -109,7 +109,7 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     const float mapsHeight =
-        std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, 180.0f, 330.0f);
+        std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, Px(180.0f), Px(330.0f));
 
     std::string deleteName;
     if (BeginDataTable("PointerMapsTable", 7,
@@ -118,13 +118,13 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImVec2(0, mapsHeight))) {
-        ImGui::TableSetupColumn("Use", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("Use", ImGuiTableColumnFlags_WidthFixed, Px(45));
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.22f);
         ImGui::TableSetupColumn("Target", ImGuiTableColumnFlags_WidthStretch, 0.27f);
-        ImGui::TableSetupColumn("Created", ImGuiTableColumnFlags_WidthFixed, 115);
-        ImGui::TableSetupColumn("Paths", ImGuiTableColumnFlags_WidthFixed, 75);
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 75);
+        ImGui::TableSetupColumn("Created", ImGuiTableColumnFlags_WidthFixed, Px(115));
+        ImGui::TableSetupColumn("Paths", ImGuiTableColumnFlags_WidthFixed, Px(75));
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(75));
         ImGui::TableHeadersRow();
 
         for (const auto& map : context.pointerMapsModel->Maps()) {
@@ -190,10 +190,10 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
         ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.22f);
-        ImGui::TableSetupColumn("Base offset", ImGuiTableColumnFlags_WidthFixed, 110);
+        ImGui::TableSetupColumn("Base offset", ImGuiTableColumnFlags_WidthFixed, Px(110));
         ImGui::TableSetupColumn("Offsets", ImGuiTableColumnFlags_WidthStretch, 0.38f);
-        ImGui::TableSetupColumn("Sessions", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, 90);
+        ImGui::TableSetupColumn("Sessions", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed, Px(90));
         ImGui::TableHeadersRow();
 
         for (const auto& path : context.pointerMapsModel->Paths()) {

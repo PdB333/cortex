@@ -177,7 +177,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     ImGui::Checkbox("Live", &liveRefresh_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
-    ImGui::SetNextItemWidth(90);
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::Combo("##DebuggerLiveRate", &liveRateIndex_,
                  liveRates, IM_ARRAYSIZE(liveRates));
 
@@ -246,8 +246,8 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     }
 
     ImGui::Spacing();
-    const float upperHeight = std::clamp(ImGui::GetContentRegionAvail().y * 0.48f, 230.0f, 420.0f);
-    const float threadWidth = 220.0f;
+    const float upperHeight = std::clamp(ImGui::GetContentRegionAvail().y * 0.48f, Px(230.0f), Px(420.0f));
+    const float threadWidth = Px(220.0f);
 
     ImGui::BeginChild("ThreadList", ImVec2(threadWidth, upperHeight), ImGuiChildFlags_Borders);
     if (!debugger.PausedThreads().empty()) {
@@ -285,7 +285,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
                                  ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed, 90);
+        ImGui::TableSetupColumn("Register", ImGuiTableColumnFlags_WidthFixed, Px(90));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (const auto& reg : snapshot.registers) {
@@ -293,7 +293,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted(reg.name.c_str());
             ImGui::TableSetColumnIndex(1);
-            ImGui::Text("0x%llX", static_cast<unsigned long long>(reg.value));
+            MonoText("0x%llX", static_cast<unsigned long long>(reg.value));
             if (ImGui::BeginPopupContextItem(reg.name.c_str())) {
                 AddressContextOptions options;
                 options.label = reg.name;
@@ -321,7 +321,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
                                  ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 135);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(135));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (size_t offset = 0;
@@ -333,7 +333,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             ImGui::PushID(static_cast<int>(offset));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::Text("0x%llX", static_cast<unsigned long long>(slot));
+            MonoText("0x%llX", static_cast<unsigned long long>(slot));
             if (ImGui::BeginPopupContextItem("StackSlot")) {
                 AddressContextOptions options;
                 options.label = "Stack slot";
@@ -375,22 +375,22 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Refresh state")) Refresh(context, true);
     ImGui::EndDisabled();
 
-    ImGui::SetNextItemWidth(210);
+    ImGui::SetNextItemWidth(Px(210));
     ImGui::InputTextWithHint("##BreakpointAddress", "address or module+offset",
                              breakpointAddress_, sizeof(breakpointAddress_));
     ImGui::SameLine();
     const char* kinds[] = {"Software", "HW execute", "HW write", "HW read/write"};
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(Px(130));
     ImGui::Combo("##BreakpointKind", &breakpointKind_, kinds, IM_ARRAYSIZE(kinds));
-    FlowSameLine(90);
+    FlowSameLine(Px(90));
     if (breakpointKind_ >= 2) {
-        ImGui::SetNextItemWidth(90);
+        ImGui::SetNextItemWidth(Px(90));
         ImGui::InputInt("##BreakpointSize", &breakpointSize_);
         breakpointSize_ = std::clamp(breakpointSize_, 1, 8);
         ImGui::SameLine();
     }
     const char* actions[] = {"Log", "Pause"};
-    ImGui::SetNextItemWidth(90);
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::Combo("##BreakpointAction", &breakpointAction_, actions, IM_ARRAYSIZE(actions));
     FlowSameLine(CheckboxWidth("Process global"));
     ImGui::Checkbox("Process global", &processGlobal_);
@@ -419,13 +419,13 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImVec2(0, 0))) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 42);
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
-        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 105);
-        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 65);
-        ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthFixed, 65);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(42));
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(145));
+        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(105));
+        ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, Px(65));
+        ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthFixed, Px(65));
         ImGui::TableSetupColumn("Coverage", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 150);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(150));
         ImGui::TableHeadersRow();
 
         int removeBreakpointId = -1;
@@ -435,7 +435,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             ImGui::TableSetColumnIndex(0);
             ImGui::Text("%d", bp.id);
             ImGui::TableSetColumnIndex(1);
-            ImGui::Text("0x%llX", static_cast<unsigned long long>(bp.address));
+            MonoText("0x%llX", static_cast<unsigned long long>(bp.address));
             ImGui::TableSetColumnIndex(2);
             ImGui::TextUnformatted(bp.kind.c_str());
             ImGui::TableSetColumnIndex(3);
@@ -478,7 +478,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     ImGui::EndChild();
 
-    ImGui::SetNextWindowSize(ImVec2(880, 520), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(Px(880), Px(520)), ImGuiCond_Appearing);
     if (ImGui::BeginPopupModal("Breakpoint hit log", nullptr,
                                ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::Text("Breakpoint %d", breakpointLogId_);
@@ -499,10 +499,10 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                               ImGuiTableFlags_Resizable |
                               ImGuiTableFlags_ScrollY,
                               ImVec2(0, -42))) {
-            ImGui::TableSetupColumn("Seq", ImGuiTableColumnFlags_WidthFixed, 70);
-            ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 90);
-            ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 120);
-            ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthFixed, 150);
+            ImGui::TableSetupColumn("Seq", ImGuiTableColumnFlags_WidthFixed, Px(70));
+            ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, Px(90));
+            ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, Px(120));
+            ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthFixed, Px(150));
             ImGui::TableSetupColumn("Registers", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableHeadersRow();
 
@@ -517,7 +517,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                 ImGui::Text("%llu", static_cast<unsigned long long>(entry.timestampMs));
                 ImGui::TableSetColumnIndex(3);
                 const char instruction[32] = {};
-                ImGui::Text("0x%llX",
+                MonoText("0x%llX",
                             static_cast<unsigned long long>(entry.instruction));
                 if (ImGui::IsItemHovered() &&
                     ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
@@ -543,7 +543,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndTable();
         }
-        if (ImGui::Button("Close", ImVec2(100, 30)))
+        if (ImGui::Button("Close", ImVec2(Px(100), Px(30))))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }

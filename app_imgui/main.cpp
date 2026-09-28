@@ -47,6 +47,7 @@
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
+#include "ui/fonts.h"
 #include "ui/theme.h"
 #include "ui/widgets.h"
 #include "ui/ui_context.h"
@@ -289,6 +290,10 @@ void CleanupDeviceD3D() {
     if (gDevice) { gDevice->Release(); gDevice = nullptr; }
 }
 
+// Set by WM_DPICHANGED and applied between frames, never while ImGui is
+// building a frame.
+float gPendingDpiScale = 0.0f;
+
 LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
 
@@ -305,6 +310,15 @@ LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_SYSCOMMAND:
             if ((wParam & 0xfff0) == SC_KEYMENU) return 0;
             break;
+        case WM_DPICHANGED: {
+            gPendingDpiScale = static_cast<float>(HIWORD(wParam)) / 96.0f;
+            const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
+            SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
+                         suggested->right - suggested->left,
+                         suggested->bottom - suggested->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -1525,7 +1539,7 @@ void DrawCommandPalette(AppState& app) {
         app.requestCommandPalette = false;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(640, 460), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(cortex::ui::Px(640), cortex::ui::Px(460)), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Command palette", nullptr,
                                 ImGuiWindowFlags_NoSavedSettings)) return;
 
@@ -1555,7 +1569,7 @@ void DrawCommandPalette(AppState& app) {
         ImGui::CloseCurrentPopup();
     }
 
-    if (ImGui::Button("Close", ImVec2(100, 28))) ImGui::CloseCurrentPopup();
+    if (ImGui::Button("Close", ImVec2(cortex::ui::Px(100), cortex::ui::Px(28)))) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
 
@@ -1565,7 +1579,7 @@ void DrawGoTo(AppState& app) {
         app.requestGoTo = false;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(520, 190), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(cortex::ui::Px(520), cortex::ui::Px(190)), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Go to", nullptr,
                                 ImGuiWindowFlags_NoSavedSettings)) return;
 
@@ -1590,13 +1604,13 @@ void DrawGoTo(AppState& app) {
         return true;
     };
 
-    if ((ImGui::Button("Memory", ImVec2(130, 32)) || enter) && go("memory-browser"))
+    if ((ImGui::Button("Memory", ImVec2(cortex::ui::Px(130), cortex::ui::Px(32))) || enter) && go("memory-browser"))
         ImGui::CloseCurrentPopup();
     ImGui::SameLine();
-    if (ImGui::Button("Disassembly", ImVec2(130, 32)) && go("disassembly"))
+    if (ImGui::Button("Disassembly", ImVec2(cortex::ui::Px(130), cortex::ui::Px(32))) && go("disassembly"))
         ImGui::CloseCurrentPopup();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(100, 32))) ImGui::CloseCurrentPopup();
+    if (ImGui::Button("Cancel", ImVec2(cortex::ui::Px(100), cortex::ui::Px(32)))) ImGui::CloseCurrentPopup();
 
     ImGui::EndPopup();
 }
@@ -1626,7 +1640,7 @@ void DrawProcessPicker(AppState& app) {
         app.ui.requestProcessPicker = false;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(760, 580), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(cortex::ui::Px(760), cortex::ui::Px(580)), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Select process", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
 
     ImGui::AlignTextToFramePadding();
@@ -1649,10 +1663,10 @@ void DrawProcessPicker(AppState& app) {
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImVec2(0, -footerHeight))) {
         ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_WidthStretch, 0.42f);
-        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 78.0f);
-        ImGui::TableSetupColumn("Arch", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, cortex::ui::Px(78.0f));
+        ImGui::TableSetupColumn("Arch", ImGuiTableColumnFlags_WidthFixed, cortex::ui::Px(72.0f));
         ImGui::TableSetupColumn("Window", ImGuiTableColumnFlags_WidthStretch, 0.50f);
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 82.0f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, cortex::ui::Px(82.0f));
         ImGui::TableHeadersRow();
 
         for (size_t i = 0; i < app.targets.size(); ++i) {
@@ -1691,12 +1705,12 @@ void DrawProcessPicker(AppState& app) {
         app.selectedTarget >= 0 && app.selectedTarget < static_cast<int>(app.targets.size());
 
     ImGui::BeginDisabled(!validSelection);
-    if (ImGui::Button("Attach", ImVec2(150, 38)) && validSelection) {
+    if (ImGui::Button("Attach", ImVec2(cortex::ui::Px(150), cortex::ui::Px(38))) && validSelection) {
         AttachTarget(app, app.targets[static_cast<size_t>(app.selectedTarget)]);
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(110, 38)) ||
+    if (ImGui::Button("Cancel", ImVec2(cortex::ui::Px(110), cortex::ui::Px(38))) ||
         (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
          ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
         ImGui::CloseCurrentPopup();
@@ -1715,7 +1729,7 @@ void DrawPromptSurface(AppState& app) {
         ImGui::OpenPopup("Human prompt");
     }
 
-    ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(cortex::ui::Px(560), 0), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal(
             "Human prompt", nullptr,
             ImGuiWindowFlags_AlwaysAutoResize |
@@ -1796,7 +1810,7 @@ void DrawPromptSurface(AppState& app) {
     const bool canSubmit =
         !timedTest || (answerReady && app.promptAnswer[0] != '\0');
     ImGui::BeginDisabled(!canSubmit);
-    if (ImGui::Button(timedTest ? "Submit result" : "Done", ImVec2(130, 34))) {
+    if (ImGui::Button(timedTest ? "Submit result" : "Done", ImVec2(cortex::ui::Px(130), cortex::ui::Px(34)))) {
         std::string error;
         const std::string answer = timedTest ? app.promptAnswer : "ack";
         if (app.promptModel.Answer(answer, &error)) {
@@ -1940,7 +1954,10 @@ void DrawHeader(AppState& app) {
 
     // Row 1: identity, target, and the right-aligned safety/AI cluster.
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("CORTEX");
+    {
+        cortex::ui::HeadingFont heading;
+        ImGui::TextUnformatted("CORTEX");
+    }
     ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
     if (ImGui::Button(session ? "Change process" : "Select process"))
         app.ui.requestProcessPicker = true;
@@ -2184,9 +2201,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     };
     RegisterClassExW(&wc);
 
+    // Size the first window for the primary monitor's DPI so a 150% or 200%
+    // display does not open a cramped window.
+    const float startupScale = ImGui_ImplWin32_GetDpiScaleForMonitor(
+        MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
+    const float windowScale = startupScale > 0.0f ? startupScale : 1.0f;
     HWND hwnd = CreateWindowW(
         wc.lpszClassName, L"Cortex",
-        WS_OVERLAPPEDWINDOW, 100, 80, 1380, 880,
+        WS_OVERLAPPEDWINDOW, 100, 80,
+        static_cast<int>(1380 * windowScale), static_cast<int>(880 * windowScale),
         nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!CreateDeviceD3D(hwnd)) {
@@ -2205,7 +2228,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.IniFilename = windowSmoke ? nullptr : "cortex-ui.ini";
 
-    cortex::ui::ApplyCortexTheme();
+    cortex::ui::LoadFonts();
+    cortex::ui::ApplyDpiScale(ImGui_ImplWin32_GetDpiScaleForHwnd(hwnd));
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(gDevice, gDeviceContext);
@@ -2224,6 +2248,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             if (msg.message == WM_QUIT) done = true;
         }
         if (done) break;
+
+        if (gPendingDpiScale > 0.0f) {
+            cortex::ui::ApplyDpiScale(gPendingDpiScale);
+            gPendingDpiScale = 0.0f;
+        }
 
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();

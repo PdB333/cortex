@@ -215,8 +215,8 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Target screenshot");
-    FlowSameLine(120);
-    ImGui::SetNextItemWidth(120);
+    FlowSameLine(Px(120));
+    ImGui::SetNextItemWidth(Px(120));
     ImGui::Combo("##ScreenshotMode", &modeIndex_, kModes, IM_ARRAYSIZE(kModes));
     FlowSameLine(ButtonWidth("Connect existing"));
 

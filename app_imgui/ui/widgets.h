@@ -1,8 +1,45 @@
 #pragma once
 
+#include "fonts.h"
+
 #include <imgui.h>
 
+#include <cstdarg>
+#include <utility>
+
 namespace cortex::ui {
+
+// Converts a layout length written for the original 13px font at 100% into
+// pixels for the current font size and monitor DPI. Every hard-coded width,
+// height or threshold in the UI goes through this so layouts scale together
+// with the text.
+inline float Px(float value) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    return value * style.FontScaleDpi * (style.FontSizeBase / 13.0f);
+}
+
+// Monospace text for addresses, bytes and instructions, so columns of hex
+// line up row to row while the rest of the UI uses the proportional face.
+inline void MonoTextUnformatted(const char* text) {
+    MonoFont mono;
+    ImGui::TextUnformatted(text);
+}
+
+inline void MonoText(const char* format, ...) IM_FMTARGS(1);
+inline void MonoText(const char* format, ...) {
+    MonoFont mono;
+    va_list args;
+    va_start(args, format);
+    ImGui::TextV(format, args);
+    va_end(args);
+}
+
+// Code and JSON editors use the monospace face.
+template <typename... Args>
+bool MonoInputTextMultiline(Args&&... args) {
+    MonoFont mono;
+    return ImGui::InputTextMultiline(std::forward<Args>(args)...);
+}
 
 // Muted explanatory text that wraps inside narrow docked panels instead of
 // running past the panel edge.
@@ -59,7 +96,7 @@ inline bool BeginDataTable(const char* id, int columns, ImGuiTableFlags flags = 
                            float minColumnWidth = 120.0f) {
     float innerWidth = 0.0f;
     if ((flags & ImGuiTableFlags_ScrollY) && !(flags & ImGuiTableFlags_ScrollX)) {
-        const float minWidth = static_cast<float>(columns) * minColumnWidth;
+        const float minWidth = static_cast<float>(columns) * Px(minColumnWidth);
         const float available =
             outerSize.x > 0.0f ? outerSize.x : ImGui::GetContentRegionAvail().x;
         if (available < minWidth) {

@@ -98,11 +98,11 @@ void NetworkWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 65);
-        ImGui::TableSetupColumn("Tick", ImGuiTableColumnFlags_WidthFixed, 110);
-        ImGui::TableSetupColumn("Dir", ImGuiTableColumnFlags_WidthFixed, 60);
-        ImGui::TableSetupColumn("Socket", ImGuiTableColumnFlags_WidthFixed, 100);
-        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 75);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(65));
+        ImGui::TableSetupColumn("Tick", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        ImGui::TableSetupColumn("Dir", ImGuiTableColumnFlags_WidthFixed, Px(60));
+        ImGui::TableSetupColumn("Socket", ImGuiTableColumnFlags_WidthFixed, Px(100));
+        ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, Px(75));
         ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 

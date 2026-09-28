@@ -71,10 +71,10 @@ void ScriptsWorkspace::Draw(UiContext& context) {
     // The editor needs the width; in a narrow dock the script list moves
     // above it instead of squeezing it into a sliver.
     const float availableWidth = ImGui::GetContentRegionAvail().x;
-    const bool stacked = availableWidth < 560.0f;
+    const bool stacked = availableWidth < Px(560.0f);
     const ImVec2 listSize = stacked
-        ? ImVec2(0.0f, 120.0f)
-        : ImVec2(std::clamp(availableWidth * 0.28f, 160.0f, 240.0f), 0.0f);
+        ? ImVec2(0.0f, Px(120.0f))
+        : ImVec2(std::clamp(availableWidth * 0.28f, Px(160.0f), Px(240.0f)), 0.0f);
     ImGui::BeginChild("ScriptList", listSize, ImGuiChildFlags_Borders);
     if (ImGui::Selectable("+ New script", context.scriptsModel->SelectedName().empty())) {
         context.scriptsModel->ClearSelection();
@@ -96,11 +96,11 @@ void ScriptsWorkspace::Draw(UiContext& context) {
     if (!stacked) ImGui::SameLine();
     ImGui::BeginChild("ScriptEditor", ImVec2(0, 0), ImGuiChildFlags_Borders);
 
-    ImGui::SetNextItemWidth(220);
+    ImGui::SetNextItemWidth(Px(220));
     ImGui::InputTextWithHint("##ScriptName", "Script name",
                              name_.data(), name_.size());
     FlowSameLine(120 + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Timeout ms").x);
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(Px(120));
     ImGui::InputInt("Timeout ms", &timeoutMs_);
     timeoutMs_ = std::clamp(timeoutMs_, 100, 120000);
     FlowSameLine(ButtonWidth("Save"));
@@ -152,9 +152,9 @@ void ScriptsWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     const float outputHeight =
-        std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, 60.0f, 150.0f);
-    ImGui::InputTextMultiline("##LuaSource", source_.data(), source_.size(),
-                              ImVec2(-1, -outputHeight - 28));
+        std::clamp(ImGui::GetContentRegionAvail().y * 0.3f, Px(60.0f), Px(150.0f));
+    MonoInputTextMultiline("##LuaSource", source_.data(), source_.size(),
+                              ImVec2(-1, -outputHeight - Px(28)));
     ImGui::TextDisabled("Output");
     ImGui::BeginChild("ScriptOutput", ImVec2(0, outputHeight), ImGuiChildFlags_Borders);
     ImGui::TextWrapped("%s", context.scriptsModel->Output().empty()

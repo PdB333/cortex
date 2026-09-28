@@ -162,15 +162,15 @@ void ProjectWorkspace::Draw(UiContext& context) {
 
     if (ImGui::BeginTabBar("ProjectTabs")) {
         if (ImGui::BeginTabItem("Addresses")) {
-            ImGui::SetNextItemWidth(160);
+            ImGui::SetNextItemWidth(Px(160));
             ImGui::InputTextWithHint("##ProjectAddressName", "Name",
                                      addressName_.data(), addressName_.size());
-            FlowSameLine(190);
-            ImGui::SetNextItemWidth(190);
+            FlowSameLine(Px(190));
+            ImGui::SetNextItemWidth(Px(190));
             ImGui::InputTextWithHint("##ProjectAddressExpression", "Address / module+offset",
                                      addressExpression_.data(), addressExpression_.size());
-            FlowSameLine(110);
-            ImGui::SetNextItemWidth(110);
+            FlowSameLine(Px(110));
+            ImGui::SetNextItemWidth(Px(110));
             ImGui::InputTextWithHint("##ProjectAddressType", "Type",
                                      addressType_.data(), addressType_.size());
             ImGui::SameLine();
@@ -203,9 +203,9 @@ void ProjectWorkspace::Draw(UiContext& context) {
                                   ImGui::GetContentRegionAvail())) {
                 ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.18f);
                 ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.22f);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 100);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(100));
                 ImGui::TableSetupColumn("Notes", ImGuiTableColumnFlags_WidthStretch, 0.35f);
-                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 180);
+                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(180));
                 ImGui::TableHeadersRow();
 
                 for (const auto& row : context.projectModel->Addresses()) {
@@ -249,23 +249,23 @@ void ProjectWorkspace::Draw(UiContext& context) {
         }
 
         if (ImGui::BeginTabItem("Pointer paths")) {
-            ImGui::SetNextItemWidth(140);
+            ImGui::SetNextItemWidth(Px(140));
             ImGui::InputTextWithHint("##PointerName", "Name",
                                      pointerName_.data(), pointerName_.size());
-            FlowSameLine(130);
-            ImGui::SetNextItemWidth(130);
+            FlowSameLine(Px(130));
+            ImGui::SetNextItemWidth(Px(130));
             ImGui::InputTextWithHint("##PointerModule", "Module",
                                      pointerModule_.data(), pointerModule_.size());
-            FlowSameLine(120);
-            ImGui::SetNextItemWidth(120);
+            FlowSameLine(Px(120));
+            ImGui::SetNextItemWidth(Px(120));
             ImGui::InputTextWithHint("##PointerBase", "Base offset",
                                      pointerBase_.data(), pointerBase_.size());
-            FlowSameLine(190);
-            ImGui::SetNextItemWidth(190);
+            FlowSameLine(Px(190));
+            ImGui::SetNextItemWidth(Px(190));
             ImGui::InputTextWithHint("##PointerOffsets", "Offsets JSON",
                                      pointerOffsets_.data(), pointerOffsets_.size());
-            FlowSameLine(100);
-            ImGui::SetNextItemWidth(100);
+            FlowSameLine(Px(100));
+            ImGui::SetNextItemWidth(Px(100));
             ImGui::InputTextWithHint("##PointerType", "Final type",
                                      pointerType_.data(), pointerType_.size());
 
@@ -299,8 +299,8 @@ void ProjectWorkspace::Draw(UiContext& context) {
                 ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.16f);
                 ImGui::TableSetupColumn("Base", ImGuiTableColumnFlags_WidthStretch, 0.13f);
                 ImGui::TableSetupColumn("Offsets", ImGuiTableColumnFlags_WidthStretch, 0.23f);
-                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 90);
-                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 160);
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(90));
+                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(160));
                 ImGui::TableHeadersRow();
 
                 for (const auto& row : context.projectModel->PointerPaths()) {
@@ -350,8 +350,8 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-220);
             ImGui::InputTextWithHint("##ProjectNoteText", "Persistent note",
                                      noteText_.data(), noteText_.size());
-            FlowSameLine(130);
-            ImGui::SetNextItemWidth(130);
+            FlowSameLine(Px(130));
+            ImGui::SetNextItemWidth(Px(130));
             ImGui::InputTextWithHint("##ProjectNoteTags", "Tags JSON",
                                      noteTags_.data(), noteTags_.size());
             FlowSameLine(ButtonWidth("Add note"));
@@ -376,10 +376,10 @@ void ProjectWorkspace::Draw(UiContext& context) {
                                   ImGuiTableFlags_Resizable |
                                   ImGuiTableFlags_ScrollY,
                                   ImGui::GetContentRegionAvail())) {
-                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 55);
+                ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(55));
                 ImGui::TableSetupColumn("Note", ImGuiTableColumnFlags_WidthStretch, 0.65f);
                 ImGui::TableSetupColumn("Tags", ImGuiTableColumnFlags_WidthStretch, 0.35f);
-                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 75);
+                ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(75));
                 ImGui::TableHeadersRow();
                 for (const auto& row : context.projectModel->Notes()) {
                     ImGui::PushID(row.id);

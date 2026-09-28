@@ -219,19 +219,19 @@ void TraceWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    ImGui::SetNextItemWidth(155);
+    ImGui::SetNextItemWidth(Px(155));
     ImGui::InputScalar("Thread", ImGuiDataType_U64, &threadId_);
     FlowSameLine(ButtonWidth("Use debugger thread"));
     if (context.debuggerModel && context.debuggerModel->CurrentThread() != 0) {
         if (ImGui::Button("Use debugger thread"))
             threadId_ = context.debuggerModel->CurrentThread();
-        FlowSameLine(130);
+        FlowSameLine(Px(130));
     }
-    ImGui::SetNextItemWidth(130);
+    ImGui::SetNextItemWidth(Px(130));
     ImGui::InputInt("Max steps", &maxSteps_);
     maxSteps_ = std::clamp(maxSteps_, 100, 1000000);
-    FlowSameLine(110);
-    ImGui::SetNextItemWidth(110);
+    FlowSameLine(Px(110));
+    ImGui::SetNextItemWidth(Px(110));
     ImGui::InputInt("Events", &eventLimit_);
     eventLimit_ = std::clamp(eventLimit_, 50, 1000);
     FlowSameLine(ButtonWidth("Start trace"));
@@ -240,7 +240,7 @@ void TraceWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     const float traceListHeight =
-        std::clamp(ImGui::GetContentRegionAvail().y * 0.36f, 170.0f, 300.0f);
+        std::clamp(ImGui::GetContentRegionAvail().y * 0.36f, Px(170.0f), Px(300.0f));
 
     int stopId = -1;
     int deleteId = -1;
@@ -250,13 +250,13 @@ void TraceWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImVec2(0, traceListHeight))) {
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 45);
-        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 90);
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 75);
-        ImGui::TableSetupColumn("Steps", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Events", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(45));
+        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, Px(75));
+        ImGui::TableSetupColumn("Steps", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Events", ImGuiTableColumnFlags_WidthFixed, Px(80));
         ImGui::TableSetupColumn("Stop reason", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 155);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, Px(155));
         ImGui::TableHeadersRow();
 
         for (const auto& trace : traces_) {
@@ -322,9 +322,9 @@ void TraceWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_Resizable |
                           ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Seq", ImGuiTableColumnFlags_WidthFixed, 65);
-        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, 85);
-        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 115);
+        ImGui::TableSetupColumn("Seq", ImGuiTableColumnFlags_WidthFixed, Px(65));
+        ImGui::TableSetupColumn("Thread", ImGuiTableColumnFlags_WidthFixed, Px(85));
+        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, Px(115));
         ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch, 0.42f);
         ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthStretch, 0.22f);
         ImGui::TableSetupColumn("Registers", ImGuiTableColumnFlags_WidthStretch, 0.36f);

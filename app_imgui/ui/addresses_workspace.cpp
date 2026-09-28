@@ -356,15 +356,15 @@ void AddressesWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    ImGui::SetNextItemWidth(150);
+    ImGui::SetNextItemWidth(Px(150));
     ImGui::InputTextWithHint("##AddressName", "Description",
                              name_.data(), name_.size());
-    FlowSameLine(210);
-    ImGui::SetNextItemWidth(210);
+    FlowSameLine(Px(210));
+    ImGui::SetNextItemWidth(Px(210));
     ImGui::InputTextWithHint("##AddressExpression", "Address / module+RVA",
                              address_.data(), address_.size());
-    FlowSameLine(105);
-    ImGui::SetNextItemWidth(105);
+    FlowSameLine(Px(105));
+    ImGui::SetNextItemWidth(Px(105));
     ImGui::Combo("##AddressType", &typeIndex_, kTypes, IM_ARRAYSIZE(kTypes));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-185);
@@ -416,7 +416,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
         selectedWatchPtr ? selectedWatchPtr->value : std::string();
     const int selectedFreezeId = selectedFreezePtr ? selectedFreezePtr->id : -1;
 
-    ImGui::SameLine();
+    FlowSameLine(std::max(ButtonWidth("Stop live"), ButtonWidth("Watch live")));
     ImGui::BeginDisabled(!selected || !context.mutationAllowed);
     if (ImGui::Button(selectedWatchId >= 0 ? "Stop live" : "Watch live") &&
         selected && context.watchesModel) {
@@ -505,9 +505,9 @@ void AddressesWorkspace::Draw(UiContext& context) {
             ImGui::GetContentRegionAvail())) {
         ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 0.22f);
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.22f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, 85);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(85));
         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, Px(80));
         ImGui::TableSetupColumn("Notes", ImGuiTableColumnFlags_WidthStretch, 0.30f);
         ImGui::TableHeadersRow();
 

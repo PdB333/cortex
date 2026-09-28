@@ -129,10 +129,10 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     ImGui::TextDisabled(cortex::target::ArchitectureName(session->Target().architecture));
     ImGui::Spacing();
 
-    ImGui::SetNextItemWidth(240);
+    ImGui::SetNextItemWidth(Px(240));
     ImGui::InputTextWithHint("##DisasmAddress", "0x7FF...", address_, sizeof(address_));
-    FlowSameLine(100);
-    ImGui::SetNextItemWidth(100);
+    FlowSameLine(Px(100));
+    ImGui::SetNextItemWidth(Px(100));
     ImGui::InputInt("Count", &count_, 16, 64);
     FlowSameLine(ButtonWidth("Go"));
     if (ImGui::Button("Go")) {
@@ -159,7 +159,7 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     ImGui::Checkbox("Follow IP", &followInstructionPointer_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
-    ImGui::SetNextItemWidth(90);
+    ImGui::SetNextItemWidth(Px(90));
     ImGui::Combo("##DisasmLiveRate", &liveRateIndex_,
                  liveRates, IM_ARRAYSIZE(liveRates));
 
@@ -193,7 +193,7 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     ImGui::Spacing();
 
     if (!analysisKind_.empty() || !analysisError_.empty()) {
-        ImGui::BeginChild("DisassemblyAnalysis", ImVec2(0, 170), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("DisassemblyAnalysis", ImVec2(0, Px(170)), ImGuiChildFlags_Borders);
         ImGui::TextUnformatted(analysisKind_.empty() ? "Analysis" : analysisKind_.c_str());
         ImGui::Separator();
         if (!analysisError_.empty())
@@ -212,8 +212,8 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 145);
-        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, 190);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(145));
+        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, Px(190));
         ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
 
@@ -229,9 +229,12 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
                 context.debuggerModel->Snapshot().instructionPointer == row.address;
             std::snprintf(label, sizeof(label), atIp ? "> 0x%llX" : "0x%llX",
                           static_cast<unsigned long long>(row.address));
-            if (ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns)) {
-                currentAddress_ = row.address;
+            bool clicked = false;
+            {
+                MonoFont mono;
+                clicked = ImGui::Selectable(label, false, ImGuiSelectableFlags_SpanAllColumns);
             }
+            if (clicked) currentAddress_ = row.address;
             if (ImGui::BeginPopupContextItem()) {
                 AddressContextOptions options;
                 options.valueType = "u8";
@@ -241,9 +244,9 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
             }
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(FormatBytes(row.bytes).c_str());
+            MonoTextUnformatted(FormatBytes(row.bytes).c_str());
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(row.text.c_str());
+            MonoTextUnformatted(row.text.c_str());
             ImGui::PopID();
         }
         ImGui::EndTable();
