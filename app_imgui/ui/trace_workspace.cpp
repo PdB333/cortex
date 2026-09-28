@@ -199,41 +199,42 @@ void TraceWorkspace::Draw(UiContext& context) {
     if (threadId_ == 0 && context.debuggerModel)
         threadId_ = context.debuggerModel->CurrentThread();
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Execution traces");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
 
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Connect existing"))
+    FlowSameLine(ButtonWidth("Connect existing"));
+    if (ImGui::Button("Connect existing"))
         EnsureRuntime(context, false);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Enable runtime"));
     ImGui::BeginDisabled(!context.mutationAllowed);
-    if (ImGui::SmallButton("Enable runtime"))
+    if (ImGui::Button("Enable runtime"))
         EnsureRuntime(context, true);
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh"))
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh"))
         RefreshTraces(context);
 
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(155);
     ImGui::InputScalar("Thread", ImGuiDataType_U64, &threadId_);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Use debugger thread"));
     if (context.debuggerModel && context.debuggerModel->CurrentThread() != 0) {
-        if (ImGui::SmallButton("Use debugger thread"))
+        if (ImGui::Button("Use debugger thread"))
             threadId_ = context.debuggerModel->CurrentThread();
-        ImGui::SameLine();
+        FlowSameLine(130);
     }
     ImGui::SetNextItemWidth(130);
     ImGui::InputInt("Max steps", &maxSteps_);
     maxSteps_ = std::clamp(maxSteps_, 100, 1000000);
-    ImGui::SameLine();
+    FlowSameLine(110);
     ImGui::SetNextItemWidth(110);
     ImGui::InputInt("Events", &eventLimit_);
     eventLimit_ = std::clamp(eventLimit_, 50, 1000);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Start trace"));
     ImGui::BeginDisabled(!context.mutationAllowed || threadId_ == 0);
     if (ImGui::Button("Start trace")) StartTrace(context);
     ImGui::EndDisabled();
@@ -243,7 +244,7 @@ void TraceWorkspace::Draw(UiContext& context) {
 
     int stopId = -1;
     int deleteId = -1;
-    if (ImGui::BeginTable("TraceTable", 7,
+    if (BeginDataTable("TraceTable", 7,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -284,7 +285,7 @@ void TraceWorkspace::Draw(UiContext& context) {
                 ImGui::BeginDisabled(!context.mutationAllowed);
                 if (ImGui::SmallButton("Stop")) stopId = trace.id;
                 ImGui::EndDisabled();
-                ImGui::SameLine();
+                FlowSameLine(ButtonWidth("Delete"));
             }
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::SmallButton("Delete")) deleteId = trace.id;
@@ -302,9 +303,9 @@ void TraceWorkspace::Draw(UiContext& context) {
                 selectedTraceId_ >= 0
                     ? (" #" + std::to_string(selectedTraceId_)).c_str()
                     : "");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Reload events"));
     ImGui::BeginDisabled(selectedTraceId_ < 0);
-    if (ImGui::SmallButton("Reload events"))
+    if (ImGui::Button("Reload events"))
         LoadEvents(context, selectedTraceId_);
     ImGui::EndDisabled();
 
@@ -315,7 +316,7 @@ void TraceWorkspace::Draw(UiContext& context) {
         return;
     }
 
-    if (ImGui::BeginTable("TraceEventsTable", 6,
+    if (BeginDataTable("TraceEventsTable", 6,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |

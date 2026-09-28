@@ -195,6 +195,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
         initializedArgs_ = true;
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Advanced runtime");
     Subtitle("Primitive + semantic Cortex tool catalog");
     ImGui::Spacing();
@@ -209,7 +210,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
                 context.status = "No existing runtime: " + error;
             }
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
             std::string error;
@@ -222,13 +223,14 @@ void RuntimeWorkspace::Draw(UiContext& context) {
         }
         ImGui::EndDisabled();
         if (!context.mutationAllowed) {
-            ImGui::SameLine();
+            FlowSameLine(TextWidth("Enable writes to inject runtime"));
             ImGui::TextDisabled("Enable writes to inject runtime");
         }
     } else {
+        ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Runtime connected");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Refresh catalog")) RefreshTools(context);
+        FlowSameLine(ButtonWidth("Refresh catalog"));
+        if (ImGui::Button("Refresh catalog")) RefreshTools(context);
     }
 
     if (context.payload->Ready() && tools_.empty()) RefreshTools(context);
@@ -256,7 +258,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
         if (!context.settings->SaveAndSync(&error))
             context.status = "MCP profile save failed: " + error;
     }
-    ImGui::SameLine();
+    FlowSameLine(260);
     ImGui::SetNextItemWidth(260);
     ImGui::InputTextWithHint("##RuntimeFilter", "Filter tools...",
                              filter_.data(), filter_.size());
@@ -319,7 +321,7 @@ void RuntimeWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Call", ImVec2(140, 36))) CallSelected(context);
     ImGui::EndDisabled();
     if (blocked) {
-        ImGui::SameLine();
+        FlowSameLine(TextWidth("Enable writes to call this tool"));
         ImGui::TextDisabled("Enable writes to call this tool");
     }
 

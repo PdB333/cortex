@@ -36,22 +36,23 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
              "[\n  {\"address\":\"0x0\",\"size\":64}\n]");
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Memory snapshots");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.snapshotsModel->Refresh(nullptr);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -59,9 +60,9 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
                 context.snapshotsModel->Refresh(nullptr);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.snapshotsModel->Refresh(&error))
             context.status = "Snapshot refresh failed: " + error;
@@ -96,7 +97,7 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
 
     int rewindId = -1;
     int deleteId = -1;
-    if (ImGui::BeginTable("SnapshotsTable", 7,
+    if (BeginDataTable("SnapshotsTable", 7,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -133,7 +134,7 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
             ImGui::TableSetColumnIndex(6);
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::SmallButton("Rewind")) rewindId = snap.id;
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Delete"));
             if (ImGui::SmallButton("Delete")) deleteId = snap.id;
             ImGui::EndDisabled();
             ImGui::PopID();
@@ -171,15 +172,15 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    FlowSameLine(180);
     ImGui::SetNextItemWidth(180);
     ImGui::InputTextWithHint("##LastChangeAddress", "Address",
                              lastChangeAddress_.data(), lastChangeAddress_.size());
-    ImGui::SameLine();
+    FlowSameLine(90);
     ImGui::SetNextItemWidth(90);
     ImGui::InputInt("Size##LastChange", &lastChangeSize_);
     lastChangeSize_ = std::clamp(lastChangeSize_, 1, 4096);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Last change"));
     ImGui::BeginDisabled(lastChangeAddress_[0] == '\0');
     if (ImGui::Button("Last change")) {
         std::string error;

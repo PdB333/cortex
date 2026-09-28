@@ -42,30 +42,51 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         ImGui::Text("AI: %zu session(s), %zu active",
                     context.aiActivityModel->SessionCount(),
                     context.aiActivityModel->ActiveTaskCount());
-        ImGui::SameLine();
+        FlowSameLine(std::max(TextWidth("listener ready"), TextWidth("listener unavailable")));
         ImGui::TextDisabled(context.aiActivityModel->Listening()
                                 ? "listener ready" : "listener unavailable");
     } else {
         ImGui::TextDisabled("AI activity model unavailable");
     }
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Auto refresh runtime"));
     ImGui::Checkbox("Auto refresh runtime", &autoRefresh_);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Refresh runtime"));
     ImGui::BeginDisabled(!session || !context.payload || !context.payload->Ready());
-    if (ImGui::SmallButton("Refresh runtime"))
+    if (ImGui::Button("Refresh runtime"))
         RefreshRuntime(context, true);
     ImGui::EndDisabled();
+
+    // A summary tab is hidden while its full workspace is open elsewhere in
+    // the layout, so the same list is never shown twice.
+    const bool showEvents = !context.WorkspaceOpen("events");
+    const bool showBreakpoints = !context.WorkspaceOpen("debugger");
+    const bool showWatches = !context.WorkspaceOpen("watches");
+    const bool showDiagnostics = !context.WorkspaceOpen("diagnostics");
+    std::string hidden;
+    auto noteHidden = [&hidden](bool shown, const char* name) {
+        if (shown) return;
+        if (!hidden.empty()) hidden += ", ";
+        hidden += name;
+    };
+    noteHidden(showEvents, "Events, Console");
+    noteHidden(showBreakpoints, "Breakpoints");
+    noteHidden(showWatches, "Watches");
+    noteHidden(showDiagnostics, "Diagnostics");
+    if (!hidden.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|  open as full panels: %s", hidden.c_str());
+    }
 
     ImGui::Separator();
 
     if (!ImGui::BeginTabBar("CortexBottomPanelTabs")) return;
 
-    if (ImGui::BeginTabItem("Events")) {
+    if (showEvents && ImGui::BeginTabItem("Events")) {
         if (!session) {
             HintText("Select a process to inspect runtime events.");
         } else if (!context.runtimeEventsModel) {
             ImGui::TextDisabled("Runtime event model unavailable.");
-        } else if (ImGui::BeginTable(
+        } else if (BeginDataTable(
                        "BottomEvents", 4,
                        ImGuiTableFlags_RowBg |
                        ImGuiTableFlags_BordersInnerH |
@@ -96,7 +117,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("Console")) {
+    if (showEvents && ImGui::BeginTabItem("Console")) {
         if (!session) {
             HintText("Select a process to inspect the runtime API log.");
         } else if (context.runtimeEventsModel) {
@@ -108,13 +129,13 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("Breakpoints")) {
+    if (showBreakpoints && ImGui::BeginTabItem("Breakpoints")) {
         if (!session || !context.debuggerModel) {
             HintText("Select a process to inspect breakpoints.");
         } else {
             const auto& rows = context.debuggerModel->Breakpoints();
             ImGui::Text("%zu breakpoint(s)", rows.size());
-            if (ImGui::BeginTable(
+            if (BeginDataTable(
                     "BottomBreakpoints", 5,
                     ImGuiTableFlags_RowBg |
                     ImGuiTableFlags_BordersInnerH |
@@ -146,11 +167,11 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("Watches")) {
+    if (showWatches && ImGui::BeginTabItem("Watches")) {
         if (!session || !context.watchesModel) {
             HintText("Select a process to inspect watches.");
         } else {
-            if (ImGui::SmallButton("Refresh watches")) {
+            if (ImGui::Button("Refresh watches")) {
                 std::string error;
                 if (!context.watchesModel->Refresh(&error))
                     context.status = "Watch refresh failed: " + error;
@@ -159,7 +180,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
             ImGui::TextDisabled("%zu watch(es), %zu freeze(s)",
                                 context.watchesModel->Watches().size(),
                                 context.watchesModel->Freezes().size());
-            if (ImGui::BeginTable(
+            if (BeginDataTable(
                     "BottomWatches", 4,
                     ImGuiTableFlags_RowBg |
                     ImGuiTableFlags_BordersInnerH |
@@ -192,13 +213,13 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         if (!context.aiActivityModel) {
             ImGui::TextDisabled("AI activity model unavailable.");
         } else {
-            if (ImGui::SmallButton("Clear history"))
+            if (ImGui::Button("Clear history"))
                 context.aiActivityModel->ClearHistory();
             ImGui::SameLine();
             ImGui::TextDisabled("%zu row(s)",
                                 context.aiActivityModel->Activities().size());
 
-            if (ImGui::BeginTable(
+            if (BeginDataTable(
                     "BottomAiActivity", 6,
                     ImGuiTableFlags_RowBg |
                     ImGuiTableFlags_BordersInnerH |
@@ -241,11 +262,11 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
         ImGui::EndTabItem();
     }
 
-    if (ImGui::BeginTabItem("Diagnostics")) {
+    if (showDiagnostics && ImGui::BeginTabItem("Diagnostics")) {
         if (!session || !context.diagnosticsModel) {
             HintText("Select a process to inspect diagnostics.");
         } else {
-            if (ImGui::SmallButton("Refresh diagnostics")) {
+            if (ImGui::Button("Refresh diagnostics")) {
                 std::string error;
                 if (!context.diagnosticsModel->Refresh(&error))
                     context.status = "Diagnostics refresh failed: " + error;

@@ -35,13 +35,14 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
         allocationMinSize_ = 0;
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Runtime instrumentation");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
@@ -50,9 +51,9 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
                 allocationMinSize_ = context.instrumentationModel->AllocationWatchMinSize();
             }
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -62,9 +63,9 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
             }
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh state"));
     }
-    if (ImGui::SmallButton("Refresh state")) {
+    if (ImGui::Button("Refresh state")) {
         std::string error;
         if (!context.instrumentationModel->RefreshState(&error))
             context.status = "Instrumentation refresh failed: " + error;
@@ -74,8 +75,8 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
             context.status = "Instrumentation state refreshed";
         }
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh events")) {
+    FlowSameLine(ButtonWidth("Refresh events"));
+    if (ImGui::Button("Refresh events")) {
         std::string error;
         if (!context.instrumentationModel->RefreshEvents(&error))
             context.status = "Instrumentation events failed: " + error;
@@ -90,15 +91,15 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(220);
             ImGui::InputTextWithHint("##PageWatchAddress", "Address / expression",
                                      pageAddress_.data(), pageAddress_.size());
-            ImGui::SameLine();
+            FlowSameLine(100);
             ImGui::SetNextItemWidth(100);
             ImGui::InputInt("Size##PageWatch", &pageSize_);
             pageSize_ = std::clamp(pageSize_, 1, 64 * 1024 * 1024);
-            ImGui::SameLine();
+            FlowSameLine(180);
             ImGui::SetNextItemWidth(180);
             ImGui::InputTextWithHint("##PageWatchLabel", "Optional label",
                                      pageLabel_.data(), pageLabel_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Watch page access"));
             ImGui::BeginDisabled(!context.mutationAllowed || pageAddress_[0] == '\0');
             if (ImGui::Button("Watch page access")) {
                 std::string error;
@@ -112,7 +113,7 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
             ImGui::EndDisabled();
 
             int deleteId = -1;
-            if (ImGui::BeginTable("PageWatches", 5,
+            if (BeginDataTable("PageWatches", 5,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -154,7 +155,7 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
 
             ImGui::Text("Access events (%zu)",
                         context.instrumentationModel->PageAccessEvents().size());
-            if (ImGui::BeginTable("PageAccessEvents", 9,
+            if (BeginDataTable("PageAccessEvents", 9,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -214,10 +215,10 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
 
         if (ImGui::BeginTabItem("Allocations")) {
             ImGui::Checkbox("Allocation watch enabled", &allocationEnabled_);
-            ImGui::SameLine();
+            FlowSameLine(160);
             ImGui::SetNextItemWidth(160);
             ImGui::InputScalar("Minimum size", ImGuiDataType_U64, &allocationMinSize_);
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Apply allocation watch"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Apply allocation watch")) {
                 std::string error;
@@ -233,7 +234,7 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndDisabled();
 
-            if (ImGui::BeginTable("AllocationEvents", 5,
+            if (BeginDataTable("AllocationEvents", 5,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |

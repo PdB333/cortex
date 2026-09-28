@@ -3,6 +3,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 namespace cortex::ui {
 
 void ActionsWorkspace::Draw(UiContext& context) {
@@ -18,22 +20,23 @@ void ActionsWorkspace::Draw(UiContext& context) {
         rollbackCheckpoint_ = 0;
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Reversible actions");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.actionsModel->Refresh(nullptr);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -41,10 +44,10 @@ void ActionsWorkspace::Draw(UiContext& context) {
                 context.actionsModel->Refresh(nullptr);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
 
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.actionsModel->Refresh(&error))
             context.status = "Actions refresh failed: " + error;
@@ -69,7 +72,7 @@ void ActionsWorkspace::Draw(UiContext& context) {
         else
             context.status = "All reversible actions rolled back";
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Clear history"));
     if (ImGui::Button("Clear history")) {
         std::string error;
         if (!context.actionsModel->Clear(context.mutationAllowed, &error))
@@ -79,7 +82,7 @@ void ActionsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    FlowSameLine(180);
     ImGui::SetNextItemWidth(180);
     ImGui::InputScalar("Rollback checkpoint", ImGuiDataType_U64, &rollbackCheckpoint_);
     ImGui::SameLine();
@@ -96,7 +99,7 @@ void ActionsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    if (ImGui::BeginTable("ActionsTable", 3,
+    if (BeginDataTable("ActionsTable", 3,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |

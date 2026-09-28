@@ -327,23 +327,24 @@ void AddressesWorkspace::Draw(UiContext& context) {
         }
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Address Table");
     Subtitle("persistent Project addresses + runtime values");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) RefreshAll(context, true);
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) RefreshAll(context, true);
 
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing runtime"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing runtime")) {
+        if (ImGui::Button("Connect existing runtime")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 RefreshAll(context, true);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -358,11 +359,11 @@ void AddressesWorkspace::Draw(UiContext& context) {
     ImGui::SetNextItemWidth(150);
     ImGui::InputTextWithHint("##AddressName", "Description",
                              name_.data(), name_.size());
-    ImGui::SameLine();
+    FlowSameLine(210);
     ImGui::SetNextItemWidth(210);
     ImGui::InputTextWithHint("##AddressExpression", "Address / module+RVA",
                              address_.data(), address_.size());
-    ImGui::SameLine();
+    FlowSameLine(105);
     ImGui::SetNextItemWidth(105);
     ImGui::Combo("##AddressType", &typeIndex_, kTypes, IM_ARRAYSIZE(kTypes));
     ImGui::SameLine();
@@ -378,7 +379,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     if (!editingOriginalName_.empty()) {
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Cancel"));
         if (ImGui::Button("Cancel")) ClearEditor();
     }
 
@@ -395,13 +396,13 @@ void AddressesWorkspace::Draw(UiContext& context) {
         if (selected) Navigate(context, selected->address, workspace);
     };
 
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Memory"));
     ImGui::BeginDisabled(!selected);
-    if (ImGui::SmallButton("Memory")) navigateSelected("memory-browser");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Disasm")) navigateSelected("disassembly");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("RE")) navigateSelected("re");
+    if (ImGui::Button("Memory")) navigateSelected("memory-browser");
+    FlowSameLine(ButtonWidth("Disasm"));
+    if (ImGui::Button("Disasm")) navigateSelected("disassembly");
+    FlowSameLine(ButtonWidth("RE"));
+    if (ImGui::Button("RE")) navigateSelected("re");
     ImGui::EndDisabled();
 
     const application::RuntimeWatch* selectedWatchPtr =
@@ -417,7 +418,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
 
     ImGui::SameLine();
     ImGui::BeginDisabled(!selected || !context.mutationAllowed);
-    if (ImGui::SmallButton(selectedWatchId >= 0 ? "Stop live" : "Watch live") &&
+    if (ImGui::Button(selectedWatchId >= 0 ? "Stop live" : "Watch live") &&
         selected && context.watchesModel) {
         std::string error;
         if (selectedWatchId >= 0) {
@@ -439,7 +440,7 @@ void AddressesWorkspace::Draw(UiContext& context) {
     ImGui::SameLine();
     ImGui::BeginDisabled(!selected ||
                          (selectedFreezeId < 0 && !selectedWatchHasValue));
-    if (ImGui::SmallButton(selectedFreezeId >= 0 ? "Unfreeze" : "Freeze value") &&
+    if (ImGui::Button(selectedFreezeId >= 0 ? "Unfreeze" : "Freeze value") &&
         selected && context.watchesModel) {
         std::string error;
         if (selectedFreezeId >= 0) {
@@ -460,8 +461,8 @@ void AddressesWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Find writer") && selected && context.reModel) {
+    FlowSameLine(ButtonWidth("Find writer"));
+    if (ImGui::Button("Find writer") && selected && context.reModel) {
         std::string error;
         const std::string type = NormalizedType(*selected);
         if (!context.reModel->FindLastWriter(
@@ -478,24 +479,24 @@ void AddressesWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     if (selected) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Edit")) BeginEdit(*selected);
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Edit"));
+        if (ImGui::Button("Edit")) BeginEdit(*selected);
+        FlowSameLine(ButtonWidth("Remove"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Remove")) RemoveSelected(context);
+        if (ImGui::Button("Remove")) RemoveSelected(context);
         ImGui::EndDisabled();
     }
 
     ImGui::Separator();
 
     if (rows.empty()) {
-        ImGui::TextDisabled("No addresses yet. Double-click a Scanner result or add one above.");
+        HintText("No addresses yet. Double-click a Scanner result or add one above.");
         HandleShortcuts(context);
         return;
     }
 
     std::string pendingRemove;
-    if (ImGui::BeginTable(
+    if (BeginDataTable(
             "PersistentAddressesTable", 6,
             ImGuiTableFlags_RowBg |
             ImGuiTableFlags_BordersInnerH |

@@ -38,22 +38,23 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
                       static_cast<unsigned long long>(navigationAddress));
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Pointer maps");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.pointerMapsModel->Refresh(nullptr);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -61,9 +62,9 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
                 context.pointerMapsModel->Refresh(nullptr);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.pointerMapsModel->Refresh(&error))
             context.status = "Pointer map refresh failed: " + error;
@@ -79,15 +80,15 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
     ImGui::SetNextItemWidth(130);
     ImGui::InputTextWithHint("##PointerMapName", "Map name",
                              name_.data(), name_.size());
-    ImGui::SameLine();
+    FlowSameLine(190);
     ImGui::SetNextItemWidth(190);
     ImGui::InputTextWithHint("##PointerMapTarget", "Target address/expression",
                              target_.data(), target_.size());
-    ImGui::SameLine();
+    FlowSameLine(90);
     ImGui::SetNextItemWidth(90);
     ImGui::InputInt("Depth", &maxDepth_);
     maxDepth_ = std::clamp(maxDepth_, 1, 16);
-    ImGui::SameLine();
+    FlowSameLine(110);
     ImGui::SetNextItemWidth(110);
     ImGui::InputInt("Max offset", &maxOffset_);
     maxOffset_ = std::clamp(maxOffset_, 1, 1 << 20);
@@ -111,7 +112,7 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
         std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, 180.0f, 330.0f);
 
     std::string deleteName;
-    if (ImGui::BeginTable("PointerMapsTable", 7,
+    if (BeginDataTable("PointerMapsTable", 7,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -170,7 +171,7 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     ImGui::Text("%zu map(s) selected", selected_.size());
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Intersect selected"));
     ImGui::BeginDisabled(selected_.size() < 2);
     if (ImGui::Button("Intersect selected")) {
         std::string error;
@@ -182,7 +183,7 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    if (ImGui::BeginTable("PointerPathCandidates", 5,
+    if (BeginDataTable("PointerPathCandidates", 5,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |

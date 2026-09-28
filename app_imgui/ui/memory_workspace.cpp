@@ -1,4 +1,5 @@
 #include "memory_workspace.h"
+#include "widgets.h"
 #include "address_context_menu.h"
 
 #include <imgui.h>
@@ -422,7 +423,7 @@ void MemoryWorkspace::DrawWelcome(UiContext& context) {
     ImGui::TextUnformatted("Cortex Memory");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Spacing();
-    ImGui::TextDisabled("Select a process, scan a value, then keep useful addresses below.");
+    HintText("Select a process, scan a value, then keep useful addresses below.");
     ImGui::Dummy(ImVec2(0, 18));
 
     const float width = ImGui::GetContentRegionAvail().x;
@@ -433,12 +434,13 @@ void MemoryWorkspace::DrawWelcome(UiContext& context) {
     }
 
     ImGui::Dummy(ImVec2(0, 12));
-    ImGui::TextDisabled("Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
+    HintText("Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
     ImGui::EndChild();
 }
 
 void MemoryWorkspace::DrawResults(UiContext& context, float height) {
     ImGui::BeginChild("ScanResults", ImVec2(0, height), ImGuiChildFlags_Borders);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Scan results");
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu)", scanResults_.size());
@@ -461,7 +463,7 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
         return;
     }
 
-    if (ImGui::BeginTable("ResultsTable", 3,
+    if (BeginDataTable("ResultsTable", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                           ImGui::GetContentRegionAvail())) {
@@ -534,13 +536,11 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     ImGui::BeginChild("ScanPanel", ImVec2(0, height), ImGuiChildFlags_Borders);
     ImGui::TextUnformatted("Value scan");
     ImGui::Separator();
-    ImGui::Spacing();
 
     ImGui::TextDisabled("Value");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##ScanValue", scanValue_, sizeof(scanValue_));
 
-    ImGui::Spacing();
     ImGui::TextDisabled("Type");
     ImGui::SetNextItemWidth(-1);
     const char* types[] = {"Int32", "Int64", "Float", "Double", "String", "Bytes"};
@@ -549,7 +549,6 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     ImGui::EndDisabled();
 
     if (firstScanDone_) {
-        ImGui::Spacing();
         ImGui::TextDisabled("Compare");
         ImGui::SetNextItemWidth(-1);
         const char* comparisons[] = {
@@ -561,29 +560,38 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
             comparisonIndex_ = 1;
     }
 
-    ImGui::Dummy(ImVec2(0, 12));
+    ImGui::Spacing();
+    const float buttonHeight = ImGui::GetFrameHeight() * 1.25f;
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float fullWidth = ImGui::GetContentRegionAvail().x;
+    const float primaryWidth = firstScanDone_ ? (fullWidth - spacing) * 0.5f : fullWidth;
     ImGui::BeginDisabled(scanRunning_);
     if (ImGui::Button(firstScanDone_ ? "Next scan" : "First scan",
-                      ImVec2(-1, 40))) {
+                      ImVec2(primaryWidth, buttonHeight))) {
         StartScan(context);
     }
     ImGui::EndDisabled();
 
     if (firstScanDone_) {
-        if (ImGui::Button("New scan", ImVec2(-1, 32))) NewScan(context);
+        FlowSameLine(ButtonWidth("New scan"));
+        if (ImGui::Button("New scan", ImVec2(-1, buttonHeight))) NewScan(context);
     }
 
     if (scanRunning_) {
-        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("Scanning...");
-        if (ImGui::Button("Cancel", ImVec2(-1, 30)) && scanCancel_) {
+        FlowSameLine(ButtonWidth("Cancel"));
+        if (ImGui::Button("Cancel", ImVec2(-1, 0)) && scanCancel_) {
             scanCancel_->store(true, std::memory_order_relaxed);
         }
     }
 
-    ImGui::Dummy(ImVec2(0, 10));
-    ImGui::TextWrapped("Double-click saves to persistent Addresses when writes are enabled. "
-                       "Right-click for the shared address actions.");
+    ImGui::Spacing();
+    HintText("Double-click a result to keep it in Addresses.");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Saving to Addresses requires Allow writes.\n"
+                          "Right-click a result for the shared address actions.");
+    }
     ImGui::EndChild();
 }
 
@@ -591,14 +599,15 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
     RefreshAddressValues(context);
 
     ImGui::BeginChild("AddressList", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Address list");
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu)", addresses_.size());
-    ImGui::SameLine();
-    if (ImGui::SmallButton("+ Add address")) openAddAddress_ = true;
+    FlowSameLine(ButtonWidth("+ Add address"));
+    if (ImGui::Button("+ Add address")) openAddAddress_ = true;
     if (!addresses_.empty()) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear")) {
+        FlowSameLine(ButtonWidth("Clear"));
+        if (ImGui::Button("Clear")) {
             addresses_.clear();
             context.status = "Address list cleared";
         }
@@ -607,12 +616,12 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
     if (addresses_.empty()) {
         ImGui::Dummy(ImVec2(0, 12));
-        ImGui::TextDisabled("Use + Add address for local scratch entries; Scanner saves go to Addresses.");
+        HintText("Use + Add address for local scratch entries; Scanner saves go to Addresses.");
         ImGui::EndChild();
         return;
     }
 
-    if (ImGui::BeginTable("AddressTable", 5,
+    if (BeginDataTable("AddressTable", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
@@ -727,7 +736,7 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
         if (ImGui::Button("Add", ImVec2(120, 34))) {
             if (AddManualAddress(context)) ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Cancel"));
         if (ImGui::Button("Cancel", ImVec2(100, 34))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -751,7 +760,7 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
                 if (CommitValueEdit(context)) ImGui::CloseCurrentPopup();
             }
             ImGui::EndDisabled();
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Cancel"));
             if (ImGui::Button("Cancel", ImVec2(100, 34))) ImGui::CloseCurrentPopup();
         } else {
             ImGui::TextDisabled("Address no longer exists.");
@@ -786,7 +795,12 @@ void MemoryWorkspace::Draw(UiContext& context) {
     }
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float upperHeight = std::clamp(available.y * 0.56f, 260.0f, 520.0f);
+    // The scan column must fit value, type, compare and both buttons without
+    // scrolling; the address list below keeps at least a few rows.
+    const float scanPanelMin = ImGui::GetFrameHeightWithSpacing() * 9.0f;
+    const float upperHeight = std::clamp(
+        std::max(available.y * 0.56f, scanPanelMin), 260.0f,
+        std::max(260.0f, available.y - ImGui::GetFrameHeightWithSpacing() * 5.0f));
     const float scanPanelWidth = std::clamp(available.x * 0.28f, 260.0f, 360.0f);
     const float resultsWidth = std::max(
         300.0f, available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);

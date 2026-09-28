@@ -98,6 +98,7 @@ void ReWorkspace::Draw(UiContext& context) {
     const bool runtimeConnected =
         context.payload && context.payload->Ready();
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Reverse Engineering");
     ImGui::SameLine();
     ImGui::TextDisabled(runtimeConnected
@@ -105,18 +106,18 @@ void ReWorkspace::Draw(UiContext& context) {
                             : (runtimeSupported
                                 ? "runtime available - enable to use RE"
                                 : "runtime unavailable"));
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 RefreshAll(context);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed || !runtimeSupported);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -124,10 +125,10 @@ void ReWorkspace::Draw(UiContext& context) {
                 RefreshAll(context);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
     ImGui::BeginDisabled(!runtimeConnected);
-    if (ImGui::SmallButton("Refresh")) RefreshAll(context);
+    if (ImGui::Button("Refresh")) RefreshAll(context);
     ImGui::EndDisabled();
 
     if (!runtimeSupported) {
@@ -143,23 +144,23 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(150);
             ImGui::InputTextWithHint("##ReTrackName", "Name",
                                      trackName_.data(), trackName_.size());
-            ImGui::SameLine();
+            FlowSameLine(180);
             ImGui::SetNextItemWidth(180);
             ImGui::InputTextWithHint("##ReTrackAddress", "Address",
                                      trackAddress_.data(), trackAddress_.size());
-            ImGui::SameLine();
+            FlowSameLine(180);
             ImGui::SetNextItemWidth(180);
             ImGui::InputTextWithHint("##ReTrackPath", "Pointer path",
                                      trackPointerPath_.data(), trackPointerPath_.size());
-            ImGui::SameLine();
+            FlowSameLine(130);
             ImGui::SetNextItemWidth(130);
             ImGui::InputTextWithHint("##ReTrackStruct", "Struct",
                                      trackStruct_.data(), trackStruct_.size());
-            ImGui::SameLine();
+            FlowSameLine(90);
             ImGui::SetNextItemWidth(90);
             ImGui::InputInt("Size##ReTrack", &trackSize_);
             trackSize_ = std::clamp(trackSize_, 1, 1024 * 1024);
-            ImGui::SameLine();
+            FlowSameLine(CheckboxWidth("Persist"));
             ImGui::Checkbox("Persist", &trackPersist_);
             ImGui::SameLine();
             ImGui::BeginDisabled(!context.mutationAllowed ||
@@ -177,7 +178,7 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::EndDisabled();
 
             int deleteTrack = -1;
-            if (ImGui::BeginTable("ReTracksTable", 7,
+            if (BeginDataTable("ReTracksTable", 7,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -218,7 +219,7 @@ void ReWorkspace::Draw(UiContext& context) {
                         context.reModel->SelectTrack(row.id, &error);
                         Copy(analysisAddress_.data(), analysisAddress_.size(), row.address.c_str());
                     }
-                    ImGui::SameLine();
+                    FlowSameLine(ButtonWidth("Delete"));
                     ImGui::BeginDisabled(!context.mutationAllowed);
                     if (ImGui::SmallButton("Delete")) deleteTrack = row.id;
                     ImGui::EndDisabled();
@@ -260,11 +261,11 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(260);
             ImGui::InputTextWithHint("##ReAnalysisAddress", "Address / module+RVA / symbol",
                                      analysisAddress_.data(), analysisAddress_.size());
-            ImGui::SameLine();
+            FlowSameLine(90);
             ImGui::SetNextItemWidth(90);
             ImGui::InputInt("Size##ReAnalysis", &analysisSize_);
             analysisSize_ = std::clamp(analysisSize_, 1, 4096);
-            ImGui::SameLine();
+            FlowSameLine(110);
             ImGui::SetNextItemWidth(110);
             ImGui::InputInt("Timeout ms", &analysisTimeoutMs_);
             analysisTimeoutMs_ = std::clamp(analysisTimeoutMs_, 100, 120000);
@@ -281,11 +282,11 @@ void ReWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndDisabled();
 
-            ImGui::SameLine();
+            FlowSameLine(100);
             ImGui::SetNextItemWidth(100);
             ImGui::InputInt("Object size", &subobjectSize_);
             subobjectSize_ = std::clamp(subobjectSize_, 1, 1024 * 1024);
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Detect C++ subobjects"));
             ImGui::BeginDisabled(analysisAddress_[0] == '\0');
             if (ImGui::Button("Detect C++ subobjects")) {
                 std::string error;
@@ -344,7 +345,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 else
                     context.status = "RE test complete";
             }
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Run + rollback"));
             if (ImGui::Button("Run + rollback")) {
                 std::string error;
                 if (!context.reModel->RunTest(
@@ -372,7 +373,7 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-140);
             ImGui::InputTextWithHint("##ReFactValue", "JSON or text value",
                                      factValue_.data(), factValue_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Save fact"));
             ImGui::BeginDisabled(!context.mutationAllowed || factKey_[0] == '\0');
             if (ImGui::Button("Save fact")) {
                 std::string error;
@@ -394,7 +395,7 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-150);
             ImGui::InputTextWithHint("##ReCheckpointRanges", "Ranges JSON",
                                      checkpointRanges_.data(), checkpointRanges_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Checkpoint"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Checkpoint")) {
                 std::string error;
@@ -424,7 +425,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 }
                 const int checkpointId =
                     checkpoints[static_cast<size_t>(selectedCheckpoint_)].id;
-                ImGui::SameLine();
+                FlowSameLine(ButtonWidth("Rollback"));
                 ImGui::BeginDisabled(!context.mutationAllowed);
                 if (ImGui::Button("Rollback")) {
                     std::string error;
@@ -434,7 +435,7 @@ void ReWorkspace::Draw(UiContext& context) {
                     else
                         context.status = "Checkpoint rolled back";
                 }
-                ImGui::SameLine();
+                FlowSameLine(ButtonWidth("Rollback + keep"));
                 if (ImGui::Button("Rollback + keep")) {
                     std::string error;
                     if (!context.reModel->RollbackCheckpoint(
@@ -443,7 +444,7 @@ void ReWorkspace::Draw(UiContext& context) {
                     else
                         context.status = "Checkpoint rolled back and kept";
                 }
-                ImGui::SameLine();
+                FlowSameLine(ButtonWidth("Delete checkpoint"));
                 if (ImGui::Button("Delete checkpoint")) {
                     std::string error;
                     if (!context.reModel->DeleteCheckpoint(
@@ -466,7 +467,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 if (!context.reModel->RefreshSessions(&error))
                     context.status = "Session refresh failed: " + error;
             }
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Export run"));
             if (ImGui::Button("Export run")) {
                 std::string error;
                 if (!context.reModel->ExportSession(&error))
@@ -490,7 +491,7 @@ void ReWorkspace::Draw(UiContext& context) {
                     }
                     ImGui::EndCombo();
                 }
-                ImGui::SameLine();
+                FlowSameLine(240);
                 ImGui::SetNextItemWidth(240);
                 if (ImGui::BeginCombo("Run B", sessions[static_cast<size_t>(sessionB_)].id.c_str())) {
                     for (size_t i = 0; i < sessions.size(); ++i) {
@@ -500,7 +501,7 @@ void ReWorkspace::Draw(UiContext& context) {
                     }
                     ImGui::EndCombo();
                 }
-                ImGui::SameLine();
+                FlowSameLine(ButtonWidth("Diff runs"));
                 ImGui::BeginDisabled(sessionA_ == sessionB_);
                 if (ImGui::Button("Diff runs")) {
                     std::string error;
@@ -530,7 +531,7 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(220);
             ImGui::InputTextWithHint("##ReGhidraName", "Optional export name",
                                      ghidraName_.data(), ghidraName_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Export Cortex -> Ghidra"));
             if (ImGui::Button("Export Cortex -> Ghidra")) {
                 std::string error;
                 if (!context.reModel->GhidraExport(ghidraName_.data(), &error))
@@ -569,7 +570,7 @@ void ReWorkspace::Draw(UiContext& context) {
                 else
                     context.status = "Breakpoint templates saved";
             }
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Arm templates"));
             if (ImGui::Button("Arm templates")) {
                 std::string error;
                 if (!context.reModel->ApplyBreakpointTemplates(

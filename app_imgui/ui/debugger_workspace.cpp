@@ -163,16 +163,17 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     auto& debugger = *context.debuggerModel;
     const std::string backend = debugger.Backend();
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Debugger");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth(" (in-process)"), TextWidth(" (external)")));
     ImGui::TextDisabled("backend: %s%s", backend.c_str(),
                         backend == "veh" ? " (in-process)" : " (external)");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) {
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) {
         Refresh(context, debugger.Ready());
         RefreshStack(context);
     }
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Live"));
     ImGui::Checkbox("Live", &liveRefresh_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
@@ -193,7 +194,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     if (!debugger.Ready()) {
         const bool injectionNeedsPermission = backend == "veh" && !context.mutationAllowed;
         ImGui::BeginDisabled(injectionNeedsPermission);
-        if (ImGui::SmallButton("Attach debugger")) {
+        if (ImGui::Button("Attach debugger")) {
             std::string error;
             if (debugger.EnsureAttached(&error)) {
                 Refresh(context, true);
@@ -216,19 +217,19 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         if (!debugger.Pause(&error)) context.status = "Pause failed: " + error;
         else context.status = "Thread paused";
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Continue"));
     if (ImGui::Button("Continue")) {
         std::string error;
         if (!debugger.Resume(&error)) context.status = "Continue failed: " + error;
         else context.status = "Thread continued";
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Step Into"));
     if (ImGui::Button("Step Into")) {
         std::string error;
         if (!debugger.Step(2000, &error)) context.status = "Step failed: " + error;
         else context.status = "Step complete";
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Step Over"));
     if (ImGui::Button("Step Over")) {
         std::string error;
         if (!debugger.StepOver(5000, &error)) context.status = "Step over failed: " + error;
@@ -238,7 +239,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     const auto& snapshot = debugger.Snapshot();
     if (snapshot.instructionPointer) {
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Disassemble IP"));
         if (ImGui::Button("Disassemble IP")) {
             context.NavigateTo("disassembly", snapshot.instructionPointer);
         }
@@ -279,7 +280,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     ImGui::Separator();
     if (snapshot.registers.empty()) {
         ImGui::TextDisabled("Select a thread to read its registers.");
-    } else if (ImGui::BeginTable("RegisterTable", 2,
+    } else if (BeginDataTable("RegisterTable", 2,
                                  ImGuiTableFlags_RowBg |
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
@@ -315,7 +316,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         ImGui::TextDisabled("%s", stackError_.c_str());
     } else if (stackBytes_.empty()) {
         ImGui::TextDisabled("Select a thread to read its stack.");
-    } else if (ImGui::BeginTable("StackTable", 2,
+    } else if (BeginDataTable("StackTable", 2,
                                  ImGuiTableFlags_RowBg |
                                  ImGuiTableFlags_BordersInnerH |
                                  ImGuiTableFlags_ScrollY,
@@ -367,10 +368,11 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     ImGui::BeginChild("BreakpointPanel", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Breakpoints");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Refresh state"));
     ImGui::BeginDisabled(!debugger.Ready());
-    if (ImGui::SmallButton("Refresh state")) Refresh(context, true);
+    if (ImGui::Button("Refresh state")) Refresh(context, true);
     ImGui::EndDisabled();
 
     ImGui::SetNextItemWidth(210);
@@ -380,7 +382,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     const char* kinds[] = {"Software", "HW execute", "HW write", "HW read/write"};
     ImGui::SetNextItemWidth(130);
     ImGui::Combo("##BreakpointKind", &breakpointKind_, kinds, IM_ARRAYSIZE(kinds));
-    ImGui::SameLine();
+    FlowSameLine(90);
     if (breakpointKind_ >= 2) {
         ImGui::SetNextItemWidth(90);
         ImGui::InputInt("##BreakpointSize", &breakpointSize_);
@@ -390,9 +392,9 @@ void DebuggerWorkspace::Draw(UiContext& context) {
     const char* actions[] = {"Log", "Pause"};
     ImGui::SetNextItemWidth(90);
     ImGui::Combo("##BreakpointAction", &breakpointAction_, actions, IM_ARRAYSIZE(actions));
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Process global"));
     ImGui::Checkbox("Process global", &processGlobal_);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Add breakpoint"));
 
     ImGui::BeginDisabled(!context.mutationAllowed || breakpointAddress_[0] == '\0');
     if (ImGui::Button("Add breakpoint")) {
@@ -411,7 +413,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
-    if (ImGui::BeginTable("BreakpointTable", 7,
+    if (BeginDataTable("BreakpointTable", 7,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -456,7 +458,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
                     ImGui::OpenPopup("Breakpoint hit log");
                 }
             }
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Remove"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::SmallButton("Remove"))
                 removeBreakpointId = bp.id;
@@ -482,8 +484,8 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         ImGui::Text("Breakpoint %d", breakpointLogId_);
         ImGui::SameLine();
         ImGui::TextDisabled("(%zu entries)", breakpointLog_.size());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Refresh") && breakpointLogId_ >= 0) {
+        FlowSameLine(ButtonWidth("Refresh"));
+        if (ImGui::Button("Refresh") && breakpointLogId_ >= 0) {
             std::string error;
             if (!debugger.LoadBreakpointLog(
                     breakpointLogId_, 0, 500, breakpointLog_, &error))
@@ -491,7 +493,7 @@ void DebuggerWorkspace::Draw(UiContext& context) {
         }
         ImGui::Separator();
 
-        if (ImGui::BeginTable("BreakpointLogTable", 5,
+        if (BeginDataTable("BreakpointLogTable", 5,
                               ImGuiTableFlags_RowBg |
                               ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_Resizable |

@@ -213,23 +213,24 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
         ReleaseTexture();
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Target screenshot");
-    ImGui::SameLine();
+    FlowSameLine(120);
     ImGui::SetNextItemWidth(120);
     ImGui::Combo("##ScreenshotMode", &modeIndex_, kModes, IM_ARRAYSIZE(kModes));
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
 
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.status = "Runtime connected";
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -237,7 +238,7 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
                 context.status = "Runtime enabled";
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Capture"));
     }
 
     ImGui::BeginDisabled(!context.payload || !context.payload->Ready());
@@ -253,7 +254,8 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    FlowSameLine(TextWidth(context.screenshotModel->Meta().empty()
+                               ? "No capture yet." : context.screenshotModel->Meta().c_str()));
     ImGui::TextDisabled("%s", context.screenshotModel->Meta().empty()
                                  ? "No capture yet."
                                  : context.screenshotModel->Meta().c_str());

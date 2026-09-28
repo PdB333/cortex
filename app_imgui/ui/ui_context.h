@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "application/actions_model.h"
 #include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
@@ -72,6 +74,12 @@ struct UiContext {
     // Lightweight cross-workspace navigation. A workspace can request another
     // workspace and optionally pass one address without depending on its class.
     std::string requestWorkspace;
+    // Workspace ids open this frame, published by the registry before any
+    // workspace draws. Lets summary surfaces avoid repeating a full panel.
+    std::vector<std::string> openWorkspaces;
+    bool WorkspaceOpen(const std::string& id) const {
+        return std::find(openWorkspaces.begin(), openWorkspaces.end(), id) != openWorkspaces.end();
+    }
     uint64_t navigationAddress = 0;
     bool navigationAddressPending = false;
     std::string navigationTargetWorkspace;

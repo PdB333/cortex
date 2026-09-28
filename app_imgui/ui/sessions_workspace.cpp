@@ -1,4 +1,5 @@
 #include "sessions_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -36,15 +37,16 @@ void SessionsWorkspace::Draw(UiContext& context) {
 
     Refresh(context);
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Target sessions");
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu attached)", targets_.size());
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) Refresh(context);
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) Refresh(context);
 
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Detach all"));
     ImGui::BeginDisabled(targets_.empty());
-    if (ImGui::SmallButton("Detach all")) {
+    if (ImGui::Button("Detach all")) {
         if (context.debuggerModel) context.debuggerModel->Reset();
         if (context.projectModel) context.projectModel->Reset();
         if (context.symbolsModel) context.symbolsModel->Reset();
@@ -73,11 +75,11 @@ void SessionsWorkspace::Draw(UiContext& context) {
     ImGui::Spacing();
 
     if (targets_.empty()) {
-        ImGui::TextDisabled("No attached target. Use Select process to create a session.");
+        HintText("No attached target. Use Select process to create a session.");
         return;
     }
 
-    if (ImGui::BeginTable("SessionsTable", 7,
+    if (BeginDataTable("SessionsTable", 7,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -149,7 +151,7 @@ void SessionsWorkspace::Draw(UiContext& context) {
                 }
             }
             ImGui::EndDisabled();
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Detach"));
             if (ImGui::SmallButton("Detach")) {
                 const bool wasActive = target.id == context.sessions->ActiveTargetId();
                 if (wasActive && context.debuggerModel) context.debuggerModel->Reset();

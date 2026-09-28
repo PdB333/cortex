@@ -131,23 +131,24 @@ void ProjectWorkspace::Draw(UiContext& context) {
         if (context.payload && context.payload->Ready()) Refresh(context);
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Persistent target knowledge");
     Subtitle("addresses, pointer paths and notes");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) Refresh(context);
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) Refresh(context);
 
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing runtime"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing runtime")) {
+        if (ImGui::Button("Connect existing runtime")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 Refresh(context);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -164,11 +165,11 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(160);
             ImGui::InputTextWithHint("##ProjectAddressName", "Name",
                                      addressName_.data(), addressName_.size());
-            ImGui::SameLine();
+            FlowSameLine(190);
             ImGui::SetNextItemWidth(190);
             ImGui::InputTextWithHint("##ProjectAddressExpression", "Address / module+offset",
                                      addressExpression_.data(), addressExpression_.size());
-            ImGui::SameLine();
+            FlowSameLine(110);
             ImGui::SetNextItemWidth(110);
             ImGui::InputTextWithHint("##ProjectAddressType", "Type",
                                      addressType_.data(), addressType_.size());
@@ -176,7 +177,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-150);
             ImGui::InputTextWithHint("##ProjectAddressNotes", "Notes",
                                      addressNotes_.data(), addressNotes_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Save address"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Save address")) {
                 std::string error;
@@ -194,7 +195,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
 
             ImGui::Spacing();
             std::string deleteAddress;
-            if (ImGui::BeginTable("ProjectAddressesTable", 5,
+            if (BeginDataTable("ProjectAddressesTable", 5,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -225,10 +226,10 @@ void ProjectWorkspace::Draw(UiContext& context) {
                     ImGui::TableSetColumnIndex(4);
                     if (ImGui::SmallButton("Memory"))
                         Navigate(context, row.address, "memory-browser");
-                    ImGui::SameLine();
+                    FlowSameLine(ButtonWidth("Disasm"));
                     if (ImGui::SmallButton("Disasm"))
                         Navigate(context, row.address, "disassembly");
-                    ImGui::SameLine();
+                    FlowSameLine(ButtonWidth("Delete"));
                     ImGui::BeginDisabled(!context.mutationAllowed);
                     if (ImGui::SmallButton("Delete")) deleteAddress = row.name;
                     ImGui::EndDisabled();
@@ -251,19 +252,19 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(140);
             ImGui::InputTextWithHint("##PointerName", "Name",
                                      pointerName_.data(), pointerName_.size());
-            ImGui::SameLine();
+            FlowSameLine(130);
             ImGui::SetNextItemWidth(130);
             ImGui::InputTextWithHint("##PointerModule", "Module",
                                      pointerModule_.data(), pointerModule_.size());
-            ImGui::SameLine();
+            FlowSameLine(120);
             ImGui::SetNextItemWidth(120);
             ImGui::InputTextWithHint("##PointerBase", "Base offset",
                                      pointerBase_.data(), pointerBase_.size());
-            ImGui::SameLine();
+            FlowSameLine(190);
             ImGui::SetNextItemWidth(190);
             ImGui::InputTextWithHint("##PointerOffsets", "Offsets JSON",
                                      pointerOffsets_.data(), pointerOffsets_.size());
-            ImGui::SameLine();
+            FlowSameLine(100);
             ImGui::SetNextItemWidth(100);
             ImGui::InputTextWithHint("##PointerType", "Final type",
                                      pointerType_.data(), pointerType_.size());
@@ -271,7 +272,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-140);
             ImGui::InputTextWithHint("##PointerNotes", "Notes",
                                      pointerNotes_.data(), pointerNotes_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Save path"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Save path")) {
                 std::string error;
@@ -288,7 +289,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::EndDisabled();
 
             std::string deletePath;
-            if (ImGui::BeginTable("ProjectPointersTable", 6,
+            if (BeginDataTable("ProjectPointersTable", 6,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -326,7 +327,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
                             context.status = "Pointer resolve failed: " + error;
                         }
                     }
-                    ImGui::SameLine();
+                    FlowSameLine(ButtonWidth("Delete"));
                     ImGui::BeginDisabled(!context.mutationAllowed);
                     if (ImGui::SmallButton("Delete")) deletePath = row.name;
                     ImGui::EndDisabled();
@@ -349,11 +350,11 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(-220);
             ImGui::InputTextWithHint("##ProjectNoteText", "Persistent note",
                                      noteText_.data(), noteText_.size());
-            ImGui::SameLine();
+            FlowSameLine(130);
             ImGui::SetNextItemWidth(130);
             ImGui::InputTextWithHint("##ProjectNoteTags", "Tags JSON",
                                      noteTags_.data(), noteTags_.size());
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Add note"));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Add note")) {
                 std::string error;
@@ -369,7 +370,7 @@ void ProjectWorkspace::Draw(UiContext& context) {
             ImGui::EndDisabled();
 
             int deleteNoteId = -1;
-            if (ImGui::BeginTable("ProjectNotesTable", 4,
+            if (BeginDataTable("ProjectNotesTable", 4,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |

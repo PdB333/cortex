@@ -151,22 +151,23 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
         Refresh(context);
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Memory viewer");
     Subtitle("Direct external-process view");
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(240);
     ImGui::InputTextWithHint("##MemoryAddress", "0x7FF...", address_, sizeof(address_));
-    ImGui::SameLine();
+    FlowSameLine(110);
     ImGui::SetNextItemWidth(110);
     ImGui::InputInt("Bytes", &byteCount_, 16, 256);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Read"));
     if (ImGui::Button("Read")) Refresh(context);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Disassemble"));
     if (ImGui::Button("Disassemble") && ParseAddress(currentAddress_)) {
         context.NavigateTo("disassembly", currentAddress_);
     }
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Live"));
     ImGui::Checkbox("Live", &liveRefresh_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
@@ -190,7 +191,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     if (ImGui::BeginChild("HexView", ImVec2(0, -118), ImGuiChildFlags_Borders)) {
         if (bytes_.empty()) {
             ImGui::TextDisabled("Enter an address and press Read.");
-        } else if (ImGui::BeginTable("HexTable", 4,
+        } else if (BeginDataTable("HexTable", 4,
                                      ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                      ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                                      ImGui::GetContentRegionAvail())) {
@@ -243,7 +244,7 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
     ImGui::TextDisabled("Write bytes at the current address");
     ImGui::SetNextItemWidth(-110);
     ImGui::InputTextWithHint("##WriteBytes", "90 90 90", writeBytes_, sizeof(writeBytes_));
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Write"));
     ImGui::BeginDisabled(!context.mutationAllowed);
     if (ImGui::Button("Write", ImVec2(100, 0))) WriteBytes(context);
     ImGui::EndDisabled();

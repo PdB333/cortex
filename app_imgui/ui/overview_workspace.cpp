@@ -1,4 +1,5 @@
 #include "overview_workspace.h"
+#include "widgets.h"
 
 #include <imgui.h>
 
@@ -28,7 +29,7 @@ void OverviewWorkspace::Draw(UiContext& context) {
     ImGui::SetWindowFontScale(1.0f);
 
     if (!session) {
-        ImGui::TextDisabled("Choose a process from the target picker to begin.");
+        HintText("Choose a process from the target picker to begin.");
         ImGui::Dummy(ImVec2(0, 18));
         if (ImGui::Button("Select process", ImVec2(180, 38)))
             context.requestProcessPicker = true;
@@ -44,7 +45,7 @@ void OverviewWorkspace::Draw(UiContext& context) {
     ImGui::Separator();
     ImGui::TextUnformatted("Target");
 
-    if (ImGui::BeginTable("OverviewTarget", 2,
+    if (BeginDataTable("OverviewTarget", 2,
                           ImGuiTableFlags_SizingFixedFit |
                           ImGuiTableFlags_BordersInnerH,
                           ImVec2(0, 220))) {
@@ -73,14 +74,14 @@ void OverviewWorkspace::Draw(UiContext& context) {
     ImGui::TextUnformatted("Actions");
 
     if (ImGui::Button("Change process")) context.requestProcessPicker = true;
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Sessions"));
     if (ImGui::Button("Sessions")) context.requestWorkspace = "sessions";
     ImGui::SameLine();
     if (ImGui::Button(context.mutationAllowed ? "Disable writes" : "Enable writes"))
         context.mutationAllowed = !context.mutationAllowed;
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Memory"));
     if (ImGui::Button("Memory")) context.requestWorkspace = "memory";
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Debugger"));
     if (ImGui::Button("Debugger")) context.requestWorkspace = "debugger";
 
     ImGui::Spacing();

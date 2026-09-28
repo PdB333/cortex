@@ -24,23 +24,24 @@ void PatchesWorkspace::Draw(UiContext& context) {
         extra_ = 5;
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Runtime patches");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
 
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.patchesModel->Refresh(nullptr);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -48,10 +49,10 @@ void PatchesWorkspace::Draw(UiContext& context) {
                 context.patchesModel->Refresh(nullptr);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
 
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.patchesModel->Refresh(&error))
             context.status = "Patch refresh failed: " + error;
@@ -67,13 +68,16 @@ void PatchesWorkspace::Draw(UiContext& context) {
     };
     ImGui::SetNextItemWidth(125);
     ImGui::Combo("##PatchMode", &mode_, modes, IM_ARRAYSIZE(modes));
-    ImGui::SameLine();
+    FlowSameLine(180);
     ImGui::SetNextItemWidth(180);
     ImGui::InputTextWithHint("##PatchAddress",
                              mode_ == 5 ? "Near address" : "Address (0x...)",
                              address_.data(), address_.size());
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-360);
+    // The value field takes whatever the row leaves after label and apply,
+    // but never less than a usable width; below that it wraps to its own row.
+    const float valueWidth = std::max(200.0f, ImGui::GetContentRegionAvail().x - 360.0f);
+    FlowSameLine(valueWidth);
+    ImGui::SetNextItemWidth(std::min(valueWidth, ImGui::GetContentRegionAvail().x));
     const char* hint =
         mode_ == 0 ? "Bytes hex, e.g. 909090" :
         mode_ == 1 ? "Size" :
@@ -81,18 +85,18 @@ void PatchesWorkspace::Draw(UiContext& context) {
         mode_ == 5 ? "Allocation size" : "Target address";
     ImGui::InputTextWithHint("##PatchValue", hint, value_.data(), value_.size());
 
-    ImGui::SameLine();
+    FlowSameLine(140);
     if (mode_ <= 2) {
         ImGui::SetNextItemWidth(140);
         ImGui::InputTextWithHint("##PatchLabel", "Label", label_.data(), label_.size());
-        ImGui::SameLine();
+        FlowSameLine(100);
     }
 
     if (mode_ == 3 || mode_ == 4) {
         ImGui::SetNextItemWidth(100);
         ImGui::InputInt(mode_ == 3 ? "JMP size" : "Min overwrite", &extra_);
         extra_ = std::max(5, extra_);
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Assemble / write"));
     }
 
     ImGui::BeginDisabled(!context.mutationAllowed ||
@@ -147,7 +151,7 @@ void PatchesWorkspace::Draw(UiContext& context) {
 
     int revertId = -1;
     const float resultHeight = 135.0f;
-    if (ImGui::BeginTable("PatchTable", 6,
+    if (BeginDataTable("PatchTable", 6,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |

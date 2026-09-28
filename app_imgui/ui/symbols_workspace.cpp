@@ -3,6 +3,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+
 namespace cortex::ui {
 
 bool SymbolsWorkspace::Navigate(UiContext& context, const std::string& address,
@@ -29,22 +31,23 @@ void SymbolsWorkspace::Draw(UiContext& context) {
         return;
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Symbols");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing runtime"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing runtime")) {
+        if (ImGui::Button("Connect existing runtime")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.status = "Runtime connected";
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -72,18 +75,18 @@ void SymbolsWorkspace::Draw(UiContext& context) {
             : context.symbolsModel->Lookup(query_.data(), &error);
         context.status = ok ? "Symbol query complete" : "Symbol query failed: " + error;
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Clear"));
     if (ImGui::Button("Clear")) context.symbolsModel->Reset();
 
     ImGui::Spacing();
     const auto& result = context.symbolsModel->Result();
     if (!result.valid) {
-        ImGui::TextDisabled("Resolve an address or look up a symbol name.");
+        HintText("Resolve an address or look up a symbol name.");
         return;
     }
 
     ImGui::Text("Query: %s", result.query.c_str());
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("FOUND"), TextWidth("not found")));
     ImGui::TextDisabled(result.found ? "FOUND" : "not found");
     if (!result.error.empty()) {
         ImGui::SameLine();
@@ -92,12 +95,12 @@ void SymbolsWorkspace::Draw(UiContext& context) {
 
     if (!result.address.empty()) {
         if (ImGui::Button("Memory")) Navigate(context, result.address, "memory-browser");
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Disassembly"));
         if (ImGui::Button("Disassembly")) Navigate(context, result.address, "disassembly");
     }
 
     ImGui::Separator();
-    if (ImGui::BeginTable("SymbolDetails", 2,
+    if (BeginDataTable("SymbolDetails", 2,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable,

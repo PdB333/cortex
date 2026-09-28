@@ -48,6 +48,7 @@
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
 #include "ui/theme.h"
+#include "ui/widgets.h"
 #include "ui/ui_context.h"
 #include "ui/workspace_registry.h"
 
@@ -1628,11 +1629,13 @@ void DrawProcessPicker(AppState& app) {
     ImGui::SetNextWindowSize(ImVec2(760, 580), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Select process", nullptr, ImGuiWindowFlags_NoSavedSettings)) return;
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Choose a process");
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Double-click to attach");
     ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) app.RefreshTargets();
+    if (ImGui::Button("Refresh")) app.RefreshTargets();
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(-1);
@@ -1641,7 +1644,7 @@ void DrawProcessPicker(AppState& app) {
     ImGui::Spacing();
 
     const float footerHeight = 54.0f;
-    if (ImGui::BeginTable("ProcessTable", 5,
+    if (cortex::ui::BeginDataTable("ProcessTable", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImVec2(0, -footerHeight))) {
@@ -1746,6 +1749,7 @@ void DrawPromptSurface(AppState& app) {
                 ? "Current value not provided"
                 : app.promptModel.CurrentValue().c_str());
         ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("->");
         ImGui::SameLine();
         ImGui::Text("%s", app.promptModel.TargetValue().c_str());
@@ -1840,6 +1844,7 @@ void DrawSessionChips(AppState& app) {
     if (attached.size() < 2) return;
 
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
     ImGui::TextDisabled("Sessions");
@@ -1873,6 +1878,7 @@ void DrawDebugControls(AppState& app) {
     if (!app.sessions.Active() || !app.debuggerModel.Ready()) return;
 
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
     ImGui::BeginDisabled(!app.ui.mutationAllowed ||
@@ -1989,6 +1995,7 @@ void DrawHeader(AppState& app) {
     ImGui::SameLine();
     app.workspaces.DrawPresetButtons();
     ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
     ImGui::BeginDisabled(!session);
@@ -2053,7 +2060,7 @@ void DrawApp(AppState& app) {
             if (ImGui::MenuItem("Debugger workspace"))
                 app.workspaces.Select("debugger");
             if (ImGui::MenuItem("Breakpoints"))
-                app.workspaces.Select("bottom");
+                app.workspaces.Select("debugger");
             ImGui::Separator();
             if (ImGui::MenuItem("Attach debugger", nullptr, false,
                                 !app.debuggerModel.Ready())) {

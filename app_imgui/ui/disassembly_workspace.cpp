@@ -123,6 +123,7 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     if (context.ConsumeNavigation("disassembly", navigationAddress))
         Decode(context, navigationAddress);
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Disassembler");
     ImGui::SameLine();
     ImGui::TextDisabled(cortex::target::ArchitectureName(session->Target().architecture));
@@ -130,31 +131,31 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
 
     ImGui::SetNextItemWidth(240);
     ImGui::InputTextWithHint("##DisasmAddress", "0x7FF...", address_, sizeof(address_));
-    ImGui::SameLine();
+    FlowSameLine(100);
     ImGui::SetNextItemWidth(100);
     ImGui::InputInt("Count", &count_, 16, 64);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Go"));
     if (ImGui::Button("Go")) {
         uint64_t address = 0;
         if (ParseAddress(address)) Decode(context, address);
         else context.status = "Invalid disassembly address";
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Memory"));
     if (ImGui::Button("Memory") && currentAddress_) {
         context.NavigateTo("memory-browser", currentAddress_);
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("CFG"));
     if (ImGui::Button("CFG"))
         Analyze(context, "analysis_cfg", "address", "CFG");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Xrefs"));
     if (ImGui::Button("Xrefs"))
         Analyze(context, "analysis_xrefs", "target", "Xrefs", true);
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Structured CFG"));
     if (ImGui::Button("Structured CFG"))
         Analyze(context, "analysis_structure", "address", "Structured CFG");
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Live"));
     ImGui::Checkbox("Live", &liveRefresh_);
-    ImGui::SameLine();
+    FlowSameLine(CheckboxWidth("Follow IP"));
     ImGui::Checkbox("Follow IP", &followInstructionPointer_);
     ImGui::SameLine();
     const char* liveRates[] = {"100 ms", "250 ms", "500 ms", "1 s"};
@@ -181,8 +182,8 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
     }
 
     if (!analysisKind_.empty() || !analysisError_.empty()) {
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear analysis")) {
+        FlowSameLine(ButtonWidth("Clear analysis"));
+        if (ImGui::Button("Clear analysis")) {
             analysisKind_.clear();
             analysisResult_.clear();
             analysisError_.clear();
@@ -203,11 +204,11 @@ void DisassemblyWorkspace::Draw(UiContext& context) {
         ImGui::Spacing();
     }
     if (instructions_.empty()) {
-        ImGui::TextDisabled("Enter an address, or open one from Modules / Memory.");
+        HintText("Enter an address, or open one from Modules / Memory.");
         return;
     }
 
-    if (ImGui::BeginTable("DisassemblyTable", 3,
+    if (BeginDataTable("DisassemblyTable", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {

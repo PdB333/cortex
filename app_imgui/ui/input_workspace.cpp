@@ -37,22 +37,23 @@ void InputWorkspace::Draw(UiContext& context) {
         lastPoll_ = {};
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Input recording & replay");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.status = "Runtime connected";
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -86,10 +87,10 @@ void InputWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    FlowSameLine(110);
     ImGui::SetNextItemWidth(110);
     ImGui::Combo("Mode", &modeIndex_, kModes, IM_ARRAYSIZE(kModes));
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Run sequence"));
 
     ImGui::BeginDisabled(!context.mutationAllowed || stepsJson_[0] == '\0');
     if (ImGui::Button("Run sequence")) {
@@ -116,14 +117,14 @@ void InputWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Refresh job"));
     ImGui::BeginDisabled(context.inputModel->JobId() < 1);
     if (ImGui::Button("Refresh job")) {
         std::string error;
         if (!context.inputModel->RefreshSequence(&error))
             context.status = "Input job refresh failed: " + error;
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Cancel job"));
     ImGui::BeginDisabled(!context.mutationAllowed || !context.inputModel->JobRunning());
     if (ImGui::Button("Cancel job")) {
         std::string error;

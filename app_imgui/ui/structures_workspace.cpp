@@ -55,27 +55,28 @@ void StructuresWorkspace::Draw(UiContext& context) {
         Copy(address_.data(), address_.size(), buffer);
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Runtime structures");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) {
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.structuresModel->Refresh(&error))
             context.status = "Structures refresh failed: " + error;
         else
             context.status = context.structuresModel->Status();
     }
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing runtime"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing runtime")) {
+        if (ImGui::Button("Connect existing runtime")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 context.structuresModel->Refresh(nullptr);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -136,7 +137,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
                     context.status = "Define structure failed: " + error;
                 }
             }
-            ImGui::SameLine();
+            FlowSameLine(ButtonWidth("Delete selected"));
             ImGui::BeginDisabled(context.structuresModel->SelectedName().empty());
             if (ImGui::Button("Delete selected")) {
                 std::string error;
@@ -173,7 +174,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
             ImGui::EndDisabled();
 
             ImGui::Spacing();
-            if (ImGui::BeginTable("StructureReadFields", 3,
+            if (BeginDataTable("StructureReadFields", 3,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |
@@ -222,7 +223,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
             ImGui::SetNextItemWidth(140);
             ImGui::InputInt("Size", &inferSize_);
             inferSize_ = std::clamp(inferSize_, 4, 1024 * 1024);
-            ImGui::SameLine();
+            FlowSameLine(CheckboxWidth("Define result"));
             ImGui::Checkbox("Define result", &inferDefine_);
             if (inferDefine_) {
                 ImGui::SameLine();
@@ -244,7 +245,7 @@ void StructuresWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndDisabled();
 
-            if (ImGui::BeginTable("StructureInference", 7,
+            if (BeginDataTable("StructureInference", 7,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_Resizable |

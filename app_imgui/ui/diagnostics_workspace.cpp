@@ -16,25 +16,26 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
         context.diagnosticsModel->Reset();
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Runtime diagnostics");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
-    if (ImGui::SmallButton("Refresh")) {
+    if (ImGui::Button("Refresh")) {
         std::string error;
         if (!context.diagnosticsModel->Refresh(&error))
             context.status = "Diagnostics refresh failed: " + error;
         else
             context.status = context.diagnosticsModel->Summary();
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Latest crash report")) {
+    FlowSameLine(ButtonWidth("Latest crash report"));
+    if (ImGui::Button("Latest crash report")) {
         std::string error;
         const std::string configured =
             context.settings ? context.settings->Values().diagnosticsCrashDirectory
@@ -59,7 +60,7 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
 
     ImGui::Spacing();
     ImGui::Text("Hooks (%zu)", context.diagnosticsModel->Hooks().size());
-    if (ImGui::BeginTable("DiagnosticHooks", 3,
+    if (BeginDataTable("DiagnosticHooks", 3,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable,
@@ -99,7 +100,7 @@ void DiagnosticsWorkspace::Draw(UiContext& context) {
         }
         if (ImGui::BeginTabItem("Crash report")) {
             if (!context.diagnosticsModel->CrashFound()) {
-                ImGui::TextDisabled("Use Latest crash report to load the newest bundle for this process.");
+                HintText("Use Latest crash report to load the newest bundle for this process.");
             } else {
                 ImGui::TextWrapped("Directory: %s",
                                    context.diagnosticsModel->CrashDirectory().c_str());

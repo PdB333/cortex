@@ -46,22 +46,23 @@ void ModulesWorkspace::Draw(UiContext& context) {
         Refresh(context);
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Loaded modules");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Refresh")) Refresh(context);
+    FlowSameLine(ButtonWidth("Refresh"));
+    if (ImGui::Button("Refresh")) Refresh(context);
     ImGui::Spacing();
     ImGui::SetNextItemWidth(360);
     ImGui::InputTextWithHint("##ModuleFilter", "Filter modules...", filter_, sizeof(filter_));
     ImGui::Spacing();
 
-    if (ImGui::BeginTable("ModulesTable", 4,
+    if (BeginDataTable("ModulesTable", 4,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY,
                           ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.45f);
         ImGui::TableSetupColumn("Base", ImGuiTableColumnFlags_WidthFixed, 145);
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 110);
-        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.75f);
+        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.55f);
         ImGui::TableHeadersRow();
 
         for (size_t i = 0; i < modules_.size(); ++i) {

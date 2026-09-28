@@ -45,22 +45,23 @@ void WatchesWorkspace::Draw(UiContext& context) {
         lastRefresh_ = {};
     }
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Runtime watches & freezes");
-    ImGui::SameLine();
+    FlowSameLine(std::max(TextWidth("runtime connected"), TextWidth("runtime disconnected")));
     ImGui::TextDisabled(context.payload && context.payload->Ready()
                             ? "runtime connected" : "runtime disconnected");
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Connect existing"));
     if (context.payload && !context.payload->Ready()) {
-        if (ImGui::SmallButton("Connect existing")) {
+        if (ImGui::Button("Connect existing")) {
             std::string error;
             if (!context.payload->TryConnectExisting(&error))
                 context.status = "Runtime connect failed: " + error;
             else
                 Refresh(context, true);
         }
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
-        if (ImGui::SmallButton("Enable runtime")) {
+        if (ImGui::Button("Enable runtime")) {
             std::string error;
             if (!context.payload->EnsureReady(&error))
                 context.status = "Runtime enable failed: " + error;
@@ -68,9 +69,9 @@ void WatchesWorkspace::Draw(UiContext& context) {
                 Refresh(context, true);
         }
         ImGui::EndDisabled();
-        ImGui::SameLine();
+        FlowSameLine(ButtonWidth("Refresh"));
     }
-    if (ImGui::SmallButton("Refresh")) Refresh(context, true);
+    if (ImGui::Button("Refresh")) Refresh(context, true);
 
     const int refreshMs = context.settings ? context.settings->Values().autoRefreshMs : 750;
     if (context.payload && context.payload->Ready()) {
@@ -82,19 +83,20 @@ void WatchesWorkspace::Draw(UiContext& context) {
 
     ImGui::Separator();
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Watch");
-    ImGui::SameLine();
+    FlowSameLine(170);
     ImGui::SetNextItemWidth(170);
     ImGui::InputTextWithHint("##WatchAddress", "Address",
                              watchAddress_.data(), watchAddress_.size());
-    ImGui::SameLine();
+    FlowSameLine(95);
     ImGui::SetNextItemWidth(95);
     ImGui::Combo("##WatchType", &watchType_, kWatchTypes, IM_ARRAYSIZE(kWatchTypes));
-    ImGui::SameLine();
+    FlowSameLine(170);
     ImGui::SetNextItemWidth(170);
     ImGui::InputTextWithHint("##WatchLabel", "Label",
                              watchLabel_.data(), watchLabel_.size());
-    ImGui::SameLine();
+    FlowSameLine(ButtonWidth("Add watch"));
     ImGui::BeginDisabled(!context.mutationAllowed || watchAddress_[0] == '\0');
     if (ImGui::Button("Add watch")) {
         std::string error;
@@ -110,23 +112,24 @@ void WatchesWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndDisabled();
 
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("Freeze");
-    ImGui::SameLine();
+    FlowSameLine(160);
     ImGui::SetNextItemWidth(160);
     ImGui::InputTextWithHint("##FreezeAddress", "Address",
                              freezeAddress_.data(), freezeAddress_.size());
-    ImGui::SameLine();
+    FlowSameLine(95);
     ImGui::SetNextItemWidth(95);
     ImGui::Combo("##FreezeType", &freezeType_, kFreezeTypes, IM_ARRAYSIZE(kFreezeTypes));
-    ImGui::SameLine();
+    FlowSameLine(125);
     ImGui::SetNextItemWidth(125);
     ImGui::InputTextWithHint("##FreezeValue", "Value",
                              freezeValue_.data(), freezeValue_.size());
-    ImGui::SameLine();
+    FlowSameLine(135);
     ImGui::SetNextItemWidth(135);
     ImGui::InputTextWithHint("##FreezeLabel", "Label",
                              freezeLabel_.data(), freezeLabel_.size());
-    ImGui::SameLine();
+    FlowSameLine(100);
     ImGui::SetNextItemWidth(100);
     ImGui::InputInt("TTL ms", &freezeTtlMs_);
     freezeTtlMs_ = std::max(0, freezeTtlMs_);
@@ -151,14 +154,19 @@ void WatchesWorkspace::Draw(UiContext& context) {
     ImGui::EndDisabled();
 
     ImGui::Spacing();
-    const float half = std::max(260.0f, (ImGui::GetContentRegionAvail().x -
-                                       ImGui::GetStyle().ItemSpacing.x) * 0.5f);
+    // Side by side when both lists get a readable width, stacked otherwise.
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const bool sideBySide = avail.x >= 2.0f * 300.0f + spacing;
+    const ImVec2 watchSize = sideBySide
+        ? ImVec2((avail.x - spacing) * 0.5f, 0.0f)
+        : ImVec2(0.0f, std::max(140.0f, (avail.y - ImGui::GetStyle().ItemSpacing.y) * 0.5f));
 
     int deleteWatch = -1;
-    ImGui::BeginChild("WatchList", ImVec2(half, 0), ImGuiChildFlags_Borders);
+    ImGui::BeginChild("WatchList", watchSize, ImGuiChildFlags_Borders);
     ImGui::Text("Watches (%zu)", context.watchesModel->Watches().size());
     ImGui::Separator();
-    if (ImGui::BeginTable("WatchesTable", 5,
+    if (BeginDataTable("WatchesTable", 5,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |
@@ -192,13 +200,13 @@ void WatchesWorkspace::Draw(UiContext& context) {
     }
     ImGui::EndChild();
 
-    ImGui::SameLine();
+    if (sideBySide) ImGui::SameLine();
 
     int deleteFreeze = -1;
     ImGui::BeginChild("FreezeList", ImVec2(0, 0), ImGuiChildFlags_Borders);
     ImGui::Text("Freezes (%zu)", context.watchesModel->Freezes().size());
     ImGui::Separator();
-    if (ImGui::BeginTable("FreezesTable", 6,
+    if (BeginDataTable("FreezesTable", 6,
                           ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_BordersInnerH |
                           ImGuiTableFlags_Resizable |

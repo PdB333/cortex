@@ -266,11 +266,22 @@ public:
                 DockMany(right, {"debugger", "patches"}, docked);
                 break;
 
-            case WorkspacePreset::ReverseEngineering:
-                DockMany(left, {"project", "symbols", "structures", "pointermaps", "snapshots"}, docked);
+            case WorkspacePreset::ReverseEngineering: {
+                // Side columns are split so no dock node needs more tabs than
+                // its width can label.
+                ImGuiID leftTop = left;
+                const ImGuiID leftBottom =
+                    ImGui::DockBuilderSplitNode(leftTop, ImGuiDir_Down, 0.45f, nullptr, &leftTop);
+                ImGuiID rightTop = right;
+                const ImGuiID rightBottom =
+                    ImGui::DockBuilderSplitNode(rightTop, ImGuiDir_Down, 0.45f, nullptr, &rightTop);
+                DockMany(leftTop, {"project", "symbols", "structures"}, docked);
+                DockMany(leftBottom, {"pointermaps", "snapshots", "modules"}, docked);
                 DockMany(center, {"re", "disassembly", "memory-browser"}, docked);
-                DockMany(right, {"patches", "instrumentation", "runtime"}, docked);
+                DockMany(rightTop, {"patches", "instrumentation"}, docked);
+                DockMany(rightBottom, {"runtime"}, docked);
                 break;
+            }
 
             case WorkspacePreset::Trace:
                 DockMany(left, {"watches"}, docked);
@@ -284,11 +295,16 @@ public:
                 DockMany(right, {"watches", "runtime"}, docked);
                 break;
 
-            case WorkspacePreset::Runtime:
+            case WorkspacePreset::Runtime: {
+                ImGuiID rightTop = right;
+                const ImGuiID rightBottom =
+                    ImGui::DockBuilderSplitNode(rightTop, ImGuiDir_Down, 0.5f, nullptr, &rightTop);
                 DockMany(left, {"modules", "sessions", "settings"}, docked);
                 DockMany(center, {"runtime", "diagnostics", "network"}, docked);
-                DockMany(right, {"screenshots", "instrumentation", "actions", "watches"}, docked);
+                DockMany(rightTop, {"screenshots", "instrumentation"}, docked);
+                DockMany(rightBottom, {"actions", "watches"}, docked);
                 break;
+            }
         }
 
         for (const auto& entry : entries_) {
@@ -307,6 +323,10 @@ public:
             Select(context.requestWorkspace);
             context.requestWorkspace.clear();
         }
+
+        context.openWorkspaces.clear();
+        for (const auto& entry : entries_)
+            if (entry.open) context.openWorkspaces.emplace_back(entry.workspace->Id());
 
         for (auto& entry : entries_) {
             if (!entry.open) continue;
