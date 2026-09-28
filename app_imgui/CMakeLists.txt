@@ -69,17 +69,15 @@ target_compile_definitions(cortex_imgui_vendor PRIVATE
     NOMINMAX
 )
 
-set_source_files_properties(../injector/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexInjectMain")
-set_source_files_properties(../mcp_bridge/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexMcpMain")
-set_source_files_properties(../tools/diagnostics_host/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
-set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
+
+# The --gui-*-suite and --*-smoke modes used by CI and release validation.
+# Turn off to ship a binary without them.
+option(CORTEX_IMGUI_TEST_MODES "Build the GUI smoke and integration test modes into cortex.exe" ON)
 
 add_executable(cortex_imgui WIN32
     main.cpp
+    cli.cpp
+    desktop_ui.cpp
     application/settings.cpp
     application/runtime_model_base.cpp
     application/ai_activity_model.cpp
@@ -142,10 +140,10 @@ add_executable(cortex_imgui WIN32
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp
     ../core/symbols/external.cpp
-    ../app/cortex.rc
-    ../app/windows_debug_provider.cpp
-    ../app/windows_debugger_backend.cpp
-    ../app/veh_debug_provider.cpp
+    ../resources/windows/cortex.rc
+    ../host/debugger/windows_debug_provider.cpp
+    ../host/debugger/windows_debugger_backend.cpp
+    ../host/debugger/veh_debug_provider.cpp
 
     ../core/target/local_backend.cpp
     ../core/target/session_manager.cpp
@@ -165,10 +163,17 @@ add_executable(cortex_imgui WIN32
 target_include_directories(cortex_imgui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../core
-    ${CMAKE_CURRENT_SOURCE_DIR}/../app
+    ${CMAKE_CURRENT_SOURCE_DIR}/../host/debugger
     ${CMAKE_CURRENT_SOURCE_DIR}/../sdk/include
     ${httplib_SOURCE_DIR}
 )
+
+if(CORTEX_IMGUI_TEST_MODES)
+    target_sources(cortex_imgui PRIVATE smoke_modes.cpp)
+    target_compile_definitions(cortex_imgui PRIVATE CORTEX_WITH_TEST_MODES=1)
+else()
+    target_compile_definitions(cortex_imgui PRIVATE CORTEX_WITH_TEST_MODES=0)
+endif()
 
 target_compile_definitions(cortex_imgui PRIVATE
     WIN32_LEAN_AND_MEAN

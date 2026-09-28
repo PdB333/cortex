@@ -16,6 +16,7 @@
 // HTTP-only args: --port 6969, --host 127.0.0.1.
 
 #include "api/mcp_pipe_protocol.h"
+#include "../host/cli_entry_points.h"
 #include "ai_activity_channel.h"
 #include "host_mode.h"
 #include "policy.h"
@@ -40,7 +41,6 @@
 #include <thread>
 #include <vector>
 
-int CortexInjectMain(int argc, char** argv);
 
 namespace {
 
@@ -540,7 +540,7 @@ bool UseBridgeCompatibilityMode(int argc, char** argv) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int CortexMcpMain(int argc, char** argv) {
     if (!UseBridgeCompatibilityMode(argc, argv))
         return RunFullMcpHost(argc, argv, ExecutableDir());
 
@@ -607,3 +607,7 @@ int main(int argc, char** argv) {
         ? RunHttp(host, port, token, toolProfile)
         : RunNative(token, toolProfile);
 }
+#ifdef CORTEX_STANDALONE_TOOL
+// Standalone build of this tool (outside cortex.exe / cortex_host.exe).
+int main(int argc, char** argv) { return CortexMcpMain(argc, argv); }
+#endif

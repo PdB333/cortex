@@ -1,4 +1,5 @@
 #include "symbols/symbols.h"
+#include "../host/cli_entry_points.h"
 #include "symbols/external.h"
 
 #include <windows.h>
@@ -38,7 +39,7 @@ void Usage() {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int CortexSymbolizeMain(int argc, char** argv) {
     std::string image;
     std::string symbolPath;
     std::string toolPath;
@@ -126,3 +127,8 @@ int main(int argc, char** argv) {
         Escape(identity.buildId).c_str());
     return 1;
 }
+
+#ifdef CORTEX_STANDALONE_TOOL
+// Standalone build of this tool (outside cortex.exe / cortex_host.exe).
+int main(int argc, char** argv) { return CortexSymbolizeMain(argc, argv); }
+#endif

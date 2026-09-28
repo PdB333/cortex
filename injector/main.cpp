@@ -3,6 +3,7 @@
 // CreateRemoteThread + LoadLibraryW technique -- works on any 32-bit process
 // that doesn't have anti-cheat/anti-injection protection.
 #include <windows.h>
+#include "../host/cli_entry_points.h"
 #include <tlhelp32.h>
 #include <iostream>
 #include <string>
@@ -103,7 +104,7 @@ bool InjectDll(DWORD pid, const std::string& dllPath) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int CortexInjectMain(int argc, char** argv) {
     if (argc < 2) {
         std::cout << "Cortex injector\n\n"
                   << "Usage:\n"
@@ -154,3 +155,8 @@ int main(int argc, char** argv) {
     std::cout << "Injected successfully.\n";
     return 0;
 }
+
+#ifdef CORTEX_STANDALONE_TOOL
+// Standalone build of this tool (outside cortex.exe / cortex_host.exe).
+int main(int argc, char** argv) { return CortexInjectMain(argc, argv); }
+#endif

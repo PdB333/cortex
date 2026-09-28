@@ -17,8 +17,7 @@ on:
       - "tools/diagnostics_host/**"
       - "tools/symbolize_main.cpp"
       - "core/symbols/**"
-      - "app/cortex.rc"
-      - "app/resources/cortex.ico"
+      - "resources/windows/**"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
   pull_request:

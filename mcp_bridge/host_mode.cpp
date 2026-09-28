@@ -2,7 +2,7 @@
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
-#include "../app/debug_provider.h"
+#include "../host/debugger/debug_provider.h"
 #include "services/crash_report_service.h"
 #include "services/operation_manager.h"
 #include "services/payload_client.h"
@@ -10,8 +10,8 @@
 #include "target/catalog.h"
 #include "target/local_backend.h"
 #include "target/session_manager.h"
-#include "../app/veh_debug_provider.h"
-#include "../app/windows_debug_provider.h"
+#include "../host/debugger/veh_debug_provider.h"
+#include "../host/debugger/windows_debug_provider.h"
 
 #include <nlohmann/json.hpp>
 

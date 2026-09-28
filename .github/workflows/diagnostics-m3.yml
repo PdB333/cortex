@@ -64,7 +64,7 @@ jobs:
       - name: Compile offline symbolizer
         shell: cmd
         run: >-
-          cl /nologo /std:c++17 /EHsc /W4
+          cl /nologo /std:c++17 /EHsc /W4 /DCORTEX_STANDALONE_TOOL
           tools\symbolize_main.cpp
           core\symbols\symbols.cpp
           core\symbols\external.cpp

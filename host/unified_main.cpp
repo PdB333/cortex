@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "cli_entry_points.h"
 
 #include <algorithm>
 #include <cctype>
@@ -16,11 +17,6 @@
 // These entry points are the existing tool mains, renamed per-source by CMake.
 // Keeping each implementation in its own translation unit avoids anonymous
 // namespace collisions and preserves the already-tested behavior.
-int CortexServeMain(int argc, char** argv);
-int CortexInjectMain(int argc, char** argv);
-int CortexMcpMain(int argc, char** argv);
-int CortexDiagnoseMain(int argc, char** argv);
-int CortexSymbolizeMain(int argc, char** argv);
 
 namespace {
 

@@ -7,10 +7,7 @@ on:
       - main
     paths:
       - "app_imgui/**"
-      - "app/windows_debug_provider.*"
-      - "app/windows_debugger_backend.*"
-      - "app/veh_debug_provider.*"
-      - "app/debug_provider.h"
+      - "host/debugger/**"
       - "core/**"
       - "runtime_helper/**"
       - "ci/assaultcube_offline_e2e_v3.ps1"

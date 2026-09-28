@@ -6,8 +6,7 @@ on:
       - main
     paths:
       - "app_imgui/**"
-      - "app/cortex.rc"
-      - "app/resources/**"
+      - "resources/windows/**"
       - "core/**"
       - "mcp_bridge/**"
       - "runtime_helper/**"
@@ -24,8 +23,7 @@ on:
   pull_request:
     paths:
       - "app_imgui/**"
-      - "app/cortex.rc"
-      - "app/resources/**"
+      - "resources/windows/**"
       - "core/**"
       - "mcp_bridge/**"
       - "runtime_helper/**"

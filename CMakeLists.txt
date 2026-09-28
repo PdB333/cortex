@@ -300,19 +300,9 @@ target_link_options(core PRIVATE -static -static-libgcc -static-libstdc++)
 # =========================================================================
 # cortex_host.exe -- all user-facing Cortex command-line tools in one binary
 # =========================================================================
-# Preserve the existing, already-tested implementations by renaming each
-# source file's main() at compile time and dispatching from unified_main.cpp.
+# Each tool exposes a named entry point (host/cli_entry_points.h) that
+# unified_main.cpp dispatches to.
 if(CORTEX_BUILD_LEGACY_COMPAT)
-set_source_files_properties(host/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexServeMain")
-set_source_files_properties(injector/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexInjectMain")
-set_source_files_properties(mcp_bridge/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexMcpMain")
-set_source_files_properties(tools/diagnostics_host/main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
-set_source_files_properties(tools/symbolize_main.cpp PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
 
 add_executable(cortex_host
     host/unified_main.cpp
@@ -327,9 +317,9 @@ add_executable(cortex_host
     host/diagnostics/analyzer.cpp
     core/symbols/symbols.cpp
     core/symbols/external.cpp
-    app/windows_debug_provider.cpp
-    app/windows_debugger_backend.cpp
-    app/veh_debug_provider.cpp
+    host/debugger/windows_debug_provider.cpp
+    host/debugger/windows_debugger_backend.cpp
+    host/debugger/veh_debug_provider.cpp
     core/target/local_backend.cpp
     core/target/session_manager.cpp
     core/target/module_provider.cpp

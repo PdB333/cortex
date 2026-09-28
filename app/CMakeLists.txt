@@ -52,13 +52,13 @@ qt_add_executable(cortex WIN32
     app_controller.h
     debugger_controller.cpp
     debugger_controller.h
-    debug_provider.h
-    windows_debug_provider.cpp
-    windows_debug_provider.h
-    veh_debug_provider.cpp
-    veh_debug_provider.h
-    windows_debugger_backend.cpp
-    windows_debugger_backend.h
+    ../host/debugger/debug_provider.h
+    ../host/debugger/windows_debug_provider.cpp
+    ../host/debugger/windows_debug_provider.h
+    ../host/debugger/veh_debug_provider.cpp
+    ../host/debugger/veh_debug_provider.h
+    ../host/debugger/windows_debugger_backend.cpp
+    ../host/debugger/windows_debugger_backend.h
     disassembly_controller.cpp
     disassembly_controller.h
     feature_controller.cpp
@@ -158,13 +158,10 @@ qt_add_qml_module(cortex
 
 target_include_directories(cortex PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../host/debugger
 )
 
 if(WIN32)
-    set_source_files_properties(../tools/diagnostics_host/main.cpp PROPERTIES
-        COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
-    set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
-        COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
     target_sources(cortex PRIVATE
         ../host/probe_cli.cpp
         ../host/probe_cli.h
@@ -174,12 +171,12 @@ if(WIN32)
         ../host/diagnostics/analyzer.cpp
         ../core/symbols/symbols.cpp
         ../core/symbols/external.cpp
-        cortex.rc
+        ../resources/windows/cortex.rc
     )
     qt_add_resources(cortex "cortex_branding"
         PREFIX "/branding"
-        BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-        FILES resources/cortex.ico
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/../resources/windows"
+        FILES ../resources/windows/cortex.ico
     )
 endif()
 

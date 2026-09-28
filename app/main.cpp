@@ -1,4 +1,5 @@
 #include "ai_activity_controller.h"
+#include "../host/cli_entry_points.h"
 #include "app_controller.h"
 #include "debugger_controller.h"
 #include "disassembly_controller.h"
@@ -41,8 +42,6 @@
 
 #ifdef Q_OS_WIN
 #include "../host/probe_cli.h"
-int CortexDiagnoseMain(int argc, char** argv);
-int CortexSymbolizeMain(int argc, char** argv);
 #endif
 
 namespace {

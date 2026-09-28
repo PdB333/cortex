@@ -48,16 +48,6 @@ set(CORTEX_MCP_SOURCE ${CORTEX_ROOT}/mcp_bridge/main.cpp)
 set(CORTEX_DIAG_SOURCE ${CORTEX_ROOT}/tools/diagnostics_host/main.cpp)
 set(CORTEX_SYMBOLIZE_SOURCE ${CORTEX_ROOT}/tools/symbolize_main.cpp)
 
-set_source_files_properties(${CORTEX_SERVE_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexServeMain")
-set_source_files_properties(${CORTEX_INJECT_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexInjectMain")
-set_source_files_properties(${CORTEX_MCP_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexMcpMain")
-set_source_files_properties(${CORTEX_DIAG_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
-set_source_files_properties(${CORTEX_SYMBOLIZE_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
 
 add_executable(cortex_host
     ${CORTEX_ROOT}/host/unified_main.cpp
@@ -72,9 +62,9 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/host/diagnostics/analyzer.cpp
     ${CORTEX_ROOT}/core/symbols/symbols.cpp
     ${CORTEX_ROOT}/core/symbols/external.cpp
-    ${CORTEX_ROOT}/app/windows_debug_provider.cpp
-    ${CORTEX_ROOT}/app/windows_debugger_backend.cpp
-    ${CORTEX_ROOT}/app/veh_debug_provider.cpp
+    ${CORTEX_ROOT}/host/debugger/windows_debug_provider.cpp
+    ${CORTEX_ROOT}/host/debugger/windows_debugger_backend.cpp
+    ${CORTEX_ROOT}/host/debugger/veh_debug_provider.cpp
     ${CORTEX_ROOT}/core/target/local_backend.cpp
     ${CORTEX_ROOT}/core/target/session_manager.cpp
     ${CORTEX_ROOT}/core/target/module_provider.cpp

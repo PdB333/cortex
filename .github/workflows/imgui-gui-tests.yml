@@ -7,10 +7,7 @@ on:
       - main
     paths:
       - "app_imgui/**"
-      - "app/windows_debug_provider.*"
-      - "app/windows_debugger_backend.*"
-      - "app/veh_debug_provider.*"
-      - "app/debug_provider.h"
+      - "host/debugger/**"
       - "core/target/**"
       - "core/services/**"
       - "core/api/**"
@@ -22,10 +19,7 @@ on:
   pull_request:
     paths:
       - "app_imgui/**"
-      - "app/windows_debug_provider.*"
-      - "app/windows_debugger_backend.*"
-      - "app/veh_debug_provider.*"
-      - "app/debug_provider.h"
+      - "host/debugger/**"
       - "core/target/**"
       - "core/services/**"
       - "core/api/**"
@@ -54,11 +48,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          count="$(grep -c 'workspaces.Add<cortex::ui::' app_imgui/main.cpp)"
+          count="$(grep -c 'workspaces.Add<cortex::ui::' app_imgui/desktop_app.h)"
           test "$count" -eq 28
-          grep -q 'GUI workspace suite' app_imgui/main.cpp
+          grep -q 'GUI workspace suite' app_imgui/smoke_modes.cpp
           grep -q 'ValidateOpenWindowsDocked' app_imgui/ui/workspace_registry.h
-          grep -q -- '--gui-cross-bitness-suite' app_imgui/main.cpp
+          grep -q -- '--gui-cross-bitness-suite' app_imgui/cli.cpp
           echo "registered workspaces: $count"
 
       - name: Reject stale Qt/QML CI

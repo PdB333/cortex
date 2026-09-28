@@ -80,7 +80,7 @@ jobs:
       - name: Build standalone compatibility injector
         shell: msys2 {0}
         run: >-
-          c++ -std=c++17 -O2 injector/main.cpp
+          c++ -std=c++17 -O2 -DCORTEX_STANDALONE_TOOL injector/main.cpp
           -o build/full-${{ matrix.arch }}/injector.exe
           -static -static-libgcc -static-libstdc++
 
