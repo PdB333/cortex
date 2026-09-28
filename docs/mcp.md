@@ -51,7 +51,7 @@ AI client -> cortex.exe mcp
                 +-- cortex_attach(pid=5678)
 ```
 
-Attaching a target does not enable Mutation. State-changing runtime calls still require their existing explicit `mutation_permission=true` contract.
+Attaching a target does not grant write permission. State-changing runtime calls still require their explicit `mutation_permission=true` contract.
 
 ## Multiple attached targets
 
@@ -164,7 +164,7 @@ The runtime MCP executor and the REST-compatible route layer share the same busi
 
 The Windows runtime endpoint is local IPC:
 
-- every injected target generates a private per-process token file named `cortex.mcp.<pid>.token`;
+- every injected target generates a private per-process token file named `cortex.mcp.<pid>.token` beside the loaded `cortex_core.dll` (normally `runtime/<arch>/`; `cortex.exe` also looks in its own directory for a runtime injected from there);
 - the endpoint name is derived from a 64-bit hash of that private MCP token, so two targets using the same runtime directory do not collide;
 - the raw token is not embedded in the pipe name;
 - the complete private MCP token is still included in every native envelope and compared in constant time;
@@ -240,8 +240,16 @@ Native stdio remains responsive to `notifications/cancelled` because normal requ
 
 Attaching a target does not grant permission to modify it. Control, mutation, and native-call operations continue to require explicit `mutation_permission=true` in the relevant MCP call.
 
-This permission remains per operation; multi-target routing does not implicitly enable Mutation on either target.
+This permission remains per operation; multi-target routing does not implicitly grant it on either target. The desktop applies the same rule: its Read-only / Writes allowed toggle decides whether it sends `mutation_permission=true`.
+
+## AI activity in the desktop
+
+`cortex.exe mcp` publishes session and tool-call lifecycle events (session started/ended, tool started/completed/failed) on a local per-user Windows mailslot. A running Cortex desktop shows them in the **AI Activity** tab of the bottom panel and in the header status, so the person at the screen can follow what an agent is doing. The events carry tool names and request ids, not tool arguments or results.
+
+## Server metadata
+
+`initialize` and `server/discover` report the server name and version `0.8.0`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
 
 ## Compatibility
 
-The injected runtime can still expose loopback REST and HTTP `/mcp` compatibility surfaces for diagnostics and older integrations. The normal unified-product path is `cortex.exe mcp` over stdio and native IPC.
+The injected runtime can still expose loopback REST and HTTP `/mcp` compatibility surfaces for diagnostics and older integrations; they are off unless `http_api_enabled=true` is set in `cortex.ini`. The normal unified-product path is `cortex.exe mcp` over stdio and native IPC.

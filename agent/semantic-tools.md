@@ -1,6 +1,6 @@
 # Cortex semantic tools
 
-Cortex v0.6 includes a semantic layer for AI agents with bounded server-side execution. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
+Since v0.6, Cortex includes a semantic layer for AI agents with bounded server-side execution. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
 
 The semantic layer does not invent domain objects. Every conclusion must include evidence, confidence, alternatives, and a recommended next action. When evidence is insufficient, return `status: not_found` or `status: inconclusive` instead of guessing.
 
@@ -110,9 +110,9 @@ Every pull request touching the semantic or MCP layer runs validation on Windows
 - MCP protocol tests cover legacy negotiation, 2026-07-28 discovery/list behaviour, notifications, batching, and calls;
 - native pipe tests lock token-derived rendezvous names and frame-size limits;
 - real DLL injection validates HTTP MCP planning and server-side read-only execution;
-- the native stdio path validates `cortex_host mcp` -> authenticated Named Pipe -> semantic executor -> native route dispatcher;
+- the native stdio path validates `cortex.exe mcp` -> authenticated Named Pipe -> semantic executor -> native route dispatcher;
 - mutation permission gates are checked before dangerous arguments reach a primitive;
 - the action journal is compared around plan-only and read-only execution;
 - CTest, unified-host checks, and release packaging still run.
 
-The v0.6.0 release workflow performs the same release gate on both x86 and x64 and includes the native stdio MCP E2E before publication. A failing build, semantic test, native transport test, or packaging check prevents publication.
+The release workflow performs the same gate on both x86 and x64 targets and includes the native stdio MCP E2E before publication. A failing build, semantic test, native transport test, or packaging check prevents publication.

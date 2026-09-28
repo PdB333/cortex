@@ -72,12 +72,14 @@ Qt invokable remains without an explicit migration outcome.
 
 ## Release-hardening gates
 
-After the workspace and method matrices are green:
+| Gate | Status |
+| --- | --- |
+| x64/x86 runtime and helper E2E | green in CI (`e2e-windows.yml`, `imgui-gui-tests.yml`) |
+| deterministic GUI smoke tests | green in CI (headless, native window, workspace, attached, multi-session, cross-bitness suites) |
+| portable dependency-closure validation | green in CI (`imgui-ui.yml`) |
+| performance, memory and startup comparison versus Qt | runs in CI (`ui-migration-benchmarks.yml`) |
+| Windows packaging/release workflow | `publish-release.yml` (publishes only on a `Release v0.8.0` commit) |
+| Linux renderer/runtime decision | deferred, see [`PLATFORM_SCOPE.md`](PLATFORM_SCOPE.md) |
+| manual validation on real authorized targets | pending |
 
-- x64/x86 runtime and helper E2E;
-- deterministic GUI smoke tests;
-- portable dependency-closure validation;
-- performance, memory and startup comparison versus Qt;
-- Windows packaging/release workflow;
-- explicit decision on Linux renderer/runtime requirements;
-- remove Qt/QML only after every gate above is green.
+Qt/QML removal is a separate change once the manual validation is done.

@@ -37,7 +37,7 @@ diagnostics_max_stack_frames = 64
 
 When `diagnostics_symbol_path` is empty, Cortex uses a `cortex_symbols` directory next to `cortex_core.dll`. `_NT_SYMBOL_PATH`, the module directory and each mod's registered `symbol_path` are also considered.
 
-The external symbolizer is not launched inside the crashing process. It is only used by the offline `cortex_host symbolize` command.
+The external symbolizer is not launched inside the crashing process. It is only used by the offline `cortex.exe symbolize` command (also available as `cortex_host.exe symbolize`).
 
 ## MSVC and clang-cl mods
 
@@ -78,7 +78,7 @@ g++ -g -O0 -shared mod.cpp -o MyMod.dll
 Use the unified host with `llvm-symbolizer.exe` or `addr2line.exe`:
 
 ```powershell
-cortex_host.exe symbolize `
+cortex.exe symbolize `
   --image C:\mods\MyMod.dll `
   --rva 0x1832 `
   --tool C:\mingw64\bin\addr2line.exe

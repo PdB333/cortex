@@ -309,7 +309,7 @@ json BuildToolsManifest() {
 
         j.push_back({{"name", "prompt_timed_test"}, {"method", "POST"}, {"path", "/prompt/timed_test"},
                       {"description", "Asks the player to play/test something for a given duration, "
-                                      "then report a result. The Qt Desktop answer control stays unavailable "
+                                      "then report a result. The Cortex desktop answer control stays unavailable "
                                       "until the timer runs out -- impossible to answer before actually testing."},
                       {"body", {{"message", "string, e.g. 'Shoot yourself and count the damage'"},
                                 {"duration_seconds", "number, required, > 0"},

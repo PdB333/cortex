@@ -1,5 +1,10 @@
 # P2 MCP contract hardening
 
+> Historical phase record. Since v0.6 the user-facing entry point is `cortex.exe mcp` over stdio and an
+> authenticated Named Pipe, and primitive calls run the native route handlers directly instead of a
+> loopback HTTP request; see [MCP](mcp.md). The URI, schema and risk-classification contracts below
+> still apply.
+
 P2 hardens Cortex's MCP transport and schema surface and makes the user-facing
 `cortex_host mcp` entry point local-only.
 

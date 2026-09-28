@@ -2,6 +2,38 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v0.8.0] - Unreleased
+
+### Native desktop application
+
+- Replaced the Qt 6/QML desktop with a native Dear ImGui (docking) application on Win32 + Direct3D 11, built from `app_imgui/`. `cortex.exe` no longer ships Qt runtime files. The Qt/QML sources in `app/` stay frozen as the parity reference and are no longer built or released.
+- Every Qt workspace and all 148 Qt controller workflows have an ImGui counterpart (`app_imgui/PARITY_MATRIX.md`, `app_imgui/INVOKABLE_PARITY.md`).
+- Dockable workspaces arranged by six presets (Memory, Debug, RE, Trace, Automation, Runtime), a two-row header with the target, the Read-only / Writes allowed toggle and debugger controls, command palette, Go To, navigation history, and a bottom panel whose tabs hide while the same content is open as a full workspace.
+- TrueType fonts (Segoe UI, Cascadia Mono / Consolas for data) and per-monitor DPI scaling, including `WM_DPICHANGED`.
+- Long runtime operations run on a background worker with a progress card, so the window keeps redrawing.
+- Settings and the dock layout are stored in `%LOCALAPPDATA%\Cortex`; a `cortex.portable` file beside `cortex.exe` keeps them next to the executable. Existing files beside the executable are copied over on first start.
+
+### Fixes
+
+- The write permission is enforced for every mutating application call, not only when the runtime is first loaded: an already connected runtime no longer receives `mutation_permission` while the UI is read-only.
+- The Debugger reads registers and stack before the debugger is attached.
+- A newly tracked RE object shows its resolved address and liveness immediately.
+- The desktop finds the runtime token when the runtime was injected from the application root instead of `runtime/<arch>`.
+- Value scans report when the result limit was reached.
+
+### MCP
+
+- The tool manifest now lists `debug_breakpoint_trigger_set`, `debug_breakpoint_trigger_clear` and `symbols_module`.
+- MCP server metadata reports version `0.8.0`.
+
+### Build and validation
+
+- `app_imgui/main.cpp` is split by concern (application state, UI, CLI, GUI test modes, window loop); the GUI test modes can be left out with `-DCORTEX_IMGUI_TEST_MODES=OFF`.
+- Command-line tools expose named entry points instead of renaming `main()` through compile definitions; standalone builds define `CORTEX_STANDALONE_TOOL`. The desktop debugger backends moved to `host/debugger/` and the Windows icon to `resources/windows/`.
+- Application models share `RuntimeModelBase` over a `RuntimeTransport` interface and are unit-tested against a scripted transport (`cortex_app_models_tests`).
+- The integrated E2E validates `/schema/validate` and calls every read-only GET tool of the manifest, failing on any 5xx.
+- The P1-P4, prompt-contract and diagnostics M1-M7 workflows are grouped as jobs of `.github/workflows/contracts.yml`.
+
 ## [v0.7.0] - 2026-09-21
 
 ### Unified desktop application

@@ -45,5 +45,8 @@ gates are green:
 - migration benchmark evidence;
 - Windows release-candidate packaging.
 
+All of these gates run in CI; manual validation on real authorized targets is
+the remaining step before release (see `PARITY_MATRIX.md`).
+
 Linux desktop support is explicitly deferred and is not used to claim Windows
 v0.8 release parity.

@@ -1,10 +1,10 @@
 # External diagnostics host
 
-Milestones 5 through 7 add an out-of-process diagnostics path for crashes and hangs. These features now live inside the single `cortex_host.exe` tool.
+Milestones 5 through 7 add an out-of-process diagnostics path for crashes and hangs. In the product these commands are part of `cortex.exe` (`cortex.exe diagnose`, `analyze`, `symbolize`, `probe`). The lightweight standalone `cortex_host.exe` built from `tools/unified_host` offers the same commands for x86 or headless environments.
 
 ## Build
 
-Build the lightweight unified host without compiling the injected DLL or renderer dependencies:
+`cortex.exe` needs no extra build step. Build the lightweight unified host without compiling the injected DLL or renderer dependencies:
 
 ```powershell
 cmake -S tools/unified_host -B build/unified-host
@@ -13,12 +13,12 @@ cmake --build build/unified-host --config Release
 
 The compatibility build paths `tools/diagnostics_host` and `tools` now redirect to the same unified executable instead of producing `cortex_diag_host.exe` or `cortex_symbolize.exe`.
 
-Build an x86 host for an x86 game and an x64 host for an x64 game. A mismatched host can still observe process/window state, but it will not trust the copied CPU context.
+The CPU context is only trusted when the watcher has the target's bitness: use `cortex.exe` (x64) for x64 targets and an x86 `cortex_host.exe` for x86 targets. A mismatched watcher can still observe process/window state.
 
 ## Watch a game
 
 ```powershell
-cortex_host.exe diagnose `
+cortex.exe diagnose `
   --pid 1234 `
   --output C:\Games\MyGame\cortex_crashes `
   --heartbeat render `
@@ -70,7 +70,7 @@ Threads are suspended one at a time only long enough to copy their control regis
 Analyze an existing crash or hang directory:
 
 ```powershell
-cortex_host.exe analyze C:\path\to\crash_directory
+cortex.exe analyze C:\path\to\crash_directory
 ```
 
 The local engine reports only evidence-backed rules, including:
@@ -90,12 +90,12 @@ The output includes a confidence level, the evidence used, and a concrete next d
 ## Other commands in the same executable
 
 ```text
-cortex_host.exe serve ...       external REST controller and scanner
-cortex_host.exe inject ...      DLL injection
-cortex_host.exe diagnose ...    crash/freeze watcher
-cortex_host.exe analyze ...     offline report analysis
-cortex_host.exe symbolize ...   PDB/DWARF lookup
-cortex_host.exe mcp ...         stdio MCP bridge
+cortex.exe probe ...        read-only target/runtime health
+cortex.exe inject ...       DLL injection
+cortex.exe diagnose ...     crash/freeze watcher
+cortex.exe analyze ...      offline report analysis
+cortex.exe symbolize ...    PDB/DWARF lookup
+cortex.exe mcp ...          stdio MCP server
 ```
 
-For compatibility, the historical `cortex_host.exe --pid ...` syntax still starts the external REST controller.
+The standalone `cortex_host.exe` accepts the same commands plus the legacy `serve` external REST controller; for compatibility, `cortex_host.exe --pid ...` still starts that controller.

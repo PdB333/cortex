@@ -1,111 +1,117 @@
-CORTEX v0.7.0 - INSTALLATION ET DEMARRAGE RAPIDE
-================================================
+CORTEX v0.8.0 - INSTALLATION AND QUICK START
+============================================
 
-Cortex v0.7.0 est distribue comme une seule application Windows portable :
-cortex.exe. Les composants d'instrumentation x64 et x86 sont inclus dans le
-sous-dossier runtime et sont selectionnes automatiquement selon la cible.
+Cortex v0.8.0 ships as a single portable Windows application: cortex.exe.
+The x64 and x86 instrumentation runtimes live in the runtime folder and are
+selected automatically for each target. Nothing else has to be installed
+(no Qt, no Visual C++ runtime).
 
 INSTALLATION
 ------------
 
-1. Telechargez l'archive :
+1. Download the archive:
 
-       cortex-v0.7.0-windows-portable.zip
+       cortex-v0.8.0-windows-portable.zip
 
-2. Decompressez toute l'archive dans un dossier normal et inscriptible,
-   par exemple :
+2. Extract the whole archive into a normal, writable folder, for example:
 
        C:\Cortex\
 
-3. Ne deplacez pas cortex.exe seul. Conservez les DLL Qt, les plugins QML et
-   le dossier runtime a cote de l'executable.
+3. Do not move cortex.exe on its own. Keep cortex_core.dll and the runtime
+   folder next to the executable.
 
-4. Lancez :
+4. Run:
 
        .\cortex.exe
 
-PREMIERE SESSION
-----------------
+FIRST SESSION
+-------------
 
-1. Selectionnez un processus dans la barre superieure.
-2. Attachez Cortex a la cible.
-3. Utilisez Scanner (Ctrl+F) ou Memory pour commencer l'inspection.
-4. Double-cliquez un resultat de scan utile pour l'ajouter a Addresses.
-5. Utilisez le menu contextuel d'une adresse pour naviguer vers Memory,
-   Disassembly, RE, Pointers, Structures ou les actions de debugger.
-6. Activez Mutation uniquement lorsque vous voulez effectuer une operation
-   qui modifie la cible ou l'etat persistant.
+1. Click "Select process" in the header (or File > Select process...).
+2. Select the target and click Attach (or double-click the row).
+3. Use the "Value scan" panel of the Memory workspace to scan a value
+   (First scan, then Next scan).
+4. Double-click a useful result to prepare an Addresses entry.
+5. Use an address's context menu to jump to the Memory viewer, the
+   Disassembler, RE, Pointer Maps, Structures or debugger actions.
+6. The Memory, Debug, RE, Trace, Automation and Runtime buttons in the header
+   rearrange the workspaces for each task.
+7. Switch the header toggle from "Read-only" to "Writes allowed" only when you
+   intend an operation that changes the target or persistent state.
 
-MODES EN LIGNE DE COMMANDE
---------------------------
+COMMAND-LINE MODES
+------------------
 
-Afficher l'aide :
+Help:
 
        .\cortex.exe --help
 
-Afficher la version :
+Version:
 
        .\cortex.exe --version
 
-Lancer MCP en mode stdio persistant :
+Persistent MCP server over stdio (targetless; attach from the AI client):
 
        .\cortex.exe mcp
 
-Attacher automatiquement MCP a un PID :
+Attach MCP to a PID or a process at startup:
 
        .\cortex.exe mcp --pid 1234
-
-Attacher automatiquement MCP a un processus :
-
        .\cortex.exe mcp --process game.exe
 
-Exposer aussi les outils primitifs bas niveau :
+Also expose the low-level primitive tools:
 
        .\cortex.exe mcp --tools all
 
-Autres commandes integrees :
+Other built-in commands:
 
        .\cortex.exe probe --pid 1234
        .\cortex.exe diagnose --pid 1234
-       .\cortex.exe analyze <dossier>
+       .\cortex.exe analyze <directory>
        .\cortex.exe symbolize [options]
+       .\cortex.exe inject <target> [dll]
 
-CONTENU IMPORTANT
------------------
+WHAT IS IN THE ARCHIVE
+----------------------
 
 cortex.exe
-    Application Cortex principale (GUI et modes CLI/MCP).
+    The Cortex application (desktop UI and CLI/MCP modes).
+
+cortex_core.dll
+    64-bit instrumentation runtime used for direct injection.
 
 runtime\x64\cortex_core.dll
-    Payload d'instrumentation pour les cibles 64 bits.
+    Instrumentation runtime for 64-bit targets.
 
 runtime\x86\cortex_core.dll
-    Payload d'instrumentation pour les cibles 32 bits.
+    Instrumentation runtime for 32-bit targets.
 
 runtime\x86\cortex_runtime_helper.exe
-    Helper prive utilise automatiquement pour les cibles 32 bits.
+    Private helper used automatically for 32-bit targets.
 
 README.md, CHANGELOG.md, LICENSE, docs
-    Documentation, historique, licence et guides techniques.
+    Documentation, history, license and technical guides.
 
-DEPANNAGE
----------
+TROUBLESHOOTING
+---------------
 
-- Si cortex.exe ne demarre pas, verifiez que l'archive a ete entierement
-  extraite et que les DLL/plugins fournis sont toujours presents.
-- Si une cible ne peut pas etre ouverte, verifiez son architecture et les
-  droits Windows du processus. N'utilisez des privileges eleves que lorsque
-  les droits de la cible l'exigent.
-- Si une operation d'ecriture, de breakpoint ou de controle est refusee,
-  activez explicitement Mutation dans Cortex.
-- Pour MCP, stdout est reserve au protocole JSON-RPC pendant toute la session.
-- Consultez docs/getting-started.md et docs/ui-guide.md pour le workflow
-  complet de l'application unifiee.
+- If cortex.exe does not start, check that the whole archive was extracted
+  and that cortex_core.dll and the runtime folder are present.
+- If a target cannot be opened, check its architecture and the process's
+  Windows rights. Only use elevated privileges when the target requires them.
+- If a write, breakpoint or control operation is refused, switch the header
+  to "Writes allowed" first.
+- Settings and the window layout are saved in %LOCALAPPDATA%\Cortex. To keep
+  them next to cortex.exe instead (USB stick, sandbox), create an empty file
+  named cortex.portable next to the executable.
+- In MCP mode, stdout is reserved for JSON-RPC for the whole session;
+  diagnostics go to stderr.
+- See docs/getting-started.md, docs/ui-guide.md and docs/ui-walkthrough.md
+  for the complete workflow.
 
-AUTORISATION
-------------
+AUTHORIZATION
+-------------
 
-Utilisez Cortex uniquement sur des logiciels et systemes que vous possedez
-ou etes autorise a inspecter. Le contournement d'anti-cheat, l'acces non
-autorise et l'interference avec des services en ligne ne font pas partie du
-perimetre du projet.
+Use Cortex only on software and systems you own or are authorized to inspect.
+Anti-cheat bypass, unauthorized access and interference with online services
+are outside the scope of this project.

@@ -12,7 +12,7 @@ bool InitInputHook();
 
 // Toggles whether the game's own cursor-position/clip/visibility calls are
 // suppressed. Cortex currently leaves this disabled because human/debugger UI
-// lives in the Qt desktop rather than inside the target process.
+// lives in the Cortex desktop rather than inside the target process.
 void SetInputCaptureActive(bool active);
 
 } // namespace hook

@@ -1,59 +1,77 @@
 # Cortex — guide for AI agents
 
 This document is written for an LLM or automated agent driving Cortex. It
-explains how to connect, authenticate, and use the API productively. The
-running Agent always self-documents its full route list through
-`GET /tools` and `GET /openapi.json`; this guide covers the workflow and the
+explains how to connect and use Cortex productively. The runtime always
+self-documents its full route list through the `/tools` manifest (and
+`/openapi.json` on the legacy HTTP API); this guide covers the workflow and the
 conventions those manifests assume.
 
-## The two endpoints
+## Connecting: MCP over stdio
 
-Cortex has two cooperating servers, both bound to `127.0.0.1` only:
+The supported path is Model Context Protocol over stdio from `cortex.exe`:
 
-| Component | Default port | Role |
-|---|---:|---|
-| **Agent** (injected DLL) | `6969` | Renderer hooks, overlay, breakpoints, live debugging, patches, calls, screenshots, prompts |
-| **Host** (external exe) | `6970` | Heavy memory scans from outside the process, so scan buffers never pollute the target |
+```json
+{
+  "mcpServers": {
+    "cortex": { "command": "C:/path/to/cortex.exe", "args": ["mcp"] }
+  }
+}
+```
 
-Prefer the **Host** for scanning (`/scan/*`) and the **Agent** for anything
-that touches the render loop, execution control, or the human overlay. Both
-share one persistent per-target workspace (`project.json`).
+```text
+AI client -> cortex.exe mcp (stdio) -> authenticated Named Pipe -> cortex_core.dll in the target
+```
 
-## Authentication
+- Without a selector the server starts targetless. Use `cortex_processes`,
+  `cortex_attach`, `cortex_targets` and `cortex_detach`; after an attach or a
+  detach Cortex sends `notifications/tools/list_changed`, so refresh
+  `tools/list`.
+- `--pid <pid>` / `--process <name>` attach at startup (repeatable).
+- With several attached targets every runtime tool takes a required
+  `_cortex_target` (PID, target id or unique process name).
+- The default `--tools compact` profile exposes the 30 semantic tools
+  (see [`semantic-tools.md`](semantic-tools.md)); `--tools all` adds every
+  primitive route.
+- Primitive calls put path placeholders in `arguments._path` and query
+  parameters in `arguments._query`.
+- Batch (array) requests are supported. Diagnostics go to stderr; stdout is
+  protocol data only.
 
-Every non-public route requires the header `X-Cortex-Token`.
+Tokens are handled for you: the runtime writes a private
+`cortex.mcp.<pid>.token` beside `cortex_core.dll` and `cortex.exe` reads it.
+Your MCP calls show up in the desktop's **AI Activity** panel, so the person
+at the screen can see what the agent is doing.
 
-- The Agent reads or creates `cortex.token` next to the DLL.
-- The Host writes `cortex_host.token` next to its exe.
+See [`docs/mcp.md`](../docs/mcp.md) for protocol versions, routing and
+security details.
 
-Read that file and send its contents as `X-Cortex-Token` on every request.
-The only routes that need no token are `/status`, `/health`, `/tools`, and
-`/openapi.json`.
+## Legacy HTTP API
+
+The loopback REST API (`127.0.0.1:6969`, header `X-Cortex-Token` read from
+`cortex.token` beside the DLL, plus `POST /mcp`) is compatibility/debug only
+and is **off by default**; it starts only with `http_api_enabled=true` in
+`cortex.ini`. The external `cortex_host serve` controller (port `6970`) is a
+legacy tool. The route names below are the same primitives the MCP catalog
+exposes, so everything in this guide applies to both.
 
 ## First moves in a new session
 
-1. `GET /health` — confirm the server is up.
-2. `GET /tools` — load the authoritative route manifest with parameter names.
-   **Always trust the exact field names from `/tools`**; do not guess.
-3. `GET /modules` — get the target's module list (name, base, size). Resolve
+1. `health` — confirm the runtime is up.
+2. `tools/list` (or the `/tools` manifest) — load the authoritative parameter
+   names. **Always trust the exact field names from the manifest**; do not
+   guess.
+3. `modules` — get the target's module list (name, base, size). Resolve
    addresses relative to a module base, never to a raw absolute from a prior
    session.
-4. `GET /project` — recover named addresses, pointer paths, structures, and
-   notes saved in earlier sessions. This is your long-term memory.
+4. `project` — recover named addresses, pointer paths, structures, and notes
+   saved in earlier sessions. This is your long-term memory.
 
-## Native MCP transport
+## Permission to change the target
 
-Cortex also speaks **Model Context Protocol** over `POST /mcp` (JSON-RPC 2.0).
-The tool catalog is auto-derived from `/tools`, so there is no second registry
-to maintain.
-
-- `initialize` returns `protocolVersion "2024-11-05"`, capabilities, serverInfo.
-- `tools/list` returns MCP tool descriptors with an `inputSchema`.
-- `tools/call` loops back through the same HTTP server; put path placeholders
-  in `arguments._path` and query params in `arguments._query`.
-- Batch (array) requests are supported.
-
-The same `X-Cortex-Token` gates `/mcp` — one token for both surfaces.
+Attaching grants no write permission. Control, mutation and native-call
+operations require `mutation_permission=true` on that call; every mutation is
+journaled and can be rolled back. Use it only for the specific operation that
+needs it.
 
 ## Core conventions
 
@@ -76,7 +94,7 @@ The same `X-Cortex-Token` gates `/mcp` — one token for both surfaces.
 
 ## Typical reverse-engineering loop
 
-1. **Find a value** — scan on the Host: `POST /scan/new` with the current
+1. **Find a value** — `POST /scan/new` with the current
    value, play the game so the value changes, then `POST /scan/next` with the
    new value / a comparison filter (`increased`, `decreased`, `changed`,
    `bigger`, `smaller`, `between`, deltas). Repeat until few candidates remain.
@@ -145,15 +163,18 @@ metadata, and project state. Use it as a bug report or a diffable checkpoint.
 
 ## Human-in-the-loop
 
-When you need the person at the screen to act or report something the API
-can't observe, use `POST /prompt`:
+When you need the person at the screen to act or report something the runtime
+can't observe, create a prompt; the Cortex desktop shows it as a modal dialog:
 
-- `response_type: "ack"` — a button the human presses when done.
-- `response_type: "number"` / `"text"` — a value the human types back.
-- `timer_seconds` — show a countdown (e.g. "take damage for 10s and tell me
-  the total").
+- `prompt_value_change` — ask the human to change a named value in the
+  application (e.g. set "Health" to 50) and click **Done**; no timer.
+- `prompt_timed_test` — ask the human to test something for
+  `duration_seconds`, then report a text or number result; the answer control
+  stays disabled until the timer runs out.
 
-Then poll `GET /prompt/{id}` until `status` is `answered` or `timeout`.
+Then poll `prompt_status` (`GET /prompt/{id}`) until `status` is `answered`. Answering is deliberately not an MCP tool: only the human, through the
+desktop, can answer, so an agent cannot confirm its own test. Creating a
+prompt fails explicitly when no desktop is attached to present it.
 
 Use `GET /screenshot` to *see* the result of an action — close the loop
 visually rather than assuming a write had the intended effect.
