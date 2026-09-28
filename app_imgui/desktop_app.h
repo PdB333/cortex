@@ -52,6 +52,7 @@
 #include "ui/settings_workspace.h"
 #include "ui/symbols_workspace.h"
 #include "ui/trace_workspace.h"
+#include "ui/tools_workspace.h"
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
@@ -276,6 +277,7 @@ struct AppState {
         workspaces.Add<cortex::ui::PatchesWorkspace>();
         workspaces.Add<cortex::ui::EventsWorkspace>();
         workspaces.Add<cortex::ui::TraceWorkspace>();
+        workspaces.Add<cortex::ui::ToolsWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 

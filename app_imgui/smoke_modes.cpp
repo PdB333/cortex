@@ -264,7 +264,7 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "modules", "debugger", "runtime", "sessions", "settings", "project",
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
-    "scripts", "input", "screenshots", "patches", "events", "trace"
+    "scripts", "input", "screenshots", "patches", "events", "trace", "tools"
 };
 
 
@@ -449,6 +449,97 @@ uint64_t GuiSmokeCodeAddress(AppState& app, std::string& error) {
     return 0;
 }
 
+// Value scanner, PE parser, signature generator and pointer scanner against
+// the real test target.
+bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summary, std::string& error) {
+    namespace services = cortex::services;
+    const auto session = app.sessions.Active();
+    auto modules = app.modules.List(&error);
+    if (modules.empty()) {
+        if (error.empty()) error = "no_modules";
+        return false;
+    }
+    const auto main = std::find_if(modules.begin(), modules.end(), [](const auto& module) {
+        return Lower(module.name).find("cortex_test_target") != std::string::npos;
+    });
+    const auto& module = main != modules.end() ? *main : modules.front();
+    const services::MemoryReader read = [session](uint64_t address, void* buffer, size_t size) {
+        return session->ReadMemory(address, buffer, size, nullptr);
+    };
+    services::PeImage image;
+    if (!services::ParsePeImage(read, module.base, image, &error) || image.sections.empty()) {
+        error = "pe_parse_failed:" + error;
+        return false;
+    }
+    uint64_t health = 0;
+    for (const auto& entry : image.exports)
+        if (entry.name == "g_cortex_health") health = module.base + entry.rva;
+
+    size_t scanHits = 0;
+    if (health) {
+        int32_t value = 0;
+        if (!session->ReadMemory(health, &value, sizeof(value), nullptr)) {
+            error = "health_read_failed";
+            return false;
+        }
+        services::ScanQuery query;
+        query.type = services::ScanDataType::Int32;
+        query.value = std::to_string(value);
+        services::ScanOptions options;
+        options.start = module.base;
+        options.stop = module.base + module.size;
+        options.writable = services::ScanTristate::Any;
+        options.copyOnWrite = services::ScanTristate::Any;
+        auto first = services::ValueScanner::FirstScan(session, query, options, &error);
+        auto contains = [health](const services::ScanStatePtr& state) {
+            return state && std::find(state->addresses.begin(), state->addresses.end(), health) != state->addresses.end();
+        };
+        if (!contains(first)) {
+            error = "value_scan_missed_health:" + error;
+            return false;
+        }
+        query.compare = services::ScanCompare::Unchanged;
+        auto unchanged = services::ValueScanner::NextScan(session, first, query, &error);
+        query.compare = services::ScanCompare::Changed;
+        auto changed = services::ValueScanner::NextScan(session, first, query, &error);
+        if (!contains(unchanged) && !contains(changed)) {
+            error = "next_scan_lost_health";
+            return false;
+        }
+        scanHits = first->Size();
+
+        services::PointerScanOptions pointerOptions;
+        pointerOptions.target = health;
+        pointerOptions.maxLevel = 2;
+        pointerOptions.maxResults = 100;
+        pointerOptions.pointerSize = session->Target().architecture == cortex::target::Architecture::X86 ? 4 : 8;
+        for (const auto& entry : modules) pointerOptions.modules.push_back({entry.name, entry.base, entry.size});
+        services::PointerScanResult pointers;
+        if (!services::PointerScanner::Scan(session, pointerOptions, pointers, &error)) {
+            error = "pointer_scan_failed:" + error;
+            return false;
+        }
+        summary += " pointers=" + std::to_string(pointers.paths.size());
+    }
+
+    std::vector<uint8_t> code(128);
+    if (!session->ReadMemory(codeAddress, code.data(), code.size(), nullptr)) code.resize(32);
+    services::Signature signature;
+    services::SignatureOptions signatureOptions;
+    signatureOptions.x64 = session->Target().architecture != cortex::target::Architecture::X86;
+    if (!services::GenerateSignature(code.data(), code.size(), nullptr, 0, signatureOptions, signature, &error)) {
+        error = "signature_failed:" + error;
+        return false;
+    }
+    summary += " pe_sections=" + std::to_string(image.sections.size()) + " exports=" +
+               std::to_string(image.exports.size()) + " scan_hits=" + std::to_string(scanHits) +
+               " signature=" + std::to_string(signature.bytes.size()) + "B";
+
+    app.ui.toolsTabRequest = "pointers";
+    app.ui.NavigateTo("tools", health ? health : codeAddress);
+    return RenderGuiStable(app, error, true);
+}
+
 int RunGuiWorkspaceSuite() {
     AppState app;
     std::string error;
@@ -526,6 +617,11 @@ int RunGuiAttachedSuite(const std::vector<std::string>& args) {
     app.ui.NavigateTo("disassembly", address);
 
     HeadlessGuiContext gui;
+    std::string toolsSummary;
+    if (!ExerciseMemoryTools(app, address, toolsSummary, error)) {
+        std::fprintf(stderr, "gui attached suite: memory tools failed: %s\n", error.c_str());
+        return 12;
+    }
     if (!ExerciseGuiPresets(app, error)) {
         std::fprintf(stderr, "gui attached suite: preset render failed: %s\n", error.c_str());
         return 8;
@@ -550,10 +646,10 @@ int RunGuiAttachedSuite(const std::vector<std::string>& args) {
     }
 
     std::printf(
-        "PASS: GUI attached suite pid=%lu address=0x%llX bytes=%zu instructions=%zu\n",
+        "PASS: GUI attached suite pid=%lu address=0x%llX bytes=%zu instructions=%zu%s\n",
         static_cast<unsigned long>(pid),
         static_cast<unsigned long long>(address),
-        bytes.size(), decoded.size());
+        bytes.size(), decoded.size(), toolsSummary.c_str());
     return 0;
 }
 

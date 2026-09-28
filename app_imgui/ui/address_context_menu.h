@@ -90,6 +90,15 @@ inline void DrawAddressContextActions(
             context.NavigateTo("pointermaps", address);
         if (ImGui::MenuItem("Structures"))
             context.NavigateTo("structures", address);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Pointer scan for this address")) {
+            context.toolsTabRequest = "pointers";
+            context.NavigateTo("tools", address);
+        }
+        if (ImGui::MenuItem("Generate AOB signature")) {
+            context.toolsTabRequest = "signature";
+            context.NavigateTo("tools", address);
+        }
         ImGui::EndMenu();
     }
 

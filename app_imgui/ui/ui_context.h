@@ -27,6 +27,7 @@
 #include "services/memory_service.h"
 #include "services/module_service.h"
 #include "services/payload_client.h"
+#include "services/value_scanner.h"
 #include "target/session_manager.h"
 
 #include <cstdint>
@@ -38,6 +39,18 @@ namespace cortex::ui {
 struct NavigationEntry {
     std::string workspace;
     uint64_t address = 0;
+};
+
+// An entry another workspace hands to the Memory address list: an absolute
+// address, or a pointer chain module+baseOffset -> offsets.
+struct PendingAddressEntry {
+    std::string description;
+    uint64_t address = 0;
+    services::ScanDataType type = services::ScanDataType::Int32;
+    std::string module;
+    uint64_t baseOffset = 0;
+    std::vector<uint32_t> offsets;
+    unsigned pointerSize = 8;
 };
 
 struct UiContext {
@@ -77,6 +90,10 @@ struct UiContext {
     bool targetPaused = false;
     // Hotkey actions whose chord could not be registered.
     std::vector<std::string> hotkeyFailures;
+    // Entries for the Memory address list, and the Memory tools tab to show
+    // with the next navigation to "tools".
+    std::vector<PendingAddressEntry> pendingAddresses;
+    std::string toolsTabRequest;
     std::string status = "Select a process to begin";
 
     // Lightweight cross-workspace navigation. A workspace can request another

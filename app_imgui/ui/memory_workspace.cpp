@@ -537,6 +537,55 @@ std::string MemoryWorkspace::FormatEntry(const AddressEntry& entry) const {
                                 entry.unsignedValue, entry.utf16);
 }
 
+std::string MemoryWorkspace::PointerText(const AddressEntry& entry) const {
+    char buffer[32] = {};
+    std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
+    std::string text = entry.module + buffer;
+    for (const auto offset : entry.offsets) {
+        std::snprintf(buffer, sizeof(buffer), " -> %X", offset);
+        text += buffer;
+    }
+    return text;
+}
+
+bool MemoryWorkspace::ResolvePointer(UiContext& context, AddressEntry& entry) {
+    const target::ModuleInfo* module = nullptr;
+    for (const auto& candidate : modules_)
+        if (Lower(candidate.name) == Lower(entry.module)) module = &candidate;
+    if (!module || !context.memory) return false;
+    uint64_t address = module->base + entry.baseOffset;
+    for (const auto offset : entry.offsets) {
+        std::vector<uint8_t> bytes;
+        std::string error;
+        if (!context.memory->Read(address, entry.pointerSize, bytes, &error) || bytes.size() != entry.pointerSize)
+            return false;
+        uint64_t value = 0;
+        std::memcpy(&value, bytes.data(), entry.pointerSize);
+        address = value + offset;
+    }
+    entry.address = address;
+    return true;
+}
+
+void MemoryWorkspace::TakePendingAddresses(UiContext& context) {
+    if (context.pendingAddresses.empty()) return;
+    for (auto& pending : context.pendingAddresses) {
+        AddressEntry entry;
+        entry.description = pending.description.empty() ? "No description" : pending.description;
+        entry.type = pending.type;
+        entry.size = std::max<size_t>(1, ValueScanner::TypeSize(pending.type));
+        entry.address = pending.address;
+        entry.pointer = !pending.module.empty();
+        entry.module = pending.module;
+        entry.baseOffset = pending.baseOffset;
+        entry.offsets = pending.offsets;
+        entry.pointerSize = pending.pointerSize;
+        addresses_.push_back(std::move(entry));
+    }
+    context.pendingAddresses.clear();
+    lastAddressRefresh_ = {};
+}
+
 void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
     if (!context.memory) return;
     const auto now = std::chrono::steady_clock::now();
@@ -547,6 +596,10 @@ void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
     for (auto& entry : addresses_) {
         std::vector<uint8_t> value;
         std::string error;
+        if (entry.pointer && !ResolvePointer(context, entry)) {
+            entry.readable = false;
+            continue;
+        }
         entry.readable = context.memory->Read(entry.address, std::max<size_t>(1, entry.size), value, &error) &&
                          value.size() == std::max<size_t>(1, entry.size);
         if (!entry.readable) continue;
@@ -1177,14 +1230,17 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
             ImGui::TableSetColumnIndex(2);
             bool isStatic = false;
-            const std::string addressText = AddressText(entry.address, isStatic);
-            if (isStatic) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
+            const std::string addressText = entry.pointer
+                ? "P->" + (entry.readable ? Hex(entry.address) : std::string("????????"))
+                : AddressText(entry.address, isStatic);
+            if (isStatic || entry.pointer) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
             {
                 MonoFont mono;
                 ImGui::Selectable(addressText.c_str(), entry.selected);
             }
-            if (isStatic) ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) ImGui::SetTooltip("%s", Hex(entry.address).c_str());
+            if (isStatic || entry.pointer) ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                ImGui::SetTooltip("%s", entry.pointer ? PointerText(entry).c_str() : Hex(entry.address).c_str());
             ImGui::OpenPopupOnItemClick("EntryMenu");
 
             ImGui::TableSetColumnIndex(3);
@@ -1342,6 +1398,23 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
 }
 
 void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& command) {
+    if (command.rfind("scan_range ", 0) == 0) {
+        std::istringstream words(command.substr(11));
+        std::string start;
+        std::string stop;
+        uint64_t from = 0;
+        uint64_t to = 0;
+        if (words >> start >> stop && ParseHex(start, from) && ParseHex(stop, to)) {
+            std::snprintf(start_, sizeof(start_), "%llX", static_cast<unsigned long long>(from));
+            std::snprintf(stop_, sizeof(stop_), "%llX", static_cast<unsigned long long>(to));
+            regionIndex_ = 0;
+            writable_ = ScanTristate::Any;
+            copyOnWrite_ = ScanTristate::Any;
+            if (scan_) NewScan(context);
+            context.status = "The next first scan covers " + Hex(from) + " - " + Hex(to);
+        }
+        return;
+    }
     if (command == "scan_cancel") {
         CancelScan();
         return;
@@ -1401,6 +1474,7 @@ void MemoryWorkspace::Draw(UiContext& context) {
         return;
     }
     RefreshModules(context);
+    TakePendingAddresses(context);
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float upperHeight = std::clamp(

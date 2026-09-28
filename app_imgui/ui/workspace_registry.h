@@ -133,13 +133,13 @@ public:
 
         switch (preset) {
             case WorkspacePreset::Memory:
-                OpenMany({"memory", "addresses", "memory-browser", "modules", "watches"});
+                OpenMany({"memory", "addresses", "memory-browser", "tools", "modules", "watches"});
                 break;
             case WorkspacePreset::Debug:
                 OpenMany({"disassembly", "debugger", "patches", "memory-browser", "modules", "watches"});
                 break;
             case WorkspacePreset::ReverseEngineering:
-                OpenMany({"re", "disassembly", "patches", "memory-browser", "modules", "project", "symbols",
+                OpenMany({"re", "disassembly", "patches", "memory-browser", "tools", "modules", "project", "symbols",
                           "structures", "pointermaps", "snapshots", "instrumentation", "runtime"});
                 break;
             case WorkspacePreset::Trace:
@@ -259,7 +259,7 @@ public:
         switch (preset_) {
             case WorkspacePreset::Memory:
                 DockMany(left, {"addresses", "modules"}, docked);
-                DockMany(center, {"memory", "memory-browser"}, docked);
+                DockMany(center, {"memory", "memory-browser", "tools"}, docked);
                 DockMany(right, {"watches"}, docked);
                 break;
 
@@ -280,7 +280,7 @@ public:
                     ImGui::DockBuilderSplitNode(rightTop, ImGuiDir_Down, 0.45f, nullptr, &rightTop);
                 DockMany(leftTop, {"project", "symbols", "structures"}, docked);
                 DockMany(leftBottom, {"pointermaps", "snapshots", "modules"}, docked);
-                DockMany(center, {"re", "disassembly", "memory-browser"}, docked);
+                DockMany(center, {"re", "disassembly", "memory-browser", "tools"}, docked);
                 DockMany(rightTop, {"patches", "instrumentation"}, docked);
                 DockMany(rightBottom, {"runtime"}, docked);
                 break;

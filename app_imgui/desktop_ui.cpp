@@ -203,6 +203,7 @@ constexpr CommandEntry kCommands[] = {
     {"View: Addresses", CommandAction::ViewAddresses},
     {"View: Memory scanner", CommandAction::ViewMemory},
     {"View: Memory viewer", CommandAction::ViewMemoryBrowser},
+    {"View: Memory tools", CommandAction::Dispatch, "view_tools"},
     {"View: Disassembler", CommandAction::ViewDisassembly},
     {"View: Modules", CommandAction::ViewModules},
     {"View: Project", CommandAction::ViewProject},
@@ -788,6 +789,8 @@ void DispatchCommand(AppState& app, const std::string& command) {
         if (!window) return;
         if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
         SetForegroundWindow(window);
+    } else if (command == "view_tools") {
+        app.workspaces.Select("tools");
     } else if (!command.empty()) {
         app.ui.commands.push_back(command);
     }
@@ -1150,6 +1153,12 @@ void DrawApp(AppState& app) {
                 app.workspaces.Select("memory-browser");
             if (ImGui::MenuItem("Disassembler"))
                 app.workspaces.Select("disassembly");
+            if (ImGui::MenuItem("Memory tools (regions, PE, strings, caves)"))
+                app.workspaces.Select("tools");
+            if (ImGui::MenuItem("Pointer scan")) {
+                app.ui.toolsTabRequest = "pointers";
+                app.ui.NavigateTo("tools", 0);
+            }
             if (ImGui::MenuItem("Modules"))
                 app.workspaces.Select("modules");
             if (ImGui::MenuItem("Sessions"))

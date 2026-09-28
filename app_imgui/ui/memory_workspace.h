@@ -47,6 +47,12 @@ private:
         FreezeMode freezeMode = FreezeMode::Always;
         bool readable = true;
         bool selected = false;
+        // Pointer entries follow module+baseOffset -> offsets on every refresh.
+        bool pointer = false;
+        std::string module;
+        uint64_t baseOffset = 0;
+        std::vector<uint32_t> offsets;
+        unsigned pointerSize = 8;
     };
 
     // Layout
@@ -93,6 +99,9 @@ private:
     void SaveEntryToProject(UiContext& context, const AddressEntry& entry);
     std::string FormatEntry(const AddressEntry& entry) const;
     bool HasAddress(uint64_t address, services::ScanDataType type) const;
+    bool ResolvePointer(UiContext& context, AddressEntry& entry);
+    void TakePendingAddresses(UiContext& context);
+    std::string PointerText(const AddressEntry& entry) const;
 
     // Scan inputs
     char scanValue_[256] = "100";

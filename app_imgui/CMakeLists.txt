@@ -128,6 +128,7 @@ add_executable(cortex_imgui WIN32
     ui/sessions_workspace.cpp
     ui/settings_workspace.cpp
     ui/trace_workspace.cpp
+    ui/tools_workspace.cpp
     ui/theme.cpp
     ui/fonts.cpp
 
@@ -153,6 +154,9 @@ add_executable(cortex_imgui WIN32
 
     ../core/services/memory_service.cpp
     ../core/services/value_scanner.cpp
+    ../core/services/memory_tools.cpp
+    ../core/services/pointer_scanner.cpp
+    ../core/services/signature.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -266,4 +270,19 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_value_scanner_tests COMMAND cortex_value_scanner_tests)
     set_tests_properties(cortex_value_scanner_tests PROPERTIES TIMEOUT 60)
+
+    # PE parsing, strings, code caves, signatures and the pointer scanner.
+    add_executable(cortex_memory_tools_tests
+        ../tests/memory_tools_tests.cpp
+        ../core/services/memory_tools.cpp
+        ../core/services/pointer_scanner.cpp
+        ../core/services/signature.cpp
+    )
+    target_include_directories(cortex_memory_tools_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_memory_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_memory_tools_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_memory_tools_tests COMMAND cortex_memory_tools_tests)
+    set_tests_properties(cortex_memory_tools_tests PROPERTIES TIMEOUT 60)
 endif()
