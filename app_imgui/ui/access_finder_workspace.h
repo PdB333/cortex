@@ -10,9 +10,11 @@
 
 namespace cortex::ui {
 
-// Cheat Engine's "Find out what writes to / accesses this address": a
-// hardware data breakpoint in log mode, with its hits grouped by the
-// instruction that caused them. The target never stops.
+// Cheat Engine's "Find out what writes to / accesses this address" (a
+// hardware data breakpoint in log mode, hits grouped by the instruction
+// that caused them) and "Find out what addresses this instruction
+// accesses" (an execute breakpoint, hits grouped by the address the
+// instruction's memory operand resolved to). The target never stops.
 class AccessFinderWorkspace final : public IWorkspace {
 public:
     const char* Id() const override { return "access-finder"; }
@@ -25,6 +27,8 @@ private:
         uint64_t count = 0;
         std::string text;
         std::vector<std::pair<std::string, uint64_t>> registers;  // at the last hit
+        unsigned size = 0;  // instruction watches: bytes accessed
+        bool write = false;
     };
 
     struct Watch {
@@ -32,6 +36,10 @@ private:
         uint64_t address = 0;
         int size = 4;
         bool writesOnly = true;
+        bool instruction = false;
+        std::vector<uint8_t> code;
+        std::string instructionText;
+        bool x64 = true;
         bool active = false;
         uint64_t lastSeq = 0;
         uint64_t total = 0;

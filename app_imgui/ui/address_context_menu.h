@@ -192,6 +192,10 @@ inline void DrawAddressContextActions(
             context.accessFinderRequests.push_back({address, std::clamp(valueSize, 1, 8), false});
             context.requestWorkspace = "access-finder";
         }
+        if (ImGui::MenuItem("Find out what addresses this instruction accesses")) {
+            context.accessFinderRequests.push_back({address, 1, false, true});
+            context.requestWorkspace = "access-finder";
+        }
         ImGui::EndDisabled();
         ImGui::Separator();
         addBreakpoint("Software breakpoint", "software", 1);

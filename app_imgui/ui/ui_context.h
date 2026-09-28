@@ -59,6 +59,9 @@ struct AccessFinderRequest {
     uint64_t address = 0;
     int size = 4;
     bool writesOnly = true;
+    // "Find out what addresses this instruction accesses": an execute
+    // breakpoint on the instruction at address.
+    bool instruction = false;
 };
 
 struct UiContext {

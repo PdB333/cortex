@@ -184,6 +184,7 @@ add_executable(cortex_imgui WIN32
     ../core/services/memory_tools.cpp
     ../core/services/pointer_scanner.cpp
     ../core/services/signature.cpp
+    ../core/services/instruction_operands.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -307,6 +308,7 @@ if(BUILD_TESTING)
         ../core/services/memory_tools.cpp
         ../core/services/pointer_scanner.cpp
         ../core/services/signature.cpp
+        ../core/services/instruction_operands.cpp
     )
     target_include_directories(cortex_memory_tools_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
     target_link_libraries(cortex_memory_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)

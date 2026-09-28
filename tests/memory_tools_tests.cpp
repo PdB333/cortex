@@ -5,6 +5,7 @@
 #include "services/memory_tools.h"
 #include "services/pointer_scanner.h"
 #include "services/signature.h"
+#include "services/instruction_operands.h"
 #include "fake_process.h"
 
 #include <cstdio>
@@ -204,6 +205,31 @@ void TestSignature() {
           invalid.bytes.size() > 0);
 }
 
+void TestMemoryAccess() {
+    auto registers = [](const std::string& name, uint64_t& value) {
+        if (name == "RAX") value = 0x10000000;
+        else if (name == "RCX") value = 3;
+        else if (name == "EBX") value = 0x2000;
+        else return false;
+        return true;
+    };
+    MemoryAccess access;
+    std::string error;
+    const uint8_t indexed[] = {0x89, 0x44, 0x88, 0x10};  // mov [rax+rcx*4+0x10], eax
+    CHECK(ResolveMemoryAccess(indexed, sizeof(indexed), 0x401000, true, registers, access, &error));
+    CHECK(access.address == 0x1000001C && access.size == 4 && access.write);
+    const uint8_t rip[] = {0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00};  // mov rax, [rip+0x10]
+    CHECK(ResolveMemoryAccess(rip, sizeof(rip), 0x401000, true, registers, access, &error));
+    CHECK(access.address == 0x401017 && access.size == 8 && !access.write);
+    const uint8_t x86[] = {0x8B, 0x43, 0x08};  // mov eax, [ebx+8]
+    CHECK(ResolveMemoryAccess(x86, sizeof(x86), 0x401000, false, registers, access, &error));
+    CHECK(access.address == 0x2008 && access.size == 4);
+    const uint8_t noMemory[] = {0x48, 0x85, 0xC0};  // test rax, rax
+    CHECK(!ResolveMemoryAccess(noMemory, sizeof(noMemory), 0x401000, true, registers, access, &error));
+    const uint8_t unknown[] = {0x8B, 0x02};  // mov eax, [rdx]
+    CHECK(!ResolveMemoryAccess(unknown, sizeof(unknown), 0x401000, true, registers, access, &error));
+}
+
 void TestPointerScanner() {
     auto process = std::make_shared<FakeProcess>();
     process->Add(0x400000, 0x2000, true, false, MemoryRegionType::Image);
@@ -257,6 +283,7 @@ int main() {
     TestPeImage();
     TestStringsAndCaves();
     TestSignature();
+    TestMemoryAccess();
     TestPointerScanner();
     if (failures) {
         std::cerr << failures << " check(s) failed" << std::endl;

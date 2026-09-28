@@ -2,6 +2,8 @@
 #include "widgets.h"
 #include "address_context_menu.h"
 
+#include "services/instruction_operands.h"
+
 #include <imgui.h>
 
 #include <algorithm>
@@ -23,27 +25,50 @@ void AccessFinderWorkspace::Start(UiContext& context, const AccessFinderRequest&
     watch.address = request.address;
     watch.size = request.size == 8 || request.size == 4 || request.size == 2 ? request.size : 1;
     watch.writesOnly = request.writesOnly;
+    watch.instruction = request.instruction;
     std::string error;
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    watch.x64 = !session || session->Target().architecture != target::Architecture::X86;
+    if (watch.instruction) {
+        watch.size = 1;
+        watch.code.assign(16, 0);
+        size_t size = watch.code.size();
+        while (size > 1 && !(session && session->ReadMemory(request.address, watch.code.data(), size, nullptr))) --size;
+        watch.code.resize(size);
+        services::MemoryAccess access;
+        const auto anyRegister = [](const std::string&, uint64_t& value) {
+            value = 0;
+            return true;
+        };
+        if (!services::ResolveMemoryAccess(watch.code.data(), watch.code.size(), request.address, watch.x64,
+                                           anyRegister, access, &error)) {
+            watch.error = error;
+            context.status = "What addresses: " + error;
+            watches_.push_back(std::move(watch));
+            selected_ = static_cast<int>(watches_.size()) - 1;
+            return;
+        }
+        watch.instructionText = access.text;
+    }
+    const std::string kind = watch.instruction ? "hw_execute" : (request.writesOnly ? "hw_write" : "hw_readwrite");
     if (!context.debuggerModel) {
         watch.error = "The debugger is not available";
     } else if (!context.mutationAllowed) {
         watch.error = "Allow writes: a hardware breakpoint changes the target's debug registers";
-    } else if (!context.debuggerModel->AddBreakpoint(Hex(request.address),
-                                                      request.writesOnly ? "hw_write" : "hw_readwrite",
-                                                      watch.size, false, true, 0, &error)) {
+    } else if (!context.debuggerModel->AddBreakpoint(Hex(request.address), kind, watch.size, false, true, 0,
+                                                      &error)) {
         watch.error = "Breakpoint failed: " + error;
     } else {
         // The new breakpoint is the highest id on this address and kind.
-        const std::string kind = request.writesOnly ? "hw_write" : "hw_readwrite";
         for (const auto& breakpoint : context.debuggerModel->Breakpoints())
             if (breakpoint.address == request.address && breakpoint.kind == kind)
                 watch.breakpointId = std::max(watch.breakpointId, breakpoint.id);
         watch.active = watch.breakpointId >= 0;
         if (!watch.active) watch.error = "The breakpoint was not reported back by the debugger";
     }
-    context.status = watch.error.empty()
-        ? std::string("Watching what ") + (watch.writesOnly ? "writes to " : "accesses ") + Hex(watch.address)
-        : watch.error;
+    context.status = !watch.error.empty() ? watch.error
+        : watch.instruction ? "Watching the addresses " + watch.instructionText + " accesses"
+        : std::string("Watching what ") + (watch.writesOnly ? "writes to " : "accesses ") + Hex(watch.address);
     watches_.push_back(std::move(watch));
     selected_ = static_cast<int>(watches_.size()) - 1;
 }
@@ -103,6 +128,29 @@ void AccessFinderWorkspace::Poll(UiContext& context) {
         }
         for (const auto& entry : entries) {
             watch.lastSeq = std::max(watch.lastSeq, entry.seq);
+            if (watch.instruction) {
+                const auto lookup = [&entry](const std::string& name, uint64_t& value) {
+                    for (const auto& reg : entry.registers.registers) {
+                        if (reg.name != name) continue;
+                        value = reg.value;
+                        return true;
+                    }
+                    return false;
+                };
+                services::MemoryAccess access;
+                if (!services::ResolveMemoryAccess(watch.code.data(), watch.code.size(), watch.address, watch.x64,
+                                                   lookup, access, nullptr))
+                    continue;
+                auto& hit = watch.hits[access.address];
+                hit.instruction = access.address;
+                hit.size = access.size;
+                hit.write = access.write;
+                ++hit.count;
+                hit.registers.clear();
+                for (const auto& value : entry.registers.registers) hit.registers.emplace_back(value.name, value.value);
+                ++watch.total;
+                continue;
+            }
             std::string text;
             const uint64_t instruction = AccessingInstruction(context, entry.instruction, text);
             auto& hit = watch.hits[instruction];
@@ -137,8 +185,9 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
 
     if (watches_.empty()) {
         HintText("Right-click an address anywhere (scan results, address list, memory viewer) > Debugger > "
-                 "Find out what writes to / accesses this address. Each hit is counted per instruction while "
-                 "the game keeps running; x86 has four hardware breakpoint slots.");
+                 "Find out what writes to / accesses this address, or right-click an instruction in the "
+                 "Disassembler > Debugger > Find out what addresses this instruction accesses. Hits are counted "
+                 "while the game keeps running; x86 has four hardware breakpoint slots.");
         return;
     }
 
@@ -147,10 +196,13 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
     for (int i = 0; i < static_cast<int>(watches_.size()); ++i) {
         auto& watch = watches_[static_cast<size_t>(i)];
         ImGui::PushID(i);
-        const std::string label = std::string(watch.writesOnly ? "Writes to " : "Accesses ") + Hex(watch.address);
+        const std::string label = watch.instruction ? "Addresses of " + (watch.instructionText.empty() ? Hex(watch.address)
+                                                                                                    : watch.instructionText)
+                                : std::string(watch.writesOnly ? "Writes to " : "Accesses ") + Hex(watch.address);
         if (ImGui::Selectable(label.c_str(), selected_ == i)) selected_ = i;
-        ImGui::TextDisabled("  %s, %llu hit(s), %zu instruction(s)", watch.active ? "running" : "stopped",
-                            static_cast<unsigned long long>(watch.total), watch.hits.size());
+        ImGui::TextDisabled("  %s, %llu hit(s), %zu %s", watch.active ? "running" : "stopped",
+                            static_cast<unsigned long long>(watch.total), watch.hits.size(),
+                            watch.instruction ? "address(es)" : "instruction(s)");
         ImGui::PopID();
     }
     ImGui::EndChild();
@@ -160,8 +212,11 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
     if (selected_ < 0 || selected_ >= static_cast<int>(watches_.size())) selected_ = 0;
     auto& watch = watches_[static_cast<size_t>(selected_)];
     ImGui::AlignTextToFramePadding();
-    ImGui::Text("%s %s (%d byte%s)", watch.writesOnly ? "Instructions that write to" : "Instructions that access",
-                Hex(watch.address).c_str(), watch.size, watch.size == 1 ? "" : "s");
+    if (watch.instruction)
+        ImGui::Text("Addresses accessed by %s  (%s)", watch.instructionText.c_str(), Hex(watch.address).c_str());
+    else
+        ImGui::Text("%s %s (%d byte%s)", watch.writesOnly ? "Instructions that write to" : "Instructions that access",
+                    Hex(watch.address).c_str(), watch.size, watch.size == 1 ? "" : "s");
     if (watch.active) {
         FlowSameLine(ButtonWidth("Stop"));
         if (ImGui::Button("Stop")) Stop(context, watch);
@@ -192,7 +247,7 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Count", ImGuiTableColumnFlags_WidthFixed, Px(70));
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.35f);
-        ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch, 0.65f);
+        ImGui::TableSetupColumn(watch.instruction ? "Value" : "Instruction", ImGuiTableColumnFlags_WidthStretch, 0.65f);
         ImGui::TableHeadersRow();
         for (size_t i = 0; i < rows.size(); ++i) {
             const Hit& hit = *rows[i];
@@ -202,7 +257,7 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
             if (ImGui::Selectable(std::to_string(hit.count).c_str(), false,
                                   ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
                 ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                context.NavigateTo("disassembly", hit.instruction);
+                context.NavigateTo(watch.instruction ? "memory-browser" : "disassembly", hit.instruction);
             if (ImGui::IsItemHovered() && !hit.registers.empty()) {
                 ImGui::BeginTooltip();
                 ImGui::TextDisabled("Registers at the last hit");
@@ -210,6 +265,15 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
                 ImGui::EndTooltip();
             }
             if (ImGui::BeginPopupContextItem("HitMenu")) {
+                if (watch.instruction && ImGui::MenuItem("Add to the address list")) {
+                    PendingAddressEntry entry;
+                    entry.address = hit.instruction;
+                    entry.description = "Accessed by " + watch.instructionText;
+                    entry.type = hit.size == 8 ? services::ScanDataType::Int64 : hit.size == 2 ? services::ScanDataType::Int16
+                               : hit.size == 1 ? services::ScanDataType::Byte : services::ScanDataType::Int32;
+                    context.pendingAddresses.push_back(entry);
+                    context.status = "Added to the Memory address list";
+                }
                 if (ImGui::MenuItem("Disassemble")) context.NavigateTo("disassembly", hit.instruction);
                 if (ImGui::MenuItem("Copy address")) ImGui::SetClipboardText(Hex(hit.instruction).c_str());
                 if (ImGui::MenuItem("Copy instruction")) ImGui::SetClipboardText(hit.text.c_str());
@@ -223,7 +287,18 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
             ImGui::TableSetColumnIndex(1);
             MonoTextUnformatted(Hex(hit.instruction).c_str());
             ImGui::TableSetColumnIndex(2);
-            MonoTextUnformatted(hit.text.c_str());
+            if (watch.instruction) {
+                const auto session = context.sessions->Active();
+                uint64_t value = 0;
+                const unsigned size = std::clamp(hit.size, 1u, 8u);
+                if (session && session->ReadMemory(hit.instruction, &value, size, nullptr))
+                    MonoText("%llu  (%0*llX)%s", static_cast<unsigned long long>(value), static_cast<int>(size * 2),
+                             static_cast<unsigned long long>(value), hit.write ? "  written" : "");
+                else
+                    ImGui::TextDisabled("??");
+            } else {
+                MonoTextUnformatted(hit.text.c_str());
+            }
         }
         ImGui::EndTable();
     }
