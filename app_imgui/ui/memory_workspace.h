@@ -24,6 +24,7 @@ private:
         bool ok = false;
         std::string error;
         std::vector<services::ScanResult> results;
+        bool limitReached = false;
     };
 
     struct AddressEntry {
@@ -65,6 +66,7 @@ private:
     int typeIndex_ = 0;
     int comparisonIndex_ = 0;
     bool firstScanDone_ = false;
+    bool scanLimitReached_ = false;
     bool scanRunning_ = false;
     std::string activeTargetId_;
 

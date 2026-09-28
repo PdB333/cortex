@@ -1693,7 +1693,11 @@ void DrawProcessPicker(AppState& app) {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(110, 38))) ImGui::CloseCurrentPopup();
+    if (ImGui::Button("Cancel", ImVec2(110, 38)) ||
+        (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+         ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+        ImGui::CloseCurrentPopup();
+    }
 
     ImGui::EndPopup();
 }

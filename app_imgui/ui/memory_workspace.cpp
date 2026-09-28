@@ -194,6 +194,7 @@ void MemoryWorkspace::ResetForTarget(const std::string& targetId) {
     scanResults_.clear();
     addresses_.clear();
     firstScanDone_ = false;
+    scanLimitReached_ = false;
     comparisonIndex_ = 0;
     editAddressIndex_ = -1;
     activeTargetId_ = targetId;
@@ -203,6 +204,7 @@ void MemoryWorkspace::NewScan(UiContext& context) {
     if (scanRunning_ && scanCancel_) scanCancel_->store(true, std::memory_order_relaxed);
     scanResults_.clear();
     firstScanDone_ = false;
+    scanLimitReached_ = false;
     comparisonIndex_ = 0;
     context.status = "Ready for a new scan";
 }
@@ -222,7 +224,11 @@ void MemoryWorkspace::PollScan(UiContext& context) {
 
     scanResults_ = std::move(result.results);
     firstScanDone_ = true;
+    // A refine only narrows the capped first-scan set, so the cap still applies.
+    scanLimitReached_ = scanLimitReached_ || result.limitReached;
     context.status = std::to_string(scanResults_.size()) + " result(s)";
+    if (scanLimitReached_)
+        context.status += " shown - scan limit reached, other matches were not kept";
 }
 
 void MemoryWorkspace::StartScan(UiContext& context) {
@@ -269,6 +275,8 @@ void MemoryWorkspace::StartScan(UiContext& context) {
             } else {
                 result.ok = services::ScanService::Exact(
                     session, exactValue, result.results, maxResults, &result.error, cancel.get());
+                result.limitReached = result.ok && maxResults > 0 &&
+                                      result.results.size() >= maxResults;
             }
             return result;
         });
@@ -434,6 +442,14 @@ void MemoryWorkspace::DrawResults(UiContext& context, float height) {
     ImGui::TextUnformatted("Scan results");
     ImGui::SameLine();
     ImGui::TextDisabled("(%zu)", scanResults_.size());
+    if (scanLimitReached_) {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.93f, 0.69f, 0.29f, 1.0f), "limit reached");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The first scan stopped at the Maximum scan results setting.\n"
+                              "Other matching addresses were not kept. Raise the limit in\n"
+                              "Settings or scan a more specific value.");
+    }
     ImGui::Separator();
 
     if (scanResults_.empty()) {

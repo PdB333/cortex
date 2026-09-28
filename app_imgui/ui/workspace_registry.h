@@ -183,6 +183,9 @@ public:
             WorkspacePreset::Runtime
         };
 
+        // Preset labels ("Memory", "Runtime") also appear in the quick toolbar of
+        // the same window; scope them so both buttons keep distinct IDs.
+        ImGui::PushID("WorkspacePresets");
         for (size_t i = 0; i < IM_ARRAYSIZE(presets); ++i) {
             if (i != 0) ImGui::SameLine();
             const bool active = presets[i] == preset_;
@@ -191,6 +194,7 @@ public:
             if (ImGui::Button(PresetName(presets[i]))) ApplyPreset(presets[i]);
             if (active) ImGui::PopStyleColor();
         }
+        ImGui::PopID();
     }
 
     void DrawViewMenu() {
