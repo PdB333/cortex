@@ -19,11 +19,11 @@ Every workspace is a dockable window: drag its tab to move it, drag a splitter t
 
 | Preset | Left | Center | Right |
 |---|---|---|---|
-| Memory | Addresses, Modules | Memory, Memory viewer | Watches |
-| Debug | Modules, Watches | Disassembler, Memory viewer | Debugger, Patches |
-| RE | Project, Symbols, Structures / Pointer Maps, Snapshots, Modules | Reverse Engineering, Disassembler, Memory viewer | Patches, Instrumentation / Advanced |
+| Memory | Addresses, Modules | Memory, Memory viewer, Memory tools | Watches |
+| Debug | Modules, Watches | Disassembler, Memory viewer, What accesses | Debugger, Patches |
+| RE | Project, Symbols, Structures / Pointer Maps, Snapshots, Modules | Reverse Engineering, Disassembler, Memory viewer, Memory tools | Patches, Instrumentation / Advanced |
 | Trace | Watches | Trace, Disassembler | Debugger, Memory viewer |
-| Automation | Scripts, Input | Actions, Events / Console | Watches, Advanced |
+| Automation | Scripts, Input | Lua engine, Actions, Events / Console | Watches, Advanced |
 | Runtime | Modules, Sessions, Settings | Advanced, Diagnostics, Network | Screenshots, Instrumentation / Actions, Watches |
 
 The bottom panel is open in every preset. The layout is saved per user and restored at the next start.
@@ -88,11 +88,23 @@ Tabs: **Objects** (tracked objects with liveness and field-change events, per-ob
 
 ### Memory
 
-The **Value scan** panel (First scan, Next scan, New scan; Exact value, Changed, Unchanged, Increased, Decreased) with its results, and a local address list. Results beyond **Maximum scan results** are dropped and the scan is marked **limit reached**. Double-click a result to prepare an Addresses entry.
+A Cheat Engine style scanner and address list, split by a draggable divider.
+
+The **Value scan** panel takes a type (byte, 2 / 4 / 8 bytes, float, double, string with UTF-16 and case, array of bytes with wildcards, or all numeric) and a comparison. First scans do exact, bigger, smaller, between or unknown-initial; next scans add increased, decreased, changed, unchanged, same-as-first and the *by* deltas, with hex, unsigned, not, compare-to-first and float rounding. **Memory scan options** set writable / executable / copy-on-write tristates, the MEM_PRIVATE / MEM_IMAGE / MEM_MAPPED region types, fast scan and alignment, an address range or a module, an optional pause while scanning and worker threads. Results colour changed values, show previous / first / green module+offset, and support multi-select add, save, remove and copy. Results beyond **Maximum scan results** are dropped and the scan is marked **limit reached**.
+
+The **address list** collects results (double-click) or manual entries. Each entry has a freeze checkbox (always, or allow-increase / allow-decrease), a type, and an address that can be an absolute value, `module+offset`, a multi-level pointer, or a full Cheat Engine expression (`[[game.exe+10]+20]+8`, module exports, user symbols). Group headers collapse and freeze their children; entries drag to reorder, take description colours and dropdown value lists, and respond to Enter / Space / Delete / Ctrl+A/C/V. Copy and paste use Cheat Engine's table format. Right-click for **Change value / address**, **Freeze mode**, **Change type / color**, **Hotkeys…** (per-entry system-wide shortcuts: toggle freeze, freeze, unfreeze, set value, increase / decrease by), **Dropdown list…**, save to Addresses and the shared address actions. **Open table… / Save table…** read and write `.CT` files (groups, pointers, colours, dropdowns, hotkeys, user symbols; a table's Lua script is offered to the Lua engine).
+
+### Memory tools
+
+Cheat Engine's Memory View tools, in tabs: **Regions** (committed regions with protection and type), **PE headers** (sections, directories, exports with forwarders, imports), **Strings**, **Code caves**, **AOB signature** (generate and test a wildcard signature), **Pointer scan** (scan, rescan, save / load, add a path to the address list), **Symbols** (register user symbols and search every module's exports), and **Assembler**. The Assembler tab either **assembles and writes** bytes at an address (Intel syntax, hex-by-default numbers, labels), or performs a **code injection** trampoline: a cave is allocated near the site, the new code runs, the replaced instructions are relocated so their branches keep their targets, control returns after them, and **Restore** undoes it. All of this requires writes allowed to modify the target.
+
+### What accesses
+
+Hardware data and execute breakpoints in log mode: **what writes / accesses** an address decodes the accessing instruction, and an **instruction watch** groups the addresses an instruction touches with a live value. Opened from the shared address actions.
 
 ### Memory viewer
 
-Address, hex and ASCII columns with configurable size, live refresh and a change column. **Write bytes at the current address** requires writes allowed.
+A 64 KB window with address, hex and display-type columns, changed bytes in red, in-place hex typing, a data inspector and text / byte find. Live refresh and navigation by expression or arrow keys. Writing requires writes allowed.
 
 ### Disassembler
 
@@ -160,9 +172,13 @@ The runtime **Events** stream and the **API log**.
 
 ## Automate
 
+### Lua engine
+
+A Cheat Engine compatible Lua engine that runs inside Cortex and reads or writes the target from outside — no runtime injected. The editor runs with **Execute** (Ctrl+Enter), stops with **Stop**, and offers examples, Open / Save `.lua` and a time limit. The API covers `readInteger`/`writeFloat`/… , `getAddress(Safe)`, `AOBScan(Unique/ModuleUnique)`, `enumModules`, `getModuleSize`, `pause`/`unpause`, byte-table conversions, `registerSymbol`, `getNameFromAddress`, `inModule` and `inSystemModule`, sandboxed (no `io`/`os`/`package`). Writes and pausing require writes allowed. A cheat table's script opens here for review before you run it.
+
 ### Scripts
 
-Lua editor and catalog: **Save**, **Run buffer**, **Run saved**, **Delete**, with output.
+Lua editor and catalog for the injected runtime: **Save**, **Run buffer**, **Run saved**, **Delete**, with output.
 
 ### Input
 

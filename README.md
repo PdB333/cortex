@@ -50,13 +50,13 @@ New to Cortex? Follow the [illustrated walkthrough](docs/ui-walkthrough.md) ([fr
 <td width="50%" valign="top">
 
 **Memory**
-Exact and comparative scans (changed, unchanged, increased, decreased), a persistent Addresses table with live values and freezes, a hex/ASCII viewer with change highlighting, pointer maps, structures with inference, snapshots with diff and rewind.
+Cheat Engine level scanning — every type (byte through double, string, array of bytes with wildcards, all numeric), exact / comparative / unknown-initial scans and *by* deltas, region-type and protection filters, fast scan and threads. An address list with freezes, `module+offset` and pointer entries, full address expressions, groups, colours, dropdowns and per-entry global hotkeys, that opens and saves Cheat Engine `.CT` tables. A 64 KB hex viewer with change highlighting and a data inspector, pointer maps and a pointer scanner, structures with inference, snapshots with diff and rewind.
 
 </td>
 <td width="50%" valign="top">
 
 **Code**
-Zydis-backed x86/x64 disassembly that can follow the instruction pointer, CFG, structured CFG and cross-references, symbols (PDB and DWARF), and reversible patches: bytes, NOP, assembly, detours, trampolines and code caves.
+Zydis-backed x86/x64 disassembly that can follow the instruction pointer, CFG, structured CFG and cross-references, symbols (PDB and DWARF), an x86/x64 **assembler** and Auto-Assembler style **code injection** (allocate a cave, relocate the replaced instructions, jump and return, restore), AOB signatures, and reversible patches: bytes, NOP, assembly, detours, trampolines and code caves.
 
 </td>
 </tr>
@@ -78,7 +78,7 @@ Tracked objects with liveness and field-change events, last-writer and C++ subob
 <td valign="top">
 
 **Observe & automate**
-Page-access and allocation instrumentation, network events, screenshots, Lua scripts, input sequences with record and replay, and a reversible action journal for everything that changed.
+A Cheat Engine compatible **Lua engine** that reads and writes the target from outside (AOB scans, symbols, module walks, byte tables) with no runtime injected; "what accesses / writes an address" and instruction watches through hardware breakpoints; page-access and allocation instrumentation, network events, screenshots, input sequences with record and replay, and a reversible action journal for everything that changed.
 
 </td>
 <td valign="top">
@@ -96,11 +96,11 @@ Every panel is a dockable window. Six presets arrange them for the job at hand, 
 
 | Preset | What you get |
 |---|---|
-| **Memory** | Value scan, Addresses, Memory viewer, Modules, Watches |
-| **Debug** | Disassembler, Debugger, Patches, Memory viewer, Modules, Watches |
-| **RE** | Reverse Engineering, Project, Symbols, Structures, Pointer Maps, Snapshots, Instrumentation |
+| **Memory** | Value scan, Addresses, Memory viewer, Memory tools, Modules, Watches |
+| **Debug** | Disassembler, Debugger, What accesses, Patches, Memory viewer, Modules, Watches |
+| **RE** | Reverse Engineering, Project, Symbols, Structures, Pointer Maps, Snapshots, Memory tools, Instrumentation |
 | **Trace** | Trace, Disassembler, Debugger, Memory viewer, Watches |
-| **Automation** | Scripts, Input, Actions, Events |
+| **Automation** | Lua engine, Scripts, Input, Actions, Events |
 | **Runtime** | Advanced tools, Diagnostics, Network, Screenshots, Sessions, Settings |
 
 <table>

@@ -39,7 +39,9 @@ The **Value scan** panel is part of the **Memory** workspace.
 
 A scan that hits **Maximum scan results** (Settings) is marked **limit reached**.
 
-Double-click a result to prepare an **Addresses** entry. Right-click a result to use address actions without saving it first.
+Double-click a result to collect it in the **Memory** workspace's own address list (below the scanner), where you freeze, edit or hotkey values and open or save Cheat Engine `.CT` tables; right-click an entry to **Save to Addresses** for the persistent project table. Right-click a result to use address actions without saving it first.
+
+The **Memory tools** panel (in the Memory and RE presets) adds regions, PE headers, strings, code caves, AOB signatures, a pointer scanner, a symbol/export browser and an x86/x64 assembler with code injection. **What accesses** (Debug preset, or the address menu) finds what reads, writes or is touched by an instruction. The **Lua engine** (Automation preset) runs Cheat Engine style scripts against the target with no runtime injected.
 
 ## 5. Work from Addresses
 
