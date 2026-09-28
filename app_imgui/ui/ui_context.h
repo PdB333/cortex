@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <functional>
 
 #include "application/actions_model.h"
 #include "application/ai_activity_model.h"
@@ -74,6 +75,16 @@ struct UiContext {
     // Lightweight cross-workspace navigation. A workspace can request another
     // workspace and optionally pass one address without depending on its class.
     std::string requestWorkspace;
+    // Runs a long runtime operation (loading the runtime, captures, diffs,
+    // exports) away from the UI thread. While it runs the window stays
+    // responsive and shows progress instead of freezing; no workspace is
+    // drawn, so the operation may freely update models and `status`. Without
+    // a runner (headless tests) the work runs inline.
+    std::function<void(std::string, std::function<void()>)> runInBackground;
+    void RunInBackground(std::string label, std::function<void()> work) {
+        if (runInBackground) runInBackground(std::move(label), std::move(work));
+        else work();
+    }
     // Workspace ids open this frame, published by the registry before any
     // workspace draws. Lets summary surfaces avoid repeating a full panel.
     std::vector<std::string> openWorkspaces;

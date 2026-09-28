@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "services/runtime_transport.h"
 
 #include <cstdint>
 #include <string>
@@ -17,7 +17,7 @@ struct RuntimeEvent {
 
 class RuntimeEventsModel {
 public:
-    explicit RuntimeEventsModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit RuntimeEventsModel(services::RuntimeTransport& payload) : payload_(payload) {}
 
     void Reset();
     bool RefreshEvents(std::string* error = nullptr);
@@ -28,7 +28,7 @@ public:
     uint64_t LastEventId() const { return lastEventId_; }
 
 private:
-    services::PayloadClient& payload_;
+    services::RuntimeTransport& payload_;
     std::vector<RuntimeEvent> events_;
     std::vector<std::string> apiLog_;
     uint64_t lastEventId_ = 0;

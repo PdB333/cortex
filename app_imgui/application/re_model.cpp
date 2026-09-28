@@ -11,11 +11,6 @@ namespace {
 
 using json = nlohmann::json;
 
-json RouteResult(const json& output) {
-    if (!output.is_object()) return output;
-    const auto found = output.find("result");
-    return found != output.end() ? *found : output;
-}
 
 std::string Trim(std::string value) {
     auto nonSpace = [](unsigned char ch) { return !std::isspace(ch); };
@@ -52,28 +47,15 @@ void ReModel::Reset() {
     resultJson_.clear();
 }
 
-bool ReModel::EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error) {
-    if (error) error->clear();
-    if (payload_.Ready()) return true;
-
-    std::string connectError;
-    if (payload_.TryConnectExisting(&connectError)) return true;
-
-    if (!allowInjection) {
-        if (error) *error = connectError.empty() ? "runtime_not_connected" : connectError;
-        return false;
-    }
-    if (!mutationAllowed) {
-        if (error) *error = "mutation_permission_required";
-        return false;
-    }
-    return payload_.EnsureReady(error);
-}
 
 bool ReModel::Call(const std::string& tool, json arguments,
                    json& result, bool mutation, bool mutationAllowed,
                    std::string* error) {
     result = json::object();
+    if (mutation && !mutationAllowed) {
+        if (error) *error = "mutation_permission_required";
+        return false;
+    }
     if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
     if (mutation) arguments["mutation_permission"] = true;
 

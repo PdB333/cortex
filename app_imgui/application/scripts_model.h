@@ -1,15 +1,15 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <string>
 #include <vector>
 
 namespace cortex::application {
 
-class ScriptsModel {
+class ScriptsModel : public RuntimeModelBase {
 public:
-    explicit ScriptsModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit ScriptsModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool Refresh(std::string* error = nullptr);
@@ -30,14 +30,9 @@ public:
     const std::string& Output() const { return output_; }
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
     static bool ValidName(const std::string& name);
     static std::string ResultText(const nlohmann::json& result);
 
-    services::PayloadClient& payload_;
     std::vector<std::string> scripts_;
     std::string selectedName_;
     std::string selectedSource_;

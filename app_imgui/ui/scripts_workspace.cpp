@@ -48,11 +48,13 @@ void ScriptsWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.scriptsModel->Refresh(nullptr);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.scriptsModel->Refresh(nullptr);
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Refresh"));
@@ -118,12 +120,14 @@ void ScriptsWorkspace::Draw(UiContext& context) {
     }
     FlowSameLine(ButtonWidth("Run saved"));
     if (ImGui::Button("Run saved")) {
-        std::string error;
-        if (!context.scriptsModel->RunSaved(
-                name_.data(), timeoutMs_, context.mutationAllowed, &error))
-            context.status = "Run script failed: " + error;
-        else
-            context.status = "Saved script executed";
+        context.RunInBackground("Running the saved script", [=, &context]() {
+            std::string error;
+            if (!context.scriptsModel->RunSaved(
+                    name_.data(), timeoutMs_, context.mutationAllowed, &error))
+                context.status = "Run script failed: " + error;
+            else
+                context.status = "Saved script executed";
+        });
     }
     FlowSameLine(ButtonWidth("Delete"));
     if (ImGui::Button("Delete")) {
@@ -142,12 +146,14 @@ void ScriptsWorkspace::Draw(UiContext& context) {
     FlowSameLine(ButtonWidth("Run buffer"));
     ImGui::BeginDisabled(!context.mutationAllowed || source_[0] == '\0');
     if (ImGui::Button("Run buffer")) {
-        std::string error;
-        if (!context.scriptsModel->RunBuffer(
-                source_.data(), timeoutMs_, context.mutationAllowed, &error))
-            context.status = "Run buffer failed: " + error;
-        else
-            context.status = "Script buffer executed";
+        context.RunInBackground("Running the script", [=, &context]() {
+            std::string error;
+            if (!context.scriptsModel->RunBuffer(
+                    source_.data(), timeoutMs_, context.mutationAllowed, &error))
+                context.status = "Run buffer failed: " + error;
+            else
+                context.status = "Script buffer executed";
+        });
     }
     ImGui::EndDisabled();
 

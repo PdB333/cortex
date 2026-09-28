@@ -10,11 +10,6 @@ namespace {
 
 using json = nlohmann::json;
 
-json RouteResult(const json& output) {
-    if (!output.is_object()) return output;
-    const auto found = output.find("result");
-    return found != output.end() ? *found : output;
-}
 
 std::string Trim(std::string value) {
     auto nonSpace = [](unsigned char ch) { return !std::isspace(ch); };
@@ -25,24 +20,6 @@ std::string Trim(std::string value) {
 
 } // namespace
 
-bool SymbolsModel::Call(const std::string& tool, json arguments,
-                        json& result, std::string* error) {
-    result = json::object();
-    if (error) error->clear();
-
-    if (!payload_.Ready()) {
-        std::string connectError;
-        if (!payload_.TryConnectExisting(&connectError)) {
-            if (error) *error = connectError.empty() ? "runtime_not_connected" : connectError;
-            return false;
-        }
-    }
-
-    json output;
-    if (!payload_.CallTool(tool, arguments, output, error)) return false;
-    result = RouteResult(output);
-    return true;
-}
 
 void SymbolsModel::ApplyDetail(const json& detail) {
     if (!detail.is_object()) return;

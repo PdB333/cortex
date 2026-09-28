@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <cstdint>
 #include <string>
@@ -32,9 +32,9 @@ struct SymbolResult {
     std::string error;
 };
 
-class SymbolsModel {
+class SymbolsModel : public RuntimeModelBase {
 public:
-    explicit SymbolsModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit SymbolsModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset() { result_ = {}; }
     const SymbolResult& Result() const { return result_; }
@@ -43,11 +43,8 @@ public:
     bool Lookup(const std::string& name, std::string* error = nullptr);
 
 private:
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, std::string* error);
     void ApplyDetail(const nlohmann::json& detail);
 
-    services::PayloadClient& payload_;
     SymbolResult result_;
 };
 

@@ -55,11 +55,13 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.pointerMapsModel->Refresh(nullptr);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.pointerMapsModel->Refresh(nullptr);
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Refresh"));
@@ -96,15 +98,17 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
     ImGui::BeginDisabled(!context.mutationAllowed ||
                          name_[0] == '\0' || target_[0] == '\0');
     if (ImGui::Button("Capture")) {
-        std::string error;
-        if (!context.pointerMapsModel->Capture(
-                name_.data(), target_.data(), maxDepth_, maxOffset_,
-                context.mutationAllowed, &error))
-            context.status = "Pointer map capture failed: " + error;
-        else {
-            name_.fill(0);
-            context.status = "Pointer map captured";
-        }
+        context.RunInBackground("Capturing a pointer map", [=, &context]() {
+            std::string error;
+            if (!context.pointerMapsModel->Capture(
+                    name_.data(), target_.data(), maxDepth_, maxOffset_,
+                    context.mutationAllowed, &error))
+                context.status = "Pointer map capture failed: " + error;
+            else {
+                name_.fill(0);
+                context.status = "Pointer map captured";
+            }
+        });
     }
     ImGui::EndDisabled();
 
@@ -174,12 +178,14 @@ void PointerMapsWorkspace::Draw(UiContext& context) {
     FlowSameLine(ButtonWidth("Intersect selected"));
     ImGui::BeginDisabled(selected_.size() < 2);
     if (ImGui::Button("Intersect selected")) {
-        std::string error;
-        if (!context.pointerMapsModel->Intersect(selected_, &error))
-            context.status = "Pointer map intersection failed: " + error;
-        else
-            context.status = std::to_string(context.pointerMapsModel->Paths().size()) +
-                             " stable path(s)";
+        context.RunInBackground("Intersecting pointer maps", [=, &context]() {
+            std::string error;
+            if (!context.pointerMapsModel->Intersect(selected_, &error))
+                context.status = "Pointer map intersection failed: " + error;
+            else
+                context.status = std::to_string(context.pointerMapsModel->Paths().size()) +
+                                 " stable path(s)";
+        });
     }
     ImGui::EndDisabled();
 

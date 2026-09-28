@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <cstdint>
 #include <string>
@@ -16,9 +16,9 @@ struct SnapshotInfo {
     uint64_t totalBytes = 0;
 };
 
-class SnapshotsModel {
+class SnapshotsModel : public RuntimeModelBase {
 public:
-    explicit SnapshotsModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit SnapshotsModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool Refresh(std::string* error = nullptr);
@@ -34,12 +34,7 @@ public:
     const std::string& ResultJson() const { return resultJson_; }
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
 
-    services::PayloadClient& payload_;
     std::vector<SnapshotInfo> snapshots_;
     std::string resultJson_;
 };

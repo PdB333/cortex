@@ -73,9 +73,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -334,6 +337,32 @@ std::string Lower(std::string value) {
     return value;
 }
 
+// One long runtime operation running off the UI thread (see
+// UiContext::RunInBackground). While it is active the frame loop keeps the
+// window responsive and draws only a progress card.
+struct BackgroundTask {
+    std::future<void> future;
+    std::string label;
+    std::chrono::steady_clock::time_point started;
+
+    bool Active() const { return future.valid(); }
+
+    void Start(std::string taskLabel, std::function<void()> work) {
+        label = std::move(taskLabel);
+        started = std::chrono::steady_clock::now();
+        future = std::async(std::launch::async, std::move(work));
+    }
+
+    // Returns true once the task has finished; rethrows its exception.
+    bool Finish() {
+        if (!Active()) return true;
+        if (future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) return false;
+        auto finished = std::move(future);
+        finished.get();
+        return true;
+    }
+};
+
 struct AppState {
     cortex::target::Catalog catalog;
     cortex::target::SessionManager sessions;
@@ -374,6 +403,10 @@ struct AppState {
     char goToExpression[160] = {};
     char promptAnswer[512] = {};
     int promptAnswerId = -1;
+
+    // Declared last so it is destroyed first: its future waits for a running
+    // task, which may still use the models above.
+    BackgroundTask background;
 
     AppState()
         : sessions(catalog),
@@ -488,11 +521,13 @@ struct AppState {
         if (selectMemory) ui.requestWorkspace = "memory";
 
         if (settings.Values().autoLoadRuntimeOnAttach) {
-            std::string error;
-            if (payload.EnsureReady(&error))
-                ui.status += " | runtime auto-loaded";
-            else
-                ui.status += " | runtime auto-load failed: " + error;
+            ui.RunInBackground("Loading the Cortex runtime into the target", [this]() {
+                std::string error;
+                if (payload.EnsureReady(&error))
+                    ui.status += " | runtime auto-loaded";
+                else
+                    ui.status += " | runtime auto-load failed: " + error;
+            });
         }
     }
 
@@ -2026,7 +2061,66 @@ void DrawHeader(AppState& app) {
     ImGui::Separator();
 }
 
+// Drawn instead of the workspace UI while a background task runs. It reads
+// nothing the task may be writing (models, status), only the task's own label
+// and start time, and keeps the dock space alive so the layout is unchanged
+// when the workspaces come back.
+void DrawBackgroundProgress(AppState& app) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("CortexDockHost", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_MenuBar);
+    ImGui::PopStyleVar(2);
+    if (ImGui::BeginMenuBar()) ImGui::EndMenuBar();
+
+    const ImGuiID dockspaceId = ImGui::GetID("CortexDockSpace");
+    ImGui::DockSpace(dockspaceId, ImVec2(0, 0), ImGuiDockNodeFlags_KeepAliveOnly);
+
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - app.background.started).count();
+    static const char* kDots[] = {"", ".", "..", "..."};
+    const ImVec2 cardSize(cortex::ui::Px(460), cortex::ui::Px(120));
+    const ImVec2 region = ImGui::GetContentRegionAvail();
+    ImGui::SetCursorPos(ImVec2(std::max(0.0f, (region.x - cardSize.x) * 0.5f),
+                               std::max(0.0f, (region.y - cardSize.y) * 0.5f)));
+    ImGui::BeginChild("BackgroundProgress", cardSize, ImGuiChildFlags_Borders);
+    {
+        cortex::ui::HeadingFont heading;
+        ImGui::Text("%s%s", app.background.label.c_str(),
+                    kDots[static_cast<int>(elapsed * 2.0) % 4]);
+    }
+    ImGui::Spacing();
+    ImGui::TextDisabled("%.1f s", elapsed);
+    cortex::ui::HintText("The window stays responsive; this finishes on its own.");
+    ImGui::EndChild();
+    ImGui::End();
+}
+
 void DrawApp(AppState& app) {
+    if (app.background.Active()) {
+        bool finished = false;
+        try {
+            finished = app.background.Finish();
+        } catch (const std::exception& ex) {
+            finished = true;
+            app.ui.status = app.background.label + " failed: " + ex.what();
+        } catch (...) {
+            finished = true;
+            app.ui.status = app.background.label + " failed";
+        }
+        if (!finished) {
+            DrawBackgroundProgress(app);
+            return;
+        }
+    }
+
     app.aiActivityModel.Poll(app.settings.Values().aiActivityHistoryLimit);
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2244,6 +2338,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGui_ImplDX11_Init(gDevice, gDeviceContext);
 
     AppState app;
+    if (!windowSmoke) {
+        app.ui.runInBackground = [&app](std::string label, std::function<void()> work) {
+            // A task started while another runs (not reachable from the UI,
+            // which is hidden meanwhile) simply runs inline.
+            if (app.background.Active()) {
+                work();
+                return;
+            }
+            app.background.Start(std::move(label), std::move(work));
+        };
+    }
     bool done = false;
     int smokeFrames = 0;
     int windowSmokePreset = 0;
@@ -2267,7 +2372,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
-        HandleGlobalShortcuts(app);
+        if (!app.background.Active()) HandleGlobalShortcuts(app);
         if (windowSmoke && smokeFrames % 3 == 0 &&
             windowSmokePreset < static_cast<int>(IM_ARRAYSIZE(kGuiPresets))) {
             app.workspaces.ApplyPreset(kGuiPresets[windowSmokePreset]);

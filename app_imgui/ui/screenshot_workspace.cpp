@@ -231,11 +231,13 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.status = "Runtime enabled";
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.status = "Runtime enabled";
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Capture"));
@@ -243,14 +245,16 @@ void ScreenshotWorkspace::Draw(UiContext& context) {
 
     ImGui::BeginDisabled(!context.payload || !context.payload->Ready());
     if (ImGui::Button("Capture")) {
-        std::string error;
-        if (!context.screenshotModel->Capture(kModes[modeIndex_], &error)) {
-            context.status = "Screenshot failed: " + error;
-        } else if (!UpdateTexture(context, error)) {
-            context.status = "Screenshot decode failed: " + error;
-        } else {
-            context.status = context.screenshotModel->Meta();
-        }
+        context.RunInBackground("Capturing a screenshot", [=, &context]() {
+            std::string error;
+            if (!context.screenshotModel->Capture(kModes[modeIndex_], &error)) {
+                context.status = "Screenshot failed: " + error;
+            } else if (!UpdateTexture(context, error)) {
+                context.status = "Screenshot decode failed: " + error;
+            } else {
+                context.status = context.screenshotModel->Meta();
+            }
+        });
     }
     ImGui::EndDisabled();
 

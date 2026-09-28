@@ -10,11 +10,6 @@ namespace {
 
 using json = nlohmann::json;
 
-json RouteResult(const json& output) {
-    if (!output.is_object()) return output;
-    const auto found = output.find("result");
-    return found != output.end() ? *found : output;
-}
 
 std::string Lower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -31,11 +26,6 @@ void ScreenshotModel::Reset() {
     ++generation_;
 }
 
-bool ScreenshotModel::EnsureRuntime(std::string* error) {
-    if (error) error->clear();
-    if (payload_.Ready()) return true;
-    return payload_.TryConnectExisting(error);
-}
 
 bool ScreenshotModel::Capture(const std::string& rawMode, std::string* error) {
     const std::string mode = Lower(rawMode);

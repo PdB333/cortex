@@ -345,11 +345,13 @@ void AddressesWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                RefreshAll(context, true);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    RefreshAll(context, true);
+            });
         }
         ImGui::EndDisabled();
     }
@@ -463,18 +465,20 @@ void AddressesWorkspace::Draw(UiContext& context) {
 
     FlowSameLine(ButtonWidth("Find writer"));
     if (ImGui::Button("Find writer") && selected && context.reModel) {
-        std::string error;
-        const std::string type = NormalizedType(*selected);
-        if (!context.reModel->FindLastWriter(
-                selected->address, TypeSize(type), 10000,
-                context.mutationAllowed, &error))
-            context.status = "Find last writer failed: " + error;
-        else {
-            uint64_t resolved = 0;
-            if (ResolveExpression(context, selected->address, resolved))
-                context.NavigateTo("re", resolved);
-            context.status = "Last-writer analysis complete";
-        }
+        context.RunInBackground("Finding the last writer", [=, &context]() {
+            std::string error;
+            const std::string type = NormalizedType(*selected);
+            if (!context.reModel->FindLastWriter(
+                    selected->address, TypeSize(type), 10000,
+                    context.mutationAllowed, &error))
+                context.status = "Find last writer failed: " + error;
+            else {
+                uint64_t resolved = 0;
+                if (ResolveExpression(context, selected->address, resolved))
+                    context.NavigateTo("re", resolved);
+                context.status = "Last-writer analysis complete";
+            }
+        });
     }
     ImGui::EndDisabled();
 

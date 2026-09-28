@@ -81,6 +81,7 @@ set_source_files_properties(../tools/symbolize_main.cpp PROPERTIES
 add_executable(cortex_imgui WIN32
     main.cpp
     application/settings.cpp
+    application/runtime_model_base.cpp
     application/ai_activity_model.cpp
     application/debugger_model.cpp
     application/project_model.cpp
@@ -222,4 +223,28 @@ if(BUILD_TESTING)
         COMMAND $<TARGET_FILE:cortex_imgui> --ai-activity-smoke
     )
     set_tests_properties(cortex_imgui_ai_activity_smoke PROPERTIES TIMEOUT 30)
+
+    # Application models against a scripted runtime transport: no target
+    # process, pipe or window needed.
+    add_executable(cortex_app_models_tests
+        ../tests/app_models_tests.cpp
+        application/runtime_model_base.cpp
+        application/actions_model.cpp
+        application/patches_model.cpp
+        application/prompt_model.cpp
+        application/runtime_events_model.cpp
+        application/snapshots_model.cpp
+        application/symbols_model.cpp
+        application/watches_model.cpp
+    )
+    target_include_directories(cortex_app_models_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_app_models_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_app_models_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_app_models_tests COMMAND cortex_app_models_tests)
+    set_tests_properties(cortex_app_models_tests PROPERTIES TIMEOUT 30)
 endif()

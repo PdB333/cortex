@@ -1,14 +1,14 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <string>
 
 namespace cortex::application {
 
-class InputModel {
+class InputModel : public RuntimeModelBase {
 public:
-    explicit InputModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit InputModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool StartRecording(bool mutationAllowed, std::string* error = nullptr);
@@ -30,12 +30,7 @@ public:
     bool JobRunning() const;
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
 
-    services::PayloadClient& payload_;
     bool recording_ = false;
     std::string recordingJson_;
     int jobId_ = -1;

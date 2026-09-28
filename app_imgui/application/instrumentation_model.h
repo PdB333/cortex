@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <cstdint>
 #include <string>
@@ -38,9 +38,9 @@ struct PageAccessEvent {
     std::string stackJson = "[]";
 };
 
-class InstrumentationModel {
+class InstrumentationModel : public RuntimeModelBase {
 public:
-    explicit InstrumentationModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit InstrumentationModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool RefreshState(std::string* error = nullptr);
@@ -61,12 +61,7 @@ public:
     const std::vector<PageAccessEvent>& PageAccessEvents() const { return pageAccessEvents_; }
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
 
-    services::PayloadClient& payload_;
     bool allocationWatchEnabled_ = false;
     uint64_t allocationWatchMinSize_ = 0;
     std::vector<PageAccessWatch> pageAccessWatches_;

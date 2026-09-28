@@ -48,11 +48,13 @@ void SymbolsWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.status = "Runtime enabled";
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.status = "Runtime enabled";
+            });
         }
         ImGui::EndDisabled();
     }

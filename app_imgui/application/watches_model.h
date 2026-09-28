@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <cstdint>
 #include <string>
@@ -26,9 +26,9 @@ struct RuntimeFreeze {
     int64_t ttlMsRemaining = 0;
 };
 
-class WatchesModel {
+class WatchesModel : public RuntimeModelBase {
 public:
-    explicit WatchesModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit WatchesModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool Refresh(std::string* error = nullptr);
@@ -45,14 +45,9 @@ public:
     const std::vector<RuntimeFreeze>& Freezes() const { return freezes_; }
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
     bool ParseValue(const std::string& type, const std::string& text,
                     nlohmann::json& value) const;
 
-    services::PayloadClient& payload_;
     std::vector<RuntimeWatch> watches_;
     std::vector<RuntimeFreeze> freezes_;
 };

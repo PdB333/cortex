@@ -6,11 +6,6 @@ namespace cortex::application {
 namespace {
 using json = nlohmann::json;
 
-json RouteResult(const json& output) {
-    if (!output.is_object()) return output;
-    const auto found = output.find("result");
-    return found != output.end() ? *found : output;
-}
 } // namespace
 
 void DiagnosticsModel::Reset() {
@@ -27,21 +22,7 @@ void DiagnosticsModel::Reset() {
     crashBreadcrumbsJson_.clear();
 }
 
-bool DiagnosticsModel::EnsureRuntime(std::string* error) {
-    if (error) error->clear();
-    if (payload_.Ready()) return true;
-    return payload_.TryConnectExisting(error);
-}
 
-bool DiagnosticsModel::Call(const std::string& tool, json arguments,
-                            json& result, std::string* error) {
-    result = json::object();
-    if (!EnsureRuntime(error)) return false;
-    json output;
-    if (!payload_.CallTool(tool, arguments, output, error)) return false;
-    result = RouteResult(output);
-    return true;
-}
 
 bool DiagnosticsModel::Refresh(std::string* error) {
     json status;

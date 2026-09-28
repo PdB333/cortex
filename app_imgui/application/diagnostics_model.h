@@ -1,7 +1,7 @@
 #pragma once
 
 #include "services/crash_report_service.h"
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <cstdint>
 #include <string>
@@ -24,10 +24,10 @@ struct DiagnosticToolStats {
     int publicCount = 0;
 };
 
-class DiagnosticsModel {
+class DiagnosticsModel : public RuntimeModelBase {
 public:
-    DiagnosticsModel(services::PayloadClient& payload, std::string runtimeDirectory)
-        : payload_(payload), runtimeDirectory_(std::move(runtimeDirectory)) {}
+    DiagnosticsModel(services::RuntimeTransport& payload, std::string runtimeDirectory)
+        : RuntimeModelBase(payload), runtimeDirectory_(std::move(runtimeDirectory)) {}
 
     void Reset();
     bool Refresh(std::string* error = nullptr);
@@ -48,11 +48,7 @@ public:
     const std::string& CrashBreadcrumbsJson() const { return crashBreadcrumbsJson_; }
 
 private:
-    bool EnsureRuntime(std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, std::string* error);
 
-    services::PayloadClient& payload_;
     std::string runtimeDirectory_;
     std::string summary_;
     std::string statusJson_;

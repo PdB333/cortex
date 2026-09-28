@@ -11,11 +11,6 @@ namespace cortex::application {
 namespace {
 using json = nlohmann::json;
 
-json RouteResult(const json& output) {
-    if (!output.is_object()) return output;
-    const auto found = output.find("result");
-    return found != output.end() ? *found : output;
-}
 
 std::string Trim(std::string value) {
     auto nonSpace = [](unsigned char ch) { return !std::isspace(ch); };
@@ -32,34 +27,7 @@ void ScriptsModel::Reset() {
     output_.clear();
 }
 
-bool ScriptsModel::EnsureRuntime(bool allowInjection, bool mutationAllowed,
-                                 std::string* error) {
-    if (error) error->clear();
-    if (payload_.Ready()) return true;
-    std::string connectError;
-    if (payload_.TryConnectExisting(&connectError)) return true;
-    if (!allowInjection) {
-        if (error) *error = connectError.empty() ? "runtime_not_connected" : connectError;
-        return false;
-    }
-    if (!mutationAllowed) {
-        if (error) *error = "mutation_permission_required";
-        return false;
-    }
-    return payload_.EnsureReady(error);
-}
 
-bool ScriptsModel::Call(const std::string& tool, json arguments,
-                        json& result, bool mutation, bool mutationAllowed,
-                        std::string* error) {
-    result = json::object();
-    if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
-    if (mutation) arguments["mutation_permission"] = true;
-    json output;
-    if (!payload_.CallTool(tool, arguments, output, error)) return false;
-    result = RouteResult(output);
-    return true;
-}
 
 bool ScriptsModel::ValidName(const std::string& rawName) {
     const std::string name = Trim(rawName);

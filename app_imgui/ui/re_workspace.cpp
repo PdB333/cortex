@@ -118,11 +118,13 @@ void ReWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed || !runtimeSupported);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                RefreshAll(context);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    RefreshAll(context);
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Refresh"));
@@ -166,14 +168,16 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::BeginDisabled(!context.mutationAllowed ||
                                  (trackAddress_[0] == '\0' && trackPointerPath_[0] == '\0'));
             if (ImGui::Button("Track")) {
-                std::string error;
-                if (!context.reModel->TrackObject(
-                        trackName_.data(), trackAddress_.data(), trackPointerPath_.data(),
-                        trackSize_, trackPersist_, trackStruct_.data(),
-                        context.mutationAllowed, &error))
-                    context.status = "Track object failed: " + error;
-                else
-                    context.status = "Object tracked";
+                context.RunInBackground("Tracking the object", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->TrackObject(
+                            trackName_.data(), trackAddress_.data(), trackPointerPath_.data(),
+                            trackSize_, trackPersist_, trackStruct_.data(),
+                            context.mutationAllowed, &error))
+                        context.status = "Track object failed: " + error;
+                    else
+                        context.status = "Object tracked";
+                });
             }
             ImGui::EndDisabled();
 
@@ -272,13 +276,15 @@ void ReWorkspace::Draw(UiContext& context) {
 
             ImGui::BeginDisabled(!context.mutationAllowed || analysisAddress_[0] == '\0');
             if (ImGui::Button("Find last writer")) {
-                std::string error;
-                if (!context.reModel->FindLastWriter(
-                        analysisAddress_.data(), analysisSize_, analysisTimeoutMs_,
-                        context.mutationAllowed, &error))
-                    context.status = "Find last writer failed: " + error;
-                else
-                    context.status = "Last-writer analysis complete";
+                context.RunInBackground("Finding the last writer", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->FindLastWriter(
+                            analysisAddress_.data(), analysisSize_, analysisTimeoutMs_,
+                            context.mutationAllowed, &error))
+                        context.status = "Find last writer failed: " + error;
+                    else
+                        context.status = "Last-writer analysis complete";
+                });
             }
             ImGui::EndDisabled();
 
@@ -315,12 +321,14 @@ void ReWorkspace::Draw(UiContext& context) {
                                       transitionJson_.size(), ImVec2(-1, 300));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Trace transition")) {
-                std::string error;
-                if (!context.reModel->TraceTransition(
-                        transitionJson_.data(), context.mutationAllowed, &error))
-                    context.status = "Transition trace failed: " + error;
-                else
-                    context.status = "Transition trace complete";
+                context.RunInBackground("Tracing the transition", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->TraceTransition(
+                            transitionJson_.data(), context.mutationAllowed, &error))
+                        context.status = "Transition trace failed: " + error;
+                    else
+                        context.status = "Transition trace complete";
+                });
             }
             ImGui::EndDisabled();
             ImGui::Separator();
@@ -337,23 +345,27 @@ void ReWorkspace::Draw(UiContext& context) {
                                       experimentJson_.size(), ImVec2(-1, 330));
             ImGui::BeginDisabled(!context.mutationAllowed);
             if (ImGui::Button("Run test")) {
-                std::string error;
-                if (!context.reModel->RunTest(
-                        experimentJson_.data(), false,
-                        context.mutationAllowed, &error))
-                    context.status = "RE test failed: " + error;
-                else
-                    context.status = "RE test complete";
+                context.RunInBackground("Running the test", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->RunTest(
+                            experimentJson_.data(), false,
+                            context.mutationAllowed, &error))
+                        context.status = "RE test failed: " + error;
+                    else
+                        context.status = "RE test complete";
+                });
             }
             FlowSameLine(ButtonWidth("Run + rollback"));
             if (ImGui::Button("Run + rollback")) {
-                std::string error;
-                if (!context.reModel->RunTest(
-                        experimentJson_.data(), true,
-                        context.mutationAllowed, &error))
-                    context.status = "RE experiment failed: " + error;
-                else
-                    context.status = "RE experiment complete";
+                context.RunInBackground("Running the experiment with rollback", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->RunTest(
+                            experimentJson_.data(), true,
+                            context.mutationAllowed, &error))
+                        context.status = "RE experiment failed: " + error;
+                    else
+                        context.status = "RE experiment complete";
+                });
             }
             ImGui::EndDisabled();
             ImGui::Separator();
@@ -463,17 +475,21 @@ void ReWorkspace::Draw(UiContext& context) {
             ImGui::Separator();
             ImGui::TextUnformatted("Run history");
             if (ImGui::Button("Refresh runs")) {
-                std::string error;
-                if (!context.reModel->RefreshSessions(&error))
-                    context.status = "Session refresh failed: " + error;
+                context.RunInBackground("Refreshing runs", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->RefreshSessions(&error))
+                        context.status = "Session refresh failed: " + error;
+                });
             }
             FlowSameLine(ButtonWidth("Export run"));
             if (ImGui::Button("Export run")) {
-                std::string error;
-                if (!context.reModel->ExportSession(&error))
-                    context.status = "Session export failed: " + error;
-                else
-                    context.status = "Session exported";
+                context.RunInBackground("Exporting the run", [=, &context]() {
+                    std::string error;
+                    if (!context.reModel->ExportSession(&error))
+                        context.status = "Session export failed: " + error;
+                    else
+                        context.status = "Session exported";
+                });
             }
 
             const auto& sessions = context.reModel->Sessions();
@@ -504,13 +520,15 @@ void ReWorkspace::Draw(UiContext& context) {
                 FlowSameLine(ButtonWidth("Diff runs"));
                 ImGui::BeginDisabled(sessionA_ == sessionB_);
                 if (ImGui::Button("Diff runs")) {
-                    std::string error;
-                    if (!context.reModel->DiffSessions(
-                            sessions[static_cast<size_t>(sessionA_)].id,
-                            sessions[static_cast<size_t>(sessionB_)].id, &error))
-                        context.status = "Session diff failed: " + error;
-                    else
-                        context.status = "Session diff complete";
+                    context.RunInBackground("Comparing runs", [=, &context]() {
+                        std::string error;
+                        if (!context.reModel->DiffSessions(
+                                sessions[static_cast<size_t>(sessionA_)].id,
+                                sessions[static_cast<size_t>(sessionB_)].id, &error))
+                            context.status = "Session diff failed: " + error;
+                        else
+                            context.status = "Session diff complete";
+                    });
                 }
                 ImGui::EndDisabled();
             }

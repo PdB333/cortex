@@ -53,11 +53,13 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.snapshotsModel->Refresh(nullptr);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.snapshotsModel->Refresh(nullptr);
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Refresh"));
@@ -81,14 +83,16 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
                               rangesJson_.size(), ImVec2(-1, 100));
     ImGui::BeginDisabled(!context.payload || !context.payload->Ready());
     if (ImGui::Button("Capture snapshot")) {
-        std::string error;
-        if (!context.snapshotsModel->Create(
-                rangesJson_.data(), label_.data(), &error))
-            context.status = "Snapshot capture failed: " + error;
-        else {
-            label_.fill(0);
-            context.status = "Snapshot captured";
-        }
+        context.RunInBackground("Capturing a memory snapshot", [=, &context]() {
+            std::string error;
+            if (!context.snapshotsModel->Create(
+                    rangesJson_.data(), label_.data(), &error))
+                context.status = "Snapshot capture failed: " + error;
+            else {
+                label_.fill(0);
+                context.status = "Snapshot captured";
+            }
+        });
     }
     ImGui::EndDisabled();
 
@@ -143,12 +147,14 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
     }
 
     if (rewindId >= 0) {
-        std::string error;
-        if (!context.snapshotsModel->Rewind(
-                rewindId, context.mutationAllowed, &error))
-            context.status = "Snapshot rewind failed: " + error;
-        else
-            context.status = "Snapshot rewound";
+        context.RunInBackground("Rewinding memory", [=, &context]() {
+            std::string error;
+            if (!context.snapshotsModel->Rewind(
+                    rewindId, context.mutationAllowed, &error))
+                context.status = "Snapshot rewind failed: " + error;
+            else
+                context.status = "Snapshot rewound";
+        });
     }
     if (deleteId >= 0) {
         std::string error;
@@ -164,11 +170,13 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
 
     ImGui::BeginDisabled(fromId_ < 0 || toId_ < 0 || fromId_ == toId_);
     if (ImGui::Button("Diff selected snapshots")) {
-        std::string error;
-        if (!context.snapshotsModel->Diff(fromId_, toId_, &error))
-            context.status = "Snapshot diff failed: " + error;
-        else
-            context.status = "Snapshot diff complete";
+        context.RunInBackground("Comparing snapshots", [=, &context]() {
+            std::string error;
+            if (!context.snapshotsModel->Diff(fromId_, toId_, &error))
+                context.status = "Snapshot diff failed: " + error;
+            else
+                context.status = "Snapshot diff complete";
+        });
     }
     ImGui::EndDisabled();
 
@@ -183,12 +191,14 @@ void SnapshotsWorkspace::Draw(UiContext& context) {
     FlowSameLine(ButtonWidth("Last change"));
     ImGui::BeginDisabled(lastChangeAddress_[0] == '\0');
     if (ImGui::Button("Last change")) {
-        std::string error;
-        if (!context.snapshotsModel->LastChange(
-                lastChangeAddress_.data(), lastChangeSize_, &error))
-            context.status = "Last-change query failed: " + error;
-        else
-            context.status = "Last-change query complete";
+        context.RunInBackground("Finding the last change", [=, &context]() {
+            std::string error;
+            if (!context.snapshotsModel->LastChange(
+                    lastChangeAddress_.data(), lastChangeSize_, &error))
+                context.status = "Last-change query failed: " + error;
+            else
+                context.status = "Last-change query complete";
+        });
     }
     ImGui::EndDisabled();
 

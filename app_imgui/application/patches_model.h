@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "runtime_model_base.h"
 
 #include <string>
 #include <vector>
@@ -16,9 +16,9 @@ struct PatchInfo {
     std::string gateway;
 };
 
-class PatchesModel {
+class PatchesModel : public RuntimeModelBase {
 public:
-    explicit PatchesModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit PatchesModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
 
     void Reset();
     bool Refresh(std::string* error = nullptr);
@@ -45,13 +45,8 @@ public:
     const std::string& OperationResult() const { return operationResult_; }
 
 private:
-    bool EnsureRuntime(bool allowInjection, bool mutationAllowed, std::string* error);
-    bool Call(const std::string& tool, nlohmann::json arguments,
-              nlohmann::json& result, bool mutation, bool mutationAllowed,
-              std::string* error);
     static std::string Trim(std::string value);
 
-    services::PayloadClient& payload_;
     std::vector<PatchInfo> patches_;
     std::string operationResult_;
 };

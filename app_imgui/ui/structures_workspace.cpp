@@ -77,11 +77,13 @@ void StructuresWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else
-                context.structuresModel->Refresh(nullptr);
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else
+                    context.structuresModel->Refresh(nullptr);
+            });
         }
         ImGui::EndDisabled();
     }
@@ -233,15 +235,17 @@ void StructuresWorkspace::Draw(UiContext& context) {
             ImGui::BeginDisabled(inferDefine_ &&
                                  (!context.mutationAllowed || name_[0] == '\0'));
             if (ImGui::Button(inferDefine_ ? "Infer + define" : "Infer")) {
-                std::string error;
-                if (!context.structuresModel->Infer(
-                        instancesJson_.data(), inferSize_, inferDefine_,
-                        name_.data(), context.mutationAllowed, &error))
-                    context.status = "Structure inference failed: " + error;
-                else {
-                    context.status = context.structuresModel->Status();
-                    if (inferDefine_) SyncSelection(context);
-                }
+                context.RunInBackground("Inferring the structure", [=, &context]() {
+                    std::string error;
+                    if (!context.structuresModel->Infer(
+                            instancesJson_.data(), inferSize_, inferDefine_,
+                            name_.data(), context.mutationAllowed, &error))
+                        context.status = "Structure inference failed: " + error;
+                    else {
+                        context.status = context.structuresModel->Status();
+                        if (inferDefine_) SyncSelection(context);
+                    }
+                });
             }
             ImGui::EndDisabled();
 

@@ -210,8 +210,10 @@ void TraceWorkspace::Draw(UiContext& context) {
         EnsureRuntime(context, false);
     FlowSameLine(ButtonWidth("Enable runtime"));
     ImGui::BeginDisabled(!context.mutationAllowed);
-    if (ImGui::Button("Enable runtime"))
-        EnsureRuntime(context, true);
+    if (ImGui::Button("Enable runtime")) {
+        context.RunInBackground("Loading the Cortex runtime into the target",
+                                [this, &context]() { EnsureRuntime(context, true); });
+    }
     ImGui::EndDisabled();
     FlowSameLine(ButtonWidth("Refresh"));
     if (ImGui::Button("Refresh"))

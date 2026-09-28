@@ -1,0 +1,261 @@
+// Unit tests for the desktop application models, run against a scripted
+// runtime transport so they need no target process, pipe or Windows API.
+
+#include "application/actions_model.h"
+#include "application/patches_model.h"
+#include "application/prompt_model.h"
+#include "application/runtime_events_model.h"
+#include "application/snapshots_model.h"
+#include "application/symbols_model.h"
+#include "application/watches_model.h"
+#include "services/runtime_transport.h"
+
+#include <nlohmann/json.hpp>
+
+#include <functional>
+#include <iostream>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using json = nlohmann::json;
+
+struct RecordedCall {
+    std::string name;
+    json arguments;
+};
+
+struct RecordedRoute {
+    std::string method;
+    std::string path;
+    json body;
+};
+
+// Stands in for the runtime. `loaded` means the runtime is present in the
+// target (TryConnectExisting succeeds); `connected` means Ready().
+class FakeTransport final : public cortex::services::RuntimeTransport {
+public:
+    bool connected = false;
+    bool loaded = false;
+    bool injectable = true;
+    int injections = 0;
+    std::vector<RecordedCall> calls;
+    std::vector<RecordedRoute> routes;
+    std::map<std::string, json> toolResults;   // tool -> route result
+    std::function<json(const std::string&, const std::string&, const json&)> routeHandler;
+
+    bool Ready() const override { return connected; }
+
+    bool TryConnectExisting(std::string* error) override {
+        if (error) error->clear();
+        if (!loaded) {
+            if (error) *error = "payload_token_unavailable";
+            return false;
+        }
+        connected = true;
+        return true;
+    }
+
+    bool EnsureReady(std::string* error) override {
+        if (TryConnectExisting(nullptr)) return true;
+        if (!injectable) {
+            if (error) *error = "payload_injection_failed";
+            return false;
+        }
+        ++injections;
+        loaded = connected = true;
+        return true;
+    }
+
+    bool CallTool(const std::string& name, const json& arguments, json& output,
+                  std::string* error) override {
+        if (error) error->clear();
+        calls.push_back({name, arguments});
+        const auto found = toolResults.find(name);
+        output = {{"status", 200},
+                  {"result", found != toolResults.end() ? found->second : json{{"ok", true}}}};
+        return true;
+    }
+
+    bool CallRouteExisting(const std::string& method, const std::string& path,
+                           const json& body, json& output, std::string* error) override {
+        if (error) error->clear();
+        if (!connected && !TryConnectExisting(error)) return false;
+        routes.push_back({method, path, body});
+        output = {{"status", 200},
+                  {"result", routeHandler ? routeHandler(method, path, body) : json{{"ok", true}}}};
+        return true;
+    }
+
+    bool Called(const std::string& name) const {
+        for (const auto& call : calls) if (call.name == name) return true;
+        return false;
+    }
+    const RecordedCall* Last(const std::string& name) const {
+        for (auto it = calls.rbegin(); it != calls.rend(); ++it)
+            if (it->name == name) return &*it;
+        return nullptr;
+    }
+};
+
+}  // namespace
+
+int main() {
+    int failures = 0;
+    auto check = [&](bool value, const char* message) {
+        if (!value) {
+            std::cerr << "FAIL: " << message << '\n';
+            ++failures;
+        }
+    };
+
+    using namespace cortex::application;
+
+    // Mutation gate: no runtime present and writes not allowed -> nothing is
+    // injected and no tool is called.
+    {
+        FakeTransport transport;
+        WatchesModel watches(transport);
+        std::string error;
+        check(!watches.AddWatch("0x1000", "i32", "hp", false, &error),
+              "AddWatch without write permission fails");
+        check(error == "mutation_permission_required", "write gate reports mutation_permission_required");
+        check(transport.injections == 0, "write gate never injects the runtime");
+        check(transport.calls.empty(), "write gate sends no tool call");
+    }
+
+    // Read-only refresh never injects: it only connects to a loaded runtime.
+    {
+        FakeTransport transport;
+        WatchesModel watches(transport);
+        std::string error;
+        check(!watches.Refresh(&error), "Refresh without a runtime fails");
+        check(error == "payload_token_unavailable", "Refresh reports the connection error");
+        check(transport.injections == 0, "Refresh never injects");
+    }
+
+    // Allowed write: runtime is loaded on demand and the call carries the
+    // explicit mutation_permission flag; the model then refreshes and parses.
+    {
+        FakeTransport transport;
+        transport.toolResults["watch_list"] = {
+            {"watches", json::array({{{"id", 7}, {"address", "0x1000"}, {"type", "i32"},
+                                      {"label", "hp"}, {"value", "100"}, {"has_value", true}}})}};
+        transport.toolResults["freeze_list"] = {{"freezes", json::array()}};
+        WatchesModel watches(transport);
+        std::string error;
+        check(watches.AddWatch("  0x1000 ", "I32", " hp ", true, &error), "AddWatch with permission succeeds");
+        check(transport.injections == 1, "allowed write loads the runtime once");
+        const RecordedCall* add = transport.Last("watch_add");
+        check(add != nullptr, "watch_add was called");
+        if (add) {
+            check(add->arguments.value("mutation_permission", false), "mutating call sets mutation_permission");
+            check(add->arguments.value("address", "") == "0x1000", "address is trimmed");
+            check(add->arguments.value("type", "") == "i32", "type is lower-cased");
+            check(add->arguments.value("label", "") == "hp", "label is trimmed");
+        }
+        check(watches.Watches().size() == 1 && watches.Watches()[0].id == 7 &&
+                  watches.Watches()[0].value == "100",
+              "watch list is parsed after the write");
+        const RecordedCall* list = transport.Last("watch_list");
+        check(list && !list->arguments.contains("mutation_permission"),
+              "read-only calls do not carry mutation_permission");
+    }
+
+    // Freeze values are validated before anything is sent.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        WatchesModel watches(transport);
+        std::string error;
+        check(!watches.AddFreeze("0x10", "float", "not-a-number", "", 0, true, &error),
+              "invalid freeze value is rejected");
+        check(error == "invalid_freeze_value", "invalid freeze reports invalid_freeze_value");
+        check(!transport.Called("freeze_add"), "invalid freeze sends nothing");
+        check(!watches.AddFreeze("0x10", "i32", "5", "", -1, true, &error),
+              "negative TTL is rejected");
+    }
+
+    // Patches: input validation and gate.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        PatchesModel patches(transport);
+        std::string error;
+        check(!patches.ApplyBytes("", "90", "", true, &error), "patch requires an address");
+        check(error == "patch_address_and_bytes_required", "patch reports missing input");
+        check(!patches.ApplyBytes("0x10", "90", "", false, &error), "patch requires write permission");
+        check(error == "mutation_permission_required", "patch gate error");
+        check(patches.ApplyBytes("0x10", "90 90", "nop", true, &error), "allowed patch succeeds");
+        const RecordedCall* write = transport.Last("patch_write");
+        check(write && write->arguments.value("bytes", "") == "90 90", "patch bytes are forwarded");
+        check(transport.injections == 0, "an already loaded runtime is reused");
+    }
+
+    // Symbols are read-only: they never load the runtime even when writes
+    // are allowed elsewhere.
+    {
+        FakeTransport transport;
+        SymbolsModel symbols(transport);
+        std::string error;
+        check(!symbols.Resolve("0x1000", &error), "symbol resolve without runtime fails");
+        check(transport.injections == 0, "symbols never inject");
+        transport.loaded = true;
+        transport.toolResults["symbols_resolve"] = {{"ok", true}, {"symbol", "main"}};
+        check(symbols.Resolve("0x1000", &error), "symbol resolve with runtime succeeds");
+        const RecordedCall* call = transport.Last("symbols_resolve");
+        check(call && call->arguments["_query"].value("address", "") == "0x1000",
+              "resolve passes the address as a query parameter");
+    }
+
+    // Prompt: private routes, connection errors surface, answers are trimmed.
+    {
+        FakeTransport transport;
+        PromptModel prompt(transport);
+        std::string error;
+        check(!prompt.Refresh(&error), "prompt refresh without runtime fails");
+        check(!error.empty(), "prompt refresh reports why it could not connect");
+
+        transport.loaded = true;
+        bool answered = false;
+        transport.routeHandler = [&](const std::string& method, const std::string& path, const json& body) -> json {
+            if (method == "GET" && path == "/prompt/active") {
+                if (answered) return {{"ok", true}, {"prompt", nullptr}};
+                return {{"ok", true},
+                        {"prompt", {{"id", 4}, {"kind", "value_change"}, {"label", "HP"},
+                                    {"current_value", "10"}, {"target_value", "20"}}}};
+            }
+            if (method == "POST" && path == "/prompt/4/answer") {
+                answered = body.value("value", "") == "done";
+                return {{"ok", true}};
+            }
+            return {{"ok", false}};
+        };
+        check(prompt.Refresh(&error) && prompt.Active() && prompt.Id() == 4, "active prompt is observed");
+        check(prompt.Answer("  done  ", &error), "prompt answer succeeds");
+        check(answered, "answer is trimmed and posted to the prompt route");
+        check(!prompt.Active(), "prompt is cleared after it is answered");
+    }
+
+    // Actions rollback is a mutation; clearing respects the gate too.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        ActionsModel actions(transport);
+        std::string error;
+        check(!actions.RollbackAll(false, &error), "rollback requires write permission");
+        check(!actions.Clear(false, &error), "clear requires write permission");
+        check(!transport.Called("actions_rollback") && !transport.Called("actions_clear"),
+              "denied rollback and clear send nothing");
+    }
+
+    if (failures) {
+        std::cerr << failures << " application model check(s) failed\n";
+        return 1;
+    }
+    std::cout << "PASS: application models (runtime gate, arguments, parsing, prompt routes)\n";
+    return 0;
+}

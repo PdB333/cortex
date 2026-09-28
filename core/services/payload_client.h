@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime_transport.h"
 #include "target/session_manager.h"
 
 #include <nlohmann/json.hpp>
@@ -15,14 +16,14 @@ namespace cortex::services {
 // this only for capabilities that genuinely need code inside the target
 // (breakpoints, traces, hooks, capture, native calls, ...). Ordinary memory
 // inspection stays on the external Session backend.
-class PayloadClient {
+class PayloadClient : public RuntimeTransport {
 public:
     PayloadClient(target::SessionManager& sessions, std::string runtimeDirectory);
 
     void SetRuntimeDirectory(std::string runtimeDirectory);
     void Reset();
 
-    bool Ready() const;
+    bool Ready() const override;
     uint64_t TargetProcessId() const;
 
     // Checks whether the currently selected target can be instrumented with
@@ -33,7 +34,7 @@ public:
     // Connect only when Cortex instrumentation is already present in the
     // selected target. This never injects code and is suitable for passive UI
     // adapters such as the human prompt surface.
-    bool TryConnectExisting(std::string* error = nullptr) {
+    bool TryConnectExisting(std::string* error = nullptr) override {
         if (error) error->clear();
         const auto session = sessions_.Active();
         if (!session || !session->Alive()) {
@@ -51,7 +52,7 @@ public:
     // when the application and target have matching bitness. Cross-bitness
     // bootstrap is intentionally delegated to a private helper rather than
     // pretending CreateRemoteThread is portable across architectures.
-    bool EnsureReady(std::string* error = nullptr);
+    bool EnsureReady(std::string* error = nullptr) override;
 
     // Calls one primitive from the existing MCP tool catalog using the native
     // authenticated Named Pipe transport. `output` receives structuredContent
@@ -59,7 +60,7 @@ public:
     bool CallTool(const std::string& name,
                   const nlohmann::json& arguments,
                   nlohmann::json& output,
-                  std::string* error = nullptr);
+                  std::string* error = nullptr) override;
 
     // Desktop-only route adapter over the authenticated local Named Pipe. It
     // never injects the payload and is not exposed through HTTP MCP/tools/list.
@@ -69,7 +70,7 @@ public:
                            const std::string& path,
                            const nlohmann::json& body,
                            nlohmann::json& output,
-                           std::string* error = nullptr) {
+                           std::string* error = nullptr) override {
         using json = nlohmann::json;
         output = json::object();
         if (error) error->clear();

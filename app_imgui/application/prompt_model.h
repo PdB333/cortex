@@ -1,6 +1,6 @@
 #pragma once
 
-#include "services/payload_client.h"
+#include "services/runtime_transport.h"
 
 #include <chrono>
 #include <cstdint>
@@ -10,7 +10,7 @@ namespace cortex::application {
 
 class PromptModel {
 public:
-    explicit PromptModel(services::PayloadClient& payload) : payload_(payload) {}
+    explicit PromptModel(services::RuntimeTransport& payload) : payload_(payload) {}
 
     void Poll();
     bool Refresh(std::string* error = nullptr);
@@ -31,7 +31,7 @@ public:
 private:
     void ClearPrompt();
 
-    services::PayloadClient& payload_;
+    services::RuntimeTransport& payload_;
     std::chrono::steady_clock::time_point lastPoll_{};
 
     bool active_ = false;

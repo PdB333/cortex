@@ -54,13 +54,15 @@ void InstrumentationWorkspace::Draw(UiContext& context) {
         FlowSameLine(ButtonWidth("Enable runtime"));
         ImGui::BeginDisabled(!context.mutationAllowed);
         if (ImGui::Button("Enable runtime")) {
-            std::string error;
-            if (!context.payload->EnsureReady(&error))
-                context.status = "Runtime enable failed: " + error;
-            else if (context.instrumentationModel->RefreshState(nullptr)) {
-                allocationEnabled_ = context.instrumentationModel->AllocationWatchEnabled();
-                allocationMinSize_ = context.instrumentationModel->AllocationWatchMinSize();
-            }
+            context.RunInBackground("Loading the Cortex runtime into the target", [=, &context]() {
+                std::string error;
+                if (!context.payload->EnsureReady(&error))
+                    context.status = "Runtime enable failed: " + error;
+                else if (context.instrumentationModel->RefreshState(nullptr)) {
+                    allocationEnabled_ = context.instrumentationModel->AllocationWatchEnabled();
+                    allocationMinSize_ = context.instrumentationModel->AllocationWatchMinSize();
+                }
+            });
         }
         ImGui::EndDisabled();
         FlowSameLine(ButtonWidth("Refresh state"));
