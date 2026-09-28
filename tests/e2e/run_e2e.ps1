@@ -239,6 +239,10 @@ Run-Scenario "api-memory-security" {
         Assert-That (($tools | ConvertTo-Json -Depth 8) -match "memory_read") "Tools manifest is incomplete"
         $openApi = Request-Json GET "/openapi.json"
         Assert-That (($openApi | ConvertTo-Json -Depth 12) -match "/memory/read") "OpenAPI is incomplete"
+        # Every manifest tool must map to a registered handler with a valid schema.
+        $contracts = Request-Json GET "/schema/validate" -ExpectedStatus @(200, 500)
+        Assert-That $contracts.ok "API contract validation failed: $($contracts.errors | ConvertTo-Json -Depth 6 -Compress)"
+        Assert-That ([int]$contracts.tool_count -gt 0) "API contract validation reported no tools"
 
         [void](Request-Json GET "/modules" -Token "" -ExpectedStatus @(401))
         [void](Request-Json GET "/modules" -Token "wrong-token" -ExpectedStatus @(401))

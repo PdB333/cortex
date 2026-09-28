@@ -221,6 +221,19 @@ json BuildToolsManifest() {
         j.push_back({{"name", "debug_breakpoint_log"}, {"method", "GET"}, {"path", "/debug/breakpoint/{id}/log"},
                       {"description", "History of hits for a breakpoint set with action=log (registers captured at each hit, up to the 500 most recent entries -- older ones are overwritten). For a 'pause' breakpoint, check /debug/paused instead."}});
 
+        j.push_back({{"name", "debug_breakpoint_trigger_set"}, {"method", "POST"}, {"path", "/debug/breakpoint/{id}/trigger"},
+                      {"description", "Arms an automatic trace on a runtime breakpoint: each hit starts a trace on the hitting thread. With stop_on_return the trace stops when the hit function returns to its caller."},
+                      {"body", {
+                          {"range", {{"type","array"},{"items",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}},{"minItems",2},{"maxItems",2},{"description","Optional [start, end] address range the trace records, e.g. [\"mod.exe+0xA000\", \"mod.exe+0xB000\"]."}}},
+                          {"stop_on_return", {{"type","boolean"},{"description","Stop the trace when the hit function returns. Default true."}}},
+                          {"once", {{"type","boolean"},{"description","Disarm after the first hit. Default true."}}},
+                          {"max_steps", {{"type","integer"},{"minimum",1},{"description","Maximum traced instructions. Default 100000."}}},
+                          {"max_events", {{"type","integer"},{"minimum",1},{"description","Maximum recorded trace events. Default 50000."}}}
+                      }}});
+
+        j.push_back({{"name", "debug_breakpoint_trigger_clear"}, {"method", "DELETE"}, {"path", "/debug/breakpoint/{id}/trigger"},
+                      {"description", "Removes the automatic trace armed on a runtime breakpoint."}});
+
         j.push_back({{"name", "debug_pause"}, {"method", "POST"}, {"path", "/debug/pause"},
                       {"description", "Pauses a running target thread while preserving external suspend ownership."},
                       {"body", {{"thread_id", "required"}}}});
@@ -244,6 +257,10 @@ json BuildToolsManifest() {
         j.push_back({{"name", "symbols_lookup"}, {"method", "GET"}, {"path", "/symbols/lookup"}, {"ok_false_is_error", false},
                       {"description", "Reverse lookup: address of a named symbol (export or PDB)."},
                       {"query", {{"name", "required"}}}});
+
+        j.push_back({{"name", "symbols_module"}, {"method", "GET"}, {"path", "/symbols/module"},
+                      {"description", "Identifies the module containing an address: name, path, base, RVA, and PE/PDB verification (loaded PDB, exact match, symbol type)."},
+                      {"query", {{"address", "required"}}}});
 
         j.push_back({{"name", "project_get"}, {"method", "GET"}, {"path", "/project"},
                       {"description", "Returns the entire persistent project for this game (named addresses, pointer paths, notes). JSON file stored beside the DLL, survives across sessions -- this is the AI's long-term memory for this game."}});
