@@ -1,0 +1,851 @@
+# Unit, contract and milestone test suites. Each job is independent and
+# quick; they were separate workflows (P1-P4, prompt contracts, diagnostics
+# M1-M7) and are grouped here so the fast checks live in one place.
+name: Contracts and unit tests
+
+on:
+  push:
+    branches:
+      - agent/p1-hardening
+      - agent/p2-mcp-contracts
+      - agent/final-integration
+      - refactor/native-mcp-tool-executor
+      - test/imgui-full-migration
+      - main
+      - agent/p3-runtime-validation
+      - agent/p4-target-capabilities
+      - agent/mod-diagnostics-m1
+      - agent/mod-diagnostics-m2
+      - agent/mod-diagnostics-m3
+      - agent/mod-diagnostics-m4
+      - agent/mod-diagnostics-m5-m7
+  pull_request:
+    paths:
+      - "core/api/request_id.h"
+      - "core/api/request_limits.h"
+      - "core/api/pagination.h"
+      - "core/api/semantic_tools.h"
+      - "tests/request_id_tests.cpp"
+      - "tests/pagination_tests.cpp"
+      - "tests/semantic_plan_p1_tests.cpp"
+      - ".github/workflows/contracts.yml"
+      - "core/action/**"
+      - "core/scripting/**"
+      - "core/api/**"
+      - "tests/**"
+      - "CMakeLists.txt"
+      - "core/api/mcp_contract.h"
+      - "core/api/mcp_protocol.h"
+      - "core/api/mcp_tools.*"
+      - "core/api/mcp_pipe.*"
+      - "core/api/mcp_pipe_protocol.h"
+      - "core/api/native_routes.*"
+      - "core/api/routes_mcp.cpp"
+      - "core/api/routes_status.cpp"
+      - "mcp_bridge/main.cpp"
+      - "mcp_bridge/policy.h"
+      - "tests/mcp_protocol_tests.cpp"
+      - "tests/mcp_pipe_protocol_tests.cpp"
+      - "tests/mcp_schema_tests.cpp"
+      - "tests/call_scheduler_tests.cpp"
+      - "tests/mcp_query_schema_tests.cpp"
+      - "tests/mcp_bridge_policy_tests.cpp"
+      - "tests/semantic_tools_tests.cpp"
+      - "host/unified_main.cpp"
+      - "host/diagnostics/**"
+      - "test_target/main_opengl.cpp"
+      - "core/target/**"
+      - "tests/target_model_portable_tests.cpp"
+      - "tests/capability_model_tests.cpp"
+      - "core/prompt/**"
+      - "tests/prompt_queue_contract_tests.cpp"
+      - "core/diagnostics/**"
+      - "core/config.*"
+      - "core/dllmain.cpp"
+      - "tests/diagnostics_tests.cpp"
+      - "test_target/main.cpp"
+      - "sdk/**"
+      - "tests/diagnostics_m2_tests.cpp"
+      - "tests/diagnostics_sdk_smoke.cpp"
+      - "tests/diagnostics_bundle_smoke.cpp"
+      - "docs/mod-sdk.md"
+      - "core/symbols/**"
+      - "core/api/routes_symbols.cpp"
+      - "tools/symbolize_main.cpp"
+      - "tests/diagnostics_m3_tests.cpp"
+      - "tests/diagnostics_m3_bundle_smoke.cpp"
+      - "tests/dwarf_fixture.cpp"
+      - "docs/symbols.md"
+      - "core/diagnostics/hooks.*"
+      - "sdk/include/cortex/diag*.h"
+      - "tests/diagnostics_m4_*.cpp"
+      - "docs/hooks.md"
+      - "core/diagnostics/shared_channel.*"
+      - "tools/diagnostics_host/**"
+      - "tests/diagnostics_m5*.cpp"
+      - "tests/diagnostics_m5_m7_tests.cpp"
+      - "docs/external-diagnostics.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- P1 Contracts (was .github/workflows/p1-contracts.yml)
+  p1-contracts:
+    name: p1-contracts-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.package_prefix }}-gcc
+
+      - name: Request ID tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/request_id_tests.cpp
+          -o request_id_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && ./request_id_tests.exe
+
+      - name: Pagination and request-limit tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/pagination_tests.cpp
+          -o pagination_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && ./pagination_tests.exe
+
+  # ---- P1 Hardening (was .github/workflows/p1-hardening.yml)
+  p1-hardening:
+    name: p1-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex with tests
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p1-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build Cortex
+        shell: msys2 {0}
+        run: cmake --build build/p1-${{ matrix.arch }} --parallel 2
+
+      - name: Run existing CTest suite
+        shell: msys2 {0}
+        run: ctest --test-dir build/p1-${{ matrix.arch }} --output-on-failure
+
+      - name: Build action transaction tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2
+          tests/action_transaction_tests.cpp
+          core/action/action.cpp
+          core/events/events.cpp
+          -Icore
+          -o build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run action transaction tests
+        shell: msys2 {0}
+        run: build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
+
+      - name: Build semantic plan tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
+          -Ibuild/p1-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run semantic plan tests
+        shell: msys2 {0}
+        run: >-
+          build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
+          core/api/routes_status.cpp
+
+  # ---- P2 Contracts (was .github/workflows/p2-contracts.yml)
+  p2-contracts:
+    name: p2-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p2-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+
+      - name: Build Cortex
+        shell: msys2 {0}
+        run: |
+          set +e
+          log="build/p2-${{ matrix.arch }}/compile.log"
+          cmake --build "build/p2-${{ matrix.arch }}" --parallel 2 >"$log" 2>&1
+          rc=$?
+          tail -n 250 "$log" || true
+          exit $rc
+
+      - name: Upload compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-compile-${{ matrix.arch }}
+          path: build/p2-${{ matrix.arch }}/compile.log
+          if-no-files-found: warn
+
+      - name: Run core tests
+        shell: msys2 {0}
+        run: ctest --test-dir build/p2-${{ matrix.arch }} --output-on-failure
+
+      - name: Build and run MCP protocol tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_protocol_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
+
+      - name: Build and run native pipe contract tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_pipe_protocol_tests.cpp
+          -o build/p2-${{ matrix.arch }}/mcp_pipe_protocol_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_pipe_protocol_tests.exe
+
+      - name: Build and run semantic execution contract tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/semantic_tools_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/semantic_tools_tests.exe core/api/routes_status.cpp
+
+      - name: Build and run MCP schema tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_schema_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
+          && c++ -std=c++17 -O2 tests/mcp_query_schema_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
+
+      - name: Build and run game-thread call scheduler tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/call_scheduler_tests.cpp core/call/call.cpp
+          -o build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
+          -static -static-libgcc -static-libstdc++ -luser32
+          && build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
+      - name: Build and run MCP bridge policy tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/mcp_bridge_policy_tests.cpp
+          -o build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
+
+      - name: Build and run inherited request tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/request_id_tests.cpp
+          -o build/p2-${{ matrix.arch }}/request_id_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/request_id_tests.exe
+          && c++ -std=c++17 -O2 tests/pagination_tests.cpp
+          -o build/p2-${{ matrix.arch }}/pagination_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/pagination_tests.exe
+
+  # ---- P3 Probe Build (was .github/workflows/p3-probe-build.yml)
+  p3-probe-build:
+    name: probe-build-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            git
+            ${{ matrix.package_prefix }}-gcc
+            ${{ matrix.package_prefix }}-cmake
+            ${{ matrix.package_prefix }}-ninja
+
+      - name: Configure Cortex
+        shell: msys2 {0}
+        run: >-
+          cmake -S . -B build/p3-probe-${{ matrix.arch }} -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=OFF
+          -DCORTEX_BUILD_LEGACY_COMPAT=ON
+
+      - name: Build unified host with probe command
+        shell: msys2 {0}
+        run: >-
+          cmake --build build/p3-probe-${{ matrix.arch }}
+          --target cortex_host
+          --parallel 2
+
+  # ---- P3 Runtime Validation (was .github/workflows/p3-runtime-validation.yml)
+  p3-runtime-validation:
+    name: opengl-fixture-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.package_prefix }}-gcc
+
+      - name: Build OpenGL fixture
+        shell: msys2 {0}
+        run: >-
+          mkdir -p build/p3-${{ matrix.arch }}
+          && c++ -std=c++17 -O2 test_target/main_opengl.cpp
+          -o build/p3-${{ matrix.arch }}/cortex_test_target_opengl_${{ matrix.arch }}.exe
+          -static -static-libgcc -static-libstdc++
+          -lopengl32 -lgdi32 -luser32
+          -Wl,--subsystem,windows
+
+      - name: Smoke-test OpenGL context
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "build/p3-${{ matrix.arch }}/cortex_test_target_opengl_${{ matrix.arch }}.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 2
+            if ($process.HasExited) {
+              throw "OpenGL fixture exited early with code $($process.ExitCode)"
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+
+  # ---- P4 Portable Target Model (was .github/workflows/p4-portable-model.yml)
+  p4-portable-model:
+    name: P4 Portable Target Model
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build portable target model test
+        run: >-
+          g++ -std=c++17 -Wall -Wextra -Werror
+          tests/target_model_portable_tests.cpp
+          -I.
+          -o target_model_portable_tests
+
+      - name: Run portable target model test
+        run: ./target_model_portable_tests
+
+  # ---- P4 Target Model (was .github/workflows/p4-target-model.yml)
+  p4-target-model:
+    name: target-model-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            package_prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            package_prefix: mingw-w64-i686
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install compiler
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: ${{ matrix.package_prefix }}-gcc
+
+      - name: Build capability model test
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 tests/capability_model_tests.cpp
+          -o capability_model_tests.exe
+          -static -static-libgcc -static-libstdc++
+
+      - name: Run capability model test
+        shell: msys2 {0}
+        run: ./capability_model_tests.exe
+
+  # ---- Unified Cortex Prompt Contracts (was .github/workflows/prompt-contract.yml)
+  prompt-contract:
+    name: Unified Cortex Prompt Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build prompt queue contract test
+        run: >-
+          g++ -std=c++17 -O2 -pthread
+          tests/prompt_queue_contract_tests.cpp
+          core/prompt/prompt_queue.cpp
+          -Icore
+          -o prompt_queue_contract_tests
+
+      - name: Run prompt queue contract test
+        run: ./prompt_queue_contract_tests
+
+  # ---- Diagnostics M1 (was .github/workflows/diagnostics-m1.yml)
+  diagnostics-m1:
+    name: diagnostics-${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile diagnostics tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_tests.cpp
+          core\diagnostics\diagnostics.cpp
+          core\config.cpp
+          /Icore
+          /Fe:diagnostics_tests.exe
+          /link dbghelp.lib
+
+      - name: Run diagnostics tests
+        shell: cmd
+        run: diagnostics_tests.exe
+
+      - name: Compile crash test target
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          test_target\main.cpp
+          /Fe:cortex_crash_test_target.exe
+          /link user32.lib gdi32.lib /SUBSYSTEM:WINDOWS
+
+  # ---- Diagnostics M2 (was .github/workflows/diagnostics-m2.yml)
+  diagnostics-m2:
+    name: diagnostics-m2-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile registry tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m2_tests.cpp
+          core\diagnostics\registry.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m2_tests.exe
+          /link
+
+      - name: Run registry tests
+        shell: cmd
+        run: diagnostics_m2_tests.exe
+
+      - name: Compile SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_sdk_smoke.exe
+          /link
+
+      - name: Run SDK smoke test
+        shell: cmd
+        run: diagnostics_sdk_smoke.exe
+
+      - name: Compile combined diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_bundle_smoke.cpp
+          core\config.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined diagnostics smoke test
+        shell: cmd
+        run: diagnostics_bundle_smoke.exe
+
+  # ---- Diagnostics M3 (was .github/workflows/diagnostics-m3.yml)
+  diagnostics-m3:
+    name: diagnostics-m3-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile PDB and crash artifact tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4 /Zi /Od
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m3_tests.cpp
+          core\diagnostics\registry.cpp
+          core\diagnostics\symbolizer.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m3_tests.exe
+          /Fd:diagnostics_m3_tests.pdb
+          /link /DEBUG /PDB:diagnostics_m3_tests.pdb dbghelp.lib
+
+      - name: Run PDB and crash artifact tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m3_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m3_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile offline symbolizer
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4 /DCORTEX_STANDALONE_TOOL
+          tools\symbolize_main.cpp
+          core\symbols\symbols.cpp
+          core\symbols\external.cpp
+          /Icore
+          /Fe:cortex_symbolize.exe
+          /link dbghelp.lib
+
+      - name: Smoke test offline symbolizer
+        shell: cmd
+        run: cortex_symbolize.exe --help
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m3_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m3_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m3_bundle_smoke.exe
+
+      - name: Validate MinGW DWARF fallback
+        if: matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $gxx = (Get-Command g++.exe).Source
+          & $gxx -g -O0 tests\dwarf_fixture.cpp -o dwarf_fixture.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $rva = (& .\dwarf_fixture.exe).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $addr2line = (Get-Command addr2line.exe).Source
+          $image = (Resolve-Path .\dwarf_fixture.exe).Path
+          $result = & .\cortex_symbolize.exe --image $image --rva $rva --tool $addr2line
+          $result | Set-Content dwarf_symbolization.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($result -notmatch '"backend":"external"') { throw "external backend was not used" }
+          if ($result -notmatch 'DwarfTarget') { throw "DWARF function was not resolved" }
+
+  # ---- Diagnostics M4 (was .github/workflows/diagnostics-m4.yml)
+  diagnostics-m4:
+    name: diagnostics-m4-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile hook registry tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m4_tests.cpp
+          core\diagnostics\registry.cpp
+          core\diagnostics\hooks.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_tests.exe
+          /link
+
+      - name: Run hook registry tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m4_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m4_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile and run SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_m4_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_sdk_smoke.exe
+          /link
+          && diagnostics_m4_sdk_smoke.exe
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m4_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m4_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m4_bundle_smoke.exe
+
+  # ---- Diagnostics M5-M7 (was .github/workflows/diagnostics-m5-m7.yml)
+  diagnostics-m5-m7:
+    name: diagnostics-m5-m7-${{ matrix.arch }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Compile external diagnostics tests
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m5_m7_tests.cpp
+          core\diagnostics\shared_channel.cpp
+          host\diagnostics\external_host.cpp
+          host\diagnostics\analyzer.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_m7_tests.exe
+          /link dbghelp.lib user32.lib
+
+      - name: Run external diagnostics tests
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\diagnostics_m5_m7_tests.exe -NoNewWindow -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            $process.Kill()
+            throw "diagnostics_m5_m7_tests timed out"
+          }
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+
+      - name: Compile and run heartbeat SDK smoke test
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          tests\diagnostics_m5_sdk_smoke.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_sdk_smoke.exe
+          /link
+          && diagnostics_m5_sdk_smoke.exe
+
+      - name: Compile external diagnostics host
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4 /DCORTEX_STANDALONE_TOOL
+          /D_CRT_SECURE_NO_WARNINGS
+          tools\diagnostics_host\main.cpp
+          host\diagnostics\external_host.cpp
+          host\diagnostics\analyzer.cpp
+          /Icore /Isdk\include
+          /Fe:cortex_diag_host.exe
+          /link dbghelp.lib user32.lib
+
+      - name: Smoke test external diagnostics host
+        shell: cmd
+        run: cortex_diag_host.exe
+
+      - name: Compile combined injected diagnostics translation unit
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /W4
+          /D_CRT_SECURE_NO_WARNINGS /DCORTEX_DIAGNOSTICS_TESTING
+          tests\diagnostics_m5_bundle_smoke.cpp
+          core\config.cpp
+          core\symbols\symbols.cpp
+          /Icore /Isdk\include
+          /Fe:diagnostics_m5_bundle_smoke.exe
+          /link dbghelp.lib
+
+      - name: Run combined injected diagnostics smoke test
+        shell: cmd
+        run: diagnostics_m5_bundle_smoke.exe

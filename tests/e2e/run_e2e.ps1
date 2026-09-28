@@ -244,6 +244,47 @@ Run-Scenario "api-memory-security" {
         Assert-That $contracts.ok "API contract validation failed: $($contracts.errors | ConvertTo-Json -Depth 6 -Compress)"
         Assert-That ([int]$contracts.tool_count -gt 0) "API contract validation reported no tools"
 
+        # Read-only sweep: every GET tool must answer without a server error
+        # and leave the runtime healthy. Required query parameters are filled
+        # from the fixture; tools that need an object id or a live thread are
+        # covered by their own scenarios.
+        $queryValues = @{
+            address = $fixture.Manifest.anchor
+            module = "cortex_test_target_$Architecture.exe"
+            name = "main"
+        }
+        $swept = 0
+        $skipped = @()
+        foreach ($tool in @($tools)) {
+            if ($tool.method -ne "GET" -or $tool.path -match "\{") { continue }
+            $query = @()
+            $fillable = $true
+            if ($tool.query) {
+                foreach ($field in $tool.query.PSObject.Properties) {
+                    $spec = $field.Value
+                    $required = ($spec -is [string] -and $spec.StartsWith("required")) -or
+                                ($spec -isnot [string] -and $spec.required -eq $true)
+                    if (-not $required) { continue }
+                    if ($queryValues.ContainsKey($field.Name)) {
+                        $query += "$($field.Name)=$([uri]::EscapeDataString([string]$queryValues[$field.Name]))"
+                    } else {
+                        $fillable = $false
+                    }
+                }
+            }
+            if (-not $fillable) { $skipped += $tool.name; continue }
+            if ($tool.name -eq "screenshot") { $query += "timeout_ms=3000" }
+            $path = $tool.path + $(if ($query.Count) { "?" + ($query -join "&") } else { "" })
+            # A capture that cannot finish in time reports 504, which is an
+            # answer, not a server fault.
+            $allowed = @(200..499) + $(if ($tool.name -eq "screenshot") { @(504) } else { @() })
+            [void](Request-Json GET $path -ExpectedStatus $allowed)
+            ++$swept
+        }
+        Assert-That ($swept -ge 30) "Read-only sweep covered only $swept GET tools"
+        Assert-That (Request-Json GET "/health").ok "Runtime unhealthy after the read-only sweep"
+        Write-Host "Read-only sweep: $swept GET tools answered; skipped (need ids/threads): $($skipped -join ', ')"
+
         [void](Request-Json GET "/modules" -Token "" -ExpectedStatus @(401))
         [void](Request-Json GET "/modules" -Token "wrong-token" -ExpectedStatus @(401))
         [void](Request-Json POST "/memory/read" -Body '{"address":"0x1","type":"u8"}' -ContentType "text/plain" -ExpectedStatus @(415))
