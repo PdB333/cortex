@@ -1,4 +1,5 @@
 #include "tools_workspace.h"
+#include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -159,19 +160,7 @@ std::string ToolsWorkspace::AddressText(uint64_t address) const {
 bool ToolsWorkspace::Resolve(UiContext& context, const char* raw, uint64_t& address) {
     const std::string text = Trim(raw ? raw : "");
     if (ParseHex(text, address) && address) return true;
-    const auto plus = text.find_last_of('+');
-    if (plus == std::string::npos || plus == 0) return false;
-    uint64_t offset = 0;
-    if (!ParseHex(text.substr(plus + 1), offset)) return false;
-    lastModules_ = {};
-    RefreshModules(context);
-    const std::string name = Lower(Trim(text.substr(0, plus)));
-    for (const auto& module : modules_) {
-        if (Lower(module.name) != name) continue;
-        address = module.base + offset;
-        return true;
-    }
-    return false;
+    return !text.empty() && EvaluateContextAddress(context, text, address);
 }
 
 services::MemoryReader ToolsWorkspace::Reader(UiContext& context) const {
@@ -1024,6 +1013,120 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
     ImGui::EndTable();
 }
 
+// ------------------------------------------------------------------ symbols
+
+// User-defined symbols (Cheat Engine's registerSymbol) and the exports of
+// every module: all of them work in any address field.
+void ToolsWorkspace::DrawSymbols(UiContext& context) {
+    HintText("Names registered here work in every address field, in cheat tables and in Lua "
+             "(registerSymbol). Module exports resolve as module.Export or just Export.");
+    ImGui::SetNextItemWidth(Px(150));
+    ImGui::InputTextWithHint("##SymbolName", "name", symbolName_, sizeof(symbolName_));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(260));
+    const bool enter = ImGui::InputTextWithHint("##SymbolAddress", "address or expression", symbolAddress_,
+                                                sizeof(symbolAddress_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (ImGui::Button("Register") || enter) {
+        const std::string name = Trim(symbolName_);
+        uint64_t address = 0;
+        std::string error;
+        if (name.empty() || name.find_first_of(" +-*[]()\"'") != std::string::npos) {
+            context.status = "Enter a symbol name without spaces or operators";
+        } else if (!EvaluateContextAddress(context, symbolAddress_, address, &error)) {
+            context.status = "Cannot resolve the address: " + error;
+        } else {
+            context.userSymbols->Set(name, address);
+            context.status = "Registered " + name + " = " + Hex(address);
+            symbolName_[0] = '\0';
+            symbolAddress_[0] = '\0';
+        }
+    }
+
+    const auto symbols = context.userSymbols->List();
+    ImGui::SeparatorText(("Registered symbols (" + std::to_string(symbols.size()) + ")").c_str());
+    if (symbols.empty()) {
+        ImGui::TextDisabled("None yet.");
+    } else if (BeginDataTable("UserSymbols", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable,
+                              ImVec2(0, std::min(Px(200), ImGui::GetFrameHeightWithSpacing() * (static_cast<float>(symbols.size()) + 1.5f))))) {
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, ButtonWidth("Remove"));
+        ImGui::TableHeadersRow();
+        for (const auto& symbol : symbols) {
+            ImGui::PushID(symbol.first.c_str());
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(symbol.first.c_str());
+            ImGui::TableSetColumnIndex(1);
+            {
+                MonoFont mono;
+                ImGui::Selectable((AddressText(symbol.second) + "##Address").c_str());
+            }
+            AddressContextOptions options;
+            options.label = symbol.first;
+            if (ImGui::BeginPopupContextItem("SymbolMenu")) {
+                DrawAddressContextActions(context, symbol.second, options);
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(2);
+            if (ImGui::SmallButton("Remove")) context.userSymbols->Remove(symbol.first);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Module exports");
+    ImGui::SetNextItemWidth(Px(260));
+    const bool search = ImGui::InputTextWithHint("##SymbolSearch", "export name contains...", symbolSearch_,
+                                                 sizeof(symbolSearch_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (ImGui::Button("Search") || search) {
+        symbolSearched_ = Trim(symbolSearch_);
+        symbolMatches_ = ContextSymbols(context, true).Search(symbolSearched_, 2000);
+        context.status = std::to_string(symbolMatches_.size()) + " export(s) found" +
+                         (symbolMatches_.size() >= 2000 ? " (first 2000)" : "");
+    }
+    if (symbolMatches_.empty()) {
+        if (!symbolSearched_.empty()) ImGui::TextDisabled("No export matches.");
+        return;
+    }
+    if (BeginDataTable("ExportMatches", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                               ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Symbol", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(symbolMatches_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& match = symbolMatches_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(match.first.c_str());
+                ImGui::TableSetColumnIndex(1);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable((Hex(match.second) + "##Export").c_str(), false, ImGuiSelectableFlags_SpanAllColumns);
+                }
+                AddressContextOptions options;
+                options.label = match.first;
+                if (ImGui::BeginPopupContextItem("ExportMenu")) {
+                    if (ImGui::MenuItem("Copy name")) ImGui::SetClipboardText(match.first.c_str());
+                    ImGui::Separator();
+                    DrawAddressContextActions(context, match.second, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
 // ------------------------------------------------------------------ frame
 
 void ToolsWorkspace::Draw(UiContext& context) {
@@ -1045,6 +1148,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
         requested_ = context.toolsTabRequest == "pointers" ? Tab::Pointers
                    : context.toolsTabRequest == "signature" ? Tab::Signature
                    : context.toolsTabRequest == "pe" ? Tab::Pe
+                   : context.toolsTabRequest == "symbols" ? Tab::Symbols
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
@@ -1076,6 +1180,10 @@ void ToolsWorkspace::Draw(UiContext& context) {
     }
     if (ImGui::BeginTabItem("Pointer scan", nullptr, flags(Tab::Pointers))) {
         DrawPointers(context);
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Symbols", nullptr, flags(Tab::Symbols))) {
+        DrawSymbols(context);
         ImGui::EndTabItem();
     }
     ImGui::EndTabBar();

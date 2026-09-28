@@ -6,6 +6,7 @@
 #include "fake_process.h"
 
 #include <atomic>
+#include <memory>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -89,6 +90,12 @@ struct Harness {
             modules[0].size = 0x1000;
             return modules;
         };
+        options.exports = [](const cortex::target::ModuleInfo& module) {
+            std::vector<cortex::application::TargetSymbols::ExportEntry> exports;
+            if (module.name == "game.exe") exports.push_back({"PlayerBase", module.base + 0x100});
+            return exports;
+        };
+        options.userSymbols = std::make_shared<cortex::application::UserSymbols>();
     }
 
     cortex::application::LuaRunResult Run(const std::string& source) {
@@ -164,6 +171,70 @@ void TestScansAndModules() {
     CHECK(!result.ok && result.error.find("Unknown module or symbol: nothing") != std::string::npos);
 }
 
+void TestSymbols() {
+    Harness h;
+    auto result = h.Run(R"(
+        return readInteger("[PlayerBase]+20"), readInteger("[game.exe.PlayerBase]+20"),
+               readInteger("[game!playerbase]+20"), getAddress("game") == getAddress("game.exe")
+    )");
+    CHECK(result.ok && result.returned == "100\t100\t100\ttrue");
+
+    result = h.Run(R"(
+        registerSymbol("hero", "[PlayerBase]+20")
+        local value = readInteger("hero")
+        writeInteger("hero+4", 1)
+    )");
+    CHECK(!result.ok && result.error.find("Writes allowed") != std::string::npos);
+    uint64_t hero = 0;
+    CHECK(h.options.userSymbols->Find("HERO", hero) && hero == 0x10000020);
+    result = h.Run("return readInteger('hero'), getNameFromAddress('PlayerBase'), getNameFromAddress(0x10000020)");
+    CHECK(result.ok && result.returned == "100\tgame.exe+100\t10000020");
+    result = h.Run("return inModule('game.exe+10'), inModule(0x10000000), inSystemModule('game.exe')");
+    CHECK(result.ok && result.returned == "true\tfalse\tfalse");
+    result = h.Run("unregisterSymbol('hero') return getAddressSafe('hero')");
+    CHECK(result.ok && result.returned == "nil");
+    result = h.Run("registerSymbol('bad name', 1)");
+    CHECK(!result.ok && result.error.find("invalid symbol name") != std::string::npos);
+    result = h.Run("return readShortInteger('[PlayerBase]+20')");
+    CHECK(result.ok && result.returned == "100");
+
+    // The same names work in address expressions outside Lua.
+    cortex::application::TargetSymbols symbols;
+    symbols.SetModules(h.options.modules());
+    symbols.SetExportReader(h.options.exports);
+    symbols.SetUserSymbols(h.options.userSymbols);
+    h.options.userSymbols->Set("Player", 0x1234);
+    uint64_t value = 0;
+    CHECK(symbols.Resolve("player", value) && value == 0x1234);
+    CHECK(symbols.Resolve("GAME.EXE", value) && value == 0x400000);
+    CHECK(symbols.Resolve("game.exe.PlayerBase", value) && value == 0x400100);
+    CHECK(!symbols.Resolve("game.exe.Missing", value));
+    CHECK(!symbols.Resolve("other!PlayerBase", value));
+    const auto found = symbols.Search("PLAYER", 10);
+    CHECK(found.size() == 1 && found[0].first == "game.exe.PlayerBase" && found[0].second == 0x400100);
+    CHECK(symbols.Search("nothing", 10).empty());
+
+    // Forwarded exports lead to the module they name.
+    cortex::application::TargetSymbols forwarded;
+    std::vector<cortex::target::ModuleInfo> modules(2);
+    modules[0].name = "KERNEL32.DLL";
+    modules[0].base = 0x70000000;
+    modules[1].name = "ntdll.dll";
+    modules[1].base = 0x77000000;
+    forwarded.SetModules(modules);
+    forwarded.SetExportReader([](const cortex::target::ModuleInfo& module) {
+        std::vector<cortex::application::TargetSymbols::ExportEntry> list;
+        if (module.name == "ntdll.dll") list.push_back({"RtlAllocateHeap", 0x77001000, ""});
+        else list.push_back({"HeapAlloc", 0, "NTDLL.RtlAllocateHeap"}), list.push_back({"Loop", 0, "KERNEL32.Loop"});
+        return list;
+    });
+    CHECK(forwarded.Resolve("kernel32.HeapAlloc", value) && value == 0x77001000);
+    CHECK(forwarded.Resolve("HeapAlloc", value) && value == 0x77001000);
+    CHECK(!forwarded.Resolve("kernel32.Loop", value));
+    const auto heap = forwarded.Search("heapalloc", 10);
+    CHECK(heap.size() == 1 && heap[0].first == "KERNEL32.DLL.HeapAlloc" && heap[0].second == 0x77001000);
+}
+
 void TestConversionsAndLimits() {
     Harness h;
     auto result = h.Run(R"(
@@ -198,6 +269,7 @@ int main() {
     TestReads();
     TestWrites();
     TestScansAndModules();
+    TestSymbols();
     TestConversionsAndLimits();
     if (failures) {
         std::cerr << failures << " check(s) failed" << std::endl;

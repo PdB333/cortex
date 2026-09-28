@@ -176,6 +176,11 @@ public:
                        std::vector<uint8_t>& bytes, std::string* error = nullptr);
     static std::string Format(const uint8_t* data, size_t size, ScanDataType type,
                               bool hex = false, bool unsignedValues = false, bool utf16 = false);
+    // current +/- delta for a numeric type (Increase/Decrease value hotkeys).
+    // Integers wrap around like the game's own arithmetic.
+    static bool Adjust(const std::vector<uint8_t>& current, ScanDataType type, bool hex,
+                       const std::string& delta, bool increase, std::vector<uint8_t>& out,
+                       std::string* error = nullptr);
 };
 
 } // namespace cortex::services

@@ -187,6 +187,7 @@ bool SettingsStore::Load(std::string* error) {
         values_.scanMappedMemory = getBool("scanMappedMemory", false);
         values_.scanFloatRounding = NormalizeRounding(getString("scanFloatRounding", "rounded"));
         values_.scanResultRefreshMs = Clamp(getInt("scanResultRefreshMs", 500), 100, 10000);
+        values_.freezeIntervalMs = Clamp(getInt("freezeIntervalMs", 100), 10, 10000);
 
         values_.debuggerBackend = NormalizeBackend(getString("debuggerBackend", "windows"));
         values_.breakpointDefaultAction = NormalizeBreakpointAction(getString("breakpointDefaultAction", "log"));
@@ -241,6 +242,7 @@ bool SettingsStore::Save(std::string* error) const {
             {"scanMappedMemory", values_.scanMappedMemory},
             {"scanFloatRounding", values_.scanFloatRounding},
             {"scanResultRefreshMs", values_.scanResultRefreshMs},
+            {"freezeIntervalMs", values_.freezeIntervalMs},
             {"debuggerBackend", values_.debuggerBackend},
             {"breakpointDefaultAction", values_.breakpointDefaultAction},
             {"hardwareBreakpointsGlobal", values_.hardwareBreakpointsGlobal},

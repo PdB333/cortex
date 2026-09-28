@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cortex::application {
@@ -9,6 +10,17 @@ namespace cortex::application {
 // Cheat Engine cheat tables (.CT): the XML file Cheat Engine saves its
 // address list to. Cortex reads and writes the address entries (values,
 // strings, byte arrays, pointers, groups); scripts are reported but not run.
+
+struct CheatTableHotkey {
+    std::string action = "Toggle Activation";  // Cheat Engine's names (Set Value, Increase Value...)
+    std::vector<unsigned> keys;                // virtual-key codes held together
+    std::string value;                         // Set / Increase / Decrease Value
+};
+
+struct CheatTableDropDown {
+    std::string value;
+    std::string label;
+};
 
 struct CheatTableEntry {
     std::string description;
@@ -22,6 +34,11 @@ struct CheatTableEntry {
     bool groupHeader = false;
     bool script = false;
     int depth = 0;                         // nesting inside group headers
+    bool collapsed = false;                // group shown closed (moHideChildren)
+    int64_t color = -1;                    // description color, 0xRRGGBB; -1 = default
+    std::vector<CheatTableHotkey> hotkeys;
+    std::vector<CheatTableDropDown> dropDown;  // value:label list shown instead of the value
+    bool dropDownDescriptionOnly = false;
 };
 
 struct CheatTable {
@@ -29,6 +46,8 @@ struct CheatTable {
     size_t scripts = 0;                    // Auto Assembler scripts that were skipped
     size_t unsupported = 0;                // other entry types that were skipped
     std::string luaScript;
+    // UserdefinedSymbols: name and address expression.
+    std::vector<std::pair<std::string, std::string>> userSymbols;
 };
 
 bool ParseCheatTable(const std::string& xml, CheatTable& table, std::string* error = nullptr);

@@ -19,6 +19,13 @@ struct XmlNode {
     std::string name;
     std::string text;
     std::vector<XmlNode> children;
+    std::vector<std::pair<std::string, std::string>> attributes;
+
+    std::string Attribute(const char* key) const {
+        for (const auto& attribute : attributes)
+            if (attribute.first == key) return attribute.second;
+        return {};
+    }
 
     const XmlNode* Child(const char* childName) const {
         for (const auto& child : children)
@@ -125,14 +132,30 @@ private:
                s_[pos_] != '/')
             ++pos_;
         node.name = s_.substr(nameStart, pos_ - nameStart);
-        // Skip attributes, honoring quoted values.
+        // Attributes: name="value" or name='value'.
         while (pos_ < s_.size() && s_[pos_] != '>' && !(s_[pos_] == '/' && pos_ + 1 < s_.size() && s_[pos_ + 1] == '>')) {
-            if (s_[pos_] == '"' || s_[pos_] == '\'') {
+            if (std::isspace(static_cast<unsigned char>(s_[pos_]))) {
+                ++pos_;
+                continue;
+            }
+            const size_t keyStart = pos_;
+            while (pos_ < s_.size() && s_[pos_] != '=' && s_[pos_] != '>' && s_[pos_] != '/' &&
+                   !std::isspace(static_cast<unsigned char>(s_[pos_])))
+                ++pos_;
+            std::string key = s_.substr(keyStart, pos_ - keyStart);
+            while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
+            if (pos_ >= s_.size() || s_[pos_] != '=') {
+                if (key.empty()) ++pos_;
+                continue;
+            }
+            ++pos_;
+            while (pos_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[pos_]))) ++pos_;
+            if (pos_ < s_.size() && (s_[pos_] == '"' || s_[pos_] == '\'')) {
                 const char quote = s_[pos_];
                 const auto end = s_.find(quote, pos_ + 1);
+                const size_t stop = end == std::string::npos ? s_.size() : end;
+                node.attributes.emplace_back(std::move(key), Decode(s_.substr(pos_ + 1, stop - pos_ - 1)));
                 pos_ = end == std::string::npos ? s_.size() : end + 1;
-            } else {
-                ++pos_;
             }
         }
         if (pos_ >= s_.size()) {
@@ -246,6 +269,38 @@ void ReadEntries(const XmlNode& list, int depth, CheatTable& table) {
                 entry.offsets.push_back(static_cast<uint32_t>(std::strtoul(Trim(it->text).c_str(), nullptr, 16)));
             }
         }
+        if (const XmlNode* options = node.Child("Options"))
+            entry.collapsed = options->Attribute("moHideChildren") == "1";
+        const std::string color = Trim(node.ChildText("Color"));
+        if (!color.empty()) {
+            // A Delphi TColor: 0x00BBGGRR; the high byte marks system colors.
+            const unsigned long bgr = std::strtoul(color.c_str(), nullptr, 16);
+            if (!(bgr & 0xFF000000ul))
+                entry.color = static_cast<int64_t>(((bgr & 0xFF) << 16) | (bgr & 0xFF00) | ((bgr >> 16) & 0xFF));
+        }
+        if (const XmlNode* list = node.Child("DropDownList")) {
+            entry.dropDownDescriptionOnly = list->Attribute("DescriptionOnly") == "1";
+            std::istringstream lines(list->text);
+            std::string line;
+            while (std::getline(lines, line)) {
+                line = Trim(line);
+                const auto colon = line.find(':');
+                if (line.empty() || colon == std::string::npos) continue;
+                entry.dropDown.push_back({Trim(line.substr(0, colon)), Trim(line.substr(colon + 1))});
+            }
+        }
+        if (const XmlNode* hotkeys = node.Child("Hotkeys")) {
+            for (const auto& item : hotkeys->children) {
+                if (item.name != "Hotkey") continue;
+                CheatTableHotkey hotkey;
+                hotkey.action = Trim(item.ChildText("Action"));
+                hotkey.value = Trim(item.ChildText("Value"));
+                if (const XmlNode* keys = item.Child("Keys"))
+                    for (const auto& key : keys->children)
+                        if (key.name == "Key") hotkey.keys.push_back(static_cast<unsigned>(std::strtoul(Trim(key.text).c_str(), nullptr, 10)));
+                if (!hotkey.action.empty() && !hotkey.keys.empty()) entry.hotkeys.push_back(std::move(hotkey));
+            }
+        }
         if (entry.variableType == "Auto Assembler Script" || node.Child("AssemblerScript")) {
             entry.script = true;
             ++table.scripts;
@@ -271,6 +326,14 @@ bool ParseCheatTable(const std::string& xml, CheatTable& table, std::string* err
     }
     if (const XmlNode* entries = root.Child("CheatEntries")) ReadEntries(*entries, 0, table);
     table.luaScript = root.ChildText("LuaScript");
+    if (const XmlNode* symbols = root.Child("UserdefinedSymbols")) {
+        for (const auto& item : symbols->children) {
+            if (item.name != "SymbolEntry") continue;
+            const std::string name = Trim(item.ChildText("Name"));
+            const std::string address = Trim(item.ChildText("Address"));
+            if (!name.empty() && !address.empty()) table.userSymbols.emplace_back(name, address);
+        }
+    }
     return true;
 }
 
@@ -292,6 +355,20 @@ std::string WriteCheatTable(const CheatTable& table) {
         out << in << "<CheatEntry>\n";
         out << field << "<ID>" << id++ << "</ID>\n";
         out << field << "<Description>\"" << Escape(entry.description) << "\"</Description>\n";
+        if (entry.collapsed) out << field << "<Options moHideChildren=\"1\"/>\n";
+        if (entry.color >= 0) {
+            const auto rgb = static_cast<unsigned long>(entry.color);
+            char buffer[16] = {};
+            std::snprintf(buffer, sizeof(buffer), "%06lX",
+                          ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF));
+            out << field << "<Color>" << buffer << "</Color>\n";
+        }
+        if (!entry.dropDown.empty()) {
+            out << field << "<DropDownList DescriptionOnly=\"" << (entry.dropDownDescriptionOnly ? 1 : 0)
+                << "\" DisplayValueAsItem=\"1\">";
+            for (const auto& item : entry.dropDown) out << Escape(item.value) << ":" << Escape(item.label) << "\n";
+            out << "</DropDownList>\n";
+        }
         if (entry.groupHeader) {
             out << field << "<GroupHeader>1</GroupHeader>\n";
         } else {
@@ -316,6 +393,21 @@ std::string WriteCheatTable(const CheatTable& table) {
                 out << field << "</Offsets>\n";
             }
         }
+        if (!entry.hotkeys.empty()) {
+            out << field << "<Hotkeys>\n";
+            int hotkeyId = 0;
+            for (const auto& hotkey : entry.hotkeys) {
+                out << field << "  <Hotkey>\n";
+                out << field << "    <Action>" << Escape(hotkey.action) << "</Action>\n";
+                out << field << "    <Keys>\n";
+                for (const unsigned key : hotkey.keys) out << field << "      <Key>" << key << "</Key>\n";
+                out << field << "    </Keys>\n";
+                if (!hotkey.value.empty()) out << field << "    <Value>" << Escape(hotkey.value) << "</Value>\n";
+                out << field << "    <ID>" << hotkeyId++ << "</ID>\n";
+                out << field << "  </Hotkey>\n";
+            }
+            out << field << "</Hotkeys>\n";
+        }
         const bool hasChildren = i + 1 < table.entries.size() && table.entries[i + 1].depth > entry.depth;
         if (hasChildren) {
             out << field << "<CheatEntries>\n";
@@ -328,7 +420,17 @@ std::string WriteCheatTable(const CheatTable& table) {
         --open;
         out << indent(open * 2 + 1) << "</CheatEntries>\n" << indent(open * 2) << "</CheatEntry>\n";
     }
-    out << "  </CheatEntries>\n  <UserdefinedSymbols/>\n";
+    out << "  </CheatEntries>\n";
+    if (table.userSymbols.empty()) {
+        out << "  <UserdefinedSymbols/>\n";
+    } else {
+        out << "  <UserdefinedSymbols>\n";
+        for (const auto& symbol : table.userSymbols) {
+            out << "    <SymbolEntry>\n      <Name>" << Escape(symbol.first) << "</Name>\n      <Address>"
+                << Escape(symbol.second) << "</Address>\n    </SymbolEntry>\n";
+        }
+        out << "  </UserdefinedSymbols>\n";
+    }
     if (!table.luaScript.empty()) out << "  <LuaScript>" << Escape(table.luaScript) << "</LuaScript>\n";
     out << "</CheatTable>\n";
     return out.str();
@@ -366,8 +468,12 @@ bool ParseCheatAddress(const std::string& raw, std::string& module, uint64_t& of
     std::string number = text;
     if (plus != std::string::npos && plus > 0) {
         module = Trim(text.substr(0, plus));
-        if (module.size() >= 2 && module.front() == '"' && module.back() == '"')
+        if (module.size() >= 2 && module.front() == '"' && module.back() == '"') {
             module = module.substr(1, module.size() - 2);
+            if (module.find('"') != std::string::npos) return false;
+        } else if (module.find_first_of("[]()*+\"' ") != std::string::npos) {
+            return false;  // an address expression, not name+offset
+        }
         number = Trim(text.substr(plus + 1));
     }
     if (number.size() > 2 && number[0] == '0' && (number[1] == 'x' || number[1] == 'X')) number.erase(0, 2);

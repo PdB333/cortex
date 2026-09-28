@@ -1,4 +1,5 @@
 #include "lua_workspace.h"
+#include "address_resolver.h"
 #include "widgets.h"
 #include "file_dialog.h"
 
@@ -96,6 +97,8 @@ void LuaWorkspace::Execute(UiContext& context) {
         output->lines.push_back(line);
         if (output->lines.size() > 5000) output->lines.erase(output->lines.begin(), output->lines.begin() + 1000);
     };
+    options.exports = MakeExportReader(session);
+    options.userSymbols = context.userSymbols;
     auto* modules = context.modules;
     options.modules = [modules]() {
         std::string error;
@@ -121,6 +124,20 @@ void LuaWorkspace::Execute(UiContext& context) {
         if (!result.returned.empty()) output->lines.push_back("= " + result.returned);
         return std::string("finished") + timing;
     });
+}
+
+// A cheat table's script lands in the editor; the user reviews and runs it.
+void LuaWorkspace::Tick(UiContext& context) {
+    if (context.luaScriptRequest.empty() || running_) return;
+    if (context.luaScriptRequest.size() >= source_.size()) {
+        context.status = "The table's Lua script is too large for the editor";
+    } else {
+        std::snprintf(source_.data(), source_.size(), "%s", context.luaScriptRequest.c_str());
+        initialized_ = true;
+        file_.clear();
+        status_ = "Loaded the cheat table's Lua script: review it, then Execute";
+    }
+    context.luaScriptRequest.clear();
 }
 
 void LuaWorkspace::Draw(UiContext& context) {

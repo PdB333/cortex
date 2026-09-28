@@ -1,4 +1,6 @@
 #include "memory_workspace.h"
+#include "memory_workspace_internal.h"
+#include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -23,137 +25,7 @@
 namespace cortex::ui {
 namespace {
 
-using services::ScanCompare;
-using services::ScanDataType;
-using services::ScanTristate;
-using services::ValueScanner;
-
-constexpr ScanDataType kTypes[] = {
-    ScanDataType::Byte, ScanDataType::Int16, ScanDataType::Int32, ScanDataType::Int64,
-    ScanDataType::Float, ScanDataType::Double, ScanDataType::String, ScanDataType::ByteArray,
-    ScanDataType::AllNumeric
-};
-
-const char* const kRoundingNames[] = {
-    "Rounded (default)", "Rounded (extreme)", "Truncated", "Exact"
-};
-
-std::string Hex(uint64_t value) {
-    char buffer[32] = {};
-    std::snprintf(buffer, sizeof(buffer), "0x%llX", static_cast<unsigned long long>(value));
-    return buffer;
-}
-
-std::string Lower(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return text;
-}
-
-std::string Trim(const std::string& text) {
-    const auto begin = text.find_first_not_of(" \t\r\n");
-    if (begin == std::string::npos) return {};
-    const auto end = text.find_last_not_of(" \t\r\n");
-    return text.substr(begin, end - begin + 1);
-}
-
-bool ParseHex(const std::string& raw, uint64_t& value) {
-    std::string text = Trim(raw);
-    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text.erase(0, 2);
-    if (text.empty() || text.size() > 16) return false;
-    for (const char ch : text)
-        if (!std::isxdigit(static_cast<unsigned char>(ch))) return false;
-    value = std::strtoull(text.c_str(), nullptr, 16);
-    return true;
-}
-
-bool IsText(ScanDataType type) {
-    return type == ScanDataType::String || type == ScanDataType::ByteArray;
-}
-
-// Addresses workspace and live watches name numeric types this way.
-std::string PersistentType(ScanDataType type, bool isUnsigned) {
-    switch (type) {
-        case ScanDataType::Byte: return isUnsigned ? "u8" : "i8";
-        case ScanDataType::Int16: return isUnsigned ? "u16" : "i16";
-        case ScanDataType::Int32: return isUnsigned ? "u32" : "i32";
-        case ScanDataType::Int64: return isUnsigned ? "u64" : "i64";
-        case ScanDataType::Float: return "float";
-        case ScanDataType::Double: return "double";
-        default: return {};
-    }
-}
-
-ScanDataType TypeFromSetting(const std::string& value) {
-    if (value == "byte") return ScanDataType::Byte;
-    if (value == "i16") return ScanDataType::Int16;
-    if (value == "i64") return ScanDataType::Int64;
-    if (value == "f32") return ScanDataType::Float;
-    if (value == "f64") return ScanDataType::Double;
-    if (value == "string") return ScanDataType::String;
-    if (value == "bytes") return ScanDataType::ByteArray;
-    if (value == "all") return ScanDataType::AllNumeric;
-    return ScanDataType::Int32;
-}
-
-int RoundingFromSetting(const std::string& value) {
-    if (value == "extreme") return 1;
-    if (value == "truncated") return 2;
-    if (value == "exact") return 3;
-    return 0;
-}
-
-// -1, 0 or 1 comparing two stored values of a numeric type.
-int CompareStored(ScanDataType type, bool isUnsigned, const std::vector<uint8_t>& left,
-                  const std::vector<uint8_t>& right) {
-    const size_t size = ValueScanner::TypeSize(type);
-    if (!size || left.size() < size || right.size() < size) return 0;
-    if (type == ScanDataType::Float || type == ScanDataType::Double) {
-        double a = 0.0;
-        double b = 0.0;
-        if (type == ScanDataType::Float) {
-            float fa = 0.0f;
-            float fb = 0.0f;
-            std::memcpy(&fa, left.data(), 4);
-            std::memcpy(&fb, right.data(), 4);
-            a = fa;
-            b = fb;
-        } else {
-            std::memcpy(&a, left.data(), 8);
-            std::memcpy(&b, right.data(), 8);
-        }
-        return a < b ? -1 : (a > b ? 1 : 0);
-    }
-    uint64_t a = 0;
-    uint64_t b = 0;
-    std::memcpy(&a, left.data(), size);
-    std::memcpy(&b, right.data(), size);
-    if (!isUnsigned) {
-        const unsigned shift = static_cast<unsigned>(64 - size * 8);
-        const int64_t sa = shift ? static_cast<int64_t>(a << shift) >> shift : static_cast<int64_t>(a);
-        const int64_t sb = shift ? static_cast<int64_t>(b << shift) >> shift : static_cast<int64_t>(b);
-        return sa < sb ? -1 : (sa > sb ? 1 : 0);
-    }
-    return a < b ? -1 : (a > b ? 1 : 0);
-}
-
-bool TypeCombo(const char* id, int* index, bool includeAll) {
-    bool changed = false;
-    const auto current = static_cast<ScanDataType>(*index);
-    if (ImGui::BeginCombo(id, ValueScanner::TypeName(current))) {
-        for (const auto type : kTypes) {
-            if (!includeAll && type == ScanDataType::AllNumeric) continue;
-            const bool selected = type == current;
-            if (ImGui::Selectable(ValueScanner::TypeName(type), selected)) {
-                *index = static_cast<int>(type);
-                changed = true;
-            }
-            if (selected) ImGui::SetItemDefaultFocus();
-        }
-        ImGui::EndCombo();
-    }
-    return changed;
-}
+using namespace memory_internal;
 
 } // namespace
 
@@ -252,7 +124,18 @@ void MemoryWorkspace::ResetForTarget(UiContext& context, const std::string& targ
     CancelScan();
     SetScan(nullptr);
     undo_.reset();
-    addresses_.clear();
+    // The address list stays, like Cheat Engine's: module, pointer and
+    // expression entries resolve again in the new process. Frozen values
+    // are released so nothing is written into it unasked.
+    bool released = false;
+    for (auto& entry : addresses_) {
+        released |= entry.freeze;
+        entry.freeze = false;
+        entry.readable = false;
+        entry.lastValue.clear();
+    }
+    if (released && !targetId.empty()) context.status = "Frozen entries were released for the new process";
+    lastAddressRefresh_ = {};
     modules_.clear();
     lastModuleRefresh_ = {};
     compare_ = ScanCompare::Exact;
@@ -396,18 +279,7 @@ std::string MemoryWorkspace::AddressText(uint64_t address, bool& isStatic) const
 bool MemoryWorkspace::ResolveAddress(UiContext& context, const std::string& raw, uint64_t& address) {
     const std::string text = Trim(raw);
     if (ParseHex(text, address) && address != 0) return true;
-    const auto plus = text.find_last_of('+');
-    if (plus == std::string::npos || plus == 0) return false;
-    uint64_t offset = 0;
-    if (!ParseHex(text.substr(plus + 1), offset)) return false;
-    const std::string name = Lower(Trim(text.substr(0, plus)));
-    RefreshModules(context, true);
-    for (const auto& module : modules_) {
-        if (Lower(module.name) != name) continue;
-        address = module.base + offset;
-        return true;
-    }
-    return false;
+    return !text.empty() && EvaluateContextAddress(context, text, address);
 }
 
 const std::vector<uint8_t>& MemoryWorkspace::LiveValue(UiContext& context, size_t index) {
@@ -527,338 +399,6 @@ void MemoryWorkspace::CopyResults(const std::vector<size_t>& rows) const {
 }
 
 // ------------------------------------------------------------------ address list
-
-bool MemoryWorkspace::HasAddress(uint64_t address, ScanDataType type) const {
-    return std::any_of(addresses_.begin(), addresses_.end(), [&](const AddressEntry& entry) {
-        return entry.address == address && entry.type == type;
-    });
-}
-
-std::string MemoryWorkspace::FormatEntry(const AddressEntry& entry) const {
-    if (!entry.readable) return "??";
-    return ValueScanner::Format(entry.lastValue.data(), entry.lastValue.size(), entry.type, entry.hex,
-                                entry.unsignedValue, entry.utf16);
-}
-
-std::string MemoryWorkspace::PointerText(const AddressEntry& entry) const {
-    char buffer[32] = {};
-    std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
-    std::string text = entry.module.empty() ? Hex(entry.baseOffset) : entry.module + buffer;
-    for (const auto offset : entry.offsets) {
-        std::snprintf(buffer, sizeof(buffer), " -> %X", offset);
-        text += buffer;
-    }
-    return text;
-}
-
-bool MemoryWorkspace::ResolveEntry(UiContext& context, AddressEntry& entry) {
-    if (entry.group || !entry.expression.empty() || !context.memory) return false;
-    if (entry.module.empty() && entry.offsets.empty()) return true;
-    uint64_t address = entry.baseOffset;
-    if (!entry.module.empty()) {
-        const target::ModuleInfo* module = nullptr;
-        for (const auto& candidate : modules_)
-            if (Lower(candidate.name) == Lower(entry.module)) module = &candidate;
-        if (!module) return false;
-        address = module->base + entry.baseOffset;
-    }
-    for (const auto offset : entry.offsets) {
-        std::vector<uint8_t> bytes;
-        std::string error;
-        if (!context.memory->Read(address, entry.pointerSize, bytes, &error) || bytes.size() != entry.pointerSize)
-            return false;
-        uint64_t value = 0;
-        std::memcpy(&value, bytes.data(), entry.pointerSize);
-        address = value + offset;
-    }
-    entry.address = address;
-    return true;
-}
-
-// An absolute address inside a module becomes module+offset, which stays
-// valid after the game restarts.
-void MemoryWorkspace::MakeStatic(AddressEntry& entry) const {
-    if (!entry.module.empty() || !entry.offsets.empty() || entry.group) return;
-    if (const auto* module = ModuleFor(entry.address)) {
-        entry.module = module->name;
-        entry.baseOffset = entry.address - module->base;
-    }
-}
-
-void MemoryWorkspace::SelectEntry(size_t index) {
-    const ImGuiIO& io = ImGui::GetIO();
-    if (io.KeyShift && selectionAnchor_ < addresses_.size()) {
-        const size_t from = std::min(selectionAnchor_, index);
-        const size_t to = std::max(selectionAnchor_, index);
-        for (size_t i = 0; i < addresses_.size(); ++i) addresses_[i].selected = i >= from && i <= to;
-        return;
-    }
-    if (io.KeyCtrl) {
-        addresses_[index].selected = !addresses_[index].selected;
-    } else {
-        for (auto& entry : addresses_) entry.selected = false;
-        addresses_[index].selected = true;
-    }
-    selectionAnchor_ = index;
-}
-
-void MemoryWorkspace::OpenTable(UiContext& context) {
-    std::string path = tablePath_;
-    if (!ShowOpenFileDialog(L"Cheat tables (*.CT)\0*.CT\0All files\0*.*\0", path)) return;
-    application::CheatTable table;
-    std::string error;
-    if (!application::LoadCheatTable(path, table, &error)) {
-        context.status = "Open table failed: " + error;
-        return;
-    }
-    const auto session = context.sessions ? context.sessions->Active() : nullptr;
-    const unsigned pointerSize = session && session->Target().architecture == target::Architecture::X86 ? 4u : 8u;
-    size_t imported = 0;
-    for (const auto& item : table.entries) {
-        AddressEntry entry;
-        entry.description = item.description.empty() ? "No description" : item.description;
-        entry.depth = item.depth;
-        entry.group = item.groupHeader;
-        entry.hex = item.showAsHex;
-        entry.unsignedValue = !item.showAsSigned;
-        entry.utf16 = item.unicode;
-        entry.pointerSize = pointerSize;
-        if (!entry.group) {
-            const std::string& type = item.variableType;
-            entry.type = type == "Byte" ? ScanDataType::Byte : type == "2 Bytes" ? ScanDataType::Int16
-                       : type == "8 Bytes" ? ScanDataType::Int64 : type == "Float" ? ScanDataType::Float
-                       : type == "Double" ? ScanDataType::Double : type == "String" ? ScanDataType::String
-                       : type == "Array of byte" ? ScanDataType::ByteArray : ScanDataType::Int32;
-            const size_t fixed = ValueScanner::TypeSize(entry.type);
-            entry.size = fixed ? fixed
-                : static_cast<size_t>(std::max(1, item.length)) * (entry.type == ScanDataType::String && item.unicode ? 2 : 1);
-            entry.offsets = item.offsets;
-            entry.pointer = !item.offsets.empty();
-            std::string module;
-            uint64_t offset = 0;
-            if (application::ParseCheatAddress(item.address, module, offset)) {
-                entry.module = module;
-                entry.baseOffset = offset;
-                if (module.empty() && !entry.pointer) entry.address = offset;
-            } else {
-                entry.expression = item.address;
-            }
-        }
-        addresses_.push_back(std::move(entry));
-        ++imported;
-    }
-    tablePath_ = path;
-    lastAddressRefresh_ = {};
-    context.status = "Opened " + std::to_string(imported) + " entr" + (imported == 1 ? "y" : "ies") + " from " + path;
-    if (table.scripts) context.status += "; " + std::to_string(table.scripts) + " Auto Assembler script(s) not imported";
-    if (table.unsupported) context.status += "; " + std::to_string(table.unsupported) + " unsupported entr(ies) skipped";
-}
-
-void MemoryWorkspace::SaveTable(UiContext& context) {
-    std::string path = tablePath_;
-    if (!ShowSaveFileDialog(L"Cheat tables (*.CT)\0*.CT\0All files\0*.*\0", L"CT", path)) return;
-    application::CheatTable table;
-    for (const auto& entry : addresses_) {
-        application::CheatTableEntry item;
-        item.description = entry.description;
-        item.depth = entry.depth;
-        item.groupHeader = entry.group;
-        item.showAsHex = entry.hex;
-        item.showAsSigned = !entry.unsignedValue;
-        item.unicode = entry.utf16;
-        if (!entry.group) {
-            switch (entry.type) {
-                case ScanDataType::Byte: item.variableType = "Byte"; break;
-                case ScanDataType::Int16: item.variableType = "2 Bytes"; break;
-                case ScanDataType::Int64: item.variableType = "8 Bytes"; break;
-                case ScanDataType::Float: item.variableType = "Float"; break;
-                case ScanDataType::Double: item.variableType = "Double"; break;
-                case ScanDataType::String: item.variableType = "String"; break;
-                case ScanDataType::ByteArray: item.variableType = "Array of byte"; break;
-                default: item.variableType = "4 Bytes"; break;
-            }
-            item.length = static_cast<int>(entry.type == ScanDataType::String && entry.utf16 ? entry.size / 2 : entry.size);
-            item.offsets = entry.offsets;
-            if (!entry.expression.empty()) item.address = entry.expression;
-            else if (!entry.module.empty() || entry.pointer) item.address = application::FormatCheatAddress(entry.module, entry.baseOffset);
-            else item.address = application::FormatCheatAddress("", entry.address);
-        }
-        table.entries.push_back(std::move(item));
-    }
-    std::string error;
-    if (!application::SaveCheatTable(path, table, &error)) {
-        context.status = "Save table failed: " + error;
-        return;
-    }
-    tablePath_ = path;
-    context.status = "Saved " + std::to_string(table.entries.size()) + " entr" +
-                     (table.entries.size() == 1 ? "y" : "ies") + " to " + path;
-}
-
-void MemoryWorkspace::TakePendingAddresses(UiContext& context) {
-    if (context.pendingAddresses.empty()) return;
-    for (auto& pending : context.pendingAddresses) {
-        AddressEntry entry;
-        entry.description = pending.description.empty() ? "No description" : pending.description;
-        entry.type = pending.type;
-        entry.size = std::max<size_t>(1, ValueScanner::TypeSize(pending.type));
-        entry.address = pending.address;
-        entry.pointer = !pending.offsets.empty();
-        entry.module = pending.module;
-        entry.baseOffset = pending.module.empty() && !entry.pointer ? pending.address : pending.baseOffset;
-        entry.offsets = pending.offsets;
-        entry.pointerSize = pending.pointerSize;
-        MakeStatic(entry);
-        addresses_.push_back(std::move(entry));
-    }
-    context.pendingAddresses.clear();
-    lastAddressRefresh_ = {};
-}
-
-void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
-    if (!context.memory) return;
-    const auto now = std::chrono::steady_clock::now();
-    if (lastAddressRefresh_.time_since_epoch().count() != 0 &&
-        now - lastAddressRefresh_ < std::chrono::milliseconds(100)) return;
-    lastAddressRefresh_ = now;
-
-    for (auto& entry : addresses_) {
-        std::vector<uint8_t> value;
-        std::string error;
-        if (entry.group) continue;
-        if (!ResolveEntry(context, entry)) {
-            entry.readable = false;
-            continue;
-        }
-        entry.readable = context.memory->Read(entry.address, std::max<size_t>(1, entry.size), value, &error) &&
-                         value.size() == std::max<size_t>(1, entry.size);
-        if (!entry.readable) continue;
-        entry.lastValue = std::move(value);
-
-        if (!entry.freeze || !context.mutationAllowed || entry.frozenValue.empty()) continue;
-        if (entry.freezeMode != FreezeMode::Always && ValueScanner::IsNumeric(entry.type)) {
-            const int order = CompareStored(entry.type, entry.unsignedValue, entry.lastValue, entry.frozenValue);
-            if ((entry.freezeMode == FreezeMode::AllowIncrease && order > 0) ||
-                (entry.freezeMode == FreezeMode::AllowDecrease && order < 0)) {
-                entry.frozenValue = entry.lastValue;
-                continue;
-            }
-        }
-        if (entry.lastValue != entry.frozenValue)
-            context.memory->Write(entry.address, entry.frozenValue, true, &error);
-    }
-}
-
-bool MemoryWorkspace::AddManualAddress(UiContext& context) {
-    if (!context.memory) return false;
-    AddressEntry entry;
-    std::string module;
-    uint64_t offset = 0;
-    if (!application::ParseCheatAddress(addAddress_, module, offset)) {
-        context.status = "Enter a hexadecimal address or module+offset";
-        return false;
-    }
-    entry.module = module;
-    entry.baseOffset = offset;
-    if (module.empty()) entry.address = offset;
-    if (addPointer_) {
-        std::string token;
-        for (const char ch : std::string(addOffsets_) + " ") {
-            if (std::isxdigit(static_cast<unsigned char>(ch)) || ch == 'x' || ch == 'X') {
-                token += ch;
-                continue;
-            }
-            uint64_t value = 0;
-            if (!token.empty() && ParseHex(token, value)) entry.offsets.push_back(static_cast<uint32_t>(value));
-            token.clear();
-        }
-        if (entry.offsets.empty()) {
-            context.status = "Enter the pointer offsets, in the order they are applied (hex)";
-            return false;
-        }
-        entry.pointer = true;
-    }
-    const auto session = context.sessions ? context.sessions->Active() : nullptr;
-    entry.pointerSize = session && session->Target().architecture == target::Architecture::X86 ? 4u : 8u;
-    entry.type = static_cast<ScanDataType>(addTypeIndex_);
-    entry.size = ValueScanner::TypeSize(entry.type);
-    if (!entry.size) {
-        const int length = std::clamp(addLength_, 1, 4096);
-        entry.size = static_cast<size_t>(length) * (entry.type == ScanDataType::String && addUtf16_ ? 2 : 1);
-    }
-    entry.utf16 = entry.type == ScanDataType::String && addUtf16_;
-    entry.description = *addDescription_ ? std::string(addDescription_) : "No description";
-    RefreshModules(context, true);
-    if (!ResolveEntry(context, entry)) {
-        context.status = module.empty() ? "The pointer chain cannot be followed" : "Module " + module + " is not loaded";
-        return false;
-    }
-    if (!entry.pointer && entry.module.empty() && HasAddress(entry.address, entry.type)) {
-        context.status = "Address is already in the list";
-        return false;
-    }
-    std::vector<uint8_t> value;
-    std::string error;
-    entry.readable = context.memory->Read(entry.address, entry.size, value, &error);
-    entry.lastValue = value;
-    entry.frozenValue = value;
-    addresses_.push_back(std::move(entry));
-    context.status = addresses_.back().readable ? "Address added" : "Address added; it cannot be read right now";
-    return true;
-}
-
-void MemoryWorkspace::BeginValueEdit(size_t index) {
-    if (index >= addresses_.size() || addresses_[index].group) return;
-    editAddressIndex_ = static_cast<int>(index);
-    const std::string current = FormatEntry(addresses_[index]);
-    std::snprintf(editValue_, sizeof(editValue_), "%s", current.c_str());
-    openEditValue_ = true;
-}
-
-bool MemoryWorkspace::CommitValueEdit(UiContext& context) {
-    if (!context.memory || !context.mutationAllowed || editAddressIndex_ < 0 ||
-        editAddressIndex_ >= static_cast<int>(addresses_.size())) {
-        context.status = "Allow writes before changing a value";
-        return false;
-    }
-    auto& entry = addresses_[static_cast<size_t>(editAddressIndex_)];
-    std::vector<uint8_t> bytes;
-    std::string error;
-    if (!ValueScanner::Encode(editValue_, entry.type, entry.hex, entry.utf16, bytes, &error)) {
-        context.status = error;
-        return false;
-    }
-    if (!context.memory->Write(entry.address, bytes, true, &error)) {
-        context.status = "Value write failed: " + error;
-        return false;
-    }
-    entry.size = bytes.size();
-    entry.lastValue = bytes;
-    entry.frozenValue = bytes;
-    context.status = "Value written";
-    return true;
-}
-
-void MemoryWorkspace::SaveEntryToProject(UiContext& context, const AddressEntry& entry) {
-    const std::string type = PersistentType(entry.type, entry.unsignedValue);
-    if (!context.projectModel || !context.mutationAllowed) {
-        context.status = "Allow writes to save addresses to the project";
-        return;
-    }
-    if (type.empty()) {
-        context.status = "Only numeric entries can be saved to Addresses";
-        return;
-    }
-    bool isStatic = false;
-    const std::string address = AddressText(entry.address, isStatic);
-    std::string error;
-    if (!context.projectModel->SetAddress(entry.description, isStatic ? address : Hex(entry.address), type,
-                                          "From the Memory address list", context.mutationAllowed, &error)) {
-        context.status = "Save to Addresses failed: " + error;
-        return;
-    }
-    context.status = "Saved to Addresses";
-}
 
 // ------------------------------------------------------------------ drawing
 
@@ -1314,317 +854,6 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
     ImGui::EndChild();
 }
 
-void MemoryWorkspace::DrawAddressList(UiContext& context) {
-    RefreshAddressValues(context);
-
-    ImGui::BeginChild("AddressList", ImVec2(0, 0), ImGuiChildFlags_Borders);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Address list");
-    ImGui::SameLine();
-    ImGui::TextDisabled("(%zu)", addresses_.size());
-    FlowSameLine(ButtonWidth("+ Add address"));
-    if (ImGui::Button("+ Add address")) openAddAddress_ = true;
-    FlowSameLine(ButtonWidth("Open table..."));
-    if (ImGui::Button("Open table...")) OpenTable(context);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add the entries of a Cheat Engine table (.CT)");
-    if (!addresses_.empty()) {
-        FlowSameLine(ButtonWidth("Save table..."));
-        if (ImGui::Button("Save table...")) SaveTable(context);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Save the list as a Cheat Engine table (.CT)");
-        FlowSameLine(ButtonWidth("Clear"));
-        if (ImGui::Button("Clear")) {
-            addresses_.clear();
-            context.status = "Address list cleared";
-        }
-    }
-    ImGui::Separator();
-
-    if (addresses_.empty()) {
-        ImGui::Dummy(ImVec2(0, Px(12)));
-        HintText("Double-click scan results to collect them here, then freeze or edit their values. "
-                 "Right-click an entry to save it to Addresses.");
-        ImGui::EndChild();
-        return;
-    }
-
-    if (BeginDataTable("AddressTable", 5,
-                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable |
-                           ImGuiTableFlags_ScrollY,
-                       ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Active", ImGuiTableColumnFlags_WidthFixed, Px(56.0f));
-        ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.26f);
-        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.14f);
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-        ImGui::TableHeadersRow();
-
-        for (size_t i = 0; i < addresses_.size();) {
-            auto& entry = addresses_[i];
-            bool remove = false;
-            ImGui::PushID(static_cast<int>(i));
-            ImGui::TableNextRow();
-
-            // Children of a group header follow it with a greater depth.
-            size_t groupEnd = i + 1;
-            if (entry.group)
-                while (groupEnd < addresses_.size() && addresses_[groupEnd].depth > entry.depth) ++groupEnd;
-
-            ImGui::TableSetColumnIndex(0);
-            ImGui::BeginDisabled(!context.mutationAllowed);
-            if (entry.group) {
-                bool all = groupEnd > i + 1;
-                for (size_t child = i + 1; child < groupEnd; ++child)
-                    all &= addresses_[child].group || addresses_[child].freeze;
-                if (ImGui::Checkbox("##Freeze", &all)) {
-                    for (size_t child = i + 1; child < groupEnd; ++child) {
-                        auto& item = addresses_[child];
-                        if (item.group) continue;
-                        if (all && !item.freeze) item.frozenValue = item.lastValue;
-                        item.freeze = all;
-                    }
-                }
-            } else if (ImGui::Checkbox("##Freeze", &entry.freeze) && entry.freeze) {
-                entry.frozenValue = entry.lastValue;
-            }
-            ImGui::EndDisabled();
-            if (entry.freeze && entry.freezeMode != FreezeMode::Always) {
-                ImGui::SameLine(0, Px(2));
-                ImGui::TextDisabled(entry.freezeMode == FreezeMode::AllowIncrease ? "+" : "-");
-            }
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip(context.mutationAllowed ? "Freeze: keep writing this value (Space)"
-                                                          : "Allow writes to freeze values");
-
-            ImGui::TableSetColumnIndex(1);
-            if (entry.depth > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(14) * static_cast<float>(entry.depth));
-            std::array<char, 160> description{};
-            std::snprintf(description.data(), description.size(), "%s", entry.description.c_str());
-            ImGui::SetNextItemWidth(-1);
-            if (entry.group) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
-            if (ImGui::InputText("##Description", description.data(), description.size(),
-                                 ImGuiInputTextFlags_EnterReturnsTrue))
-                entry.description = description.data();
-            if (ImGui::IsItemDeactivatedAfterEdit()) entry.description = description.data();
-            if (entry.group) ImGui::PopStyleColor();
-
-            ImGui::TableSetColumnIndex(2);
-            bool isStatic = !entry.module.empty() && !entry.pointer;
-            char staticText[64] = {};
-            if (isStatic) std::snprintf(staticText, sizeof(staticText), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
-            const std::string addressText = entry.group ? std::string()
-                : !entry.expression.empty() ? entry.expression
-                : entry.pointer ? "P->" + (entry.readable ? Hex(entry.address) : std::string("????????"))
-                : isStatic ? entry.module + staticText
-                : AddressText(entry.address, isStatic);
-            if (!entry.expression.empty()) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            else if (isStatic || entry.pointer) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
-            {
-                MonoFont mono;
-                if (ImGui::Selectable((addressText + "##Address").c_str(), entry.selected)) SelectEntry(i);
-            }
-            if (!entry.expression.empty() || isStatic || entry.pointer) ImGui::PopStyleColor();
-            if (!entry.group && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                ImGui::SetTooltip("%s", !entry.expression.empty() ? "A symbol Cortex cannot resolve; kept for the table"
-                                        : entry.pointer ? PointerText(entry).c_str() : Hex(entry.address).c_str());
-            ImGui::OpenPopupOnItemClick("EntryMenu");
-
-            ImGui::TableSetColumnIndex(3);
-            const std::string typeText = entry.group ? std::string("Group")
-                : std::string(ValueScanner::TypeName(entry.type)) +
-                      (entry.type == ScanDataType::String && entry.utf16 ? " (UTF-16)" : "");
-            ImGui::TextUnformatted(typeText.c_str());
-            ImGui::OpenPopupOnItemClick("EntryMenu");
-
-            ImGui::TableSetColumnIndex(4);
-            const std::string value = entry.group ? std::string() : FormatEntry(entry);
-            const bool changed = entry.readable && entry.freeze && entry.lastValue != entry.frozenValue;
-            if (changed) ImGui::PushStyleColor(ImGuiCol_Text, ChangedValueColor());
-            if (ImGui::Selectable(value.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
-                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                if (context.mutationAllowed) BeginValueEdit(i);
-                else context.status = "Allow writes to edit a value";
-            }
-            if (changed) ImGui::PopStyleColor();
-            if (ImGui::IsItemFocused() && context.mutationAllowed && ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
-                entry.freeze = !entry.freeze;
-                if (entry.freeze) entry.frozenValue = entry.lastValue;
-            }
-
-            ImGui::OpenPopupOnItemClick("EntryMenu");
-            if (entry.group && ImGui::BeginPopup("EntryMenu")) {
-                if (ImGui::MenuItem("Remove the group header")) remove = true;
-                if (ImGui::MenuItem("Remove the group and its entries")) {
-                    addresses_.erase(addresses_.begin() + static_cast<std::ptrdiff_t>(i) + 1,
-                                     addresses_.begin() + static_cast<std::ptrdiff_t>(groupEnd));
-                    remove = true;
-                }
-                ImGui::EndPopup();
-            } else if (!entry.group && ImGui::BeginPopup("EntryMenu")) {
-                ImGui::BeginDisabled(!context.mutationAllowed);
-                if (ImGui::MenuItem("Edit value...")) BeginValueEdit(i);
-                if (ImGui::MenuItem(entry.freeze ? "Unfreeze" : "Freeze", "Space")) {
-                    entry.freeze = !entry.freeze;
-                    if (entry.freeze) entry.frozenValue = entry.lastValue;
-                }
-                ImGui::EndDisabled();
-                if (ValueScanner::IsNumeric(entry.type) && ImGui::BeginMenu("Freeze mode")) {
-                    if (ImGui::MenuItem("Always write the value", nullptr, entry.freezeMode == FreezeMode::Always))
-                        entry.freezeMode = FreezeMode::Always;
-                    if (ImGui::MenuItem("Allow increases", nullptr, entry.freezeMode == FreezeMode::AllowIncrease))
-                        entry.freezeMode = FreezeMode::AllowIncrease;
-                    if (ImGui::MenuItem("Allow decreases", nullptr, entry.freezeMode == FreezeMode::AllowDecrease))
-                        entry.freezeMode = FreezeMode::AllowDecrease;
-                    ImGui::EndMenu();
-                }
-                if (ValueScanner::IsInteger(entry.type)) {
-                    ImGui::MenuItem("Show as hexadecimal", nullptr, &entry.hex);
-                    ImGui::MenuItem("Show as unsigned", nullptr, &entry.unsignedValue);
-                }
-                if (ImGui::BeginMenu("Change type")) {
-                    for (const auto type : kTypes) {
-                        if (type == ScanDataType::AllNumeric) continue;
-                        if (ImGui::MenuItem(ValueScanner::TypeName(type), nullptr, entry.type == type) &&
-                            entry.type != type) {
-                            const size_t fixed = ValueScanner::TypeSize(type);
-                            entry.size = fixed ? fixed : std::max<size_t>(entry.size, 8);
-                            entry.type = type;
-                            entry.freeze = false;
-                            entry.lastValue.clear();
-                            lastAddressRefresh_ = {};
-                        }
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::Separator();
-                ImGui::BeginDisabled(!context.mutationAllowed || !context.projectModel ||
-                                     PersistentType(entry.type, entry.unsignedValue).empty());
-                if (ImGui::MenuItem("Save to Addresses")) SaveEntryToProject(context, entry);
-                ImGui::EndDisabled();
-                if (ImGui::MenuItem("Copy address")) ImGui::SetClipboardText(Hex(entry.address).c_str());
-                if (isStatic && ImGui::MenuItem("Copy module+offset")) ImGui::SetClipboardText(addressText.c_str());
-                ImGui::Separator();
-                AddressContextOptions options;
-                options.label = entry.description;
-                options.valueType = PersistentType(entry.type, entry.unsignedValue);
-                if (options.valueType.empty()) options.valueType = "i32";
-                options.valueSize = static_cast<int>(entry.size);
-                DrawAddressContextActions(context, entry.address, options);
-                ImGui::Separator();
-                if (ImGui::MenuItem("Remove", "Delete")) remove = true;
-                ImGui::EndPopup();
-            }
-
-            ImGui::PopID();
-            if (remove) addresses_.erase(addresses_.begin() + static_cast<std::ptrdiff_t>(i));
-            else ++i;
-        }
-        ImGui::EndTable();
-    }
-
-    // Keyboard actions on the selected entries.
-    const bool anySelected = std::any_of(addresses_.begin(), addresses_.end(),
-                                         [](const AddressEntry& entry) { return entry.selected; });
-    if (anySelected && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
-            addresses_.erase(std::remove_if(addresses_.begin(), addresses_.end(),
-                                            [](const AddressEntry& entry) { return entry.selected; }),
-                             addresses_.end());
-            context.status = "Selected entries removed";
-        } else if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
-            if (!context.mutationAllowed) {
-                context.status = "Allow writes to freeze values";
-            } else {
-                for (auto& entry : addresses_) {
-                    if (!entry.selected || entry.group) continue;
-                    entry.freeze = !entry.freeze;
-                    if (entry.freeze) entry.frozenValue = entry.lastValue;
-                }
-            }
-        } else if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
-            for (auto& entry : addresses_) entry.selected = true;
-        }
-    }
-    ImGui::EndChild();
-}
-
-void MemoryWorkspace::DrawDialogs(UiContext& context) {
-    if (openAddAddress_) {
-        ImGui::OpenPopup("Add address");
-        openAddAddress_ = false;
-        addAddress_[0] = '\0';
-        addDescription_[0] = '\0';
-        addTypeIndex_ = static_cast<int>(ScanDataType::Int32);
-        addLength_ = 16;
-        addUtf16_ = false;
-        addPointer_ = false;
-        addOffsets_[0] = '\0';
-    }
-    ImGui::SetNextWindowSize(ImVec2(Px(430), 0), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Add address", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextDisabled("Address");
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint("##ManualAddress", "7FF6A1B20010 or game.exe+1A2B", addAddress_, sizeof(addAddress_));
-        ImGui::TextDisabled("Description");
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint("##ManualDescription", "Health", addDescription_, sizeof(addDescription_));
-        ImGui::TextDisabled("Type");
-        ImGui::SetNextItemWidth(-1);
-        TypeCombo("##ManualType", &addTypeIndex_, false);
-        ImGui::Checkbox("Pointer", &addPointer_);
-        if (addPointer_) {
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##ManualOffsets", "offsets in hex, base first: 10 48", addOffsets_,
-                                     sizeof(addOffsets_));
-        }
-        const auto type = static_cast<ScanDataType>(addTypeIndex_);
-        if (IsText(type)) {
-            ImGui::TextDisabled(type == ScanDataType::String ? "Length (characters)" : "Length (bytes)");
-            ImGui::SetNextItemWidth(Px(140));
-            if (ImGui::InputInt("##ManualLength", &addLength_)) addLength_ = std::clamp(addLength_, 1, 4096);
-            if (type == ScanDataType::String) {
-                ImGui::SameLine();
-                ImGui::Checkbox("UTF-16", &addUtf16_);
-            }
-        }
-        ImGui::Spacing();
-        if (ImGui::Button("Add", ImVec2(Px(120), Px(34))) && AddManualAddress(context)) ImGui::CloseCurrentPopup();
-        FlowSameLine(Px(100));
-        if (ImGui::Button("Cancel", ImVec2(Px(100), Px(34)))) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
-
-    if (openEditValue_) {
-        ImGui::OpenPopup("Edit value");
-        openEditValue_ = false;
-    }
-    ImGui::SetNextWindowSize(ImVec2(Px(430), 0), ImGuiCond_Appearing);
-    if (ImGui::BeginPopupModal("Edit value", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        if (editAddressIndex_ >= 0 && editAddressIndex_ < static_cast<int>(addresses_.size())) {
-            const auto& entry = addresses_[static_cast<size_t>(editAddressIndex_)];
-            MonoText("%s  (%s%s)", Hex(entry.address).c_str(), ValueScanner::TypeName(entry.type),
-                     entry.hex ? ", hexadecimal" : "");
-            ImGui::SetNextItemWidth(-1);
-            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-            const bool enter = ImGui::InputText("##EditedValue", editValue_, sizeof(editValue_),
-                                                ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::Spacing();
-            ImGui::BeginDisabled(!context.mutationAllowed);
-            if ((ImGui::Button("Write value", ImVec2(Px(130), Px(34))) || (enter && context.mutationAllowed)) &&
-                CommitValueEdit(context))
-                ImGui::CloseCurrentPopup();
-            ImGui::EndDisabled();
-            FlowSameLine(Px(100));
-            if (ImGui::Button("Cancel", ImVec2(Px(100), Px(34)))) ImGui::CloseCurrentPopup();
-        } else {
-            ImGui::TextDisabled("Address no longer exists.");
-            if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-}
-
 void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& command) {
     if (command.rfind("scan_range ", 0) == 0) {
         std::istringstream words(command.substr(11));
@@ -1651,20 +880,7 @@ void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& comma
         UndoScan(context);
         return;
     }
-    if (command == "freeze_toggle_all") {
-        if (!context.mutationAllowed) {
-            context.status = "Allow writes to freeze values";
-            return;
-        }
-        const bool freeze = std::any_of(addresses_.begin(), addresses_.end(),
-                                        [](const AddressEntry& entry) { return !entry.freeze; });
-        for (auto& entry : addresses_) {
-            if (freeze && !entry.freeze) entry.frozenValue = entry.lastValue;
-            entry.freeze = freeze;
-        }
-        context.status = freeze ? "Address list frozen" : "Address list unfrozen";
-        return;
-    }
+    if (HandleAddressCommand(context, command)) return;
 
     ScanCompare compare = compare_;
     if (command == "scan_exact") compare = ScanCompare::Exact;
@@ -1690,24 +906,19 @@ void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& comma
 }
 
 void MemoryWorkspace::Draw(UiContext& context) {
-    PollScan(context);
-
+    // Scans, target changes and frozen values run in Tick, every frame.
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
-    const std::string targetId = session ? session->Target().id : std::string();
-    if (targetId != activeTargetId_) ResetForTarget(context, targetId);
-
     if (!session) {
         DrawWelcome(context);
         DrawDialogs(context);
         return;
     }
-    RefreshModules(context);
-    TakePendingAddresses(context);
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float splitterHeight = Px(8.0f);
     const float upperHeight = std::clamp(
-        available.y * 0.55f, std::min(Px(260.0f), available.y),
-        std::max(Px(260.0f), available.y - ImGui::GetFrameHeightWithSpacing() * 5.0f));
+        available.y * upperRatio_, std::min(Px(200.0f), available.y),
+        std::max(Px(200.0f), available.y - splitterHeight - ImGui::GetFrameHeightWithSpacing() * 4.0f));
     const float scanPanelWidth = std::clamp(available.x * 0.30f, Px(270.0f), Px(380.0f));
     const float resultsWidth = std::max(Px(160.0f), available.x - scanPanelWidth - ImGui::GetStyle().ItemSpacing.x);
 
@@ -1721,7 +932,23 @@ void MemoryWorkspace::Draw(UiContext& context) {
     DrawScanPanel(context, upperHeight);
     ImGui::EndChild();
 
-    ImGui::Spacing();
+    // Drag to share the height between the scanner and the address list;
+    // double-click restores the default split.
+    ImGui::InvisibleButton("##ListSplitter", ImVec2(-1, splitterHeight));
+    const bool splitterActive = ImGui::IsItemActive();
+    if (splitterActive && available.y > 0)
+        upperRatio_ = std::clamp((upperHeight + ImGui::GetIO().MouseDelta.y) / available.y, 0.15f, 0.85f);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) upperRatio_ = 0.55f;
+    if (splitterActive || ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    {
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        const float y = (min.y + max.y) * 0.5f;
+        const ImU32 color = ImGui::GetColorU32(splitterActive || ImGui::IsItemHovered() ? ImGuiCol_SeparatorActive
+                                                                                         : ImGuiCol_Separator);
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(min.x + (max.x - min.x) * 0.45f, y),
+                                            ImVec2(min.x + (max.x - min.x) * 0.55f, y), color, Px(3.0f));
+    }
     DrawAddressList(context);
     DrawDialogs(context);
 }

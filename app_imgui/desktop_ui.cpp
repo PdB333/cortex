@@ -2,6 +2,7 @@
 // surface, background progress and the dock host.
 
 #include "desktop_app.h"
+#include "ui/address_resolver.h"
 
 #include <tlhelp32.h>
 
@@ -49,30 +50,10 @@ bool ResolveAddressExpression(AppState& app, const char* expression,
     }
     if (ParseAddressToken(value, address)) return true;
 
-    const size_t plus = value.find_last_of('+');
-    if (plus == std::string::npos || plus == 0 || plus + 1 >= value.size()) {
-        error = "Address not recognized";
-        return false;
-    }
-
-    const std::string moduleName = Lower(Trim(value.substr(0, plus)));
-    uint64_t offset = 0;
-    if (!ParseAddressToken(value.substr(plus + 1), offset, 16)) {
-        error = "Invalid module offset";
-        return false;
-    }
-
-    std::string moduleError;
-    const auto modules = app.modules.List(&moduleError);
-    for (const auto& module : modules) {
-        if (Lower(module.name) != moduleName) continue;
-        if (offset > std::numeric_limits<uint64_t>::max() - module.base) {
-            error = "Address overflow";
-            return false;
-        }
-        address = module.base + offset;
-        return true;
-    }
+    // Cheat Engine address expressions: module+offset, [pointer]+offset,
+    // module.Export, user-defined symbols...
+    std::string expressionError;
+    if (cortex::ui::EvaluateContextAddress(app.ui, value, address, &expressionError)) return true;
 
     if (app.projectModel.Refresh(nullptr)) {
         std::string projectExpression;
@@ -97,7 +78,7 @@ bool ResolveAddressExpression(AppState& app, const char* expression,
             return true;
     }
 
-    error = moduleError.empty() ? "Address, module, project or symbol not found" : moduleError;
+    error = expressionError.empty() ? "Address, module, project or symbol not found" : expressionError;
     return false;
 }
 

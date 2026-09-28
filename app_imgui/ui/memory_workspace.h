@@ -8,12 +8,17 @@
 #include <chrono>
 #include <cstdint>
 #include <future>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 struct ImGuiMultiSelectIO;
+
+namespace cortex::application {
+struct CheatTableEntry;
+}
 
 namespace cortex::ui {
 
@@ -23,6 +28,7 @@ public:
     const char* Title() const override { return "Memory"; }
     void Draw(UiContext& context) override;
     void HandleCommand(UiContext& context, const std::string& command) override;
+    void Tick(UiContext& context) override;
 
 private:
     struct ScanTask {
@@ -32,6 +38,23 @@ private:
     };
 
     enum class FreezeMode : uint8_t { Always = 0, AllowIncrease, AllowDecrease };
+
+    // Cheat Engine's per-entry hotkey actions, in its order.
+    enum class EntryHotkeyAction : uint8_t {
+        ToggleFreeze = 0, ToggleFreezeAllowIncrease, ToggleFreezeAllowDecrease,
+        Freeze, Unfreeze, SetValue, IncreaseValue, DecreaseValue
+    };
+
+    struct EntryHotkey {
+        std::string chord;  // "Ctrl+F1"
+        EntryHotkeyAction action = EntryHotkeyAction::ToggleFreeze;
+        std::string value;  // Set / Increase / Decrease value
+    };
+
+    struct DropDownItem {
+        std::string value;
+        std::string label;
+    };
 
     struct AddressEntry {
         uint64_t address = 0;
@@ -59,7 +82,15 @@ private:
         // not parse (a symbol), kept as written.
         bool group = false;
         int depth = 0;
+        bool collapsed = false;
+        // A Cheat Engine address expression ([[game.exe+10]+20]+8, symbols),
+        // evaluated on every refresh.
         std::string expression;
+        uint32_t uid = 0;              // stable id for hotkey commands
+        std::vector<EntryHotkey> hotkeys;
+        int64_t color = -1;            // description color, 0xRRGGBB
+        std::vector<DropDownItem> dropDown;
+        bool dropDownOnly = false;     // show the label without the value
     };
 
     // Layout
@@ -106,13 +137,31 @@ private:
     void SaveEntryToProject(UiContext& context, const AddressEntry& entry);
     std::string FormatEntry(const AddressEntry& entry) const;
     bool HasAddress(uint64_t address, services::ScanDataType type) const;
-    bool ResolveEntry(UiContext& context, AddressEntry& entry);
+    bool ResolveEntry(UiContext& context, AddressEntry& entry, std::string* error = nullptr);
     void MakeStatic(AddressEntry& entry) const;
     void OpenTable(UiContext& context);
     void SaveTable(UiContext& context);
     void SelectEntry(size_t index);
     void TakePendingAddresses(UiContext& context);
     std::string PointerText(const AddressEntry& entry) const;
+    std::string DisplayValue(const AddressEntry& entry) const;
+    bool HandleAddressCommand(UiContext& context, const std::string& command);
+    void RunEntryHotkey(UiContext& context, size_t index, const EntryHotkey& hotkey);
+    void SetFreeze(AddressEntry& entry, bool freeze);
+    void PublishHotkeys(UiContext& context);
+    application::CheatTableEntry ToTableEntry(const AddressEntry& entry) const;
+    AddressEntry FromTableEntry(const application::CheatTableEntry& item, unsigned pointerSize) const;
+    unsigned TargetPointerSize(UiContext& context) const;
+    void CopyEntries(bool selectedOnly);
+    void PasteEntries(UiContext& context);
+    void GroupSelected(UiContext& context);
+    size_t BlockEnd(size_t index) const;
+    void MoveBlock(size_t from, size_t before, int depth = -1);
+    void BeginAddressEdit(size_t index);
+    int EntryIndex(uint32_t uid) const;
+    void DrawEntryMenu(UiContext& context, size_t index, size_t groupEnd, bool& remove);
+    void DrawHotkeyDialog(UiContext& context);
+    void DrawDropDownDialog(UiContext& context);
 
     // Scan inputs
     char scanValue_[256] = "100";
@@ -177,6 +226,29 @@ private:
     char addOffsets_[128] = {};
     size_t selectionAnchor_ = 0;
     std::string tablePath_;
+    uint32_t nextUid_ = 1;
+    uint32_t editEntryUid_ = 0;       // Change address: the entry edited, 0 = Add
+    std::map<std::string, std::string> publishedHotkeys_;
+
+    // Entry hotkeys dialog
+    bool openHotkeys_ = false;
+    uint32_t hotkeyEntryUid_ = 0;
+    bool capturingEntryHotkey_ = false;
+    std::string newHotkeyChord_;
+    int newHotkeyAction_ = 0;
+    char newHotkeyValue_[64] = {};
+
+    // Dropdown list dialog
+    bool openDropDown_ = false;
+    uint32_t dropDownEntryUid_ = 0;
+    char dropDownText_[8192] = {};
+    bool dropDownOnlyEdit_ = false;
+
+    // A cheat table's Lua script, offered to the Lua engine.
+    std::string tableLuaScript_;
+    bool openLuaPrompt_ = false;
+
+    float upperRatio_ = 0.55f;        // scanner height / workspace height
 };
 
 } // namespace cortex::ui

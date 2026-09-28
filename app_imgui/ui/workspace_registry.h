@@ -328,6 +328,7 @@ public:
             for (const auto& command : commands)
                 for (auto& entry : entries_) entry.workspace->HandleCommand(context, command);
         }
+        for (auto& entry : entries_) entry.workspace->Tick(context);
         if (!context.requestWorkspace.empty()) {
             Select(context.requestWorkspace);
             context.requestWorkspace.clear();

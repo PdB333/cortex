@@ -19,6 +19,7 @@ public:
     const char* Id() const override { return "lua"; }
     const char* Title() const override { return "Lua engine"; }
     void Draw(UiContext& context) override;
+    void Tick(UiContext& context) override;
 
 private:
     struct Output {

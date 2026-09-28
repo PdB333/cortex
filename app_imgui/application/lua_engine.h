@@ -1,10 +1,12 @@
 #pragma once
 
+#include "address_expression.h"
 #include "target/module_provider.h"
 #include "target/session.h"
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,8 @@ struct LuaRunOptions {
     const std::atomic_bool* cancelled = nullptr;
     std::function<void(const std::string& line)> output;  // print()
     std::function<std::vector<target::ModuleInfo>()> modules;
+    TargetSymbols::ExportReader exports;       // module.Export names, optional
+    std::shared_ptr<UserSymbols> userSymbols;  // registerSymbol, optional
 };
 
 struct LuaRunResult {

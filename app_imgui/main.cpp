@@ -216,10 +216,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         if (done) break;
 
         if (!windowSmoke) {
-            app.ui.hotkeyFailures = app.hotkeys.Apply(hwnd, app.settings.Values().hotkeys);
+            // Settings hotkeys plus the per-entry hotkeys of the address list.
+            auto bindings = app.settings.Values().hotkeys;
+            bindings.insert(app.ui.entryHotkeys.begin(), app.ui.entryHotkeys.end());
+            app.ui.hotkeyFailures = app.hotkeys.Apply(hwnd, bindings);
             for (const int id : gHotkeyIds) {
-                const std::string action = app.hotkeys.ActionFor(id);
-                if (!action.empty() && !app.background.Active()) DispatchCommand(app, action);
+                if (app.background.Active()) break;
+                for (const auto& action : app.hotkeys.ActionsFor(id)) DispatchCommand(app, action);
             }
         }
         gHotkeyIds.clear();

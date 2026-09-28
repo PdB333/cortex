@@ -27,6 +27,11 @@ struct HotkeyChord {
 bool ParseHotkeyChord(const std::string& text, HotkeyChord& chord);
 std::string FormatHotkeyChord(const HotkeyChord& chord);
 
+// Cheat tables store a hotkey as the virtual-key codes held together
+// (17, 112 = Ctrl+F1). Only one non-modifier key fits RegisterHotKey.
+bool HotkeyChordFromKeys(const std::vector<unsigned>& keys, HotkeyChord& chord);
+std::vector<unsigned> HotkeyChordKeys(const HotkeyChord& chord);
+
 // Keys a hotkey can use. Names match ImGui::GetKeyName so the settings page
 // can record a chord from the keyboard.
 struct HotkeyKey {
@@ -36,7 +41,8 @@ struct HotkeyKey {
 const std::vector<HotkeyKey>& HotkeyKeys();
 
 // Registers bindings on a window with RegisterHotKey and maps WM_HOTKEY ids
-// back to action ids. Re-applies only when the bindings change.
+// back to action ids. Actions bound to the same chord share one registration
+// and all run on the key. Re-applies only when the bindings change.
 class HotkeyRegistrar {
 public:
     ~HotkeyRegistrar();
@@ -45,13 +51,14 @@ public:
     // another program, or not a valid chord).
     std::vector<std::string> Apply(void* window, const std::map<std::string, std::string>& bindings);
     void Clear();
-    std::string ActionFor(int id) const;
+    std::vector<std::string> ActionsFor(int id) const;
     const std::vector<std::string>& Failures() const { return failures_; }
 
 private:
     void* window_ = nullptr;
     std::map<std::string, std::string> applied_;
-    std::map<int, std::string> actions_;
+    std::map<int, std::vector<std::string>> actions_;
+    std::map<std::string, int> registered_;  // chord -> id, -1 when refused
     std::vector<std::string> failures_;
     bool initialized_ = false;
 };

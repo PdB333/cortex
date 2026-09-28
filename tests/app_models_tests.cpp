@@ -21,6 +21,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace {
 
 using json = nlohmann::json;
@@ -125,14 +129,37 @@ int main() {
     <CheatEntry>
       <ID>0</ID>
       <Description>"Player"</Description>
+      <Options moHideChildren="1" moActivateChildrenAsWell='1'/>
+      <Color>0000FF</Color>
       <GroupHeader>1</GroupHeader>
       <CheatEntries>
         <CheatEntry>
           <ID>1</ID>
           <Description>"Health &amp; armor"</Description>
           <ShowAsHex>1</ShowAsHex>
+          <DropDownList DescriptionOnly="1" DisplayValueAsItem="1">0:Dead
+64:Full &amp; healthy
+</DropDownList>
           <VariableType>4 Bytes</VariableType>
           <Address>"Tutorial-i386.exe"+001FD660</Address>
+          <Hotkeys>
+            <Hotkey>
+              <Action>Set Value</Action>
+              <Keys>
+                <Key>17</Key>
+                <Key>112</Key>
+              </Keys>
+              <Value>999</Value>
+              <ID>0</ID>
+            </Hotkey>
+            <Hotkey>
+              <Action>Toggle Activation</Action>
+              <Keys>
+                <Key>113</Key>
+              </Keys>
+              <ID>1</ID>
+            </Hotkey>
+          </Hotkeys>
           <Offsets>
             <Offset>18</Offset>
             <Offset>0</Offset>
@@ -167,7 +194,12 @@ nop 5
       <Address>game.exe+10</Address>
     </CheatEntry>
   </CheatEntries>
-  <UserdefinedSymbols/>
+  <UserdefinedSymbols>
+    <SymbolEntry>
+      <Name>player</Name>
+      <Address>"Tutorial-i386.exe"+1FD660</Address>
+    </SymbolEntry>
+  </UserdefinedSymbols>
   <LuaScript>print("hi")</LuaScript>
 </CheatTable>)";
         CheatTable table;
@@ -184,8 +216,19 @@ nop 5
             check(table.entries[2].variableType == "String" && table.entries[2].unicode &&
                   table.entries[2].length == 12, "UTF-16 strings keep their length");
             check(table.entries[3].depth == 0 && !table.entries[3].showAsSigned, "entries after a group");
+            check(group.collapsed && group.color == 0xFF0000, "collapsed groups and BGR colors");
+            check(health.color == -1, "entries without a color keep the default");
+            check(health.dropDown.size() == 2 && health.dropDown[1].value == "64" &&
+                  health.dropDown[1].label == "Full & healthy" && health.dropDownDescriptionOnly,
+                  "dropdown lists and their attributes");
+            check(health.hotkeys.size() == 2 && health.hotkeys[0].action == "Set Value" &&
+                  health.hotkeys[0].keys == std::vector<unsigned>({17, 112}) && health.hotkeys[0].value == "999" &&
+                  health.hotkeys[1].action == "Toggle Activation", "entry hotkeys");
         }
         check(table.luaScript == "print(\"hi\")", "the table's Lua script is kept");
+        check(table.userSymbols.size() == 1 && table.userSymbols[0].first == "player" &&
+                  table.userSymbols[0].second == "\"Tutorial-i386.exe\"+1FD660",
+              "user-defined symbols are read");
 
         std::string module;
         uint64_t offset = 0;
@@ -196,6 +239,8 @@ nop 5
         check(ParseCheatAddress("7FF6A1B20010", module, offset) && module.empty() && offset == 0x7FF6A1B20010ull,
               "absolute addresses");
         check(!ParseCheatAddress("player_base", module, offset), "symbols are not addresses");
+        check(!ParseCheatAddress("[game.exe+10]+8", module, offset), "pointer expressions are not module+offset");
+        check(!ParseCheatAddress("game.exe+10+8", module, offset), "sums are expressions");
         check(FormatCheatAddress("game.exe", 0x10) == "\"game.exe\"+00000010", "module addresses format like CE");
 
         CheatTable again;
@@ -205,6 +250,13 @@ nop 5
             check(again.entries[1].offsets == table.entries[1].offsets && again.entries[1].depth == 1,
                   "pointers and groups survive a round trip");
             check(again.entries[1].description == "Health & armor", "descriptions are escaped");
+            check(again.entries[0].collapsed && again.entries[0].color == 0xFF0000, "colors survive a round trip");
+            check(again.userSymbols == table.userSymbols && again.luaScript == table.luaScript,
+                  "symbols and the Lua script survive a round trip");
+            check(again.entries[1].hotkeys.size() == 2 && again.entries[1].hotkeys[0].keys == table.entries[1].hotkeys[0].keys &&
+                  again.entries[1].hotkeys[0].value == "999", "hotkeys survive a round trip");
+            check(again.entries[1].dropDown.size() == 2 && again.entries[1].dropDown[1].label == "Full & healthy",
+                  "dropdown lists survive a round trip");
         }
         check(!ParseCheatTable("<Other/>", again, &error), "other XML is refused");
         check(!ParseCheatTable("<CheatTable><CheatEntries>", again, &error), "truncated XML is refused");
@@ -231,9 +283,36 @@ nop 5
                 unique &= std::string(HotkeyActions()[i].id) != HotkeyActions()[j].id;
         check(unique, "hotkey action ids are unique");
 
+        check(HotkeyChordFromKeys({17, 112}, chord) && FormatHotkeyChord(chord) == "Ctrl+F1",
+              "cheat table keys become a chord");
+        check(HotkeyChordFromKeys({0xA1, 0xA4, 0x41}, chord) && FormatHotkeyChord(chord) == "Alt+Shift+A",
+              "left/right modifiers count as modifiers");
+        check(!HotkeyChordFromKeys({65, 66}, chord), "two plain keys do not fit RegisterHotKey");
+        check(!HotkeyChordFromKeys({17}, chord), "a modifier alone is not a hotkey");
+        check(ParseHotkeyChord("Ctrl+Shift+F9", chord) &&
+              HotkeyChordKeys(chord) == std::vector<unsigned>({0x11, 0x10, 0x78}), "a chord becomes table keys");
+
         HotkeyRegistrar registrar;
         const auto failures = registrar.Apply(nullptr, {{"pause_target", "Ctrl+Bogus"}});
         check(failures.size() == 1 && failures.front() == "pause_target", "invalid bindings are reported");
+        void* window = nullptr;
+#if defined(_WIN32)
+        window = CreateWindowExW(0, L"STATIC", L"hotkeys", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+#endif
+        const auto refused = registrar.Apply(window, {{"entry 1 0", "Ctrl+Alt+Shift+F21"},
+                                                      {"entry 2 0", "ctrl + alt + shift + f21"},
+                                                      {"scan_next", "Ctrl+Alt+Shift+F22"}});
+        check(refused.empty(), "free chords register");
+        bool shared = false;
+        for (int id = 0x4C00; id < 0x4C10; ++id) {
+            const auto actions = registrar.ActionsFor(id);
+            shared |= actions.size() == 2 && actions[0] == "entry 1 0" && actions[1] == "entry 2 0";
+        }
+        check(shared, "actions on the same chord share one registration");
+        registrar.Clear();
+#if defined(_WIN32)
+        if (window) DestroyWindow(static_cast<HWND>(window));
+#endif
     }
 
     // Mutation gate: no runtime present and writes not allowed -> nothing is

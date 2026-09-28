@@ -2,6 +2,7 @@
 // Built when CORTEX_WITH_TEST_MODES is on.
 
 #include "desktop_app.h"
+#include "ui/address_resolver.h"
 
 namespace cortex::desktop {
 
@@ -568,6 +569,27 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         summary += " lua=" + luaResult.returned;
+
+        // Address expressions resolve exports by name, module.Export and
+        // user-defined symbols, like Cheat Engine's symbol handler.
+        uint64_t resolved = 0;
+        std::string expressionError;
+        if (!cortex::ui::EvaluateContextAddress(app.ui, "g_cortex_health", resolved, &expressionError) ||
+            resolved != health ||
+            !cortex::ui::EvaluateContextAddress(app.ui, module.name + ".g_cortex_health", resolved, &expressionError) ||
+            resolved != health) {
+            error = "expression_export_failed:" + expressionError;
+            return false;
+        }
+        app.ui.userSymbols->Set("smoke_health", health);
+        const bool symbolResolved = cortex::ui::EvaluateContextAddress(app.ui, "smoke_health+4", resolved, &expressionError) &&
+                                    resolved == health + 4;
+        app.ui.userSymbols->Remove("smoke_health");
+        if (!symbolResolved) {
+            error = "expression_symbol_failed:" + expressionError;
+            return false;
+        }
+        summary += " expressions=ok";
 
         services::PointerScanOptions pointerOptions;
         pointerOptions.target = health;

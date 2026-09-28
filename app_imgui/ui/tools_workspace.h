@@ -25,7 +25,7 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers };
+    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols };
 
     void Reset(const std::string& targetId);
     void RefreshModules(UiContext& context);
@@ -43,6 +43,7 @@ private:
     void DrawCaves(UiContext& context);
     void DrawSignature(UiContext& context);
     void DrawPointers(UiContext& context);
+    void DrawSymbols(UiContext& context);
     void PollPointerScan(UiContext& context);
     std::vector<services::PointerModule> CurrentPointerModules() const;
 
@@ -111,6 +112,13 @@ private:
     std::chrono::steady_clock::time_point lastPointerRefresh_{};
     std::vector<uint64_t> pointerLive_;
     int pointerLiveFirst_ = -1;
+
+    // Symbols
+    char symbolName_[96] = {};
+    char symbolAddress_[160] = {};
+    char symbolSearch_[96] = {};
+    std::vector<std::pair<std::string, uint64_t>> symbolMatches_;
+    std::string symbolSearched_;
 };
 
 } // namespace cortex::ui

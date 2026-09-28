@@ -125,6 +125,36 @@ std::string FormatHotkeyChord(const HotkeyChord& chord) {
     return text + found->name;
 }
 
+bool HotkeyChordFromKeys(const std::vector<unsigned>& keys, HotkeyChord& chord) {
+    chord = HotkeyChord{};
+    for (const unsigned key : keys) {
+        switch (key) {
+            case 0x10: case 0xA0: case 0xA1: chord.modifiers |= kModShift; break;
+            case 0x11: case 0xA2: case 0xA3: chord.modifiers |= kModControl; break;
+            case 0x12: case 0xA4: case 0xA5: chord.modifiers |= kModAlt; break;
+            case 0x5B: case 0x5C: chord.modifiers |= kModWin; break;
+            default:
+                if (chord.virtualKey && chord.virtualKey != key) return false;
+                chord.virtualKey = key;
+                break;
+        }
+    }
+    const auto& known = HotkeyKeys();
+    return chord.Valid() && std::any_of(known.begin(), known.end(),
+                                        [&](const HotkeyKey& item) { return item.virtualKey == chord.virtualKey; });
+}
+
+std::vector<unsigned> HotkeyChordKeys(const HotkeyChord& chord) {
+    std::vector<unsigned> keys;
+    if (!chord.Valid()) return keys;
+    if (chord.modifiers & kModControl) keys.push_back(0x11);
+    if (chord.modifiers & kModAlt) keys.push_back(0x12);
+    if (chord.modifiers & kModShift) keys.push_back(0x10);
+    if (chord.modifiers & kModWin) keys.push_back(0x5B);
+    keys.push_back(chord.virtualKey);
+    return keys;
+}
+
 HotkeyRegistrar::~HotkeyRegistrar() {
     Clear();
 }
@@ -133,6 +163,7 @@ void HotkeyRegistrar::Clear() {
 #if defined(_WIN32)
     for (const auto& entry : actions_) UnregisterHotKey(static_cast<HWND>(window_), entry.first);
 #endif
+    registered_.clear();
     actions_.clear();
     applied_.clear();
     failures_.clear();
@@ -153,21 +184,30 @@ std::vector<std::string> HotkeyRegistrar::Apply(void* window, const std::map<std
             failures_.push_back(binding.first);
             continue;
         }
+        const std::string normalized = FormatHotkeyChord(chord);
+        const auto shared = registered_.find(normalized);
+        if (shared != registered_.end()) {
+            if (shared->second < 0) failures_.push_back(binding.first);
+            else actions_[shared->second].push_back(binding.first);
+            continue;
+        }
 #if defined(_WIN32)
         if (!window || !RegisterHotKey(static_cast<HWND>(window), id, chord.modifiers | MOD_NOREPEAT, chord.virtualKey)) {
+            registered_[normalized] = -1;
             failures_.push_back(binding.first);
             continue;
         }
 #endif
-        actions_[id] = binding.first;
+        registered_[normalized] = id;
+        actions_[id].push_back(binding.first);
         ++id;
     }
     return failures_;
 }
 
-std::string HotkeyRegistrar::ActionFor(int id) const {
+std::vector<std::string> HotkeyRegistrar::ActionsFor(int id) const {
     const auto found = actions_.find(id);
-    return found == actions_.end() ? std::string() : found->second;
+    return found == actions_.end() ? std::vector<std::string>() : found->second;
 }
 
 } // namespace cortex::application

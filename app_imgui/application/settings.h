@@ -28,6 +28,7 @@ struct Settings {
     bool scanMappedMemory = false;
     std::string scanFloatRounding = "rounded";  // rounded, extreme, truncated, exact
     int scanResultRefreshMs = 500;
+    int freezeIntervalMs = 100;  // how often frozen values are written back
 
     std::string debuggerBackend = "windows";
     std::string breakpointDefaultAction = "log";

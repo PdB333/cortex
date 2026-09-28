@@ -2,6 +2,7 @@
 #include "widgets.h"
 
 #include "application/hotkeys.h"
+#include "hotkey_capture.h"
 
 #include <imgui.h>
 
@@ -142,27 +143,6 @@ bool ComboRow(SettingsGrid& grid, const char* label, const char* id,
     return true;
 }
 
-namespace {
-
-// Letters, digits and editing keys need a modifier: a bare global hotkey
-// would take the key away from every other program.
-bool NeedsModifier(const std::string& key) {
-    if (key.size() >= 2 && key[0] == 'F' && std::isdigit(static_cast<unsigned char>(key[1]))) return false;
-    if (key.rfind("Keypad", 0) == 0) return false;
-    return key != "Pause" && key != "ScrollLock" && key != "Insert" && key != "Home" && key != "End" &&
-           key != "PageUp" && key != "PageDown" && key != "PrintScreen";
-}
-
-bool IsModifierKey(ImGuiKey key) {
-    return key == ImGuiKey_LeftCtrl || key == ImGuiKey_RightCtrl || key == ImGuiKey_LeftShift ||
-           key == ImGuiKey_RightShift || key == ImGuiKey_LeftAlt || key == ImGuiKey_RightAlt ||
-           key == ImGuiKey_LeftSuper || key == ImGuiKey_RightSuper || key == ImGuiKey_ReservedForModCtrl ||
-           key == ImGuiKey_ReservedForModShift || key == ImGuiKey_ReservedForModAlt ||
-           key == ImGuiKey_ReservedForModSuper;
-}
-
-} // namespace
-
 bool SettingsWorkspace::DrawHotkeys(UiContext& context) {
     auto& bindings = context.settings->Values().hotkeys;
     bool changed = false;
@@ -171,34 +151,27 @@ bool SettingsWorkspace::DrawHotkeys(UiContext& context) {
 
     // Record a chord for the row being captured.
     if (!capturingHotkey_.empty()) {
-        const ImGuiIO& io = ImGui::GetIO();
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-            capturingHotkey_.clear();
-        } else if (ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !io.KeyCtrl && !io.KeyAlt && !io.KeyShift) {
-            bindings.erase(capturingHotkey_);
-            capturingHotkey_.clear();
-            changed = true;
-        } else {
-            for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
-                const auto imguiKey = static_cast<ImGuiKey>(key);
-                if (IsModifierKey(imguiKey) || !ImGui::IsKeyPressed(imguiKey, false)) continue;
-                const std::string name = ImGui::GetKeyName(imguiKey);
-                std::string chord;
-                if (io.KeyCtrl) chord += "Ctrl+";
-                if (io.KeyAlt) chord += "Alt+";
-                if (io.KeyShift) chord += "Shift+";
-                if (io.KeySuper) chord += "Win+";
-                application::HotkeyChord parsed;
-                if (!application::ParseHotkeyChord(chord + name, parsed)) continue;
-                if (chord.empty() && NeedsModifier(name)) {
-                    context.status = "Add Ctrl, Alt or Shift to " + name + ": alone it would block that key everywhere";
-                    break;
-                }
-                bindings[capturingHotkey_] = application::FormatHotkeyChord(parsed);
+        std::string chord;
+        std::string message;
+        switch (CaptureHotkeyChord(chord, message)) {
+            case HotkeyCaptureResult::Captured:
+                bindings[capturingHotkey_] = chord;
                 capturingHotkey_.clear();
                 changed = true;
                 break;
-            }
+            case HotkeyCaptureResult::Cleared:
+                bindings.erase(capturingHotkey_);
+                capturingHotkey_.clear();
+                changed = true;
+                break;
+            case HotkeyCaptureResult::Cancelled:
+                capturingHotkey_.clear();
+                break;
+            case HotkeyCaptureResult::Rejected:
+                context.status = message;
+                break;
+            case HotkeyCaptureResult::Waiting:
+                break;
         }
     }
 
@@ -291,6 +264,7 @@ void SettingsWorkspace::Draw(UiContext& context) {
             changed |= CheckboxRow(grid, "Scan mapped files (MEM_MAPPED)", "##ScanMapped", &value.scanMappedMemory);
             changed |= IntRow(grid, "Scan result refresh (ms)", "##ScanRefresh",
                               &value.scanResultRefreshMs, 100, 10000);
+            changed |= IntRow(grid, "Freeze interval (ms)", "##FreezeInterval", &value.freezeIntervalMs, 10, 10000);
         }
     }
 

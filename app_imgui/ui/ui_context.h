@@ -4,6 +4,7 @@
 #include <functional>
 
 #include "application/actions_model.h"
+#include "application/address_expression.h"
 #include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
 #include "application/input_model.h"
@@ -30,7 +31,10 @@
 #include "services/value_scanner.h"
 #include "target/session_manager.h"
 
+#include <chrono>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -101,6 +105,20 @@ struct UiContext {
     bool targetPaused = false;
     // Hotkey actions whose chord could not be registered.
     std::vector<std::string> hotkeyFailures;
+    // Per-entry hotkeys of the Memory address list: action id -> chord.
+    // Registered with the Settings hotkeys; the action id comes back as a
+    // command.
+    std::map<std::string, std::string> entryHotkeys;
+    // A Lua script to load into the Lua engine (a cheat table's script).
+    std::string luaScriptRequest;
+    // Names address expressions resolve (see address_resolver.h): modules,
+    // exports and user-defined symbols shared with the Lua engine.
+    std::shared_ptr<application::UserSymbols> userSymbols = std::make_shared<application::UserSymbols>();
+    struct AddressSymbols {
+        application::TargetSymbols symbols;
+        std::string targetId;
+        std::chrono::steady_clock::time_point refreshed{};
+    } addressSymbols;
     // Entries for the Memory address list, and the Memory tools tab to show
     // with the next navigation to "tools".
     std::vector<PendingAddressEntry> pendingAddresses;

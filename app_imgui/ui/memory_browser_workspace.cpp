@@ -1,4 +1,5 @@
 #include "memory_browser_workspace.h"
+#include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -211,18 +212,7 @@ std::string MemoryBrowserWorkspace::AddressLabel(uint64_t address, bool& isStati
 bool MemoryBrowserWorkspace::ResolveAddress(UiContext& context, const std::string& raw, uint64_t& address) {
     const std::string text = Trim(raw);
     if (ParseHex(text, address)) return true;
-    const auto plus = text.find_last_of('+');
-    if (plus == std::string::npos || plus == 0 || !context.modules) return false;
-    uint64_t offset = 0;
-    if (!ParseHex(text.substr(plus + 1), offset)) return false;
-    std::string error;
-    const std::string name = Lower(Trim(text.substr(0, plus)));
-    for (const auto& module : context.modules->List(&error)) {
-        if (Lower(module.name) != name) continue;
-        address = module.base + offset;
-        return true;
-    }
-    return false;
+    return !text.empty() && EvaluateContextAddress(context, text, address);
 }
 
 void MemoryBrowserWorkspace::Find(UiContext& context, bool fromStart) {

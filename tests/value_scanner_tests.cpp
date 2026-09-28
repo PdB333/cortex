@@ -435,6 +435,28 @@ void TestEncodeAndFormat() {
     CHECK(!ValueScanner::Encode("90 ??", ScanDataType::ByteArray, false, false, bytes));
     CHECK(!ValueScanner::Encode("", ScanDataType::String, false, false, bytes));
     CHECK(ValueScanner::Format(bytes.data(), 0, ScanDataType::Int32) == "?");
+
+    // Increase / decrease value hotkeys.
+    std::vector<uint8_t> current;
+    std::vector<uint8_t> out;
+    CHECK(ValueScanner::Encode("100", ScanDataType::Int32, false, false, current));
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Int32, false, "25", true, out) &&
+          ValueScanner::Format(out.data(), out.size(), ScanDataType::Int32) == "125");
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Int32, false, "150", false, out) &&
+          ValueScanner::Format(out.data(), out.size(), ScanDataType::Int32) == "-50");
+    CHECK(ValueScanner::Encode("250", ScanDataType::Byte, false, false, current));
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Byte, false, "10", true, out) && out.size() == 1 && out[0] == 4);
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Byte, true, "A", false, out) && out[0] == 240);
+    CHECK(ValueScanner::Encode("2.5", ScanDataType::Float, false, false, current));
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Float, false, "0.25", true, out) &&
+          ValueScanner::Format(out.data(), out.size(), ScanDataType::Float) == "2.75");
+    CHECK(ValueScanner::Encode("10", ScanDataType::Double, false, false, current));
+    CHECK(ValueScanner::Adjust(current, ScanDataType::Double, false, "0.5", false, out) &&
+          ValueScanner::Format(out.data(), out.size(), ScanDataType::Double) == "9.5");
+    std::string error;
+    CHECK(!ValueScanner::Adjust(current, ScanDataType::String, false, "1", true, out, &error) && !error.empty());
+    CHECK(!ValueScanner::Adjust({}, ScanDataType::Int32, false, "1", true, out, &error));
+    CHECK(!ValueScanner::Adjust(current, ScanDataType::Double, false, "abc", true, out, &error));
 }
 
 } // namespace

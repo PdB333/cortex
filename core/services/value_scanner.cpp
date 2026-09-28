@@ -1601,6 +1601,48 @@ bool ValueScanner::Encode(const std::string& text, ScanDataType type, bool hex, 
     return false;
 }
 
+bool ValueScanner::Adjust(const std::vector<uint8_t>& current, ScanDataType type, bool hex,
+                          const std::string& delta, bool increase, std::vector<uint8_t>& out,
+                          std::string* error) {
+    const size_t size = TypeSize(type);
+    if (!IsNumeric(type) || type == ScanDataType::AllNumeric || !size) {
+        SetError(error, "Only numeric values can be increased or decreased");
+        return false;
+    }
+    if (current.size() < size) {
+        SetError(error, "The current value is unknown");
+        return false;
+    }
+    std::vector<uint8_t> step;
+    if (!Encode(delta, type, hex, false, step, error)) return false;
+    out.assign(current.begin(), current.begin() + static_cast<std::ptrdiff_t>(size));
+    if (IsInteger(type)) {
+        uint64_t value = 0;
+        uint64_t amount = 0;
+        std::memcpy(&value, out.data(), size);
+        std::memcpy(&amount, step.data(), size);
+        value = increase ? value + amount : value - amount;
+        std::memcpy(out.data(), &value, size);
+        return true;
+    }
+    if (type == ScanDataType::Float) {
+        float value = 0.0f;
+        float amount = 0.0f;
+        std::memcpy(&value, out.data(), 4);
+        std::memcpy(&amount, step.data(), 4);
+        value = increase ? value + amount : value - amount;
+        std::memcpy(out.data(), &value, 4);
+        return true;
+    }
+    double value = 0.0;
+    double amount = 0.0;
+    std::memcpy(&value, out.data(), 8);
+    std::memcpy(&amount, step.data(), 8);
+    value = increase ? value + amount : value - amount;
+    std::memcpy(out.data(), &value, 8);
+    return true;
+}
+
 std::string ValueScanner::Format(const uint8_t* data, size_t size, ScanDataType type, bool hex,
                                  bool unsignedValues, bool utf16) {
     if (!data) return "?";

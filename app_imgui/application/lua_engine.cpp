@@ -31,6 +31,7 @@ struct Context {
     bool paused = false;
     std::vector<target::ModuleInfo> modules;
     bool modulesLoaded = false;
+    TargetSymbols symbols;
 };
 
 const char kContextKey = 0;
@@ -57,6 +58,9 @@ const std::vector<target::ModuleInfo>& Modules(Context& context) {
     if (!context.modulesLoaded) {
         if (context.options->modules) context.modules = context.options->modules();
         context.modulesLoaded = true;
+        context.symbols.SetModules(context.modules);
+        context.symbols.SetExportReader(context.options->exports);
+        context.symbols.SetUserSymbols(context.options->userSymbols);
     }
     return context.modules;
 }
@@ -79,12 +83,8 @@ uint64_t ToAddress(lua_State* L, int index) {
     Context& context = Ctx(L);
     AddressResolver resolver;
     resolver.symbol = [&context](const std::string& name, uint64_t& value) {
-        for (const auto& module : Modules(context)) {
-            if (Lower(module.name) != Lower(name)) continue;
-            value = module.base;
-            return true;
-        }
-        return false;
+        Modules(context);
+        return context.symbols.Resolve(name, value);
     };
     resolver.readPointer = [&context](uint64_t address, uint64_t& value) {
         value = 0;
@@ -276,6 +276,59 @@ int GetAddressSafe(lua_State* L) {
         lua_pop(L, 1);
         lua_pushnil(L);
     }
+    return 1;
+}
+
+// registerSymbol(name, address): the name works in every address
+// expression, in scripts and in the address list.
+int RegisterSymbol(lua_State* L) {
+    const std::string name = luaL_checkstring(L, 1);
+    const uint64_t address = ToAddress(L, 2);
+    Context& context = Ctx(L);
+    if (!context.options->userSymbols) return luaL_error(L, "registerSymbol is not available here");
+    if (name.empty() || name.find_first_of(" +-*[]()\"'") != std::string::npos)
+        return luaL_error(L, "registerSymbol: invalid symbol name '%s'", name.c_str());
+    context.options->userSymbols->Set(name, address);
+    return 0;
+}
+
+int UnregisterSymbol(lua_State* L) {
+    const std::string name = luaL_checkstring(L, 1);
+    Context& context = Ctx(L);
+    if (context.options->userSymbols) context.options->userSymbols->Remove(name);
+    return 0;
+}
+
+const target::ModuleInfo* ModuleAt(Context& context, uint64_t address) {
+    for (const auto& module : Modules(context))
+        if (address >= module.base && address < module.base + module.size) return &module;
+    return nullptr;
+}
+
+// getNameFromAddress(address): "game.exe+1A2B", or the hexadecimal address.
+int GetNameFromAddress(lua_State* L) {
+    const uint64_t address = ToAddress(L, 1);
+    char buffer[64] = {};
+    if (const auto* module = ModuleAt(Ctx(L), address)) {
+        std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(address - module->base));
+        lua_pushstring(L, (module->name + buffer).c_str());
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%llX", static_cast<unsigned long long>(address));
+        lua_pushstring(L, buffer);
+    }
+    return 1;
+}
+
+int InModule(lua_State* L) {
+    lua_pushboolean(L, ModuleAt(Ctx(L), ToAddress(L, 1)) != nullptr);
+    return 1;
+}
+
+// A module loaded from the Windows directory.
+int InSystemModule(lua_State* L) {
+    const auto* module = ModuleAt(Ctx(L), ToAddress(L, 1));
+    const std::string path = module ? Lower(module->path) : std::string();
+    lua_pushboolean(L, path.find("\\windows\\") != std::string::npos || path.find("/windows/") != std::string::npos);
     return 1;
 }
 
@@ -535,6 +588,7 @@ struct Function {
 const Function kFunctions[] = {
     {"readByte", ReadNumber<uint8_t>},
     {"readSmallInteger", ReadNumber<uint16_t>},
+    {"readShortInteger", ReadNumber<uint16_t>},
     {"readInteger", ReadNumber<uint32_t>},
     {"readQword", ReadNumber<uint64_t>},
     {"readFloat", ReadNumber<float>},
@@ -544,6 +598,7 @@ const Function kFunctions[] = {
     {"readString", ReadString},
     {"writeByte", WriteNumber<uint8_t>},
     {"writeSmallInteger", WriteNumber<uint16_t>},
+    {"writeShortInteger", WriteNumber<uint16_t>},
     {"writeInteger", WriteNumber<uint32_t>},
     {"writeQword", WriteNumber<uint64_t>},
     {"writeFloat", WriteNumber<float>},
@@ -553,6 +608,11 @@ const Function kFunctions[] = {
     {"writeString", WriteString},
     {"getAddress", GetAddress},
     {"getAddressSafe", GetAddressSafe},
+    {"registerSymbol", RegisterSymbol},
+    {"unregisterSymbol", UnregisterSymbol},
+    {"getNameFromAddress", GetNameFromAddress},
+    {"inModule", InModule},
+    {"inSystemModule", InSystemModule},
     {"AOBScan", AobScan},
     {"AOBScanUnique", AobScanUnique},
     {"AOBScanModuleUnique", AobScanModuleUnique},
