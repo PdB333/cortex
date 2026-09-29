@@ -1,6 +1,7 @@
 #pragma once
 
 #include "workspace.h"
+#include "services/custom_types.h"
 #include "services/value_scanner.h"
 #include "target/module_provider.h"
 
@@ -90,6 +91,9 @@ private:
         std::vector<EntryHotkey> hotkeys;
         // Auto Assembler script entries: the checkbox runs [ENABLE] and
         // [DISABLE] instead of freezing a value.
+        // A user-defined value type (services::CustomTypeTable). While it is
+        // set the entry reads and writes through that type instead of `type`.
+        std::string customType;
         bool script = false;
         std::string assemblerScript;
         bool scriptEnabled = false;
@@ -143,6 +147,8 @@ private:
     void BeginValueEdit(size_t index);
     void SaveEntryToProject(UiContext& context, const AddressEntry& entry);
     std::string FormatEntry(const AddressEntry& entry) const;
+    // The type an entry reads through, or null when it uses a standard one.
+    const services::CustomType* EntryCustomType(const AddressEntry& entry) const;
     bool HasAddress(uint64_t address, services::ScanDataType type) const;
     bool ResolveEntry(UiContext& context, AddressEntry& entry, std::string* error = nullptr);
     void MakeStatic(AddressEntry& entry) const;
@@ -222,6 +228,9 @@ private:
     // Address list
     std::vector<AddressEntry> addresses_;
     std::chrono::steady_clock::time_point lastAddressRefresh_{};
+    // The user-defined types of the session, taken from the UiContext every
+    // frame so formatting an entry needs no context.
+    std::shared_ptr<services::CustomTypeTable> customTypes_;
     bool openAddAddress_ = false;
     bool openEditValue_ = false;
     int editAddressIndex_ = -1;

@@ -1,4 +1,5 @@
 #include "tools_workspace.h"
+#include "file_dialog.h"
 #include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
@@ -1526,6 +1527,255 @@ void ToolsWorkspace::DrawGroupedScan(UiContext& context) {
     }
 }
 
+// ------------------------------------------------------------------ memory dump
+
+void ToolsWorkspace::DrawDump(UiContext& context) {
+    HintText("Writes a piece of the target's memory to a file, and puts a file back where it came from. "
+             "Pages that cannot be read are saved as zeros, so a whole region survives the guard pages "
+             "inside it.");
+
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) return;
+
+    ImGui::SetNextItemWidth(Px(260));
+    ImGui::InputTextWithHint("##DumpAddress", "address, module+RVA or expression", dumpAddress_,
+                             sizeof(dumpAddress_));
+    FlowSameLine(Px(160));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputTextWithHint("Size", "1000", dumpSize_, sizeof(dumpSize_));
+
+    // A module is the range people reach for most often, so it fills both.
+    FlowSameLine(Px(270));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Module");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(200));
+    if (ModuleCombo("##DumpModule", dumpModule_)) {
+        if (const auto* module = ModuleAt(dumpModule_)) {
+            std::snprintf(dumpAddress_, sizeof(dumpAddress_), "%s", Hex(module->base).c_str());
+            std::snprintf(dumpSize_, sizeof(dumpSize_), "%llX", static_cast<unsigned long long>(module->size));
+        }
+    }
+
+    uint64_t address = 0;
+    const bool haveAddress = Resolve(context, dumpAddress_, address);
+    uint64_t size = 0;
+    const bool haveSize = services::ParseAsmNumber(dumpSize_, size) && size;
+
+    FlowSameLine(ButtonWidth("Save to file..."));
+    ImGui::BeginDisabled(!haveAddress || !haveSize);
+    if (ImGui::Button("Save to file...")) {
+        std::string path = dumpPath_;
+        if (ShowSaveFileDialog(L"Memory dumps (*.bin)\0*.bin\0All files\0*.*\0", L"bin", path)) {
+            std::snprintf(dumpPath_, sizeof(dumpPath_), "%s", path.c_str());
+            services::MemoryDumpReport report;
+            std::string error;
+            dumpError_ = !services::DumpMemoryToFile(Reader(context), path, address, size, report, &error);
+            if (dumpError_) {
+                dumpInfo_ = error;
+            } else {
+                dumpInfo_ = "Wrote " + std::to_string(report.requested) + " byte(s) to " + path;
+                if (report.holes)
+                    dumpInfo_ += " (" + std::to_string(report.holes) + " unreadable, saved as zeros)";
+            }
+        }
+    }
+    ImGui::EndDisabled();
+
+    FlowSameLine(ButtonWidth("Load from file..."));
+    ImGui::BeginDisabled(!haveAddress || !context.mutationAllowed);
+    if (ImGui::Button("Load from file...")) {
+        std::string path = dumpPath_;
+        if (ShowOpenFileDialog(L"Memory dumps (*.bin)\0*.bin\0All files\0*.*\0", path)) {
+            std::snprintf(dumpPath_, sizeof(dumpPath_), "%s", path.c_str());
+            const auto writer = [session](uint64_t at, const void* buffer, size_t count) {
+                return session->WriteMemory(at, buffer, count, nullptr);
+            };
+            uint64_t written = 0;
+            std::string error;
+            dumpError_ = !services::LoadFileToMemory(writer, path, address, 0, 0, written, &error);
+            dumpInfo_ = dumpError_ ? error
+                                   : "Wrote " + std::to_string(written) + " byte(s) to " + Hex(address);
+        }
+    }
+    ImGui::EndDisabled();
+    if (!context.mutationAllowed) {
+        FlowSameLine(Px(200));
+        ImGui::TextDisabled("Allow writes to load a file back");
+    }
+
+    if (!dumpInfo_.empty()) {
+        if (dumpError_) ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.4f, 1.0f), "%s", dumpInfo_.c_str());
+        else ImGui::TextDisabled("%s", dumpInfo_.c_str());
+    }
+}
+
+// ------------------------------------------------------------------ custom types
+
+void ToolsWorkspace::LoadTypeEditor(const services::CustomType& type) {
+    std::snprintf(typeName_, sizeof(typeName_), "%s", type.name.c_str());
+    typeBase_ = static_cast<int>(type.base);
+    typeSize_ = static_cast<int>(type.size);
+    typeBigEndian_ = type.bigEndian;
+    typeSigned_ = type.signedValue;
+    typeBitOffset_ = static_cast<int>(type.bitOffset);
+    typeBitCount_ = static_cast<int>(type.bitCount);
+    typeScale_ = type.scale;
+    typeOffset_ = type.offset;
+}
+
+services::CustomType ToolsWorkspace::TypeFromEditor() const {
+    services::CustomType type;
+    type.name = typeName_;
+    type.base = static_cast<services::CustomTypeBase>(typeBase_);
+    type.size = static_cast<size_t>(typeSize_);
+    type.bigEndian = typeBigEndian_;
+    type.signedValue = typeSigned_;
+    type.bitOffset = static_cast<unsigned>(typeBitOffset_);
+    type.bitCount = static_cast<unsigned>(typeBitCount_);
+    type.scale = typeScale_;
+    type.offset = typeOffset_;
+    return type;
+}
+
+void ToolsWorkspace::DrawCustomTypes(UiContext& context) {
+    HintText("Value types of your own, for what the standard ones cannot read: a big-endian field, a value "
+             "the game keeps multiplied by ten, a few bits inside a word. A type shows raw * scale + offset "
+             "and writes the same the other way round. Pick one from an address list entry's Change type.");
+    if (!context.customTypes) return;
+    auto& table = *context.customTypes;
+
+    const auto& types = table.Types();
+    if (BeginDataTable("CustomTypes", 4,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable,
+                       ImVec2(0, Px(150)))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+        ImGui::TableSetupColumn("Reads", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("Shows", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableHeadersRow();
+        std::string remove;
+        for (size_t row = 0; row < types.size(); ++row) {
+            const auto& type = types[row];
+            ImGui::PushID(static_cast<int>(row));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::Selectable((type.name + "##Type").c_str(), typeSelected_ == static_cast<int>(row),
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
+                typeSelected_ = static_cast<int>(row);
+                LoadTypeEditor(type);
+            }
+            ImGui::TableSetColumnIndex(1);
+            std::string reads = std::to_string(type.size) + (type.size == 1 ? " byte" : " bytes");
+            reads += type.base == services::CustomTypeBase::Float    ? ", float"
+                     : type.base == services::CustomTypeBase::Double ? ", double"
+                     : type.signedValue                              ? ", signed"
+                                                                     : ", unsigned";
+            if (type.bigEndian) reads += ", big-endian";
+            ImGui::TextUnformatted(reads.c_str());
+            ImGui::TableSetColumnIndex(2);
+            char shows[96] = {};
+            if (type.base == services::CustomTypeBase::Integer && (type.bitOffset || type.bitCount))
+                std::snprintf(shows, sizeof(shows), "bits %u..%u, x%g %+g", type.bitOffset,
+                              type.bitOffset + (type.bitCount ? type.bitCount : 1) - 1, type.scale, type.offset);
+            else
+                std::snprintf(shows, sizeof(shows), "x%g %+g", type.scale, type.offset);
+            ImGui::TextUnformatted(shows);
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("Remove")) remove = type.name;
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+        if (!remove.empty()) {
+            table.Remove(remove);
+            typeSelected_ = -1;
+            typeInfo_ = "Removed " + remove;
+            typeError_ = false;
+        }
+    }
+
+    ImGui::SeparatorText(typeSelected_ >= 0 ? "Edit the type" : "New type");
+    ImGui::SetNextItemWidth(Px(200));
+    ImGui::InputTextWithHint("##TypeName", "name", typeName_, sizeof(typeName_));
+    FlowSameLine(Px(180));
+    static const char* const kBases[] = {"Integer", "Float", "Double"};
+    ImGui::SetNextItemWidth(Px(140));
+    if (ImGui::Combo("Reads", &typeBase_, kBases, 3))
+        typeSize_ = typeBase_ == 1 ? 4 : typeBase_ == 2 ? 8 : typeSize_;
+    FlowSameLine(Px(150));
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Bytes", &typeSize_)) typeSize_ = std::clamp(typeSize_, 1, 8);
+    ImGui::EndDisabled();
+    FlowSameLine(CheckboxWidth("Big-endian"));
+    ImGui::Checkbox("Big-endian", &typeBigEndian_);
+    FlowSameLine(CheckboxWidth("Signed"));
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::Checkbox("Signed", &typeSigned_);
+    ImGui::EndDisabled();
+
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("First bit", &typeBitOffset_)) typeBitOffset_ = std::clamp(typeBitOffset_, 0, 63);
+    FlowSameLine(Px(150));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Bits", &typeBitCount_)) typeBitCount_ = std::clamp(typeBitCount_, 0, 64);
+    ImGui::EndDisabled();
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputDouble("Scale", &typeScale_, 0.0, 0.0, "%g");
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputDouble("Offset", &typeOffset_, 0.0, 0.0, "%g");
+
+    if (ImGui::Button(typeSelected_ >= 0 ? "Save" : "Add")) {
+        std::string error;
+        const auto type = TypeFromEditor();
+        typeError_ = !table.Set(type, &error);
+        typeInfo_ = typeError_ ? error : "Saved " + type.name;
+        if (!typeError_) {
+            const auto& updated = table.Types();
+            for (size_t row = 0; row < updated.size(); ++row)
+                if (updated[row].name == type.name) typeSelected_ = static_cast<int>(row);
+        }
+    }
+    FlowSameLine(ButtonWidth("New"));
+    if (ImGui::Button("New")) {
+        typeSelected_ = -1;
+        LoadTypeEditor(services::CustomType{});
+        typeInfo_.clear();
+        typeError_ = false;
+    }
+    FlowSameLine(ButtonWidth("Save to file..."));
+    if (ImGui::Button("Save to file...")) {
+        std::string path = typePath_;
+        if (ShowSaveFileDialog(L"Cortex types (*.ctypes)\0*.ctypes\0All files\0*.*\0", L"ctypes", path)) {
+            std::snprintf(typePath_, sizeof(typePath_), "%s", path.c_str());
+            std::string error;
+            typeError_ = !table.Save(path, &error);
+            typeInfo_ = typeError_ ? error : "Saved " + std::to_string(types.size()) + " type(s) to " + path;
+        }
+    }
+    FlowSameLine(ButtonWidth("Load from file..."));
+    if (ImGui::Button("Load from file...")) {
+        std::string path = typePath_;
+        if (ShowOpenFileDialog(L"Cortex types (*.ctypes)\0*.ctypes\0All files\0*.*\0", path)) {
+            std::snprintf(typePath_, sizeof(typePath_), "%s", path.c_str());
+            std::string error;
+            typeError_ = !table.Load(path, &error);
+            typeSelected_ = -1;
+            typeInfo_ = typeError_ ? error
+                                   : "Loaded " + std::to_string(table.Types().size()) + " type(s) from " + path;
+        }
+    }
+
+    if (!typeInfo_.empty()) {
+        if (typeError_) ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.4f, 1.0f), "%s", typeInfo_.c_str());
+        else ImGui::TextDisabled("%s", typeInfo_.c_str());
+    }
+}
+
 // ------------------------------------------------------------------ speedhack
 
 services::SpeedhackHost ToolsWorkspace::SpeedhackHostFor(UiContext& context, uint64_t pid) const {
@@ -1660,6 +1910,8 @@ void ToolsWorkspace::Draw(UiContext& context) {
                    : context.toolsTabRequest == "assembler" ? Tab::Assembler
                    : context.toolsTabRequest == "speedhack" ? Tab::Speed
                    : context.toolsTabRequest == "grouped" ? Tab::Grouped
+                   : context.toolsTabRequest == "dump" ? Tab::Dump
+                   : context.toolsTabRequest == "types" ? Tab::Types
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
@@ -1677,6 +1929,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
         {"AOB signature", Tab::Signature},  {"Pointer scan", Tab::Pointers},
         {"Symbols", Tab::Symbols},          {"Assembler", Tab::Assembler},
         {"Grouped scan", Tab::Grouped},     {"Speedhack", Tab::Speed},
+        {"Dump", Tab::Dump},                {"Custom types", Tab::Types},
     };
     if (tabPending_) {
         active_ = requested_;
@@ -1713,6 +1966,8 @@ void ToolsWorkspace::Draw(UiContext& context) {
         case Tab::Assembler: DrawAssembler(context); break;
         case Tab::Grouped: DrawGroupedScan(context); break;
         case Tab::Speed: DrawSpeedhack(context); break;
+        case Tab::Dump: DrawDump(context); break;
+        case Tab::Types: DrawCustomTypes(context); break;
     }
 }
 

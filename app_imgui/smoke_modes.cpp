@@ -6,10 +6,13 @@
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
+#include "services/custom_types.h"
 #include "services/memory_tools.h"
 #include "services/speedhack.h"
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
+
+#include <fstream>
 
 namespace cortex::desktop {
 
@@ -643,6 +646,51 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         summary += " grouped=" + std::to_string(groupedHits.size());
+
+        // A memory dump of the page holding the health value, read back and
+        // compared, then a user-defined type reading the same bytes.
+        const std::string dumpPath = "cortex_smoke_dump.bin";
+        services::MemoryDumpReport dump;
+        const services::MemoryReader dumpReader = [session](uint64_t at, void* buffer, size_t count) {
+            return session->ReadMemory(at, buffer, count, nullptr);
+        };
+        if (!services::DumpMemoryToFile(dumpReader, dumpPath, windowBase, window.size(), dump, &error)) {
+            error = "dump_failed:" + error;
+            return false;
+        }
+        uint64_t dumpSize = 0;
+        if (!services::FileByteSize(dumpPath, dumpSize, &error) || dumpSize != window.size()) {
+            error = "dump_size_mismatch";
+            return false;
+        }
+        std::vector<uint8_t> reread(window.size());
+        {
+            std::ifstream file(dumpPath, std::ios::binary);
+            file.read(reinterpret_cast<char*>(reread.data()), static_cast<std::streamsize>(reread.size()));
+            if (!file) {
+                error = "dump_read_back_failed";
+                return false;
+            }
+        }
+        std::remove(dumpPath.c_str());
+        if (std::memcmp(reread.data() + 0x100, &first32, 4) != 0) {
+            error = "dump_contents_mismatch";
+            return false;
+        }
+        summary += " dump=" + std::to_string(dump.read);
+
+        services::CustomType tenths;
+        tenths.name = "health x10";
+        tenths.size = 4;
+        tenths.scale = 0.1;
+        double scaled = 0;
+        if (!services::ReadCustomType(tenths, reread.data() + 0x100, 4, scaled, &error) ||
+            scaled < static_cast<double>(first32) * 0.1 - 0.001 ||
+            scaled > static_cast<double>(first32) * 0.1 + 0.001) {
+            error = "custom_type_failed:" + error;
+            return false;
+        }
+        summary += " customtype=ok";
     }
 
     std::vector<uint8_t> code(128);

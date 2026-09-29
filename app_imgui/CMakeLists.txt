@@ -189,6 +189,7 @@ add_executable(cortex_imgui WIN32
     ../core/services/assembler.cpp
     ../core/services/auto_assembler.cpp
     ../core/services/speedhack.cpp
+    ../core/services/custom_types.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -381,4 +382,17 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_speedhack_tests COMMAND cortex_speedhack_tests)
     set_tests_properties(cortex_speedhack_tests PROPERTIES TIMEOUT 60)
+
+    # User-defined value types and memory dumps.
+    add_executable(cortex_custom_types_tests
+        ../tests/custom_types_tests.cpp
+        ../core/services/custom_types.cpp
+        ../core/services/memory_tools.cpp
+    )
+    target_include_directories(cortex_custom_types_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_custom_types_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_custom_types_tests COMMAND cortex_custom_types_tests)
+    set_tests_properties(cortex_custom_types_tests PROPERTIES TIMEOUT 60)
 endif()

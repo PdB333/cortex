@@ -116,8 +116,19 @@ size_t MemoryWorkspace::BlockEnd(size_t index) const {
     return end;
 }
 
+const services::CustomType* MemoryWorkspace::EntryCustomType(const AddressEntry& entry) const {
+    if (entry.customType.empty() || !customTypes_) return nullptr;
+    return customTypes_->Find(entry.customType);
+}
+
 std::string MemoryWorkspace::FormatEntry(const AddressEntry& entry) const {
     if (!entry.readable) return "??";
+    if (const auto* custom = EntryCustomType(entry)) {
+        double value = 0;
+        if (!services::ReadCustomType(*custom, entry.lastValue.data(), entry.lastValue.size(), value))
+            return "??";
+        return services::FormatCustomValue(*custom, value);
+    }
     return ValueScanner::Format(entry.lastValue.data(), entry.lastValue.size(), entry.type, entry.hex,
                                 entry.unsignedValue, entry.utf16);
 }
@@ -125,7 +136,9 @@ std::string MemoryWorkspace::FormatEntry(const AddressEntry& entry) const {
 // The value, or its dropdown label ("100 : Full").
 std::string MemoryWorkspace::DisplayValue(const AddressEntry& entry) const {
     const std::string text = FormatEntry(entry);
-    if (entry.dropDown.empty() || !entry.readable) return text;
+    // A dropdown lists values of a standard type; a custom type reads them
+    // differently, so its entries show the value alone.
+    if (entry.dropDown.empty() || !entry.readable || EntryCustomType(entry)) return text;
     for (const auto& item : entry.dropDown) {
         std::vector<uint8_t> bytes;
         if (!ValueScanner::Encode(item.value, entry.type, entry.hex, entry.utf16, bytes)) continue;
@@ -258,7 +271,8 @@ application::CheatTableEntry MemoryWorkspace::ToTableEntry(const AddressEntry& e
         item.assemblerScript = entry.assemblerScript;
         item.variableType = "Auto Assembler Script";
     } else if (!entry.group) {
-        item.variableType = VariableTypeName(entry.type);
+        item.variableType = entry.customType.empty() ? VariableTypeName(entry.type) : "Custom";
+        item.customType = entry.customType;
         item.length = static_cast<int>(entry.type == ScanDataType::String && entry.utf16 ? entry.size / 2 : entry.size);
         item.offsets = entry.offsets;
         if (!entry.expression.empty()) item.address = entry.expression;
@@ -302,6 +316,14 @@ MemoryWorkspace::AddressEntry MemoryWorkspace::FromTableEntry(const application:
         const size_t fixed = ValueScanner::TypeSize(entry.type);
         entry.size = fixed ? fixed
             : static_cast<size_t>(std::max(1, item.length)) * (entry.type == ScanDataType::String && item.unicode ? 2 : 1);
+        // A user-defined type decides its own width; a table that names one
+        // Cortex does not have keeps the name, and the entry reads as the
+        // standard type until the type is defined.
+        if (item.variableType == "Custom" && !item.customType.empty()) {
+            entry.customType = item.customType;
+            if (customTypes_)
+                if (const auto* custom = customTypes_->Find(item.customType)) entry.size = custom->size;
+        }
         entry.offsets = item.offsets;
         entry.pointer = !item.offsets.empty();
         std::string module;
@@ -836,11 +858,27 @@ bool MemoryWorkspace::CommitValueEdit(UiContext& context) {
     for (size_t i = 0; i < addresses_.size(); ++i) {
         auto& entry = addresses_[i];
         const bool target = i == static_cast<size_t>(editAddressIndex_) ||
-                            (edited.selected && entry.selected && !entry.group && entry.type == edited.type);
+                            (edited.selected && entry.selected && !entry.group && entry.type == edited.type &&
+                             entry.customType == edited.customType);
         if (!target) continue;
         std::vector<uint8_t> bytes;
         std::string error;
-        if (!ValueScanner::Encode(editValue_, entry.type, entry.hex, entry.utf16, bytes, &error)) {
+        if (const auto* custom = EntryCustomType(entry)) {
+            // A custom type may cover only part of the bytes, so what the
+            // target holds is the starting point.
+            bytes = entry.lastValue;
+            bytes.resize(custom->size, 0);
+            char* end = nullptr;
+            const double value = std::strtod(editValue_, &end);
+            if (!end || end == editValue_ || *end != '\0') {
+                context.status = "\"" + std::string(editValue_) + "\" is not a number";
+                return false;
+            }
+            if (!services::WriteCustomType(*custom, value, bytes.data(), bytes.size(), &error)) {
+                context.status = error;
+                return false;
+            }
+        } else if (!ValueScanner::Encode(editValue_, entry.type, entry.hex, entry.utf16, bytes, &error)) {
             context.status = error;
             return false;
         }
@@ -939,13 +977,29 @@ void MemoryWorkspace::DrawEntryMenu(UiContext& context, size_t index, size_t gro
         if (ImGui::BeginMenu("Change type")) {
             for (const auto type : kTypes) {
                 if (type == ScanDataType::AllNumeric) continue;
-                if (ImGui::MenuItem(ValueScanner::TypeName(type), nullptr, entry.type == type) && entry.type != type) {
+                const bool selected = entry.customType.empty() && entry.type == type;
+                if (ImGui::MenuItem(ValueScanner::TypeName(type), nullptr, selected) && !selected) {
                     const size_t fixed = ValueScanner::TypeSize(type);
                     entry.size = fixed ? fixed : std::max<size_t>(entry.size, 8);
                     entry.type = type;
+                    entry.customType.clear();
                     entry.freeze = false;
                     entry.lastValue.clear();
                     lastAddressRefresh_ = {};
+                }
+            }
+            // User-defined types read the same bytes their own way.
+            if (customTypes_ && !customTypes_->Types().empty()) {
+                ImGui::Separator();
+                for (const auto& custom : customTypes_->Types()) {
+                    const bool selected = entry.customType == custom.name;
+                    if (ImGui::MenuItem(custom.name.c_str(), nullptr, selected) && !selected) {
+                        entry.customType = custom.name;
+                        entry.size = custom.size;
+                        entry.freeze = false;
+                        entry.lastValue.clear();
+                        lastAddressRefresh_ = {};
+                    }
                 }
             }
             ImGui::EndMenu();
@@ -1008,6 +1062,22 @@ void MemoryWorkspace::DrawEntryMenu(UiContext& context, size_t index, size_t gro
 }
 
 void MemoryWorkspace::DrawAddressList(UiContext& context) {
+    // The user-defined types can be edited from Memory tools while the list
+    // is showing them, so their widths are picked up again every frame.
+    customTypes_ = context.customTypes;
+    if (customTypes_) {
+        for (auto& entry : addresses_) {
+            if (entry.customType.empty()) continue;
+            const auto* custom = customTypes_->Find(entry.customType);
+            if (custom && entry.size != custom->size) {
+                entry.size = custom->size;
+                entry.lastValue.clear();
+                entry.freeze = false;
+                lastAddressRefresh_ = {};
+            }
+        }
+    }
+
     ImGui::BeginChild("AddressList", ImVec2(0, 0), ImGuiChildFlags_Borders);
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Address list");
@@ -1236,6 +1306,7 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
             ImGui::TableSetColumnIndex(3);
             const std::string typeText = entry.group ? std::string("Group")
                 : entry.script ? std::string("Script")
+                : !entry.customType.empty() ? entry.customType
                 : std::string(ValueScanner::TypeName(entry.type)) +
                       (entry.type == ScanDataType::String && entry.utf16 ? " (UTF-16)" : "");
             ImGui::TextUnformatted(typeText.c_str());

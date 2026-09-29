@@ -6,6 +6,7 @@
 #include "services/signature.h"
 #include "services/assembler.h"
 #include "services/speedhack.h"
+#include "services/custom_types.h"
 #include "target/module_provider.h"
 
 #include <array>
@@ -28,7 +29,9 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed, Grouped };
+    enum class Tab {
+        Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed, Grouped, Dump, Types
+    };
 
     void Reset(const std::string& targetId);
     void RefreshModules(UiContext& context);
@@ -153,6 +156,29 @@ private:
     std::vector<services::GroupedElement> groupedElements_;
     std::string groupedInfo_;
 
+    // Memory dump
+    char dumpAddress_[96] = {};
+    char dumpSize_[32] = "1000";
+    char dumpPath_[512] = {};
+    int dumpModule_ = 0;
+    std::string dumpInfo_;
+    bool dumpError_ = false;
+
+    // User-defined types
+    int typeSelected_ = -1;
+    char typeName_[64] = {};
+    int typeBase_ = 0;                  // services::CustomTypeBase
+    int typeSize_ = 4;
+    bool typeBigEndian_ = false;
+    bool typeSigned_ = true;
+    int typeBitOffset_ = 0;
+    int typeBitCount_ = 0;
+    double typeScale_ = 1.0;
+    double typeOffset_ = 0.0;
+    char typePath_[512] = {};
+    std::string typeInfo_;
+    bool typeError_ = false;
+
     // Speedhack
     services::SpeedhackState speed_;
     uint64_t speedPid_ = 0;
@@ -162,6 +188,10 @@ private:
     void DrawAssembler(UiContext& context);
     void DrawSpeedhack(UiContext& context);
     void DrawGroupedScan(UiContext& context);
+    void DrawDump(UiContext& context);
+    void DrawCustomTypes(UiContext& context);
+    void LoadTypeEditor(const services::CustomType& type);
+    services::CustomType TypeFromEditor() const;
     services::SpeedhackHost SpeedhackHostFor(UiContext& context, uint64_t pid) const;
     bool AssembleCurrent(UiContext& context, uint64_t address, services::AssembleBlockResult& result, std::string& error);
     int StealLength(UiContext& context, uint64_t address, int minimum) const;

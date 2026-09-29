@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 
 namespace cortex::services {
@@ -476,6 +477,100 @@ void FindGroupedValues(const uint8_t* data, size_t size, uint64_t base,
         result.offsets = std::move(offsets);
         out.push_back(std::move(result));
     }
+}
+
+// ------------------------------------------------------------------ memory dump
+
+namespace {
+
+// Dumping goes page by page so one unreadable page does not lose the rest.
+constexpr uint64_t kDumpChunk = 0x1000;
+constexpr uint64_t kMaxDump = 1ull << 31;  // 2 GB, well past any sane dump
+
+} // namespace
+
+bool DumpMemoryToFile(const MemoryReader& read, const std::string& path, uint64_t address, uint64_t size,
+                      MemoryDumpReport& report, std::string* error) {
+    report = MemoryDumpReport{};
+    auto fail = [&](const std::string& message) {
+        if (error) *error = message;
+        return false;
+    };
+    if (!read) return fail("No reader");
+    if (!size) return fail("Nothing to dump: the size is zero");
+    if (size > kMaxDump) return fail("That dump is too large");
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) return fail("Cannot write \"" + path + "\"");
+
+    report.requested = size;
+    std::vector<uint8_t> chunk(static_cast<size_t>(kDumpChunk));
+    for (uint64_t offset = 0; offset < size; offset += kDumpChunk) {
+        const auto count = static_cast<size_t>(std::min<uint64_t>(kDumpChunk, size - offset));
+        if (read(address + offset, chunk.data(), count)) {
+            report.read += count;
+        } else {
+            std::memset(chunk.data(), 0, count);
+            report.holes += count;
+        }
+        file.write(reinterpret_cast<const char*>(chunk.data()), static_cast<std::streamsize>(count));
+        if (!file) return fail("Cannot write \"" + path + "\"");
+    }
+    file.close();
+    if (!report.read) return fail("None of that range could be read");
+    return true;
+}
+
+bool LoadFileToMemory(const MemoryWriter& write, const std::string& path, uint64_t address, uint64_t offset,
+                      uint64_t size, uint64_t& written, std::string* error) {
+    written = 0;
+    auto fail = [&](const std::string& message) {
+        if (error) *error = message;
+        return false;
+    };
+    if (!write) return fail("No writer");
+
+    uint64_t total = 0;
+    if (!FileByteSize(path, total, error)) return false;
+    if (offset > total) return fail("That offset is past the end of the file");
+    const uint64_t available = total - offset;
+    if (!size || size > available) size = available;
+    if (!size) return fail("Nothing to write: the file is empty");
+    if (size > kMaxDump) return fail("That file is too large");
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return fail("Cannot read \"" + path + "\"");
+    file.seekg(static_cast<std::streamoff>(offset));
+    if (!file) return fail("Cannot seek in \"" + path + "\"");
+
+    std::vector<uint8_t> chunk(static_cast<size_t>(kDumpChunk));
+    while (written < size) {
+        const auto count = static_cast<size_t>(std::min<uint64_t>(kDumpChunk, size - written));
+        file.read(reinterpret_cast<char*>(chunk.data()), static_cast<std::streamsize>(count));
+        if (static_cast<size_t>(file.gcount()) != count) return fail("Cannot read \"" + path + "\"");
+        // A partial write leaves the target half patched, so the caller is
+        // told how far it got.
+        if (!write(address + written, chunk.data(), count))
+            return fail("Cannot write to " + std::to_string(written) + " byte(s) into the target");
+        written += count;
+    }
+    return true;
+}
+
+bool FileByteSize(const std::string& path, uint64_t& size, std::string* error) {
+    size = 0;
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        if (error) *error = "Cannot open \"" + path + "\"";
+        return false;
+    }
+    const auto end = file.tellg();
+    if (end < 0) {
+        if (error) *error = "Cannot measure \"" + path + "\"";
+        return false;
+    }
+    size = static_cast<uint64_t>(end);
+    return true;
 }
 
 } // namespace cortex::services

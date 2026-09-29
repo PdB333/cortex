@@ -242,8 +242,9 @@ std::string Escape(const std::string& text) {
 }
 
 bool IsValueType(const std::string& type) {
+    // "Custom" carries the name of a user-defined type beside it.
     static const char* const kTypes[] = {"Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String",
-                                         "Array of byte"};
+                                         "Array of byte", "Custom"};
     return std::find(std::begin(kTypes), std::end(kTypes), type) != std::end(kTypes);
 }
 
@@ -256,6 +257,7 @@ void ReadEntries(const XmlNode& list, int depth, CheatTable& table) {
         if (entry.description.size() >= 2 && entry.description.front() == '"' && entry.description.back() == '"')
             entry.description = entry.description.substr(1, entry.description.size() - 2);
         entry.variableType = Trim(node.ChildText("VariableType"));
+        entry.customType = Trim(node.ChildText("CustomType"));
         entry.groupHeader = Trim(node.ChildText("GroupHeader")) == "1";
         entry.address = Trim(node.ChildText("Address"));
         entry.showAsHex = Trim(node.ChildText("ShowAsHex")) == "1";
@@ -383,6 +385,8 @@ std::string WriteCheatTable(const CheatTable& table) {
             if (entry.showAsHex) out << field << "<ShowAsHex>1</ShowAsHex>\n";
             if (!entry.showAsSigned) out << field << "<ShowAsSigned>0</ShowAsSigned>\n";
             out << field << "<VariableType>" << Escape(entry.variableType) << "</VariableType>\n";
+            if (entry.variableType == "Custom")
+                out << field << "<CustomType>" << Escape(entry.customType) << "</CustomType>\n";
             if (entry.variableType == "String" || entry.variableType == "Array of byte")
                 out << field << "<Length>" << entry.length << "</Length>\n";
             if (entry.variableType == "String") {

@@ -34,6 +34,7 @@ struct CheatTableEntry {
     bool groupHeader = false;
     bool script = false;
     std::string assemblerScript;           // Auto Assembler source, when script
+    std::string customType;                // a user-defined type, when variableType is "Custom"
     int depth = 0;                         // nesting inside group headers
     bool collapsed = false;                // group shown closed (moHideChildren)
     int64_t color = -1;                    // description color, 0xRRGGBB; -1 = default

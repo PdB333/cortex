@@ -277,6 +277,29 @@ nop 5
             check(again.entries[1].dropDown.size() == 2 && again.entries[1].dropDown[1].label == "Full & healthy",
                   "dropdown lists survive a round trip");
         }
+        // A user-defined type is written as Cheat Engine's "Custom" with the
+        // type's name beside it, and comes back naming the same type.
+        {
+            CheatTable custom;
+            CheatTableEntry entry;
+            entry.description = "Health x10";
+            entry.variableType = "Custom";
+            entry.customType = "health x10";
+            entry.address = "game.exe+20";
+            custom.entries.push_back(entry);
+            const std::string written = WriteCheatTable(custom);
+            check(written.find("<CustomType>health x10</CustomType>") != std::string::npos,
+                  "custom types are written beside the variable type");
+            CheatTable read;
+            std::string customError;
+            check(ParseCheatTable(written, read, &customError) && read.entries.size() == 1 &&
+                      read.unsupported == 0,
+                  "a table using a custom type reads back");
+            if (read.entries.size() == 1)
+                check(read.entries[0].variableType == "Custom" && read.entries[0].customType == "health x10",
+                      "custom types survive a round trip");
+        }
+
         check(!ParseCheatTable("<Other/>", again, &error), "other XML is refused");
         check(!ParseCheatTable("<CheatTable><CheatEntries>", again, &error), "truncated XML is refused");
     }

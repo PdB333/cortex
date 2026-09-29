@@ -133,4 +133,32 @@ void FindGroupedValues(const uint8_t* data, size_t size, uint64_t base,
                        const std::vector<GroupedElement>& elements, size_t window, bool ordered,
                        size_t maxResults, std::vector<GroupedHit>& out);
 
+// ------------------------------------------------------------------ memory dump
+
+// Writes target memory to a file, like Cheat Engine's "save memory region",
+// and puts a file back where it came from.
+
+// Writes target memory: returns false when the range could not be written.
+using MemoryWriter = std::function<bool(uint64_t address, const void* buffer, size_t size)>;
+
+struct MemoryDumpReport {
+    uint64_t requested = 0;   // bytes asked for
+    uint64_t read = 0;        // bytes that came back from the target
+    uint64_t holes = 0;       // unreadable bytes, written as zeros
+};
+
+// Dumps [address, address + size) to `path`. Pages that cannot be read
+// become zeros and are counted, so a dump of a whole region survives the
+// guard pages in it; the dump fails only when nothing at all was readable.
+bool DumpMemoryToFile(const MemoryReader& read, const std::string& path, uint64_t address, uint64_t size,
+                      MemoryDumpReport& report, std::string* error = nullptr);
+
+// Writes `size` bytes of `path`, starting at `offset` in the file, to
+// `address`. A size of 0 means the rest of the file.
+bool LoadFileToMemory(const MemoryWriter& write, const std::string& path, uint64_t address, uint64_t offset,
+                      uint64_t size, uint64_t& written, std::string* error = nullptr);
+
+// The size of a file on disk, for the dialogs that offer to load one back.
+bool FileByteSize(const std::string& path, uint64_t& size, std::string* error = nullptr);
+
 } // namespace cortex::services

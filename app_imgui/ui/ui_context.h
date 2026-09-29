@@ -23,6 +23,7 @@
 #include "application/watches_model.h"
 #include "application/scripts_model.h"
 #include "application/screenshot_model.h"
+#include "services/custom_types.h"
 #include "services/debugger_service.h"
 #include "services/disassembly_service.h"
 #include "services/memory_service.h"
@@ -114,6 +115,9 @@ struct UiContext {
     // Names address expressions resolve (see address_resolver.h): modules,
     // exports and user-defined symbols shared with the Lua engine.
     std::shared_ptr<application::UserSymbols> userSymbols = std::make_shared<application::UserSymbols>();
+    // User-defined value types, shared by the Memory tools editor and the
+    // address list that shows and writes them.
+    std::shared_ptr<services::CustomTypeTable> customTypes = std::make_shared<services::CustomTypeTable>();
     struct AddressSymbols {
         application::TargetSymbols symbols;
         std::string targetId;
