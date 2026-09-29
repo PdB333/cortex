@@ -102,6 +102,8 @@ struct WindowsDebuggerBackend::Impl {
     // a hit on a slot after its breakpoint was removed (the event was
     // already queued); those traps are ours and must not reach the target.
     std::chrono::steady_clock::time_point slotReleasedAt[4] = {};
+    // The last time a hardware breakpoint was added or removed.
+    std::chrono::steady_clock::time_point hwLastChange = {};
     std::map<DWORD, int> pendingSoftwareRearm;
     std::map<DWORD, TempStepOver> tempStepOvers;
     std::map<DWORD, HANDLE> manualPaused;
@@ -133,6 +135,39 @@ struct WindowsDebuggerBackend::Impl {
         return SnapshotFromHandle(thread, tid, target.architecture, out, error);
     }
 
+#if defined(_WIN64)
+    static void FillSnapshot(const WOW64_CONTEXT& c, cortex::target::ThreadRegisterSnapshot& out) {
+        out.instructionPointer = c.Eip;
+        Push(out.registers, "EAX", c.Eax); Push(out.registers, "EBX", c.Ebx);
+        Push(out.registers, "ECX", c.Ecx); Push(out.registers, "EDX", c.Edx);
+        Push(out.registers, "ESI", c.Esi); Push(out.registers, "EDI", c.Edi);
+        Push(out.registers, "EBP", c.Ebp); Push(out.registers, "ESP", c.Esp);
+        Push(out.registers, "EIP", c.Eip); Push(out.registers, "EFLAGS", c.EFlags);
+    }
+
+    static void FillSnapshot(const CONTEXT& c, cortex::target::ThreadRegisterSnapshot& out) {
+        out.instructionPointer = c.Rip;
+        Push(out.registers, "RAX", c.Rax); Push(out.registers, "RBX", c.Rbx);
+        Push(out.registers, "RCX", c.Rcx); Push(out.registers, "RDX", c.Rdx);
+        Push(out.registers, "RSI", c.Rsi); Push(out.registers, "RDI", c.Rdi);
+        Push(out.registers, "RBP", c.Rbp); Push(out.registers, "RSP", c.Rsp);
+        Push(out.registers, "R8", c.R8); Push(out.registers, "R9", c.R9);
+        Push(out.registers, "R10", c.R10); Push(out.registers, "R11", c.R11);
+        Push(out.registers, "R12", c.R12); Push(out.registers, "R13", c.R13);
+        Push(out.registers, "R14", c.R14); Push(out.registers, "R15", c.R15);
+        Push(out.registers, "RIP", c.Rip); Push(out.registers, "EFLAGS", c.EFlags);
+    }
+#else
+    static void FillSnapshot(const CONTEXT& c, cortex::target::ThreadRegisterSnapshot& out) {
+        out.instructionPointer = c.Eip;
+        Push(out.registers, "EAX", c.Eax); Push(out.registers, "EBX", c.Ebx);
+        Push(out.registers, "ECX", c.Ecx); Push(out.registers, "EDX", c.Edx);
+        Push(out.registers, "ESI", c.Esi); Push(out.registers, "EDI", c.Edi);
+        Push(out.registers, "EBP", c.Ebp); Push(out.registers, "ESP", c.Esp);
+        Push(out.registers, "EIP", c.Eip); Push(out.registers, "EFLAGS", c.EFlags);
+    }
+#endif
+
     // Reads a suspended thread's registers for a target of the given
     // architecture; usable before the debugger is attached.
     static bool SnapshotFromHandle(HANDLE thread, DWORD tid,
@@ -149,12 +184,7 @@ struct WindowsDebuggerBackend::Impl {
                 SetError(error, "wow64_get_context_failed:" + std::to_string(GetLastError()));
                 return false;
             }
-            out.instructionPointer = c.Eip;
-            Push(out.registers, "EAX", c.Eax); Push(out.registers, "EBX", c.Ebx);
-            Push(out.registers, "ECX", c.Ecx); Push(out.registers, "EDX", c.Edx);
-            Push(out.registers, "ESI", c.Esi); Push(out.registers, "EDI", c.Edi);
-            Push(out.registers, "EBP", c.Ebp); Push(out.registers, "ESP", c.Esp);
-            Push(out.registers, "EIP", c.Eip); Push(out.registers, "EFLAGS", c.EFlags);
+            FillSnapshot(c, out);
             return true;
         }
         if (architecture != cortex::target::Architecture::X64) {
@@ -167,16 +197,7 @@ struct WindowsDebuggerBackend::Impl {
             SetError(error, "get_context_failed:" + std::to_string(GetLastError()));
             return false;
         }
-        out.instructionPointer = c.Rip;
-        Push(out.registers, "RAX", c.Rax); Push(out.registers, "RBX", c.Rbx);
-        Push(out.registers, "RCX", c.Rcx); Push(out.registers, "RDX", c.Rdx);
-        Push(out.registers, "RSI", c.Rsi); Push(out.registers, "RDI", c.Rdi);
-        Push(out.registers, "RBP", c.Rbp); Push(out.registers, "RSP", c.Rsp);
-        Push(out.registers, "R8", c.R8); Push(out.registers, "R9", c.R9);
-        Push(out.registers, "R10", c.R10); Push(out.registers, "R11", c.R11);
-        Push(out.registers, "R12", c.R12); Push(out.registers, "R13", c.R13);
-        Push(out.registers, "R14", c.R14); Push(out.registers, "R15", c.R15);
-        Push(out.registers, "RIP", c.Rip); Push(out.registers, "EFLAGS", c.EFlags);
+        FillSnapshot(c, out);
         return true;
 #else
         if (architecture != cortex::target::Architecture::X86) {
@@ -189,12 +210,7 @@ struct WindowsDebuggerBackend::Impl {
             SetError(error, "get_context_failed:" + std::to_string(GetLastError()));
             return false;
         }
-        out.instructionPointer = c.Eip;
-        Push(out.registers, "EAX", c.Eax); Push(out.registers, "EBX", c.Ebx);
-        Push(out.registers, "ECX", c.Ecx); Push(out.registers, "EDX", c.Edx);
-        Push(out.registers, "ESI", c.Esi); Push(out.registers, "EDI", c.Edi);
-        Push(out.registers, "EBP", c.Ebp); Push(out.registers, "ESP", c.Esp);
-        Push(out.registers, "EIP", c.Eip); Push(out.registers, "EFLAGS", c.EFlags);
+        FillSnapshot(c, out);
         return true;
 #endif
     }
@@ -240,6 +256,81 @@ struct WindowsDebuggerBackend::Impl {
             return false;
         }
         return true;
+    }
+
+    // The context of the thread that reported a hardware trap. Every hit used
+    // to cost four reads and two writes of the thread context; the game is
+    // frozen for the whole time, so on a hot address that was the lag. The
+    // context is read once and written back once.
+    struct TrapContext {
+#if defined(_WIN64)
+        WOW64_CONTEXT wow{};
+        bool isWow = false;
+#endif
+        CONTEXT native{};
+        uint64_t dr[4] = {};
+        uint64_t dr6 = 0;
+        uint64_t dr7 = 0;
+    };
+
+    bool readTrap(HANDLE thread, TrapContext& trap, DWORD tid,
+                  cortex::target::ThreadRegisterSnapshot& snapshot) const {
+        snapshot = {};
+        snapshot.threadId = tid;
+#if defined(_WIN64)
+        if (targetIsWow64X86()) {
+            trap.isWow = true;
+            trap.wow.ContextFlags = WOW64_CONTEXT_FULL | WOW64_CONTEXT_DEBUG_REGISTERS;
+            if (!Wow64GetThreadContext(thread, &trap.wow)) return false;
+            trap.dr[0] = trap.wow.Dr0; trap.dr[1] = trap.wow.Dr1;
+            trap.dr[2] = trap.wow.Dr2; trap.dr[3] = trap.wow.Dr3;
+            trap.dr6 = trap.wow.Dr6; trap.dr7 = trap.wow.Dr7;
+            FillSnapshot(trap.wow, snapshot);
+            return true;
+        }
+#endif
+        trap.native.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
+        if (!GetThreadContext(thread, &trap.native)) return false;
+        trap.dr[0] = trap.native.Dr0; trap.dr[1] = trap.native.Dr1;
+        trap.dr[2] = trap.native.Dr2; trap.dr[3] = trap.native.Dr3;
+        trap.dr6 = trap.native.Dr6; trap.dr7 = trap.native.Dr7;
+        FillSnapshot(trap.native, snapshot);
+        return true;
+    }
+
+    // Puts the thread back after a trap: DR6 cleared, the trap flag off and
+    // the resume flag on, and, when `disableSlot` is a slot, that slot's
+    // enable bits cleared so a hardware breakpoint nobody owns any more
+    // cannot trap again.
+    bool writeTrap(HANDLE thread, TrapContext& trap, int disableSlot) const {
+        const uint64_t keep = disableSlot >= 0 && disableSlot < 4
+                                  ? ~((uint64_t{3} << (disableSlot * 2)) | (uint64_t{0xF} << (16 + disableSlot * 4)))
+                                  : ~uint64_t{0};
+#if defined(_WIN64)
+        if (trap.isWow) {
+            trap.wow.ContextFlags = WOW64_CONTEXT_CONTROL | WOW64_CONTEXT_DEBUG_REGISTERS;
+            trap.wow.Dr6 = 0;
+            trap.wow.Dr7 = static_cast<DWORD>(trap.dr7 & keep);
+            trap.wow.EFlags = (trap.wow.EFlags & ~0x100u) | 0x10000u;
+            return Wow64SetThreadContext(thread, &trap.wow) != FALSE;
+        }
+#endif
+        trap.native.ContextFlags = CONTEXT_CONTROL | CONTEXT_DEBUG_REGISTERS;
+        trap.native.Dr6 = 0;
+        trap.native.Dr7 = static_cast<DWORD_PTR>(trap.dr7 & keep);
+        trap.native.EFlags = (trap.native.EFlags & ~0x100u) | 0x10000u;
+        return SetThreadContext(thread, &trap.native) != FALSE;
+    }
+
+    // True while a single-step exception could be ours: a hardware
+    // breakpoint exists, or one changed a moment ago and its last traps may
+    // still be queued. Such a trap must never reach the game, which has no
+    // handler for it and would be killed.
+    bool ownsHardwareTraps() {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const auto& item : bps)
+            if (item.second.info.kind != "software") return true;
+        return std::chrono::steady_clock::now() - hwLastChange < std::chrono::seconds(10);
     }
 
     bool getDebugRegisters(HANDLE thread, uint64_t dr[4], uint64_t& dr6, uint64_t& dr7,
@@ -339,7 +430,10 @@ struct WindowsDebuggerBackend::Impl {
         } else {
             dr[slot] = 0;
         }
-        dr6 = 0;
+        // DR6 is written back as it was read. Clearing it here raced with a
+        // hit that had already been reported for this thread: the handler
+        // then found no slot bit, took the trap for the game's own and
+        // passed the single-step exception on, which killed the game.
         return setDebugRegisters(thread, dr, dr6, dr7, error);
     }
 
@@ -534,7 +628,9 @@ struct WindowsDebuggerBackend::Impl {
                 std::lock_guard<std::mutex> lock(mutex);
                 if (Breakpoint* bp = softwareAt(address)) {
                     ++bp->info.hitCount;
-                    local = *bp;
+                    local.info = bp->info;
+                    local.originalByte = bp->originalByte;
+                    local.hwSlot = bp->hwSlot;
                     found = true;
                 }
             }
@@ -614,50 +710,65 @@ struct WindowsDebuggerBackend::Impl {
                 return DBG_CONTINUE;
             }
 
-            uint64_t dr[4] = {}, dr6 = 0, dr7 = 0;
+            // One read of the thread's context serves the slot lookup, the
+            // register snapshot and the write-back.
+            TrapContext trap;
+            cortex::target::ThreadRegisterSnapshot snapshot;
+            const bool haveTrap = readTrap(thread, trap, event.dwThreadId, snapshot);
             int slot = -1;
-            if (getDebugRegisters(thread, dr, dr6, dr7, nullptr)) {
+            if (haveTrap) {
                 for (int candidate = 0; candidate < 4; ++candidate) {
-                    if ((dr6 & (uint64_t{1} << candidate)) != 0) { slot = candidate; break; }
+                    if ((trap.dr6 & (uint64_t{1} << candidate)) != 0) { slot = candidate; break; }
                 }
-                if (slot >= 0) setDebugRegisters(thread, dr, 0, dr7, nullptr);
             }
 
-            Breakpoint local;
-            bool found = false;
+            // Only the fields a hit needs are copied: the breakpoint also
+            // owns its log, and copying that on every hit of a hot address
+            // was most of the time spent while the game stood still.
+            BreakpointInfo hitInfo;
+            int hitId = -1;
             if (slot >= 0) {
                 std::lock_guard<std::mutex> lock(mutex);
                 if (Breakpoint* bp = hardwareAtSlot(slot, event.dwThreadId)) {
                     ++bp->info.hitCount;
-                    local = *bp;
-                    found = true;
+                    hitInfo = bp->info;
+                    hitId = bp->info.id;
                 }
             }
-            if (found) {
-                setExecutionState(thread, std::nullopt, false, true, nullptr);
-                cortex::target::ThreadRegisterSnapshot snapshot;
-                snapshotFromHandle(thread, event.dwThreadId, snapshot, nullptr);
+            if (hitId >= 0) {
+                writeTrap(thread, trap, -1);
                 CloseHandle(thread);
                 {
                     std::lock_guard<std::mutex> lock(mutex);
-                    auto current = bps.find(local.info.id);
+                    auto current = bps.find(hitId);
                     if (current != bps.end()) recordHit(current->second, snapshot);
                 }
-                if (local.info.pauseOnHit) {
-                    setPause(event, local.info.id, snapshot);
+                if (hitInfo.pauseOnHit) {
+                    setPause(event, hitId, snapshot);
                     pauseEvent = true;
                 }
                 return DBG_CONTINUE;
             }
 
-            if (rearmId >= 0) setExecutionState(thread, std::nullopt, false, false, nullptr);
-            CloseHandle(thread);
-            if (rearmId >= 0) return DBG_CONTINUE;
             if (slot >= 0) {
-                std::lock_guard<std::mutex> lock(mutex);
-                if (std::chrono::steady_clock::now() - slotReleasedAt[slot] < std::chrono::seconds(5))
-                    return DBG_CONTINUE;
+                // A slot of ours with no breakpoint behind it: one that was
+                // removed while this trap was already on its way. The slot
+                // is disarmed on this thread and the trap swallowed, at any
+                // time after the removal; passing it on would kill the game.
+                writeTrap(thread, trap, slot);
+                CloseHandle(thread);
+                return DBG_CONTINUE;
             }
+
+            // No slot bit: a step of the software breakpoint re-arm, or a
+            // trap whose DR6 was cleared by a concurrent change of the debug
+            // registers, or the game's own trap flag. The first two are
+            // ours; the last one is only told apart by whether we have any
+            // hardware breakpoint at all, and when we do it is swallowed.
+            const bool ours = rearmId >= 0 || ownsHardwareTraps();
+            if (ours) setExecutionState(thread, std::nullopt, false, false, nullptr);
+            CloseHandle(thread);
+            if (ours) return DBG_CONTINUE;
             return DBG_EXCEPTION_NOT_HANDLED;
         }
 
@@ -978,6 +1089,7 @@ int WindowsDebuggerBackend::addBreakpoint(const std::string& kindValue, uint64_t
             }
         }
         bp.info.id = impl_->nextBreakpointId++;
+        if (kind != "software") impl_->hwLastChange = std::chrono::steady_clock::now();
         if (kind != "software") {
             for (int slot = 0; slot < 4; ++slot) {
                 if (!impl_->hwSlotUsed[slot]) {
@@ -1047,6 +1159,7 @@ bool WindowsDebuggerBackend::removeBreakpoint(int id, std::string* error) {
         if (bp.hwSlot >= 0) {
             impl_->hwSlotUsed[bp.hwSlot] = false;
             impl_->slotReleasedAt[bp.hwSlot] = std::chrono::steady_clock::now();
+            impl_->hwLastChange = impl_->slotReleasedAt[bp.hwSlot];
         }
         for (auto pending = impl_->pendingSoftwareRearm.begin(); pending != impl_->pendingSoftwareRearm.end();) {
             if (pending->second == id) pending = impl_->pendingSoftwareRearm.erase(pending);

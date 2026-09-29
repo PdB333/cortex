@@ -26,6 +26,15 @@ public:
     bool Ready() const override;
     uint64_t TargetProcessId() const;
 
+    // The runtime answers from a thread inside the target, so while every
+    // thread of the target is suspended (Pause target) a call would sit on
+    // the pipe until it timed out and freeze the desktop with the game.
+    // While suspended, calls fail at once with "target_paused" and Ready()
+    // is false; the connection itself is kept, so resuming needs no
+    // reconnect.
+    void SetSuspended(bool suspended) { suspended_.store(suspended, std::memory_order_relaxed); }
+    bool Suspended() const { return suspended_.load(std::memory_order_relaxed); }
+
     // Checks whether the currently selected target can be instrumented with
     // the runtime assets available beside the desktop application. This does
     // not inject anything and is safe to call from UI enable/disable logic.
@@ -36,6 +45,10 @@ public:
     // adapters such as the human prompt surface.
     bool TryConnectExisting(std::string* error = nullptr) override {
         if (error) error->clear();
+        if (Suspended()) {
+            if (error) *error = "target_paused";
+            return false;
+        }
         const auto session = sessions_.Active();
         if (!session || !session->Alive()) {
             if (error) *error = "no_active_session";
@@ -74,6 +87,10 @@ public:
         using json = nlohmann::json;
         output = json::object();
         if (error) error->clear();
+        if (Suspended()) {
+            if (error) *error = "target_paused";
+            return false;
+        }
         if (method.empty() || path.empty() || path.front() != '/' || !body.is_object()) {
             if (error) *error = "invalid_private_route_call";
             return false;
@@ -160,6 +177,7 @@ private:
     std::string mcpSessionId_;
     uint64_t verifiedProcessId_ = 0;
     std::atomic<uint64_t> requestSequence_{0};
+    std::atomic<bool> suspended_{false};
 };
 
 } // namespace cortex::services

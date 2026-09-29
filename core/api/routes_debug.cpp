@@ -269,6 +269,11 @@ void RegisterDebugRoutes(httplib::Server& svr) {
         if (!p.empty()) try { sinceSeq = std::stoull(p); } catch (...) {}
         auto q = req.get_param_value("limit");
         if (!q.empty()) try { limit = (size_t)std::stoul(q); } catch (...) {}
+        // compact=1 leaves out what a log reader that only counts hits does not
+        // need: the stack (16 frames, each described with a symbol lookup), the
+        // code bytes and the named instruction. On a hot breakpoint that is most
+        // of the reply and most of the time spent building it.
+        const bool compact = req.get_param_value("compact") == "1";
 
         std::vector<dbg::BpLogEntry> entries;
         uint64_t dropped = 0, total = 0;
@@ -281,6 +286,13 @@ void RegisterDebugRoutes(httplib::Server& svr) {
         json arr = json::array();
         uint64_t nextSeq = sinceSeq;
         for (const auto& e : entries) {
+            if (compact) {
+                arr.push_back({{"seq", e.seq}, {"thread_id", e.threadId},
+                                {"timestamp_ms", e.timestampMs}, {"instruction", HexAddr(e.instruction)},
+                                {"registers", RegsToJson(e.regs)}});
+                if (e.seq >= nextSeq) nextSeq = e.seq + 1;
+                continue;
+            }
             json stack=json::array(), stackNamed=json::array();for(uintptr_t frame:e.stack){stack.push_back(HexAddr(frame));stackNamed.push_back(process::DescribeAddress(frame));}
             std::ostringstream bytes;bytes<<std::hex<<std::setfill('0');for(uint8_t byte:e.bytes)bytes<<std::setw(2)<<static_cast<unsigned>(byte);
             json caps = json::array();

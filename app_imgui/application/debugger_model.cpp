@@ -58,6 +58,10 @@ bool DebuggerModel::EnsureProvider(bool attach, std::string* error) {
     }
 
     if (!attach || provider_->Ready()) return true;
+    if (targetPaused_) {
+        if (error) *error = "target_paused: resume the target before starting the debugger";
+        return false;
+    }
     if (!provider_->Attach(error)) return false;
     return true;
 }

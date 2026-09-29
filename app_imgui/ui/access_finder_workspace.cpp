@@ -115,19 +115,26 @@ uint64_t AccessFinderWorkspace::AccessingInstruction(UiContext& context, uint64_
 
 void AccessFinderWorkspace::Poll(UiContext& context) {
     const auto now = std::chrono::steady_clock::now();
-    if (now - lastPoll_ < std::chrono::milliseconds(250)) return;
+    if (now - lastPoll_ < pollInterval_) return;
     lastPoll_ = now;
     if (!context.debuggerModel) return;
     for (auto& watch : watches_) {
         if (!watch.active) continue;
         std::vector<DebugBreakpointLogEntry> entries;
         std::string error;
-        if (!context.debuggerModel->LoadBreakpointLog(watch.breakpointId, watch.lastSeq, 2000, entries, &error)) {
+        const auto started = std::chrono::steady_clock::now();
+        // Entries newer than the last one seen: the last one itself used to
+        // come back every time and was counted again.
+        const uint64_t since = watch.lastSeq ? watch.lastSeq + 1 : 0;
+        if (!context.debuggerModel->LoadBreakpointLog(watch.breakpointId, since, 500, entries, &error)) {
             watch.error = error;
             continue;
         }
+        bool changed = false;
         for (const auto& entry : entries) {
             watch.lastSeq = std::max(watch.lastSeq, entry.seq);
+            changed = true;
+            ++watch.listed;
             if (watch.instruction) {
                 const auto lookup = [&entry](const std::string& name, uint64_t& value) {
                     for (const auto& reg : entry.registers.registers) {
@@ -148,7 +155,6 @@ void AccessFinderWorkspace::Poll(UiContext& context) {
                 ++hit.count;
                 hit.registers.clear();
                 for (const auto& value : entry.registers.registers) hit.registers.emplace_back(value.name, value.value);
-                ++watch.total;
                 continue;
             }
             std::string text;
@@ -159,8 +165,49 @@ void AccessFinderWorkspace::Poll(UiContext& context) {
             ++hit.count;
             hit.registers.clear();
             for (const auto& value : entry.registers.registers) hit.registers.emplace_back(value.name, value.value);
-            ++watch.total;
         }
+        // The sequence number is the hit count, so it also covers the hits
+        // the debugger dropped because they came faster than they are read.
+        watch.total = std::max(watch.total, watch.lastSeq);
+        if (changed) ++watch.version;
+
+        if (watch.rateAt.time_since_epoch().count() == 0) {
+            watch.rateAt = now;
+            watch.rateSeq = watch.total;
+        } else if (now - watch.rateAt >= std::chrono::seconds(1)) {
+            const double seconds = std::chrono::duration<double>(now - watch.rateAt).count();
+            watch.rate = static_cast<double>(watch.total - watch.rateSeq) / seconds;
+            watch.rateAt = now;
+            watch.rateSeq = watch.total;
+        }
+
+        // Instruction watches show what each address holds now. Read here,
+        // a few times a second, rather than once per row per frame.
+        if (watch.instruction && now - watch.valuesAt >= std::chrono::milliseconds(500)) {
+            watch.valuesAt = now;
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            size_t reads = 0;
+            for (auto& item : watch.hits) {
+                if (!session || ++reads > 256) break;
+                Hit& hit = item.second;
+                hit.value = 0;
+                hit.valueRead = session->ReadMemory(hit.instruction, &hit.value, std::clamp(hit.size, 1u, 8u), nullptr);
+            }
+            ++watch.version;
+        }
+
+        // A hot address stops the whole game on every hit: stop before the
+        // game is unplayable, not after.
+        if (stopAfterHits_ > 0 && watch.total >= static_cast<uint64_t>(stopAfterHits_)) {
+            Stop(context, watch);
+            watch.note = "Stopped after " + std::to_string(watch.total) +
+                         " hits so the game is not slowed further. Raise or clear \"Stop after\" to keep watching.";
+        }
+
+        // A slow poll means the list is busy: poll less often.
+        const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started);
+        pollInterval_ = std::clamp(spent * 8, std::chrono::milliseconds(250), std::chrono::milliseconds(2000));
     }
 }
 
@@ -203,6 +250,8 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
         ImGui::TextDisabled("  %s, %llu hit(s), %zu %s", watch.active ? "running" : "stopped",
                             static_cast<unsigned long long>(watch.total), watch.hits.size(),
                             watch.instruction ? "address(es)" : "instruction(s)");
+        if (watch.active && watch.rate >= 500.0)
+            ImGui::TextColored(WarningTextColor(), "  %.0f hits/s: slowing the game", watch.rate);
         ImGui::PopID();
     }
     ImGui::EndChild();
@@ -220,6 +269,12 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
     if (watch.active) {
         FlowSameLine(ButtonWidth("Stop"));
         if (ImGui::Button("Stop")) Stop(context, watch);
+        FlowSameLine(Px(210));
+        ImGui::SetNextItemWidth(Px(90));
+        if (ImGui::InputInt("Stop after", &stopAfterHits_, 0, 0)) stopAfterHits_ = std::max(stopAfterHits_, 0);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Every hit stops the whole game while Cortex records it. The watch stops itself\n"
+                              "after this many hits so a busy address does not freeze the game. 0 = never.");
     } else {
         FlowSameLine(ButtonWidth("Remove"));
         if (ImGui::Button("Remove")) {
@@ -230,11 +285,21 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
         }
     }
     if (!watch.error.empty()) ImGui::TextColored(WarningTextColor(), "%s", watch.error.c_str());
+    if (!watch.note.empty()) ImGui::TextColored(WarningTextColor(), "%s", watch.note.c_str());
+    if (watch.total > watch.listed)
+        ImGui::TextDisabled("%llu hit(s) came faster than they can be listed and were counted only.",
+                            static_cast<unsigned long long>(watch.total - watch.listed));
     ImGui::Separator();
 
-    std::vector<const Hit*> rows;
-    for (const auto& item : watch.hits) rows.push_back(&item.second);
-    std::sort(rows.begin(), rows.end(), [](const Hit* a, const Hit* b) { return a->count > b->count; });
+    if (watch.orderVersion != watch.version) {
+        watch.order.clear();
+        for (const auto& item : watch.hits) watch.order.push_back(item.first);
+        std::sort(watch.order.begin(), watch.order.end(), [&watch](uint64_t a, uint64_t b) {
+            return watch.hits[a].count > watch.hits[b].count;
+        });
+        watch.orderVersion = watch.version;
+    }
+    const auto& rows = watch.order;
     if (rows.empty()) {
         HintText(watch.active ? "Waiting for the game to touch the address..." : "No hit was recorded.");
         ImGui::EndChild();
@@ -249,8 +314,11 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.35f);
         ImGui::TableSetupColumn(watch.instruction ? "Value" : "Instruction", ImGuiTableColumnFlags_WidthStretch, 0.65f);
         ImGui::TableHeadersRow();
-        for (size_t i = 0; i < rows.size(); ++i) {
-            const Hit& hit = *rows[i];
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(rows.size()));
+        while (clipper.Step()) for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const size_t i = static_cast<size_t>(row);
+            const Hit& hit = watch.hits[rows[i]];
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::PushID(static_cast<int>(i));
@@ -288,12 +356,10 @@ void AccessFinderWorkspace::Draw(UiContext& context) {
             MonoTextUnformatted(Hex(hit.instruction).c_str());
             ImGui::TableSetColumnIndex(2);
             if (watch.instruction) {
-                const auto session = context.sessions->Active();
-                uint64_t value = 0;
                 const unsigned size = std::clamp(hit.size, 1u, 8u);
-                if (session && session->ReadMemory(hit.instruction, &value, size, nullptr))
-                    MonoText("%llu  (%0*llX)%s", static_cast<unsigned long long>(value), static_cast<int>(size * 2),
-                             static_cast<unsigned long long>(value), hit.write ? "  written" : "");
+                if (hit.valueRead)
+                    MonoText("%llu  (%0*llX)%s", static_cast<unsigned long long>(hit.value), static_cast<int>(size * 2),
+                             static_cast<unsigned long long>(hit.value), hit.write ? "  written" : "");
                 else
                     ImGui::TextDisabled("??");
             } else {

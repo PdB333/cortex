@@ -495,6 +495,25 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
         if (entry.name == "g_cortex_ticks") ticks = module.base + entry.rva;
     }
 
+    // Pause target: while every thread of the target is suspended the runtime
+    // cannot answer, so a call must fail at once instead of holding the UI
+    // until it times out.
+    {
+        app.payload.SetSuspended(true);
+        nlohmann::json ignored;
+        std::string pausedError;
+        const auto started = std::chrono::steady_clock::now();
+        const bool refused = !app.payload.CallTool("status", nlohmann::json::object(), ignored, &pausedError) &&
+                             pausedError == "target_paused" && !app.payload.Ready();
+        const auto spent = std::chrono::steady_clock::now() - started;
+        app.payload.SetSuspended(false);
+        if (!refused || spent > std::chrono::milliseconds(250)) {
+            error = "pause_guard_failed:" + pausedError;
+            return false;
+        }
+        summary += " pause_guard=ok";
+    }
+
     // Find out what writes to the frame counter: a log-mode hardware
     // breakpoint through the access finder workspace.
     if (frame && app.debuggerModel.Ready()) {

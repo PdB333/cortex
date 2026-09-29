@@ -234,7 +234,7 @@ static std::vector<uintptr_t> HeuristicStackScan(uintptr_t sp, int maxFrames) {
     return out;
 }
 
-std::vector<uintptr_t> WalkContextStack(PCONTEXT ctx, int maxFrames) {
+std::vector<uintptr_t> WalkContextStack(PCONTEXT ctx, int maxFrames, bool allowSymbolWalk) {
     std::vector<uintptr_t> frames{GetCtxIp(ctx)};
 #ifdef _WIN64
     uintptr_t frame = ctx->Rbp, sp = ctx->Rsp; constexpr size_t ptrSize = 8;
@@ -256,8 +256,13 @@ std::vector<uintptr_t> WalkContextStack(PCONTEXT ctx, int maxFrames) {
 
     // EBP walk yielded nothing beyond IP -- try StackWalk64 (works with PDBs
     // or PE unwind info on x64) then a heuristic stack-return-address scan.
-    auto sw = StackWalkFromContext(*ctx, GetCurrentThread(), maxFrames);
-    if (sw.size() > frames.size()) return sw;
+    // StackWalk64 loads dbghelp and may search for symbols, which is far too
+    // heavy, and not safe, inside an exception handler that runs on every hit
+    // of a hot data breakpoint: those hits use the heuristic scan only.
+    if (allowSymbolWalk) {
+        auto sw = StackWalkFromContext(*ctx, GetCurrentThread(), maxFrames);
+        if (sw.size() > frames.size()) return sw;
+    }
     auto heur = HeuristicStackScan(sp, maxFrames - 1);
     frames.insert(frames.end(), heur.begin(), heur.end());
     return frames;
@@ -435,8 +440,13 @@ void PushLogEntry(int id, DWORD tid, uint64_t seq, PCONTEXT ctx) {
     else if (auto hw = g_hwBps.find(id); hw != g_hwBps.end()) caps = hw->second.captures;
     auto captureResults = caps.empty() ? std::vector<BpCaptureResult>{} : RunCaptures(caps, ctx);
     MaybeEnqueueTrigger(id, tid, ctx);
+    // A hardware breakpoint can be hit thousands of times a second, and this
+    // runs inside the exception handler with every other game thread held
+    // behind g_mutex: only software breakpoints, which the user placed to
+    // look at, get the dbghelp stack walk.
+    const bool hardware = g_hwBps.find(id) != g_hwBps.end();
     ring.entries.push_back(BpLogEntry{seq, tid, GetTickCount64(), CtxToRegs(ctx), GetCtxIp(ctx),
-                                       std::move(bytes), WalkContextStack(ctx,16),
+                                       std::move(bytes), WalkContextStack(ctx, 16, !hardware),
                                        std::move(captureResults)});
     ring.total = seq;
     if (ring.entries.size() > kMaxBpLogEntries) {
@@ -703,6 +713,21 @@ LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS info) {
     }
 
     if (code == EXCEPTION_SINGLE_STEP) {
+        // A hardware breakpoint can also trap inside this handler: code it
+        // runs (a log capture, a stack walk, a memory read) may touch the
+        // watched address. Taking g_mutex again on the same thread would
+        // deadlock the game, so a trap raised while handling one is dropped.
+        thread_local bool insideHandler = false;
+        if (insideHandler) {
+            ctx->Dr6 = 0;
+            ctx->EFlags |= kRF;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        struct HandlerScope {
+            bool& flag;
+            explicit HandlerScope(bool& value) : flag(value) { flag = true; }
+            ~HandlerScope() { flag = false; }
+        } handlerScope(insideHandler);
         bool traceActive = false;
         bool traceHandled = false;
         {

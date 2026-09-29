@@ -21,6 +21,10 @@ public:
     ~DebuggerModel();
 
     void Reset();
+    // While the target is paused (every thread suspended) the debugger
+    // cannot attach: the initial breakpoint never arrives and the attach
+    // waits out its timeouts on the UI thread. It is refused up front.
+    void SetTargetPaused(bool paused) { targetPaused_ = paused; }
     bool EnsureAttached(std::string* error = nullptr);
     bool Ready();
     const std::string& Backend();
@@ -67,6 +71,7 @@ private:
     uint64_t currentThreadId_ = 0;
     std::vector<DebugBreakpointInfo> breakpoints_;
     std::vector<DebugPausedThread> pausedThreads_;
+    bool targetPaused_ = false;
 };
 
 } // namespace cortex::application

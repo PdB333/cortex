@@ -107,7 +107,9 @@ bool VehDebugProvider::SnapshotFromJson(uint64_t threadId, const json& registers
 
 std::vector<DebugBreakpointLogEntry> VehDebugProvider::BreakpointLog(int id, uint64_t sinceSeq,
                                                                      size_t limit, std::string* error) {
-    json arguments = {{"_path", {{"id", id}}}, {"_query", {{"since_seq", sinceSeq}, {"limit", limit}}}};
+    // compact: the desktop only counts hits and reads registers, and the full
+    // reply carries a described stack per entry.
+    json arguments = {{"_path", {{"id", id}}}, {"_query", {{"since_seq", sinceSeq}, {"limit", limit}, {"compact", 1}}}};
     json result;
     if (!Call("debug_breakpoint_log", arguments, result, error)) return {};
     std::vector<DebugBreakpointLogEntry> values;

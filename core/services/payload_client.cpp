@@ -233,6 +233,7 @@ void PayloadClient::Reset() {
 }
 
 bool PayloadClient::Ready() const {
+    if (Suspended()) return false;
     std::lock_guard<std::mutex> lock(mutex_);
     return verifiedProcessId_ != 0 && !token_.empty() && !pipeName_.empty();
 }
@@ -433,6 +434,10 @@ bool PayloadClient::InjectPayload(const target::TargetDescriptor& target, std::s
 
 bool PayloadClient::EnsureReady(std::string* error) {
     if (error) error->clear();
+    if (Suspended()) {
+        SetError(error, "target_paused");
+        return false;
+    }
     const auto session = sessions_.Active();
     if (!session || !session->Alive()) {
         SetError(error, "no_active_session");
@@ -532,6 +537,10 @@ bool PayloadClient::CallTool(const std::string& name,
                              std::string* error) {
     output = json::object();
     if (error) error->clear();
+    if (Suspended()) {
+        SetError(error, "target_paused");
+        return false;
+    }
     if (name.empty() || !arguments.is_object()) {
         SetError(error, "invalid_payload_tool_call");
         return false;
@@ -584,6 +593,10 @@ bool PayloadClient::ForwardMcp(const json& message,
     if (error) error->clear();
     if (toolProfile != "compact" && toolProfile != "all") {
         SetError(error, "invalid_mcp_tool_profile");
+        return false;
+    }
+    if (Suspended()) {
+        SetError(error, "target_paused");
         return false;
     }
     if (!Ready() && !EnsureReady(error)) return false;
