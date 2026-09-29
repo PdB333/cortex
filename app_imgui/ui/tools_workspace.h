@@ -16,6 +16,9 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <tuple>
+#include <set>
 #include <vector>
 
 namespace cortex::ui {
@@ -198,6 +201,32 @@ private:
     std::vector<services::SpiderNode> spider_;
     uint64_t spiderBase_ = 0;
     std::string spiderInfo_;
+    // Graph view: one vertex per distinct object the pointers lead to, one
+    // edge per pointer, laid out in a column per level.
+    struct GraphVertex {
+        uint64_t value = 0;
+        int level = 0;
+        int firstNode = -1;   // the spider node that first reached it, for its path
+        int row = 0;
+        std::string label;
+        std::string note;
+    };
+    struct GraphEdge {
+        int from = 0;
+        int to = 0;
+        uint32_t offset = 0;
+    };
+    bool spiderGraph_ = true;
+    std::vector<GraphVertex> graphVertices_;
+    std::vector<GraphEdge> graphEdges_;
+    size_t graphBuiltFor_ = static_cast<size_t>(-1);
+    uint64_t graphBuiltBase_ = 0;
+    float graphPanX_ = 24.0f;
+    float graphPanY_ = 24.0f;
+    float graphZoom_ = 1.0f;
+    int graphSelected_ = -1;
+    int graphMenuVertex_ = -1;
+    bool graphTruncated_ = false;
 
     // Speedhack
     services::SpeedhackState speed_;
@@ -212,6 +241,11 @@ private:
     void DrawCustomTypes(UiContext& context);
     void DrawDissect(UiContext& context);
     void DrawSpider(UiContext& context);
+    void BuildSpiderGraph();
+    void DrawSpiderGraph(UiContext& context);
+    void DrawSpiderList(UiContext& context);
+    void AddSpiderPath(UiContext& context, size_t nodeIndex);
+    std::string SpiderPathText(size_t nodeIndex) const;
     // Tells an address in the target from an ordinary number, and names one.
     services::AddressPredicate AddressPredicateFor(UiContext& context) const;
     services::AddressDescriber AddressDescriberFor(UiContext& context) const;

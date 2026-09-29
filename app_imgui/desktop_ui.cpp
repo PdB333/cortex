@@ -2,6 +2,7 @@
 // surface, background progress and the dock host.
 
 #include "desktop_app.h"
+#include "ui/tools_tabs.h"
 #include "ui/address_resolver.h"
 
 #include <tlhelp32.h>
@@ -912,39 +913,11 @@ void DrawHeader(AppState& app) {
         ImGui::TextDisabled("No process attached");
     }
 
-    const std::string aiText = AiStatusText(app);
-    float clusterWidth = 0.0f;
-    if (!aiText.empty()) clusterWidth += ImGui::CalcTextSize(aiText.c_str()).x + style.ItemSpacing.x * 2.0f;
-    if (session) {
-        clusterWidth += WriteGateWidth(app) + style.ItemSpacing.x;
-        clusterWidth += ImGui::CalcTextSize("Detach").x + style.FramePadding.x * 2.0f;
-    }
-    const float rightEdge = ImGui::GetWindowContentRegionMax().x;
-    ImGui::SameLine();
-    const float clusterStart = rightEdge - clusterWidth;
-    if (clusterStart > ImGui::GetCursorPosX()) ImGui::SetCursorPosX(clusterStart);
-
-    if (!aiText.empty()) {
-        ImGui::AlignTextToFramePadding();
-        if (app.aiActivityModel.Connected()) ImGui::TextUnformatted(aiText.c_str());
-        else ImGui::TextDisabled("%s", aiText.c_str());
-        if (session) ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-    }
-    if (session) {
-        DrawWriteGate(app);
-        ImGui::SameLine();
-        if (ImGui::Button("Detach")) ResetTargetState(app);
-    }
-
-    // Row 2: layouts, navigation, debugger control and extra sessions.
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("Workspace");
-    ImGui::SameLine();
-    app.workspaces.DrawPresetButtons();
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
+    // Navigation, target pause, debugger control and extra sessions share the
+    // first line with the target. The layouts (presets) are in the Workspace
+    // menu: a button row for them, then a second line for these, took a good
+    // part of the window.
+    ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
     ImGui::BeginDisabled(!session);
     if (ImGui::Button("Go to...")) app.requestGoTo = true;
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -965,6 +938,36 @@ void DrawHeader(AppState& app) {
     ImGui::EndDisabled();
     DrawDebugControls(app);
     DrawSessionChips(app);
+
+    const std::string aiText = AiStatusText(app);
+    float clusterWidth = 0.0f;
+    if (!aiText.empty()) clusterWidth += ImGui::CalcTextSize(aiText.c_str()).x + style.ItemSpacing.x * 2.0f;
+    if (session) {
+        clusterWidth += WriteGateWidth(app) + style.ItemSpacing.x;
+        clusterWidth += ImGui::CalcTextSize("Detach").x + style.FramePadding.x * 2.0f;
+    }
+    const float rightEdge = ImGui::GetWindowContentRegionMax().x;
+    const float clusterStart = rightEdge - clusterWidth;
+    // The status cluster sits at the right of the same line when it fits and
+    // drops to its own line in a narrow window instead of running off it.
+    const float usedRight = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + style.ItemSpacing.x;
+    if (clusterStart >= usedRight) {
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(clusterStart);
+    }
+
+    if (!aiText.empty()) {
+        ImGui::AlignTextToFramePadding();
+        if (app.aiActivityModel.Connected()) ImGui::TextUnformatted(aiText.c_str());
+        else ImGui::TextDisabled("%s", aiText.c_str());
+        if (session) ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+    }
+    if (session) {
+        DrawWriteGate(app);
+        ImGui::SameLine();
+        if (ImGui::Button("Detach")) ResetTargetState(app);
+    }
+
     ImGui::Separator();
 }
 
@@ -1034,6 +1037,11 @@ void DrawApp(AppState& app) {
     {
         const auto session = app.sessions.Active();
         app.ui.targetPaused = session && app.pausedPids.count(session->Target().processId) > 0;
+        // The runtime lives inside the target: with every thread suspended it
+        // cannot answer, so the calls are refused up front instead of
+        // freezing this window until they time out.
+        app.payload.SetSuspended(app.ui.targetPaused);
+        app.debuggerModel.SetTargetPaused(app.ui.targetPaused);
     }
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1134,11 +1142,18 @@ void DrawApp(AppState& app) {
                 app.workspaces.Select("memory-browser");
             if (ImGui::MenuItem("Disassembler"))
                 app.workspaces.Select("disassembly");
-            if (ImGui::MenuItem("Memory tools (regions, PE, strings, caves)"))
-                app.workspaces.Select("tools");
-            if (ImGui::MenuItem("Pointer scan")) {
-                app.ui.toolsTabRequest = "pointers";
-                app.ui.NavigateTo("tools", 0);
+            if (ImGui::BeginMenu("Memory tools")) {
+                for (const char* group : cortex::ui::ToolGroups()) {
+                    ImGui::SeparatorText(group);
+                    for (const auto& tool : cortex::ui::ToolTabs()) {
+                        if (std::string(tool.group) != group) continue;
+                        if (ImGui::MenuItem(tool.label)) {
+                            app.ui.toolsTabRequest = tool.request;
+                            app.ui.NavigateTo("tools", 0);
+                        }
+                    }
+                }
+                ImGui::EndMenu();
             }
             if (ImGui::MenuItem("Modules"))
                 app.workspaces.Select("modules");

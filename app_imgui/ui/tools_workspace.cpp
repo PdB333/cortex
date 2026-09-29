@@ -1,5 +1,6 @@
 #include "tools_workspace.h"
 #include "file_dialog.h"
+#include "tools_tabs.h"
 #include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
@@ -10,6 +11,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1946,6 +1949,39 @@ void ToolsWorkspace::DrawDissect(UiContext& context) {
 
 // ------------------------------------------------------------------ pointer spider
 
+void ToolsWorkspace::AddSpiderPath(UiContext& context, size_t nodeIndex) {
+    if (nodeIndex >= spider_.size()) return;
+    const auto& node = spider_[nodeIndex];
+    const auto offsets = services::SpiderOffsets(spider_, nodeIndex);
+    // The path reads the pointer at root + the first offset, follows it by the
+    // second, and so on; the entry's address is the slot the node was read
+    // from. The first offset belongs to the base, the rest are the pointer
+    // offsets of the entry.
+    PendingAddressEntry entry;
+    entry.address = node.address;
+    entry.description = "Spider " + SpiderPathText(nodeIndex);
+    entry.type = services::ScanDataType::Int64;
+    const uint64_t base = spiderBase_ + (offsets.empty() ? 0 : offsets.front());
+    entry.baseOffset = base;
+    if (offsets.size() > 1) entry.offsets.assign(offsets.begin() + 1, offsets.end());
+    // A base inside a module is kept as module + offset, so the entry survives
+    // a restart of the game.
+    for (const auto& module : modules_) {
+        if (base < module.base || base >= module.base + module.size) continue;
+        entry.module = module.name;
+        entry.baseOffset = base - module.base;
+        break;
+    }
+    if (const auto session = context.sessions ? context.sessions->Active() : nullptr)
+        entry.pointerSize = session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+    context.pendingAddresses.push_back(std::move(entry));
+    context.requestWorkspace = "memory";
+}
+
+std::string ToolsWorkspace::SpiderPathText(size_t nodeIndex) const {
+    return services::SpiderPath(spider_, nodeIndex);
+}
+
 void ToolsWorkspace::DrawSpider(UiContext& context) {
     HintText("Follows every plausible pointer out of one address, level by level, so you can see what a "
              "base pointer actually leads to. The pointer scanner does the opposite: it looks for paths "
@@ -1963,6 +1999,14 @@ void ToolsWorkspace::DrawSpider(UiContext& context) {
     if (ImGui::InputInt("Offset span", &spiderSpan_)) spiderSpan_ = std::clamp(spiderSpan_, 8, 0x2000);
     FlowSameLine(ButtonWidth("Explore"));
     const bool run = ImGui::Button("Explore") || submitted;
+    FlowSameLine(ButtonWidth("Graph") + ButtonWidth("List") + Px(6));
+    if (spiderGraph_) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button("Graph")) spiderGraph_ = true;
+    if (spiderGraph_) ImGui::PopStyleColor();
+    ImGui::SameLine();
+    if (!spiderGraph_) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button("List")) spiderGraph_ = false;
+    if (!spiderGraph_) ImGui::PopStyleColor();
 
     if (run) {
         uint64_t root = 0;
@@ -1986,12 +2030,21 @@ void ToolsWorkspace::DrawSpider(UiContext& context) {
                 spiderBase_ = root;
                 spiderInfo_ = std::to_string(spider_.size()) + " pointer(s) from " + Hex(root) +
                               (spider_.size() >= options.maxNodes ? " (limit reached)" : "");
+                graphBuiltFor_ = static_cast<size_t>(-1);
+                graphSelected_ = -1;
+                graphPanX_ = 24.0f;
+                graphPanY_ = 24.0f;
             }
         }
     }
     if (!spiderInfo_.empty()) ImGui::TextDisabled("%s", spiderInfo_.c_str());
     if (spider_.empty()) return;
 
+    if (spiderGraph_) DrawSpiderGraph(context);
+    else DrawSpiderList(context);
+}
+
+void ToolsWorkspace::DrawSpiderList(UiContext& context) {
     if (BeginDataTable("SpiderNodes", 4,
                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
                            ImGuiTableFlags_Resizable,
@@ -2012,20 +2065,11 @@ void ToolsWorkspace::DrawSpider(UiContext& context) {
                 ImGui::TableSetColumnIndex(0);
                 {
                     MonoFont mono;
-                    ImGui::Selectable(services::SpiderPath(spider_, static_cast<size_t>(row)).c_str(), false,
+                    ImGui::Selectable(SpiderPathText(static_cast<size_t>(row)).c_str(), false,
                                       ImGuiSelectableFlags_SpanAllColumns);
                 }
                 if (ImGui::BeginPopupContextItem("SpiderMenu")) {
-                    if (ImGui::MenuItem("Add the path to the address list")) {
-                        PendingAddressEntry entry;
-                        entry.address = node.value;
-                        entry.description = "Spider";
-                        entry.type = services::ScanDataType::Int32;
-                        entry.baseOffset = spiderBase_;
-                        entry.offsets = services::SpiderOffsets(spider_, static_cast<size_t>(row));
-                        context.pendingAddresses.push_back(entry);
-                        context.requestWorkspace = "memory";
-                    }
+                    if (ImGui::MenuItem("Add the path to the address list")) AddSpiderPath(context, static_cast<size_t>(row));
                     if (ImGui::MenuItem("Explore from here")) {
                         std::snprintf(spiderRoot_, sizeof(spiderRoot_), "%s", Hex(node.value).c_str());
                     }
@@ -2050,6 +2094,237 @@ void ToolsWorkspace::DrawSpider(UiContext& context) {
             }
         }
         ImGui::EndTable();
+    }
+}
+
+// One vertex per distinct object the pointers lead to (the root first), one
+// edge per pointer. Nodes come out of the spider breadth first, so the level
+// a vertex is first seen at is the shortest way to it, and an object reached
+// by several paths is one vertex with several edges into it.
+void ToolsWorkspace::BuildSpiderGraph() {
+    constexpr size_t kMaxVertices = 220;
+    graphVertices_.clear();
+    graphEdges_.clear();
+    graphTruncated_ = false;
+    std::unordered_map<uint64_t, int> index;
+    std::vector<int> perLevel;
+
+    const auto addVertex = [&](uint64_t value, int level, int firstNode, const std::string& note) {
+        GraphVertex vertex;
+        vertex.value = value;
+        vertex.level = level;
+        vertex.firstNode = firstNode;
+        vertex.note = note;
+        vertex.label = note.empty() ? Hex(value) : note;
+        if (static_cast<size_t>(level) >= perLevel.size()) perLevel.resize(static_cast<size_t>(level) + 1, 0);
+        vertex.row = perLevel[static_cast<size_t>(level)]++;
+        graphVertices_.push_back(std::move(vertex));
+        index[value] = static_cast<int>(graphVertices_.size()) - 1;
+        return static_cast<int>(graphVertices_.size()) - 1;
+    };
+
+    std::string rootNote;
+    for (const auto& module : modules_) {
+        if (spiderBase_ < module.base || spiderBase_ >= module.base + module.size) continue;
+        char buffer[32] = {};
+        std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(spiderBase_ - module.base));
+        rootNote = module.name + buffer;
+        break;
+    }
+    addVertex(spiderBase_, 0, -1, rootNote);
+
+    std::set<std::tuple<int, int, uint32_t>> seenEdges;
+    for (size_t i = 0; i < spider_.size(); ++i) {
+        const auto& node = spider_[i];
+        const uint64_t parentValue = node.parent < 0 ? spiderBase_ : spider_[static_cast<size_t>(node.parent)].value;
+        const auto from = index.find(parentValue);
+        if (from == index.end()) continue;
+        int to;
+        const auto existing = index.find(node.value);
+        if (existing != index.end()) {
+            to = existing->second;
+        } else {
+            if (graphVertices_.size() >= kMaxVertices) {
+                graphTruncated_ = true;
+                continue;
+            }
+            to = addVertex(node.value, node.level + 1, static_cast<int>(i), node.note);
+        }
+        if (seenEdges.insert({from->second, to, node.offset}).second)
+            graphEdges_.push_back({from->second, to, node.offset});
+    }
+    graphBuiltFor_ = spider_.size();
+    graphBuiltBase_ = spiderBase_;
+}
+
+void ToolsWorkspace::DrawSpiderGraph(UiContext& context) {
+    if (graphBuiltFor_ != spider_.size() || graphBuiltBase_ != spiderBase_) BuildSpiderGraph();
+
+    ImGui::TextDisabled("%zu object(s), %zu pointer(s). Drag to move, wheel to zoom, click to select, "
+                        "right-click for actions.%s",
+                        graphVertices_.size(), graphEdges_.size(),
+                        graphTruncated_ ? " Only the nearest objects are drawn; the list has them all." : "");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset view")) {
+        graphPanX_ = 24.0f;
+        graphPanY_ = 24.0f;
+        graphZoom_ = 1.0f;
+    }
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImVec2 size = ImGui::GetContentRegionAvail();
+    size.y = std::max(size.y, Px(120));
+    ImGui::InvisibleButton("##SpiderCanvas", size,
+                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+                               ImGuiButtonFlags_MouseButtonMiddle);
+    const bool canvasHovered = ImGui::IsItemHovered();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
+    draw->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                        ImGui::GetColorU32(ImGuiCol_FrameBg));
+
+    // Pan with a drag, zoom about the pointer with the wheel.
+    ImGuiIO& io = ImGui::GetIO();
+    if (canvasHovered || ImGui::IsItemActive()) {
+        if (ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) ||
+                                      ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f))) {
+            graphPanX_ += io.MouseDelta.x;
+            graphPanY_ += io.MouseDelta.y;
+        }
+        if (io.MouseWheel != 0.0f) {
+            const float before = graphZoom_;
+            graphZoom_ = std::clamp(graphZoom_ * (io.MouseWheel > 0 ? 1.1f : 1.0f / 1.1f), 0.35f, 2.2f);
+            const float ratio = graphZoom_ / before;
+            const float mx = io.MousePos.x - origin.x;
+            const float my = io.MousePos.y - origin.y;
+            graphPanX_ = mx - (mx - graphPanX_) * ratio;
+            graphPanY_ = my - (my - graphPanY_) * ratio;
+        }
+    }
+
+    const float zoom = graphZoom_;
+    const float nodeW = Px(196) * zoom;
+    const float nodeH = Px(34) * zoom;
+    const float columnGap = Px(92) * zoom;
+    const float rowGap = Px(16) * zoom;
+    const auto topLeft = [&](const GraphVertex& v) {
+        return ImVec2(origin.x + graphPanX_ + static_cast<float>(v.level) * (nodeW + columnGap),
+                      origin.y + graphPanY_ + static_cast<float>(v.row) * (nodeH + rowGap));
+    };
+
+    // Which vertex the pointer is over, and the ones next to it, so the
+    // edges that matter stand out.
+    int hovered = -1;
+    for (size_t i = 0; i < graphVertices_.size(); ++i) {
+        const ImVec2 a = topLeft(graphVertices_[i]);
+        if (canvasHovered && io.MousePos.x >= a.x && io.MousePos.x <= a.x + nodeW && io.MousePos.y >= a.y &&
+            io.MousePos.y <= a.y + nodeH)
+            hovered = static_cast<int>(i);
+    }
+    const int focus = hovered >= 0 ? hovered : graphSelected_;
+
+    const ImU32 edgeColor = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.55f);
+    const ImU32 edgeFocus = ImGui::GetColorU32(ImGuiCol_PlotLinesHovered);
+    const ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 dimText = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    ImFont* font = ImGui::GetFont();
+    const float fontSize = ImGui::GetFontSize() * std::clamp(zoom, 0.7f, 1.3f);
+
+    for (const auto& edge : graphEdges_) {
+        const ImVec2 a = topLeft(graphVertices_[static_cast<size_t>(edge.from)]);
+        const ImVec2 b = topLeft(graphVertices_[static_cast<size_t>(edge.to)]);
+        const bool active = focus >= 0 && (edge.from == focus || edge.to == focus);
+        const ImVec2 p1(a.x + nodeW, a.y + nodeH * 0.5f);
+        const ImVec2 p4(b.x, b.y + nodeH * 0.5f);
+        const float reach = std::max(columnGap * 0.6f, std::fabs(p4.x - p1.x) * 0.4f);
+        draw->AddBezierCubic(p1, ImVec2(p1.x + reach, p1.y), ImVec2(p4.x - reach, p4.y), p4,
+                             active ? edgeFocus : edgeColor, active ? 2.0f : 1.0f);
+        if (zoom >= 0.6f || active) {
+            char label[24] = {};
+            std::snprintf(label, sizeof(label), "+%X", edge.offset);
+            const ImVec2 mid((p1.x + p4.x) * 0.5f, (p1.y + p4.y) * 0.5f - fontSize * 0.55f);
+            draw->AddText(font, fontSize * 0.85f, mid, active ? textColor : dimText, label);
+        }
+    }
+
+    for (size_t i = 0; i < graphVertices_.size(); ++i) {
+        const auto& v = graphVertices_[i];
+        const ImVec2 a = topLeft(v);
+        const ImVec2 b(a.x + nodeW, a.y + nodeH);
+        if (b.x < origin.x || a.x > origin.x + size.x || b.y < origin.y || a.y > origin.y + size.y) continue;
+        const bool root = i == 0;
+        const bool isSelected = static_cast<int>(i) == graphSelected_;
+        const bool isHovered = static_cast<int>(i) == hovered;
+        ImU32 fill = ImGui::GetColorU32(root ? ImGuiCol_ButtonActive : ImGuiCol_Button);
+        if (isHovered) fill = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
+        draw->AddRectFilled(a, b, fill, Px(6) * zoom);
+        draw->AddRect(a, b, isSelected ? edgeFocus : ImGui::GetColorU32(ImGuiCol_Border), Px(6) * zoom, 0,
+                      isSelected ? 2.0f : 1.0f);
+        // A bar on the left: a module (static, survives a restart) or not.
+        draw->AddRectFilled(a, ImVec2(a.x + Px(4) * zoom, b.y),
+                            v.note.empty() ? ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.5f)
+                                           : IM_COL32(88, 190, 140, 255),
+                            Px(6) * zoom, ImDrawFlags_RoundCornersLeft);
+        const float pad = Px(10) * zoom;
+        // A module label ("game.exe+1A2B") is shortened in the module name, so
+        // the offset, which is what tells two nodes apart, always stays.
+        std::string first = v.label;
+        const float room = nodeW - pad * 2.0f;
+        const auto widthOf = [&](const std::string& text) {
+            return font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text.c_str()).x;
+        };
+        if (widthOf(first) > room) {
+            const size_t plus = first.rfind('+');
+            std::string prefix = plus == std::string::npos ? first : first.substr(0, plus);
+            const std::string suffix = plus == std::string::npos ? std::string() : first.substr(plus);
+            while (prefix.size() > 1) {
+                prefix.pop_back();
+                first = prefix + "..." + suffix;
+                if (widthOf(first) <= room) break;
+            }
+        }
+        draw->AddText(font, fontSize, ImVec2(a.x + pad, a.y + nodeH * 0.5f - fontSize * 0.95f), textColor,
+                      first.c_str());
+        if (zoom >= 0.6f)
+            draw->AddText(font, fontSize * 0.82f, ImVec2(a.x + pad, a.y + nodeH * 0.5f + fontSize * 0.05f), dimText,
+                          v.note.empty() ? "" : Hex(v.value).c_str());
+    }
+    draw->PopClipRect();
+
+    if (canvasHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+        !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f))
+        graphSelected_ = hovered;
+    if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && hovered >= 0) {
+        graphSelected_ = hovered;
+        graphMenuVertex_ = hovered;
+        ImGui::OpenPopup("SpiderGraphMenu");
+    }
+    if (hovered >= 0 && !ImGui::IsPopupOpen("SpiderGraphMenu")) {
+        const auto& v = graphVertices_[static_cast<size_t>(hovered)];
+        ImGui::BeginTooltip();
+        MonoTextUnformatted(Hex(v.value).c_str());
+        if (!v.note.empty()) ImGui::TextDisabled("%s", v.note.c_str());
+        if (v.firstNode >= 0) ImGui::TextDisabled("%s", SpiderPathText(static_cast<size_t>(v.firstNode)).c_str());
+        ImGui::EndTooltip();
+    }
+    if (ImGui::BeginPopup("SpiderGraphMenu")) {
+        if (graphMenuVertex_ >= 0 && graphMenuVertex_ < static_cast<int>(graphVertices_.size())) {
+            const auto& v = graphVertices_[static_cast<size_t>(graphMenuVertex_)];
+            if (v.firstNode >= 0 && ImGui::MenuItem("Add the path to the address list"))
+                AddSpiderPath(context, static_cast<size_t>(v.firstNode));
+            if (ImGui::MenuItem("Explore from here")) {
+                std::snprintf(spiderRoot_, sizeof(spiderRoot_), "%s", Hex(v.value).c_str());
+            }
+            if (ImGui::MenuItem("Dissect what it points at")) {
+                std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s", Hex(v.value).c_str());
+                active_ = Tab::Dissect;
+            }
+            ImGui::Separator();
+            AddressContextOptions options;
+            options.label = "Spider";
+            DrawAddressContextActions(context, v.value, options);
+        }
+        ImGui::EndPopup();
     }
 }
 
@@ -2180,59 +2455,42 @@ void ToolsWorkspace::Draw(UiContext& context) {
             std::snprintf(signatureAddress_, sizeof(signatureAddress_), "%s", Hex(address).c_str());
             std::snprintf(pointerTarget_, sizeof(pointerTarget_), "%s", Hex(address).c_str());
         }
-        requested_ = context.toolsTabRequest == "pointers" ? Tab::Pointers
-                   : context.toolsTabRequest == "signature" ? Tab::Signature
-                   : context.toolsTabRequest == "pe" ? Tab::Pe
-                   : context.toolsTabRequest == "symbols" ? Tab::Symbols
-                   : context.toolsTabRequest == "assembler" ? Tab::Assembler
-                   : context.toolsTabRequest == "speedhack" ? Tab::Speed
-                   : context.toolsTabRequest == "grouped" ? Tab::Grouped
-                   : context.toolsTabRequest == "dump" ? Tab::Dump
-                   : context.toolsTabRequest == "types" ? Tab::Types
-                   : context.toolsTabRequest == "dissect" ? Tab::Dissect
-                   : context.toolsTabRequest == "spider" ? Tab::Spider
-                   : Tab::Regions;
+        requested_ = Tab::Regions;
+        for (size_t index = 0; index < ToolTabs().size(); ++index)
+            if (context.toolsTabRequest == ToolTabs()[index].request) requested_ = static_cast<Tab>(index);
         tabPending_ = true;
         context.toolsTabRequest.clear();
     }
 
-    // A tab bar would scroll once there are this many tools, hiding the last
-    // ones behind arrows, so the selector wraps onto as many rows as it needs.
-    struct Entry {
-        const char* label;
-        Tab tab;
-    };
-    static const Entry kTools[] = {
-        {"Regions", Tab::Regions},          {"PE headers", Tab::Pe},
-        {"Strings", Tab::Strings},          {"Code caves", Tab::Caves},
-        {"AOB signature", Tab::Signature},  {"Pointer scan", Tab::Pointers},
-        {"Symbols", Tab::Symbols},          {"Assembler", Tab::Assembler},
-        {"Grouped scan", Tab::Grouped},     {"Speedhack", Tab::Speed},
-        {"Dump", Tab::Dump},                {"Custom types", Tab::Types},
-        {"Dissect", Tab::Dissect},          {"Pointer spider", Tab::Spider},
-    };
+    // The tools are picked from one combo instead of a row of buttons: with
+    // fourteen of them the row wrapped onto several lines and took a good part
+    // of the panel. The same list is in the Tools menu.
+    const auto& tools = ToolTabs();
     if (tabPending_) {
         active_ = requested_;
         tabPending_ = false;
     }
-
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float available = ImGui::GetContentRegionAvail().x;
-    float row = 0.0f;
-    for (size_t index = 0; index < sizeof(kTools) / sizeof(kTools[0]); ++index) {
-        const Entry& entry = kTools[index];
-        const float width = ImGui::CalcTextSize(entry.label).x + style.FramePadding.x * 2.0f;
-        if (index && row + style.ItemSpacing.x + width <= available) {
-            ImGui::SameLine();
-            row += style.ItemSpacing.x + width;
-        } else {
-            row = width;
+    const size_t current = std::min<size_t>(static_cast<size_t>(active_), tools.size() - 1);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Tool");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(210));
+    if (ImGui::BeginCombo("##ToolSelect", tools[current].label, ImGuiComboFlags_HeightLargest)) {
+        for (const char* group : ToolGroups()) {
+            ImGui::SeparatorText(group);
+            for (size_t index = 0; index < tools.size(); ++index) {
+                if (std::string(tools[index].group) != group) continue;
+                const bool selected = index == current;
+                if (ImGui::Selectable(tools[index].label, selected)) active_ = static_cast<Tab>(index);
+                if (selected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tools[index].hint);
+            }
         }
-        const bool selected = active_ == entry.tab;
-        if (selected) ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_ButtonActive]);
-        if (ImGui::Button(entry.label)) active_ = entry.tab;
-        if (selected) ImGui::PopStyleColor();
+        ImGui::EndCombo();
     }
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s", tools[current].hint);
     ImGui::Separator();
 
     switch (active_) {
