@@ -3,6 +3,7 @@
 #include "widgets.h"
 #include "address_context_menu.h"
 #include "address_resolver.h"
+#include "auto_assembler_host.h"
 #include "hotkey_capture.h"
 
 #include "application/address_expression.h"
@@ -252,7 +253,11 @@ application::CheatTableEntry MemoryWorkspace::ToTableEntry(const AddressEntry& e
         out.value = hotkey.value;
         item.hotkeys.push_back(std::move(out));
     }
-    if (!entry.group) {
+    if (entry.script) {
+        item.script = true;
+        item.assemblerScript = entry.assemblerScript;
+        item.variableType = "Auto Assembler Script";
+    } else if (!entry.group) {
         item.variableType = VariableTypeName(entry.type);
         item.length = static_cast<int>(entry.type == ScanDataType::String && entry.utf16 ? entry.size / 2 : entry.size);
         item.offsets = entry.offsets;
@@ -289,7 +294,10 @@ MemoryWorkspace::AddressEntry MemoryWorkspace::FromTableEntry(const application:
         out.value = hotkey.value;
         entry.hotkeys.push_back(std::move(out));
     }
-    if (!entry.group) {
+    if (item.script) {
+        entry.script = true;
+        entry.assemblerScript = item.assemblerScript;
+    } else if (!entry.group) {
         entry.type = TypeFromVariableType(item.variableType);
         const size_t fixed = ValueScanner::TypeSize(entry.type);
         entry.size = fixed ? fixed
@@ -489,6 +497,60 @@ void MemoryWorkspace::TakePendingAddresses(UiContext& context) {
     lastAddressRefresh_ = {};
 }
 
+// ------------------------------------------------------------------ scripts
+
+// Runs an entry's Auto Assembler script. [ENABLE] registers its symbols
+// and allocations so [DISABLE] can find them again.
+bool MemoryWorkspace::RunEntryScript(UiContext& context, size_t index, bool enable) {
+    if (index >= addresses_.size()) return false;
+    auto& entry = addresses_[index];
+    if (!entry.script) return false;
+    if (!context.mutationAllowed) {
+        entry.scriptStatus = "Allow writes to run scripts";
+        context.status = entry.scriptStatus;
+        return false;
+    }
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) {
+        entry.scriptStatus = "Select a process first";
+        return false;
+    }
+
+    services::AutoAssembleOptions options;
+    options.enable = enable;
+    options.x64 = session->Target().architecture != target::Architecture::X86;
+    services::AutoAssembleResult result;
+    std::string error;
+    const auto host = MakeAutoAssemblerHost(context);
+    if (!services::RunAutoAssembler(entry.assemblerScript, host, options, result, &error)) {
+        entry.scriptStatus = error;
+        context.status = entry.description + ": " + error;
+        return false;
+    }
+
+    if (enable) {
+        for (const auto& allocation : result.allocations) {
+            context.userSymbols->Set(allocation.first, allocation.second);
+            entry.scriptSymbols.push_back(allocation.first);
+        }
+        for (const auto& symbol : result.registered) {
+            context.userSymbols->Set(symbol.first, symbol.second);
+            entry.scriptSymbols.push_back(symbol.first);
+        }
+    } else {
+        for (const auto& name : result.unregistered) context.userSymbols->Remove(name);
+        for (const auto& name : entry.scriptSymbols) context.userSymbols->Remove(name);
+        entry.scriptSymbols.clear();
+    }
+    entry.scriptEnabled = enable;
+    entry.scriptStatus = enable ? "enabled" : "disabled";
+    if (!result.patches.empty())
+        entry.scriptStatus += " (" + std::to_string(result.patches.size()) + " patch(es))";
+    context.status = entry.description + ": " + entry.scriptStatus;
+    lastAddressRefresh_ = {};
+    return true;
+}
+
 // ------------------------------------------------------------------ refresh
 
 void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
@@ -502,7 +564,7 @@ void MemoryWorkspace::RefreshAddressValues(UiContext& context) {
     for (auto& entry : addresses_) {
         std::vector<uint8_t> value;
         std::string error;
-        if (entry.group) continue;
+        if (entry.group || entry.script) continue;
         if (!ResolveEntry(context, entry)) {
             entry.readable = false;
             continue;
@@ -827,7 +889,29 @@ void MemoryWorkspace::DrawEntryMenu(UiContext& context, size_t index, size_t gro
         selectionAnchor_ = index;
     }
 
-    if (entry.group) {
+    if (entry.script) {
+        if (ImGui::MenuItem("Edit script...")) {
+            scriptEntryUid_ = entry.uid;
+            std::snprintf(scriptText_.data(), scriptText_.size(), "%s", entry.assemblerScript.c_str());
+            openScript_ = true;
+        }
+        ImGui::BeginDisabled(!writes);
+        if (ImGui::MenuItem(entry.scriptEnabled ? "Disable" : "Enable")) RunEntryScript(context, index, !entry.scriptEnabled);
+        ImGui::EndDisabled();
+        if (ImGui::MenuItem("Check script")) {
+            services::AutoAssembleOptions options;
+            options.enable = true;
+            options.dryRun = true;
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            options.x64 = !session || session->Target().architecture != target::Architecture::X86;
+            services::AutoAssembleResult result;
+            std::string error;
+            const auto host = MakeAutoAssemblerHost(context);
+            const bool ok = services::RunAutoAssembler(entry.assemblerScript, host, options, result, &error);
+            entry.scriptStatus = ok ? "script looks valid" : error;
+            context.status = entry.description + ": " + entry.scriptStatus;
+        }
+    } else if (entry.group) {
         if (ImGui::MenuItem(entry.collapsed ? "Expand" : "Collapse")) entry.collapsed = !entry.collapsed;
         ImGui::BeginDisabled(!writes);
         if (ImGui::MenuItem("Freeze all entries")) for (size_t i = index + 1; i < groupEnd; ++i) SetFreeze(addresses_[i], true);
@@ -941,6 +1025,40 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
         addOffsets_[0] = '\0';
         openAddAddress_ = true;
     }
+    FlowSameLine(ButtonWidth("+ Script"));
+    if (ImGui::Button("+ Script")) {
+        AddressEntry entry;
+        entry.script = true;
+        entry.description = "New script";
+        entry.uid = nextUid_++;
+        entry.assemblerScript =
+            "[ENABLE]\n"
+            "// aobscanmodule(INJECT,game.exe,89 83 00 01 00 00)\n"
+            "// alloc(newmem,$1000,INJECT)\n"
+            "// label(code)\n"
+            "// label(return)\n"
+            "//\n"
+            "// newmem:\n"
+            "// code:\n"
+            "//   mov [rbx+00000100],eax\n"
+            "//   jmp return\n"
+            "//\n"
+            "// INJECT:\n"
+            "//   jmp newmem\n"
+            "// return:\n"
+            "// registersymbol(INJECT)\n"
+            "\n"
+            "[DISABLE]\n"
+            "// INJECT:\n"
+            "//   db 89 83 00 01 00 00\n"
+            "// unregistersymbol(INJECT)\n"
+            "// dealloc(newmem)\n";
+        addresses_.push_back(std::move(entry));
+        scriptEntryUid_ = addresses_.back().uid;
+        std::snprintf(scriptText_.data(), scriptText_.size(), "%s", addresses_.back().assemblerScript.c_str());
+        openScript_ = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add an Auto Assembler script entry");
     FlowSameLine(ButtonWidth("Group"));
     if (ImGui::Button("Group")) GroupSelected(context);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Put the selected entries in a group header, or add an empty one");
@@ -998,7 +1116,10 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
             ImGui::TableSetColumnIndex(0);
             ImGui::BeginDisabled(!context.mutationAllowed);
-            if (entry.group) {
+            if (entry.script) {
+                bool on = entry.scriptEnabled;
+                if (ImGui::Checkbox("##Script", &on)) RunEntryScript(context, i, on);
+            } else if (entry.group) {
                 bool all = groupEnd > i + 1;
                 bool any = false;
                 for (size_t child = i + 1; child < groupEnd; ++child) {
@@ -1015,8 +1136,9 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
             }
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                std::string tip = context.mutationAllowed ? "Freeze: keep writing this value (Space)"
-                                                          : "Allow writes to freeze values";
+                std::string tip = !context.mutationAllowed ? "Allow writes to freeze values or run scripts"
+                                  : entry.script ? "Run the script's [ENABLE] / [DISABLE] section"
+                                                 : "Freeze: keep writing this value (Space)";
                 for (const auto& hotkey : entry.hotkeys)
                     tip += "\n" + hotkey.chord + ": " + kHotkeyActionNames[static_cast<int>(hotkey.action)] +
                            (ActionNeedsValue(static_cast<int>(hotkey.action)) ? " " + hotkey.value : std::string());
@@ -1056,18 +1178,27 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
             char staticText[64] = {};
             if (isStatic) std::snprintf(staticText, sizeof(staticText), "+%llX", static_cast<unsigned long long>(entry.baseOffset));
             const std::string addressText = entry.group ? std::string()
+                : entry.script ? std::string("Auto Assembler script")
                 : entry.pointer ? "P->" + (entry.readable ? Hex(entry.address) : std::string("????????"))
                 : !entry.expression.empty() ? entry.expression
                 : isStatic ? entry.module + staticText
                 : AddressText(entry.address, isStatic);
-            const bool green = isStatic || entry.pointer || !entry.expression.empty();
+            const bool green = !entry.script && (isStatic || entry.pointer || !entry.expression.empty());
             if (green) ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
             {
                 MonoFont mono;
                 if (ImGui::Selectable((addressText + "##Address").c_str(), entry.selected,
                                       ImGuiSelectableFlags_AllowDoubleClick)) {
                     SelectEntry(i);
-                    if (!entry.group && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) BeginAddressEdit(i);
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                        if (entry.script) {
+                            scriptEntryUid_ = entry.uid;
+                            std::snprintf(scriptText_.data(), scriptText_.size(), "%s", entry.assemblerScript.c_str());
+                            openScript_ = true;
+                        } else if (!entry.group) {
+                            BeginAddressEdit(i);
+                        }
+                    }
                 }
             }
             if (green) ImGui::PopStyleColor();
@@ -1092,7 +1223,9 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
                 }
                 ImGui::EndDragDropTarget();
             }
-            if (!entry.group && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+            if (entry.script && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+                ImGui::SetTooltip("Double-click to read or edit the script.");
+            } else if (!entry.group && !entry.script && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
                 const std::string tip = entry.pointer || !entry.expression.empty()
                     ? PointerText(entry) + (entry.readable ? " = " + Hex(entry.address) : std::string(" (cannot be resolved)"))
                     : Hex(entry.address);
@@ -1102,17 +1235,22 @@ void MemoryWorkspace::DrawAddressList(UiContext& context) {
 
             ImGui::TableSetColumnIndex(3);
             const std::string typeText = entry.group ? std::string("Group")
+                : entry.script ? std::string("Script")
                 : std::string(ValueScanner::TypeName(entry.type)) +
                       (entry.type == ScanDataType::String && entry.utf16 ? " (UTF-16)" : "");
             ImGui::TextUnformatted(typeText.c_str());
             ImGui::OpenPopupOnItemClick("EntryMenu");
 
             ImGui::TableSetColumnIndex(4);
-            const std::string value = entry.group ? std::string() : DisplayValue(entry);
-            const bool changed = entry.readable && entry.freeze && entry.lastValue != entry.frozenValue;
+            const std::string value = entry.group ? std::string()
+                : entry.script ? entry.scriptStatus
+                : DisplayValue(entry);
+            const bool changed = entry.script ? (!entry.scriptEnabled && !entry.scriptStatus.empty() &&
+                                                 entry.scriptStatus != "disabled")
+                                              : (entry.readable && entry.freeze && entry.lastValue != entry.frozenValue);
             if (changed) ImGui::PushStyleColor(ImGuiCol_Text, ChangedValueColor());
             if (ImGui::Selectable((value + "##Value").c_str(), false, ImGuiSelectableFlags_AllowDoubleClick) &&
-                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !entry.script) {
                 if (context.mutationAllowed) BeginValueEdit(i);
                 else context.status = "Allow writes to edit a value";
             }
@@ -1311,6 +1449,71 @@ void MemoryWorkspace::DrawHotkeyDialog(UiContext& context) {
     ImGui::EndPopup();
 }
 
+void MemoryWorkspace::DrawScriptDialog(UiContext& context) {
+    if (openScript_) {
+        ImGui::OpenPopup("Auto Assembler script");
+        openScript_ = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(Px(720), Px(560)), ImGuiCond_Always);
+    if (!ImGui::BeginPopupModal("Auto Assembler script", nullptr, ImGuiWindowFlags_NoResize)) return;
+    const int index = EntryIndex(scriptEntryUid_);
+    if (index < 0) {
+        ImGui::TextDisabled("The entry no longer exists.");
+        if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        return;
+    }
+    auto& entry = addresses_[static_cast<size_t>(index)];
+    ImGui::Text("Script for \"%s\"", entry.description.c_str());
+    HintText("Cheat Engine syntax: [ENABLE] and [DISABLE] sections, aobscanmodule, alloc, label, "
+             "registersymbol, dealloc. Numbers are hexadecimal; $1000 and #4096 also work.");
+    {
+        MonoFont mono;
+        ImGui::InputTextMultiline("##ScriptText", scriptText_.data(), scriptText_.size(),
+                                  ImVec2(-1, Px(390)), ImGuiInputTextFlags_AllowTabInput);
+    }
+    if (!entry.scriptStatus.empty()) {
+        const bool bad = entry.scriptStatus != "enabled" && entry.scriptStatus != "disabled" &&
+                         entry.scriptStatus.rfind("enabled", 0) != 0 && entry.scriptStatus != "script looks valid";
+        ImGui::PushStyleColor(ImGuiCol_Text, bad ? ChangedValueColor() : StaticAddressColor());
+        ImGui::TextWrapped("%s", entry.scriptStatus.c_str());
+        ImGui::PopStyleColor();
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Save", ImVec2(Px(100), Px(32)))) {
+        entry.assemblerScript = scriptText_.data();
+        context.status = "Script saved";
+    }
+    FlowSameLine(Px(100));
+    if (ImGui::Button("Check", ImVec2(Px(100), Px(32)))) {
+        entry.assemblerScript = scriptText_.data();
+        services::AutoAssembleOptions options;
+        options.enable = true;
+        options.dryRun = true;
+        const auto session = context.sessions ? context.sessions->Active() : nullptr;
+        options.x64 = !session || session->Target().architecture != target::Architecture::X86;
+        services::AutoAssembleResult result;
+        std::string error;
+        const auto host = MakeAutoAssemblerHost(context);
+        entry.scriptStatus = services::RunAutoAssembler(entry.assemblerScript, host, options, result, &error)
+                                 ? "script looks valid"
+                                 : error;
+    }
+    FlowSameLine(Px(110));
+    ImGui::BeginDisabled(!context.mutationAllowed);
+    if (ImGui::Button(entry.scriptEnabled ? "Disable" : "Enable", ImVec2(Px(110), Px(32)))) {
+        entry.assemblerScript = scriptText_.data();
+        RunEntryScript(context, static_cast<size_t>(index), !entry.scriptEnabled);
+    }
+    ImGui::EndDisabled();
+    FlowSameLine(Px(100));
+    if (ImGui::Button("Close", ImVec2(Px(100), Px(32)))) {
+        entry.assemblerScript = scriptText_.data();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 void MemoryWorkspace::DrawDropDownDialog(UiContext& context) {
     if (openDropDown_) {
         ImGui::OpenPopup("Dropdown list");
@@ -1445,6 +1648,7 @@ void MemoryWorkspace::DrawDialogs(UiContext& context) {
     }
 
     DrawHotkeyDialog(context);
+    DrawScriptDialog(context);
     DrawDropDownDialog(context);
 
     if (openLuaPrompt_) {

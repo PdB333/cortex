@@ -303,7 +303,9 @@ void ReadEntries(const XmlNode& list, int depth, CheatTable& table) {
         }
         if (entry.variableType == "Auto Assembler Script" || node.Child("AssemblerScript")) {
             entry.script = true;
+            entry.assemblerScript = node.ChildText("AssemblerScript");
             ++table.scripts;
+            table.entries.push_back(entry);
         } else if (!entry.groupHeader && !IsValueType(entry.variableType)) {
             ++table.unsupported;
         } else {
@@ -371,6 +373,12 @@ std::string WriteCheatTable(const CheatTable& table) {
         }
         if (entry.groupHeader) {
             out << field << "<GroupHeader>1</GroupHeader>\n";
+        } else if (entry.script) {
+            out << field << "<VariableType>Auto Assembler Script</VariableType>\n";
+            // Scripts keep their angle brackets and ampersands: CDATA, as
+            // Cheat Engine writes them.
+            out << field << "<AssemblerScript>" << "<![CDATA[" << entry.assemblerScript << "]]>"
+                << "</AssemblerScript>\n";
         } else {
             if (entry.showAsHex) out << field << "<ShowAsHex>1</ShowAsHex>\n";
             if (!entry.showAsSigned) out << field << "<ShowAsSigned>0</ShowAsSigned>\n";

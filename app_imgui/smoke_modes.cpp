@@ -5,6 +5,8 @@
 #include "ui/address_resolver.h"
 
 #include "services/assembler.h"
+#include "services/auto_assembler.h"
+#include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
 
 namespace cortex::desktop {
@@ -719,6 +721,85 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
                 summary += " injection=ok";
             }
         }
+    }
+
+    // Auto Assembler scripts: a data patch through an exported symbol, then
+    // an allocation with registersymbol and dealloc.
+    if (health) {
+        const bool x64 = session->Target().architecture != cortex::target::Architecture::X86;
+        const auto host = cortex::ui::MakeAutoAssemblerHost(app.ui);
+        cortex::services::AutoAssembleOptions options;
+        options.x64 = x64;
+
+        uint32_t before = 0;
+        session->ReadMemory(health, &before, 4, nullptr);
+        char script[512] = {};
+        std::snprintf(script, sizeof(script),
+                      "[ENABLE]\n"
+                      "g_cortex_health:\n"
+                      "  db 39 30 00 00\n"
+                      "[DISABLE]\n"
+                      "g_cortex_health:\n"
+                      "  db %02X %02X %02X %02X\n",
+                      before & 0xFF, (before >> 8) & 0xFF, (before >> 16) & 0xFF, (before >> 24) & 0xFF);
+
+        cortex::services::AutoAssembleResult enabled;
+        options.enable = true;
+        if (!cortex::services::RunAutoAssembler(script, host, options, enabled, &error)) {
+            error = "auto_assembler_enable_failed:" + error;
+            return false;
+        }
+        uint32_t patched = 0;
+        session->ReadMemory(health, &patched, 4, nullptr);
+        if (patched != 0x3039) {
+            error = "auto_assembler_patch_missing";
+            return false;
+        }
+        cortex::services::AutoAssembleResult disabled;
+        options.enable = false;
+        if (!cortex::services::RunAutoAssembler(script, host, options, disabled, &error)) {
+            error = "auto_assembler_disable_failed:" + error;
+            return false;
+        }
+        uint32_t restored = 0;
+        session->ReadMemory(health, &restored, 4, nullptr);
+        if (restored != before) {
+            error = "auto_assembler_restore_failed";
+            return false;
+        }
+
+        cortex::services::AutoAssembleResult allocated;
+        options.enable = true;
+        if (!cortex::services::RunAutoAssembler(
+                "[ENABLE]\nalloc(smokecave,$100)\nregistersymbol(smokecave)\nsmokecave:\n  ret\n"
+                "[DISABLE]\nunregistersymbol(smokecave)\ndealloc(smokecave)\n",
+                host, options, allocated, &error)) {
+            error = "auto_assembler_alloc_failed:" + error;
+            return false;
+        }
+        if (allocated.allocations.size() != 1 || allocated.registered.size() != 1) {
+            error = "auto_assembler_alloc_unexpected";
+            return false;
+        }
+        const uint64_t cave = allocated.allocations[0].second;
+        uint8_t caveByte = 0;
+        if (!session->ReadMemory(cave, &caveByte, 1, nullptr) || caveByte != 0xC3) {
+            error = "auto_assembler_cave_not_written";
+            return false;
+        }
+        // The symbol the script registered must resolve for [DISABLE].
+        app.ui.userSymbols->Set("smokecave", cave);
+        cortex::services::AutoAssembleResult freed;
+        options.enable = false;
+        cortex::services::RunAutoAssembler(
+            "[ENABLE]\nalloc(smokecave,$100)\n[DISABLE]\nunregistersymbol(smokecave)\ndealloc(smokecave)\n",
+            host, options, freed, &error);
+        app.ui.userSymbols->Remove("smokecave");
+        if (freed.freed.size() != 1) {
+            error = "auto_assembler_dealloc_missing";
+            return false;
+        }
+        summary += " autoassembler=ok";
     }
 
     app.ui.toolsTabRequest = "pointers";

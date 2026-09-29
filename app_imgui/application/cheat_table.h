@@ -9,7 +9,7 @@ namespace cortex::application {
 
 // Cheat Engine cheat tables (.CT): the XML file Cheat Engine saves its
 // address list to. Cortex reads and writes the address entries (values,
-// strings, byte arrays, pointers, groups); scripts are reported but not run.
+// strings, byte arrays, pointers, groups) and Auto Assembler scripts.
 
 struct CheatTableHotkey {
     std::string action = "Toggle Activation";  // Cheat Engine's names (Set Value, Increase Value...)
@@ -33,6 +33,7 @@ struct CheatTableEntry {
     bool showAsSigned = true;
     bool groupHeader = false;
     bool script = false;
+    std::string assemblerScript;           // Auto Assembler source, when script
     int depth = 0;                         // nesting inside group headers
     bool collapsed = false;                // group shown closed (moHideChildren)
     int64_t color = -1;                    // description color, 0xRRGGBB; -1 = default
@@ -43,7 +44,7 @@ struct CheatTableEntry {
 
 struct CheatTable {
     std::vector<CheatTableEntry> entries;
-    size_t scripts = 0;                    // Auto Assembler scripts that were skipped
+    size_t scripts = 0;                    // Auto Assembler script entries
     size_t unsupported = 0;                // other entry types that were skipped
     std::string luaScript;
     // UserdefinedSymbols: name and address expression.

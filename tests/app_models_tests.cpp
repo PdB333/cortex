@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -205,8 +206,26 @@ nop 5
         CheatTable table;
         std::string error;
         check(ParseCheatTable(xml, table, &error), "a Cheat Engine table parses");
-        check(table.entries.size() == 4 && table.scripts == 1, "entries are read and scripts counted");
-        if (table.entries.size() == 4) {
+        check(table.entries.size() == 5 && table.scripts == 1, "entries are read, scripts included");
+        {
+            const auto script = std::find_if(table.entries.begin(), table.entries.end(),
+                                             [](const CheatTableEntry& item) { return item.script; });
+            check(script != table.entries.end(), "the Auto Assembler entry is kept");
+            if (script != table.entries.end()) {
+                check(script->description == "Infinite ammo", "script entries keep their description");
+                check(script->assemblerScript.find("[ENABLE]") != std::string::npos &&
+                          script->assemblerScript.find("nop 5") != std::string::npos,
+                      "the script source is kept verbatim");
+                CheatTable again2;
+                std::string error2;
+                check(ParseCheatTable(WriteCheatTable(table), again2, &error2), "a table with a script rewrites");
+                const auto back = std::find_if(again2.entries.begin(), again2.entries.end(),
+                                               [](const CheatTableEntry& item) { return item.script; });
+                check(back != again2.entries.end() && back->assemblerScript == script->assemblerScript,
+                      "scripts survive a round trip");
+            }
+        }
+        if (table.entries.size() == 5) {
             const auto& group = table.entries[0];
             const auto& health = table.entries[1];
             check(group.groupHeader && group.description == "Player" && group.depth == 0, "group header");
@@ -215,7 +234,7 @@ nop 5
             check(health.offsets == std::vector<uint32_t>({0xC, 0x14, 0x0, 0x18}), "offsets are applied base first");
             check(table.entries[2].variableType == "String" && table.entries[2].unicode &&
                   table.entries[2].length == 12, "UTF-16 strings keep their length");
-            check(table.entries[3].depth == 0 && !table.entries[3].showAsSigned, "entries after a group");
+            check(table.entries[4].depth == 0 && !table.entries[4].showAsSigned, "entries after a group");
             check(group.collapsed && group.color == 0xFF0000, "collapsed groups and BGR colors");
             check(health.color == -1, "entries without a color keep the default");
             check(health.dropDown.size() == 2 && health.dropDown[1].value == "64" &&
@@ -244,9 +263,9 @@ nop 5
         check(FormatCheatAddress("game.exe", 0x10) == "\"game.exe\"+00000010", "module addresses format like CE");
 
         CheatTable again;
-        check(ParseCheatTable(WriteCheatTable(table), again, &error) && again.entries.size() == 4,
+        check(ParseCheatTable(WriteCheatTable(table), again, &error) && again.entries.size() == 5,
               "a written table reads back");
-        if (again.entries.size() == 4) {
+        if (again.entries.size() == 5) {
             check(again.entries[1].offsets == table.entries[1].offsets && again.entries[1].depth == 1,
                   "pointers and groups survive a round trip");
             check(again.entries[1].description == "Health & armor", "descriptions are escaped");

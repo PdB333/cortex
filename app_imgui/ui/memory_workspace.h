@@ -88,6 +88,13 @@ private:
         std::string expression;
         uint32_t uid = 0;              // stable id for hotkey commands
         std::vector<EntryHotkey> hotkeys;
+        // Auto Assembler script entries: the checkbox runs [ENABLE] and
+        // [DISABLE] instead of freezing a value.
+        bool script = false;
+        std::string assemblerScript;
+        bool scriptEnabled = false;
+        std::vector<std::string> scriptSymbols;  // registered by [ENABLE], removed by [DISABLE]
+        std::string scriptStatus;
         int64_t color = -1;            // description color, 0xRRGGBB
         std::vector<DropDownItem> dropDown;
         bool dropDownOnly = false;     // show the label without the value
@@ -161,6 +168,8 @@ private:
     int EntryIndex(uint32_t uid) const;
     void DrawEntryMenu(UiContext& context, size_t index, size_t groupEnd, bool& remove);
     void DrawHotkeyDialog(UiContext& context);
+    void DrawScriptDialog(UiContext& context);
+    bool RunEntryScript(UiContext& context, size_t index, bool enable);
     void DrawDropDownDialog(UiContext& context);
 
     // Scan inputs
@@ -237,6 +246,11 @@ private:
     std::string newHotkeyChord_;
     int newHotkeyAction_ = 0;
     char newHotkeyValue_[64] = {};
+
+    // Auto Assembler script dialog
+    bool openScript_ = false;
+    uint32_t scriptEntryUid_ = 0;
+    std::array<char, 32768> scriptText_ = {};
 
     // Dropdown list dialog
     bool openDropDown_ = false;
