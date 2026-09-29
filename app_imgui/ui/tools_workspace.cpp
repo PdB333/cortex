@@ -1402,6 +1402,105 @@ void ToolsWorkspace::DrawAssembler(UiContext& context) {
     }
 }
 
+// ------------------------------------------------------------------ speedhack
+
+services::SpeedhackHost ToolsWorkspace::SpeedhackHostFor(UiContext& context, uint64_t pid) const {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    services::SpeedhackHost host;
+    host.read = [session](uint64_t address, void* buffer, size_t size) {
+        return session && session->ReadMemory(address, buffer, size, nullptr);
+    };
+    host.write = [pid](uint64_t address, const void* buffer, size_t size) {
+        return cortex::remote_memory::WriteCode(pid, address, buffer, size, nullptr);
+    };
+    host.allocate = [pid](size_t size, uint64_t nearAddress, uint64_t& address, std::string& error) {
+        return cortex::remote_memory::Allocate(pid, size, nearAddress, address, &error);
+    };
+    host.release = [pid](uint64_t address, std::string& error) {
+        return cortex::remote_memory::Free(pid, address, &error);
+    };
+    host.symbol = [&context](const std::string& name, uint64_t& value) {
+        return ContextSymbols(context).Resolve(name, value);
+    };
+    return host;
+}
+
+void ToolsWorkspace::DrawSpeedhack(UiContext& context) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    const uint64_t pid = session ? session->Target().processId : 0;
+    const bool x64 = !session || session->Target().architecture != target::Architecture::X86;
+
+    HintText("Hooks the target's timing functions so the game runs faster or slower. The clock is scaled "
+             "from the moment it is turned on, so it never jumps backwards.");
+
+    ImGui::SetNextItemWidth(Px(320));
+    bool changed = ImGui::SliderFloat("##Speed", &speedValue_, 0.05f, 25.0f, "%.2fx",
+                                      ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    ImGui::TextDisabled("speed");
+    for (const float preset : {0.25f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f}) {
+        char label[16] = {};
+        std::snprintf(label, sizeof(label), "%gx", preset);
+        FlowSameLine(ButtonWidth(label));
+        if (ImGui::Button(label)) {
+            speedValue_ = preset;
+            changed = true;
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(!context.mutationAllowed || !session);
+    if (!speed_.active) {
+        if (ImGui::Button("Enable speedhack", ImVec2(Px(180), Px(32)))) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, pid);
+            if (services::InstallSpeedhack(host, x64, speedValue_, speed_, &error)) {
+                speedPid_ = pid;
+                speedInfo_ = "Speed x" + std::to_string(speed_.multiplier).substr(0, 5) + " on " +
+                             std::to_string(speed_.hooks.size()) + " function(s)";
+                context.status = speedInfo_;
+            } else {
+                speedInfo_ = "Speedhack failed: " + error;
+            }
+        }
+    } else {
+        if (ImGui::Button("Disable speedhack", ImVec2(Px(180), Px(32)))) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, speedPid_);
+            speedInfo_ = services::RemoveSpeedhack(host, speed_, &error) ? "Speed back to normal"
+                                                                        : "Restore failed: " + error;
+            speedValue_ = 1.0f;
+            context.status = speedInfo_;
+        }
+    }
+    ImGui::EndDisabled();
+    if (!context.mutationAllowed) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Allow writes to change the speed");
+    }
+
+    // Moving the slider while it runs only rewrites the multiplier.
+    if (changed && speed_.active && context.mutationAllowed) {
+        std::string error;
+        const auto host = SpeedhackHostFor(context, speedPid_);
+        if (!services::UpdateSpeedhack(host, speed_, speedValue_, &error)) speedInfo_ = "Update failed: " + error;
+    }
+
+    if (!speedInfo_.empty()) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", speedInfo_.c_str());
+    }
+
+    if (!speed_.hooks.empty()) {
+        ImGui::SeparatorText("Hooked");
+        for (const auto& hook : speed_.hooks) MonoText("%s  %s", hook.function.c_str(), AddressText(hook.address).c_str());
+    }
+    if (!speed_.skipped.empty()) {
+        ImGui::SeparatorText("Not hooked");
+        for (const auto& skipped : speed_.skipped) ImGui::TextWrapped("%s", skipped.c_str());
+    }
+}
+
 // ------------------------------------------------------------------ frame
 
 void ToolsWorkspace::Draw(UiContext& context) {
@@ -1411,7 +1510,17 @@ void ToolsWorkspace::Draw(UiContext& context) {
         HintText("Select a process to use the memory tools.");
         return;
     }
-    if (session->Target().id != targetId_) Reset(session->Target().id);
+    if (session->Target().id != targetId_) {
+        // Leaving a target: put its timing functions back first.
+        if (speed_.active) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, speedPid_);
+            services::RemoveSpeedhack(host, speed_, &error);
+            speedValue_ = 1.0f;
+            speedInfo_.clear();
+        }
+        Reset(session->Target().id);
+    }
     RefreshModules(context);
 
     uint64_t address = 0;
@@ -1425,6 +1534,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
                    : context.toolsTabRequest == "pe" ? Tab::Pe
                    : context.toolsTabRequest == "symbols" ? Tab::Symbols
                    : context.toolsTabRequest == "assembler" ? Tab::Assembler
+                   : context.toolsTabRequest == "speedhack" ? Tab::Speed
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
@@ -1464,6 +1574,10 @@ void ToolsWorkspace::Draw(UiContext& context) {
     }
     if (ImGui::BeginTabItem("Assembler", nullptr, flags(Tab::Assembler))) {
         DrawAssembler(context);
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Speedhack", nullptr, flags(Tab::Speed))) {
+        DrawSpeedhack(context);
         ImGui::EndTabItem();
     }
     ImGui::EndTabBar();

@@ -682,6 +682,24 @@ bool AssembleBlock(const AssembleRequest& request, AssembleBlockResult& result, 
     return true;
 }
 
+bool CodeBoundary(const uint8_t* data, size_t size, size_t minimum, bool x64, size_t& length,
+                  std::string* error) {
+    length = 0;
+    ZydisDecoder decoder;
+    if (!ZYAN_SUCCESS(ZydisDecoderInit(&decoder, x64 ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LEGACY_32,
+                                       x64 ? ZYDIS_STACK_WIDTH_64 : ZYDIS_STACK_WIDTH_32)))
+        return Fail(error, "Cannot initialize the decoder");
+    while (length < minimum) {
+        ZydisDecodedInstruction instruction;
+        if (length >= size) return Fail(error, "Not enough bytes to decode");
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&decoder, nullptr, data + length, size - length, &instruction)))
+            return Fail(error, "Cannot decode the instruction");
+        length += instruction.length;
+    }
+    if (error) error->clear();
+    return true;
+}
+
 bool RelocateCode(const uint8_t* data, size_t size, uint64_t from, uint64_t to, bool x64,
                   std::vector<uint8_t>& out, std::string* error) {
     out.clear();

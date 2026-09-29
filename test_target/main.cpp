@@ -20,6 +20,9 @@ extern "C" __declspec(dllexport) char     g_cortex_str[32] = "cortex-canary";
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
+// Sampled from GetTickCount() every frame, so a speedhack that scales the
+// clock is observable from outside.
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_ticks = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_breakpoint_canary = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_hw_value = 0;
 extern "C" __declspec(dllexport) volatile DWORD g_cortex_hw_writer_tid = 0;
@@ -332,6 +335,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         }
 
         ++g_cortex_frame;
+        g_cortex_ticks = GetTickCount();
         CortexBreakpointCanary();
         g_cortex_step_over_sink = CortexStepOverCaller(g_cortex_frame);
         if (GetAsyncKeyState('W') & 0x8000) ++g_cortex_wpress;

@@ -5,6 +5,7 @@
 #include "services/pointer_scanner.h"
 #include "services/signature.h"
 #include "services/assembler.h"
+#include "services/speedhack.h"
 #include "target/module_provider.h"
 
 #include <array>
@@ -27,7 +28,7 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler };
+    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed };
 
     void Reset(const std::string& targetId);
     void RefreshModules(UiContext& context);
@@ -141,7 +142,15 @@ private:
     std::vector<Injection> injections_;
     int injectSteal_ = 5;
 
+    // Speedhack
+    services::SpeedhackState speed_;
+    uint64_t speedPid_ = 0;
+    float speedValue_ = 1.0f;
+    std::string speedInfo_;
+
     void DrawAssembler(UiContext& context);
+    void DrawSpeedhack(UiContext& context);
+    services::SpeedhackHost SpeedhackHostFor(UiContext& context, uint64_t pid) const;
     bool AssembleCurrent(UiContext& context, uint64_t address, services::AssembleBlockResult& result, std::string& error);
     int StealLength(UiContext& context, uint64_t address, int minimum) const;
     bool InjectCode(UiContext& context, uint64_t address, std::string& error);

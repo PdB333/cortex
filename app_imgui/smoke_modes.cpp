@@ -6,6 +6,7 @@
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
+#include "services/speedhack.h"
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
 
@@ -481,10 +482,12 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
     uint64_t health = 0;
     uint64_t frame = 0;
     uint64_t stepOver = 0;
+    uint64_t ticks = 0;
     for (const auto& entry : image.exports) {
         if (entry.name == "g_cortex_health") health = module.base + entry.rva;
         if (entry.name == "g_cortex_frame") frame = module.base + entry.rva;
         if (entry.name == "CortexStepOverCaller") stepOver = module.base + entry.rva;
+        if (entry.name == "g_cortex_ticks") ticks = module.base + entry.rva;
     }
 
     // Find out what writes to the frame counter: a log-mode hardware
@@ -800,6 +803,62 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         summary += " autoassembler=ok";
+    }
+
+    // Speedhack: the target samples GetTickCount() every frame, so scaling
+    // the clock shows up as a faster tick rate.
+    if (ticks) {
+        const bool x64 = session->Target().architecture != cortex::target::Architecture::X86;
+        const uint64_t pid = session->Target().processId;
+        cortex::services::SpeedhackHost speedHost;
+        speedHost.read = [session](uint64_t address, void* buffer, size_t size) {
+            return session->ReadMemory(address, buffer, size, nullptr);
+        };
+        speedHost.write = [pid](uint64_t address, const void* buffer, size_t size) {
+            return cortex::remote_memory::WriteCode(pid, address, buffer, size, nullptr);
+        };
+        speedHost.allocate = [pid](size_t size, uint64_t nearAddress, uint64_t& address, std::string& message) {
+            return cortex::remote_memory::Allocate(pid, size, nearAddress, address, &message);
+        };
+        speedHost.release = [pid](uint64_t address, std::string& message) {
+            return cortex::remote_memory::Free(pid, address, &message);
+        };
+        speedHost.symbol = [&app](const std::string& name, uint64_t& value) {
+            return cortex::ui::ContextSymbols(app.ui).Resolve(name, value);
+        };
+
+        auto tickRate = [&](int milliseconds) {
+            uint32_t first = 0;
+            uint32_t last = 0;
+            session->ReadMemory(ticks, &first, 4, nullptr);
+            Sleep(static_cast<DWORD>(milliseconds));
+            session->ReadMemory(ticks, &last, 4, nullptr);
+            return static_cast<double>(last - first) / milliseconds;
+        };
+
+        const double normal = tickRate(400);
+        cortex::services::SpeedhackState speed;
+        std::string speedError;
+        if (!cortex::services::InstallSpeedhack(speedHost, x64, 8.0, speed, &speedError)) {
+            error = "speedhack_install_failed:" + speedError;
+            return false;
+        }
+        const double fast = tickRate(400);
+        cortex::services::RemoveSpeedhack(speedHost, speed, nullptr);
+        Sleep(200);
+        const double restored = tickRate(400);
+        if (!session->Alive()) {
+            error = "target_died_after_speedhack";
+            return false;
+        }
+        // The scaled clock must run clearly faster, and go back to normal.
+        if (!(fast > normal * 3.0) || !(restored < fast / 2.0)) {
+            char detail[128] = {};
+            std::snprintf(detail, sizeof(detail), "speedhack_rate_unexpected:%.2f/%.2f/%.2f", normal, fast, restored);
+            error = detail;
+            return false;
+        }
+        summary += " speedhack=ok";
     }
 
     app.ui.toolsTabRequest = "pointers";

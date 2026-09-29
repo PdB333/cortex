@@ -55,6 +55,11 @@ bool AssembleBlock(const AssembleRequest& request, AssembleBlockResult& result, 
 bool RelocateCode(const uint8_t* data, size_t size, uint64_t from, uint64_t to, bool x64,
                   std::vector<uint8_t>& out, std::string* error = nullptr);
 
+// The length of the whole instructions covering at least `minimum` bytes,
+// so a patch never cuts an instruction in half.
+bool CodeBoundary(const uint8_t* data, size_t size, size_t minimum, bool x64, size_t& length,
+                  std::string* error = nullptr);
+
 // A Cheat Engine number: hexadecimal, #decimal, (float)x, (double)x,
 // with an optional minus sign. False when the text is not a number.
 bool ParseAsmNumber(const std::string& text, uint64_t& value);
