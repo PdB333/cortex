@@ -1776,6 +1776,283 @@ void ToolsWorkspace::DrawCustomTypes(UiContext& context) {
     }
 }
 
+// ------------------------------------------------------------------ dissect
+
+services::AddressPredicate ToolsWorkspace::AddressPredicateFor(UiContext& context) const {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) return {};
+    // The regions are captured once: the predicate is called for every word
+    // the dissector and the spider look at.
+    auto ranges = std::make_shared<std::vector<std::pair<uint64_t, uint64_t>>>();
+    for (const auto& region : session->MemoryRegions())
+        if (region.readable) ranges->emplace_back(region.base, region.base + region.size);
+    std::sort(ranges->begin(), ranges->end());
+    return [ranges](uint64_t address) {
+        auto after = std::upper_bound(ranges->begin(), ranges->end(),
+                                      std::make_pair(address, std::numeric_limits<uint64_t>::max()));
+        if (after == ranges->begin()) return false;
+        --after;
+        return address >= after->first && address < after->second;
+    };
+}
+
+services::AddressDescriber ToolsWorkspace::AddressDescriberFor(UiContext& context) const {
+    auto modules = std::make_shared<std::vector<target::ModuleInfo>>(modules_);
+    (void)context;
+    return [modules](uint64_t address) -> std::string {
+        for (const auto& module : *modules) {
+            if (address < module.base || address >= module.base + module.size) continue;
+            char buffer[32] = {};
+            std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(address - module.base));
+            return module.name + buffer;
+        }
+        return {};
+    };
+}
+
+void ToolsWorkspace::DrawDissect(UiContext& context) {
+    HintText("Reads the same bytes at one or more instances of a structure and says what sits at each "
+             "offset: a pointer, a float, some text, a number. With several instances the fields that "
+             "disagree are the ones that belong to the instance — that is how you find health among the "
+             "padding. Separate the addresses with spaces or commas.");
+
+    ImGui::SetNextItemWidth(-1);
+    const bool submitted = ImGui::InputTextWithHint("##DissectAddresses", "address, address, ...",
+                                                    dissectAddresses_, sizeof(dissectAddresses_),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Bytes", &dissectSize_)) dissectSize_ = std::clamp(dissectSize_, 4, 8192);
+    FlowSameLine(Px(170));
+    static const char* const kSteps[] = {"1 byte", "2 bytes", "4 bytes", "8 bytes"};
+    int stepIndex = dissectAlignment_ == 1 ? 0 : dissectAlignment_ == 2 ? 1 : dissectAlignment_ == 8 ? 3 : 2;
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::Combo("Step", &stepIndex, kSteps, 4))
+        dissectAlignment_ = stepIndex == 0 ? 1 : stepIndex == 1 ? 2 : stepIndex == 3 ? 8 : 4;
+    FlowSameLine(CheckboxWidth("Hide empty fields"));
+    ImGui::Checkbox("Hide empty fields", &dissectHideZeros_);
+    FlowSameLine(CheckboxWidth("Only what differs"));
+    ImGui::Checkbox("Only what differs", &dissectOnlyDiffering_);
+    FlowSameLine(ButtonWidth("Dissect"));
+    const bool run = ImGui::Button("Dissect") || submitted;
+
+    if (run) {
+        std::vector<uint64_t> instances;
+        std::string text = dissectAddresses_;
+        for (auto& c : text)
+            if (c == ',' || c == ';') c = ' ';
+        std::istringstream stream(text);
+        std::string token;
+        bool bad = false;
+        while (stream >> token) {
+            uint64_t address = 0;
+            if (!Resolve(context, token.c_str(), address)) {
+                dissectInfo_ = "\"" + token + "\" is not an address";
+                bad = true;
+                break;
+            }
+            instances.push_back(address);
+        }
+        if (!bad) {
+            services::DissectOptions options;
+            options.size = static_cast<size_t>(dissectSize_);
+            options.alignment = static_cast<size_t>(dissectAlignment_);
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            options.pointerSize =
+                session && session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+            std::string error;
+            if (!services::DissectStructure(Reader(context), instances, options, AddressPredicateFor(context),
+                                            AddressDescriberFor(context), dissect_, &error)) {
+                dissectInfo_ = error;
+                dissect_.fields.clear();
+            } else {
+                dissectInfo_ = std::to_string(dissect_.fields.size()) + " field(s) over " +
+                               std::to_string(dissect_.instances.size()) + " instance(s)";
+                if (dissect_.unreadable)
+                    dissectInfo_ += ", " + std::to_string(dissect_.unreadable) + " unreadable";
+            }
+        }
+    }
+    if (!dissectInfo_.empty()) ImGui::TextDisabled("%s", dissectInfo_.c_str());
+    if (dissect_.fields.empty()) return;
+
+    const int columns = 3 + static_cast<int>(dissect_.instances.size());
+    if (BeginDataTable("DissectFields", columns,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        for (size_t i = 0; i < dissect_.instances.size(); ++i)
+            ImGui::TableSetupColumn((Hex(dissect_.instances[i]) + "##Instance" + std::to_string(i)).c_str(),
+                                    ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableSetupColumn("Points at", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+
+        for (size_t row = 0; row < dissect_.fields.size(); ++row) {
+            const auto& field = dissect_.fields[row];
+            if (dissectHideZeros_ && field.zero) continue;
+            if (dissectOnlyDiffering_ && !field.differs) continue;
+            ImGui::PushID(static_cast<int>(row));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            char offset[32] = {};
+            std::snprintf(offset, sizeof(offset), "+%llX", static_cast<unsigned long long>(field.offset));
+            {
+                MonoFont mono;
+                ImGui::Selectable(offset, false, ImGuiSelectableFlags_SpanAllColumns);
+            }
+            if (ImGui::BeginPopupContextItem("DissectMenu")) {
+                const uint64_t address = dissect_.instances.empty() ? 0 : dissect_.instances[0] + field.offset;
+                if (ImGui::MenuItem("Add to the address list")) {
+                    PendingAddressEntry entry;
+                    entry.address = address;
+                    entry.description = field.name;
+                    entry.type = field.kind == services::DissectKind::Float ? services::ScanDataType::Float
+                               : field.kind == services::DissectKind::Double ? services::ScanDataType::Double
+                               : field.kind == services::DissectKind::Pointer ? services::ScanDataType::Int64
+                               : field.kind == services::DissectKind::Text ? services::ScanDataType::String
+                                                                           : services::ScanDataType::Int32;
+                    context.pendingAddresses.push_back(entry);
+                    context.requestWorkspace = "memory";
+                }
+                if (field.kind == services::DissectKind::Pointer && ImGui::MenuItem("Dissect what it points at")) {
+                    std::string targets;
+                    for (const auto& value : field.values) targets += (targets.empty() ? "" : " ") + value;
+                    std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s", targets.c_str());
+                }
+                ImGui::Separator();
+                AddressContextOptions options;
+                options.label = field.name;
+                options.valueSize = static_cast<int>(field.size);
+                DrawAddressContextActions(context, address, options);
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled("%s", services::DissectKindName(field.kind));
+            for (size_t i = 0; i < field.values.size(); ++i) {
+                ImGui::TableSetColumnIndex(2 + static_cast<int>(i));
+                if (field.differs) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.78f, 0.35f, 1.0f));
+                MonoTextUnformatted(field.values[i].c_str());
+                if (field.differs) ImGui::PopStyleColor();
+            }
+            ImGui::TableSetColumnIndex(2 + static_cast<int>(dissect_.instances.size()));
+            if (!field.note.empty()) ImGui::TextDisabled("%s", field.note.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
+// ------------------------------------------------------------------ pointer spider
+
+void ToolsWorkspace::DrawSpider(UiContext& context) {
+    HintText("Follows every plausible pointer out of one address, level by level, so you can see what a "
+             "base pointer actually leads to. The pointer scanner does the opposite: it looks for paths "
+             "that reach a value you already found.");
+
+    ImGui::SetNextItemWidth(Px(280));
+    const bool submitted = ImGui::InputTextWithHint("##SpiderRoot", "address, module+RVA or expression",
+                                                    spiderRoot_, sizeof(spiderRoot_),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+    FlowSameLine(Px(150));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Levels", &spiderLevel_)) spiderLevel_ = std::clamp(spiderLevel_, 1, 5);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Offset span", &spiderSpan_)) spiderSpan_ = std::clamp(spiderSpan_, 8, 0x2000);
+    FlowSameLine(ButtonWidth("Explore"));
+    const bool run = ImGui::Button("Explore") || submitted;
+
+    if (run) {
+        uint64_t root = 0;
+        if (!Resolve(context, spiderRoot_, root)) {
+            spiderInfo_ = "That address could not be resolved";
+            spider_.clear();
+        } else {
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            services::SpiderOptions options;
+            options.maxLevel = spiderLevel_;
+            options.maxOffset = static_cast<uint32_t>(spiderSpan_);
+            options.pointerSize =
+                session && session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+            options.alignment = options.pointerSize;
+            std::string error;
+            if (!services::SpiderPointers(Reader(context), root, options, AddressPredicateFor(context),
+                                          AddressDescriberFor(context), spider_, &error)) {
+                spiderInfo_ = error;
+                spider_.clear();
+            } else {
+                spiderBase_ = root;
+                spiderInfo_ = std::to_string(spider_.size()) + " pointer(s) from " + Hex(root) +
+                              (spider_.size() >= options.maxNodes ? " (limit reached)" : "");
+            }
+        }
+    }
+    if (!spiderInfo_.empty()) ImGui::TextDisabled("%s", spiderInfo_.c_str());
+    if (spider_.empty()) return;
+
+    if (BeginDataTable("SpiderNodes", 4,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+        ImGui::TableSetupColumn("Read from", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+        ImGui::TableSetupColumn("Points at", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+        ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(spider_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& node = spider_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable(services::SpiderPath(spider_, static_cast<size_t>(row)).c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns);
+                }
+                if (ImGui::BeginPopupContextItem("SpiderMenu")) {
+                    if (ImGui::MenuItem("Add the path to the address list")) {
+                        PendingAddressEntry entry;
+                        entry.address = node.value;
+                        entry.description = "Spider";
+                        entry.type = services::ScanDataType::Int32;
+                        entry.baseOffset = spiderBase_;
+                        entry.offsets = services::SpiderOffsets(spider_, static_cast<size_t>(row));
+                        context.pendingAddresses.push_back(entry);
+                        context.requestWorkspace = "memory";
+                    }
+                    if (ImGui::MenuItem("Explore from here")) {
+                        std::snprintf(spiderRoot_, sizeof(spiderRoot_), "%s", Hex(node.value).c_str());
+                    }
+                    if (ImGui::MenuItem("Dissect what it points at")) {
+                        std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s",
+                                      Hex(node.value).c_str());
+                        active_ = Tab::Dissect;
+                    }
+                    ImGui::Separator();
+                    AddressContextOptions options;
+                    options.label = "Spider";
+                    DrawAddressContextActions(context, node.value, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::TableSetColumnIndex(1);
+                MonoTextUnformatted(Hex(node.address).c_str());
+                ImGui::TableSetColumnIndex(2);
+                MonoTextUnformatted(Hex(node.value).c_str());
+                ImGui::TableSetColumnIndex(3);
+                if (!node.note.empty()) ImGui::TextDisabled("%s", node.note.c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
 // ------------------------------------------------------------------ speedhack
 
 services::SpeedhackHost ToolsWorkspace::SpeedhackHostFor(UiContext& context, uint64_t pid) const {
@@ -1912,6 +2189,8 @@ void ToolsWorkspace::Draw(UiContext& context) {
                    : context.toolsTabRequest == "grouped" ? Tab::Grouped
                    : context.toolsTabRequest == "dump" ? Tab::Dump
                    : context.toolsTabRequest == "types" ? Tab::Types
+                   : context.toolsTabRequest == "dissect" ? Tab::Dissect
+                   : context.toolsTabRequest == "spider" ? Tab::Spider
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
@@ -1930,6 +2209,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
         {"Symbols", Tab::Symbols},          {"Assembler", Tab::Assembler},
         {"Grouped scan", Tab::Grouped},     {"Speedhack", Tab::Speed},
         {"Dump", Tab::Dump},                {"Custom types", Tab::Types},
+        {"Dissect", Tab::Dissect},          {"Pointer spider", Tab::Spider},
     };
     if (tabPending_) {
         active_ = requested_;
@@ -1968,6 +2248,8 @@ void ToolsWorkspace::Draw(UiContext& context) {
         case Tab::Speed: DrawSpeedhack(context); break;
         case Tab::Dump: DrawDump(context); break;
         case Tab::Types: DrawCustomTypes(context); break;
+        case Tab::Dissect: DrawDissect(context); break;
+        case Tab::Spider: DrawSpider(context); break;
     }
 }
 

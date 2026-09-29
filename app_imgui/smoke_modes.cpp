@@ -8,6 +8,7 @@
 #include "services/auto_assembler.h"
 #include "services/custom_types.h"
 #include "services/memory_tools.h"
+#include "services/structure_dissect.h"
 #include "services/speedhack.h"
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
@@ -691,6 +692,56 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         summary += " customtype=ok";
+
+        // Dissecting the bytes around the health value, and a pointer spider
+        // over the module's data, both through the same address predicate.
+        const auto regions = session->MemoryRegions();
+        const auto plausible = [regions](uint64_t value) {
+            for (const auto& region : regions)
+                if (region.readable && value >= region.base && value < region.base + region.size) return true;
+            return false;
+        };
+        const auto describe = [&modules](uint64_t value) -> std::string {
+            for (const auto& entry : modules)
+                if (value >= entry.base && value < entry.base + entry.size) return entry.name;
+            return {};
+        };
+        services::DissectOptions dissectOptions;
+        dissectOptions.size = 0x80;
+        services::DissectResult dissected;
+        if (!services::DissectStructure(dumpReader, {health, health}, dissectOptions, plausible, describe,
+                                        dissected, &error) ||
+            dissected.fields.empty() || dissected.instances.size() != 2) {
+            error = "dissect_failed:" + error;
+            return false;
+        }
+        // The same address twice must agree on every field.
+        for (const auto& field : dissected.fields) {
+            if (!field.differs) continue;
+            error = "dissect_differs_against_itself";
+            return false;
+        }
+        summary += " dissect=" + std::to_string(dissected.fields.size());
+
+        services::SpiderOptions spiderOptions;
+        spiderOptions.maxLevel = 2;
+        spiderOptions.maxOffset = 0x100;
+        spiderOptions.maxNodes = 200;
+        std::vector<services::SpiderNode> spidered;
+        if (!services::SpiderPointers(dumpReader, module.base, spiderOptions, plausible, describe, spidered,
+                                      &error)) {
+            error = "spider_failed:" + error;
+            return false;
+        }
+        for (size_t node = 0; node < spidered.size(); ++node) {
+            // Every path names as many offsets as the node has levels.
+            if (services::SpiderOffsets(spidered, node).size() ==
+                static_cast<size_t>(spidered[node].level) + 1)
+                continue;
+            error = "spider_path_mismatch";
+            return false;
+        }
+        summary += " spider=" + std::to_string(spidered.size());
     }
 
     std::vector<uint8_t> code(128);

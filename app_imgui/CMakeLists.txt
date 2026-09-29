@@ -190,6 +190,7 @@ add_executable(cortex_imgui WIN32
     ../core/services/auto_assembler.cpp
     ../core/services/speedhack.cpp
     ../core/services/custom_types.cpp
+    ../core/services/structure_dissect.cpp
     ../core/services/module_service.cpp
     ../core/services/disassembly_service.cpp
     ../core/services/debugger_service.cpp
@@ -395,4 +396,16 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_custom_types_tests COMMAND cortex_custom_types_tests)
     set_tests_properties(cortex_custom_types_tests PROPERTIES TIMEOUT 60)
+
+    # Dissecting a structure and the pointer spider.
+    add_executable(cortex_structure_dissect_tests
+        ../tests/structure_dissect_tests.cpp
+        ../core/services/structure_dissect.cpp
+    )
+    target_include_directories(cortex_structure_dissect_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_structure_dissect_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_structure_dissect_tests COMMAND cortex_structure_dissect_tests)
+    set_tests_properties(cortex_structure_dissect_tests PROPERTIES TIMEOUT 60)
 endif()

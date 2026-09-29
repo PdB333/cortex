@@ -7,6 +7,7 @@
 #include "services/assembler.h"
 #include "services/speedhack.h"
 #include "services/custom_types.h"
+#include "services/structure_dissect.h"
 #include "target/module_provider.h"
 
 #include <array>
@@ -30,7 +31,8 @@ public:
 
 private:
     enum class Tab {
-        Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed, Grouped, Dump, Types
+        Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed, Grouped, Dump, Types,
+        Dissect, Spider
     };
 
     void Reset(const std::string& targetId);
@@ -179,6 +181,24 @@ private:
     std::string typeInfo_;
     bool typeError_ = false;
 
+    // Structure dissect
+    char dissectAddresses_[512] = {};
+    int dissectSize_ = 256;
+    int dissectAlignment_ = 4;
+    bool dissectHideZeros_ = false;
+    bool dissectOnlyDiffering_ = false;
+    services::DissectResult dissect_;
+    std::string dissectInfo_;
+
+    // Pointer spider
+    char spiderRoot_[96] = {};
+    int spiderLevel_ = 2;
+    int spiderSpan_ = 0x200;
+    services::SpiderOptions spiderOptions_;
+    std::vector<services::SpiderNode> spider_;
+    uint64_t spiderBase_ = 0;
+    std::string spiderInfo_;
+
     // Speedhack
     services::SpeedhackState speed_;
     uint64_t speedPid_ = 0;
@@ -190,6 +210,11 @@ private:
     void DrawGroupedScan(UiContext& context);
     void DrawDump(UiContext& context);
     void DrawCustomTypes(UiContext& context);
+    void DrawDissect(UiContext& context);
+    void DrawSpider(UiContext& context);
+    // Tells an address in the target from an ordinary number, and names one.
+    services::AddressPredicate AddressPredicateFor(UiContext& context) const;
+    services::AddressDescriber AddressDescriberFor(UiContext& context) const;
     void LoadTypeEditor(const services::CustomType& type);
     services::CustomType TypeFromEditor() const;
     services::SpeedhackHost SpeedhackHostFor(UiContext& context, uint64_t pid) const;
