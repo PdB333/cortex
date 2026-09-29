@@ -279,7 +279,77 @@ void TestPointerScanner() {
 
 } // namespace
 
+
+void TestGroupedScan() {
+    using cortex::services::FindGroupedValues;
+    using cortex::services::GroupedElement;
+    using cortex::services::GroupedHit;
+    using cortex::services::ParseGroupedScan;
+
+    std::vector<GroupedElement> elements;
+    std::string error;
+    CHECK(ParseGroupedScan("4:64 f:1.5 2:14", 4, elements, &error));
+    CHECK(elements.size() == 3);
+    CHECK(elements[0].size == 4 && elements[0].bytes[0] == 0x64 && elements[0].bytes[1] == 0);
+    CHECK(elements[1].size == 4);
+    CHECK(elements[2].size == 2 && elements[2].bytes[0] == 0x14);
+    // Decimal with '#', and a default size when no prefix is given.
+    CHECK(ParseGroupedScan("#100 *", 2, elements, &error));
+    CHECK(elements.size() == 2 && elements[0].size == 2 && elements[0].bytes[0] == 100);
+    CHECK(elements[1].wildcard);
+    // A wildcard can carry a width: a structure field whose value is unknown.
+    CHECK(ParseGroupedScan("4:64 4:* 2:14", 4, elements, &error));
+    CHECK(elements.size() == 3 && elements[1].wildcard && elements[1].size == 4);
+    CHECK(!ParseGroupedScan("", 4, elements, &error));
+    CHECK(!ParseGroupedScan("*", 4, elements, &error) && error.find("at least one value") != std::string::npos);
+    CHECK(!ParseGroupedScan("q:5", 4, elements, &error) && error.find("Unknown element type") != std::string::npos);
+    CHECK(!ParseGroupedScan("4:zz", 4, elements, &error));
+
+    // A buffer holding a little structure: 100, a float 1.5, then 20.
+    std::vector<uint8_t> data(512, 0);
+    const float pi = 1.5f;
+    const uint32_t hundred = 100;
+    const uint16_t twenty = 20;
+    std::memcpy(data.data() + 64, &hundred, 4);
+    std::memcpy(data.data() + 72, &pi, 4);
+    std::memcpy(data.data() + 80, &twenty, 2);
+    // A decoy: the same first value with nothing after it.
+    std::memcpy(data.data() + 300, &hundred, 4);
+
+    CHECK(ParseGroupedScan("4:64 f:1.5 2:14", 4, elements, &error));
+    std::vector<GroupedHit> hits;
+    FindGroupedValues(data.data(), data.size(), 0x140000000ull, elements, 64, true, 16, hits);
+    CHECK(hits.size() == 1);
+    if (hits.size() == 1) {
+        CHECK(hits[0].address == 0x140000000ull + 64);
+        CHECK(hits[0].offsets.size() == 3 && hits[0].offsets[1] == 8 && hits[0].offsets[2] == 16);
+    }
+
+    // A sized wildcard stands for a field: the value after it is looked for
+    // past that field, and the wildcard reports where it sits.
+    CHECK(ParseGroupedScan("4:64 4:* f:1.5", 4, elements, &error));
+    FindGroupedValues(data.data(), data.size(), 0x140000000ull, elements, 64, true, 16, hits);
+    CHECK(hits.size() == 1);
+    if (hits.size() == 1) {
+        CHECK(hits[0].address == 0x140000000ull + 64);
+        CHECK(hits[0].offsets.size() == 3 && hits[0].offsets[1] == 4 && hits[0].offsets[2] == 8);
+    }
+
+    // A window that stops before the last value finds nothing.
+    CHECK(ParseGroupedScan("4:64 f:1.5 2:14", 4, elements, &error));
+    FindGroupedValues(data.data(), data.size(), 0, elements, 12, true, 16, hits);
+    CHECK(hits.empty());
+
+    // Out of order: ordered refuses, unordered accepts.
+    CHECK(ParseGroupedScan("4:64 2:14 f:1.5", 4, elements, &error));
+    FindGroupedValues(data.data(), data.size(), 0, elements, 64, true, 16, hits);
+    CHECK(hits.empty());
+    FindGroupedValues(data.data(), data.size(), 0, elements, 64, false, 16, hits);
+    CHECK(hits.size() == 1);
+}
+
 int main() {
+    TestGroupedScan();
     TestPeImage();
     TestStringsAndCaves();
     TestSignature();

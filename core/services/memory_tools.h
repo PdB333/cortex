@@ -102,4 +102,35 @@ void FindCodeCaves(const uint8_t* data, size_t size, uint64_t base, size_t minSi
 size_t CountPatternMatches(const uint8_t* data, size_t size, const std::vector<uint8_t>& bytes,
                            const std::vector<uint8_t>& mask, size_t limit, uint64_t* firstOffset = nullptr);
 
+// ------------------------------------------------------------------ grouped scan
+
+// Cheat Engine's grouped scan: several values that sit close together, which
+// is how a structure is found from the few fields you know. The text lists
+// them, one per element, with an optional type prefix:
+//   4:100 f:1.5 2:20      4-byte 100, float 1.5, 2-byte 20
+//   1:0A * 4:#1000        a wildcard element skips whatever is in between
+// Prefixes: 1, 2, 4, 8 (integer sizes), f (float), d (double). Without one
+// the default size is used. Values are hexadecimal unless prefixed with #,
+// like everywhere else.
+struct GroupedElement {
+    size_t size = 4;
+    std::vector<uint8_t> bytes;
+    bool wildcard = false;
+};
+
+bool ParseGroupedScan(const std::string& text, size_t defaultSize, std::vector<GroupedElement>& elements,
+                      std::string* error = nullptr);
+
+struct GroupedHit {
+    uint64_t address = 0;              // where the first element sits
+    std::vector<uint64_t> offsets;     // offset of each element from address
+};
+
+// Every place in data where all the elements appear within `window` bytes.
+// With `ordered`, they must appear in the order given; otherwise each is
+// looked up anywhere in the window.
+void FindGroupedValues(const uint8_t* data, size_t size, uint64_t base,
+                       const std::vector<GroupedElement>& elements, size_t window, bool ordered,
+                       size_t maxResults, std::vector<GroupedHit>& out);
+
 } // namespace cortex::services

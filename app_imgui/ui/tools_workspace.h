@@ -28,7 +28,7 @@ public:
     void Draw(UiContext& context) override;
 
 private:
-    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed };
+    enum class Tab { Regions, Pe, Strings, Caves, Signature, Pointers, Symbols, Assembler, Speed, Grouped };
 
     void Reset(const std::string& targetId);
     void RefreshModules(UiContext& context);
@@ -51,6 +51,7 @@ private:
     std::vector<services::PointerModule> CurrentPointerModules() const;
 
     std::string targetId_;
+    Tab active_ = Tab::Regions;
     Tab requested_ = Tab::Regions;
     bool tabPending_ = false;
     std::vector<target::ModuleInfo> modules_;
@@ -142,6 +143,16 @@ private:
     std::vector<Injection> injections_;
     int injectSteal_ = 5;
 
+    // Grouped scan
+    char groupedText_[256] = {};
+    int groupedWindow_ = 64;
+    int groupedDefaultSize_ = 4;
+    bool groupedOrdered_ = true;
+    bool groupedWritableOnly_ = true;
+    std::vector<services::GroupedHit> grouped_;
+    std::vector<services::GroupedElement> groupedElements_;
+    std::string groupedInfo_;
+
     // Speedhack
     services::SpeedhackState speed_;
     uint64_t speedPid_ = 0;
@@ -150,6 +161,7 @@ private:
 
     void DrawAssembler(UiContext& context);
     void DrawSpeedhack(UiContext& context);
+    void DrawGroupedScan(UiContext& context);
     services::SpeedhackHost SpeedhackHostFor(UiContext& context, uint64_t pid) const;
     bool AssembleCurrent(UiContext& context, uint64_t address, services::AssembleBlockResult& result, std::string& error);
     int StealLength(UiContext& context, uint64_t address, int minimum) const;

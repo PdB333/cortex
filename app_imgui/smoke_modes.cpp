@@ -6,6 +6,7 @@
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
+#include "services/memory_tools.h"
 #include "services/speedhack.h"
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
@@ -613,6 +614,35 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         summary += " pointers=" + std::to_string(pointers.paths.size());
+
+        // Grouped scan: the two words around the health value are searched
+        // for together, the way Cheat Engine matches a structure.
+        std::vector<uint8_t> window(0x400);
+        const uint64_t windowBase = health - 0x100;
+        if (!session->ReadMemory(windowBase, window.data(), window.size(), nullptr)) {
+            error = "grouped_read_failed";
+            return false;
+        }
+        uint32_t first32 = 0;
+        uint32_t second32 = 0;
+        std::memcpy(&first32, window.data() + 0x100, 4);
+        std::memcpy(&second32, window.data() + 0x104, 4);
+        char pattern[64] = {};
+        std::snprintf(pattern, sizeof(pattern), "4:%X 4:%X", first32, second32);
+        std::vector<services::GroupedElement> elements;
+        if (!services::ParseGroupedScan(pattern, 4, elements, &error) || elements.size() != 2) {
+            error = "grouped_parse_failed:" + error;
+            return false;
+        }
+        std::vector<services::GroupedHit> groupedHits;
+        services::FindGroupedValues(window.data(), window.size(), windowBase, elements, 32, true, 64, groupedHits);
+        const bool foundHealth = std::any_of(groupedHits.begin(), groupedHits.end(),
+                                             [health](const auto& hit) { return hit.address == health; });
+        if (!foundHealth) {
+            error = "grouped_scan_missed_health";
+            return false;
+        }
+        summary += " grouped=" + std::to_string(groupedHits.size());
     }
 
     std::vector<uint8_t> code(128);

@@ -1402,6 +1402,130 @@ void ToolsWorkspace::DrawAssembler(UiContext& context) {
     }
 }
 
+// ------------------------------------------------------------------ grouped scan
+
+void ToolsWorkspace::DrawGroupedScan(UiContext& context) {
+    HintText("Finds several values that sit close together, which is how you locate a structure from the "
+             "few fields you know. Prefix an element with its type: 4:64 f:1.5 2:14. A bare * skips one "
+             "byte and 4:* a field whose value you do not know. Numbers are hexadecimal; #100 is decimal.");
+
+    ImGui::SetNextItemWidth(-1);
+    const bool submitted = ImGui::InputTextWithHint("##GroupedText", "4:64 f:1.5 2:14", groupedText_,
+                                                    sizeof(groupedText_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Window", &groupedWindow_)) groupedWindow_ = std::clamp(groupedWindow_, 4, 4096);
+    FlowSameLine(Px(150));
+    static const char* const kSizes[] = {"1 byte", "2 bytes", "4 bytes", "8 bytes"};
+    int sizeIndex = groupedDefaultSize_ == 1 ? 0 : groupedDefaultSize_ == 2 ? 1 : groupedDefaultSize_ == 8 ? 3 : 2;
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::Combo("Default", &sizeIndex, kSizes, 4))
+        groupedDefaultSize_ = sizeIndex == 0 ? 1 : sizeIndex == 1 ? 2 : sizeIndex == 3 ? 8 : 4;
+    FlowSameLine(CheckboxWidth("In order"));
+    ImGui::Checkbox("In order", &groupedOrdered_);
+    FlowSameLine(CheckboxWidth("Writable memory only"));
+    ImGui::Checkbox("Writable memory only", &groupedWritableOnly_);
+    FlowSameLine(ButtonWidth("Scan"));
+    const bool scan = ImGui::Button("Scan") || submitted;
+
+    if (scan) {
+        std::string parseError;
+        if (!services::ParseGroupedScan(groupedText_, static_cast<size_t>(groupedDefaultSize_), groupedElements_,
+                                        &parseError)) {
+            groupedInfo_ = parseError;
+            grouped_.clear();
+        } else {
+            const auto elements = groupedElements_;
+            const size_t window = static_cast<size_t>(groupedWindow_);
+            const bool ordered = groupedOrdered_;
+            const bool writableOnly = groupedWritableOnly_;
+            context.RunInBackground("Grouped scan", [this, &context, elements, window, ordered, writableOnly]() {
+                grouped_.clear();
+                const auto session = context.sessions ? context.sessions->Active() : nullptr;
+                if (!session) {
+                    groupedInfo_ = "Select a process first";
+                    return;
+                }
+                constexpr size_t kMaxResults = 5000;
+                constexpr uint64_t kMaxBytes = 512ull * 1024 * 1024;
+                uint64_t scanned = 0;
+                std::vector<uint8_t> buffer;
+                for (const auto& region : session->MemoryRegions()) {
+                    if (!region.readable) continue;
+                    if (writableOnly && !region.writable) continue;
+                    if (grouped_.size() >= kMaxResults || scanned >= kMaxBytes) break;
+                    const size_t size = static_cast<size_t>(std::min<uint64_t>(region.size, kMaxBytes - scanned));
+                    buffer.assign(size, 0);
+                    if (!session->ReadMemory(region.base, buffer.data(), size, nullptr)) continue;
+                    scanned += size;
+                    std::vector<services::GroupedHit> hits;
+                    services::FindGroupedValues(buffer.data(), size, region.base, elements, window, ordered,
+                                                kMaxResults - grouped_.size(), hits);
+                    grouped_.insert(grouped_.end(), hits.begin(), hits.end());
+                }
+                groupedInfo_ = std::to_string(grouped_.size()) + " match(es) in " +
+                               std::to_string(scanned / (1024 * 1024)) + " MB" +
+                               (grouped_.size() >= kMaxResults ? " (limit reached)" : "");
+            });
+        }
+    }
+    if (!groupedInfo_.empty()) ImGui::TextDisabled("%s", groupedInfo_.c_str());
+    if (grouped_.empty()) return;
+
+    if (BeginDataTable("GroupedResults", 3,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+        ImGui::TableSetupColumn("Offsets", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+        ImGui::TableSetupColumn("Region", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(grouped_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& hit = grouped_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable((Hex(hit.address) + "##Grouped").c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns);
+                }
+                if (ImGui::BeginPopupContextItem("GroupedMenu")) {
+                    if (ImGui::MenuItem("Add to the address list")) {
+                        PendingAddressEntry entry;
+                        entry.address = hit.address;
+                        entry.description = "Grouped scan";
+                        entry.type = services::ScanDataType::Int32;
+                        context.pendingAddresses.push_back(entry);
+                        context.requestWorkspace = "memory";
+                    }
+                    ImGui::Separator();
+                    AddressContextOptions options;
+                    options.label = "Grouped scan";
+                    DrawAddressContextActions(context, hit.address, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::TableSetColumnIndex(1);
+                std::string offsets;
+                for (const auto offset : hit.offsets) {
+                    char buffer[16] = {};
+                    std::snprintf(buffer, sizeof(buffer), "%s+%llX", offsets.empty() ? "" : " ",
+                                  static_cast<unsigned long long>(offset));
+                    offsets += buffer;
+                }
+                MonoTextUnformatted(offsets.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(AddressText(hit.address).c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
 // ------------------------------------------------------------------ speedhack
 
 services::SpeedhackHost ToolsWorkspace::SpeedhackHostFor(UiContext& context, uint64_t pid) const {
@@ -1535,53 +1659,61 @@ void ToolsWorkspace::Draw(UiContext& context) {
                    : context.toolsTabRequest == "symbols" ? Tab::Symbols
                    : context.toolsTabRequest == "assembler" ? Tab::Assembler
                    : context.toolsTabRequest == "speedhack" ? Tab::Speed
+                   : context.toolsTabRequest == "grouped" ? Tab::Grouped
                    : Tab::Regions;
         tabPending_ = true;
         context.toolsTabRequest.clear();
     }
 
-    if (!ImGui::BeginTabBar("ToolTabs")) return;
-    auto flags = [&](Tab tab) {
-        return tabPending_ && requested_ == tab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+    // A tab bar would scroll once there are this many tools, hiding the last
+    // ones behind arrows, so the selector wraps onto as many rows as it needs.
+    struct Entry {
+        const char* label;
+        Tab tab;
     };
-    if (ImGui::BeginTabItem("Regions", nullptr, flags(Tab::Regions))) {
-        DrawRegions(context);
-        ImGui::EndTabItem();
+    static const Entry kTools[] = {
+        {"Regions", Tab::Regions},          {"PE headers", Tab::Pe},
+        {"Strings", Tab::Strings},          {"Code caves", Tab::Caves},
+        {"AOB signature", Tab::Signature},  {"Pointer scan", Tab::Pointers},
+        {"Symbols", Tab::Symbols},          {"Assembler", Tab::Assembler},
+        {"Grouped scan", Tab::Grouped},     {"Speedhack", Tab::Speed},
+    };
+    if (tabPending_) {
+        active_ = requested_;
+        tabPending_ = false;
     }
-    if (ImGui::BeginTabItem("PE headers", nullptr, flags(Tab::Pe))) {
-        DrawPe(context);
-        ImGui::EndTabItem();
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float available = ImGui::GetContentRegionAvail().x;
+    float row = 0.0f;
+    for (size_t index = 0; index < sizeof(kTools) / sizeof(kTools[0]); ++index) {
+        const Entry& entry = kTools[index];
+        const float width = ImGui::CalcTextSize(entry.label).x + style.FramePadding.x * 2.0f;
+        if (index && row + style.ItemSpacing.x + width <= available) {
+            ImGui::SameLine();
+            row += style.ItemSpacing.x + width;
+        } else {
+            row = width;
+        }
+        const bool selected = active_ == entry.tab;
+        if (selected) ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_ButtonActive]);
+        if (ImGui::Button(entry.label)) active_ = entry.tab;
+        if (selected) ImGui::PopStyleColor();
     }
-    if (ImGui::BeginTabItem("Strings", nullptr, flags(Tab::Strings))) {
-        DrawStrings(context);
-        ImGui::EndTabItem();
+    ImGui::Separator();
+
+    switch (active_) {
+        case Tab::Regions: DrawRegions(context); break;
+        case Tab::Pe: DrawPe(context); break;
+        case Tab::Strings: DrawStrings(context); break;
+        case Tab::Caves: DrawCaves(context); break;
+        case Tab::Signature: DrawSignature(context); break;
+        case Tab::Pointers: DrawPointers(context); break;
+        case Tab::Symbols: DrawSymbols(context); break;
+        case Tab::Assembler: DrawAssembler(context); break;
+        case Tab::Grouped: DrawGroupedScan(context); break;
+        case Tab::Speed: DrawSpeedhack(context); break;
     }
-    if (ImGui::BeginTabItem("Code caves", nullptr, flags(Tab::Caves))) {
-        DrawCaves(context);
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("AOB signature", nullptr, flags(Tab::Signature))) {
-        DrawSignature(context);
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Pointer scan", nullptr, flags(Tab::Pointers))) {
-        DrawPointers(context);
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Symbols", nullptr, flags(Tab::Symbols))) {
-        DrawSymbols(context);
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Assembler", nullptr, flags(Tab::Assembler))) {
-        DrawAssembler(context);
-        ImGui::EndTabItem();
-    }
-    if (ImGui::BeginTabItem("Speedhack", nullptr, flags(Tab::Speed))) {
-        DrawSpeedhack(context);
-        ImGui::EndTabItem();
-    }
-    ImGui::EndTabBar();
-    tabPending_ = false;
 }
 
 } // namespace cortex::ui

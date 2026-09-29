@@ -1,7 +1,10 @@
 #include "memory_tools.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 namespace cortex::services {
 namespace {
@@ -313,6 +316,166 @@ size_t CountPatternMatches(const uint8_t* data, size_t size, const std::vector<u
         ++count;
     }
     return count;
+}
+
+// ------------------------------------------------------------------ grouped scan
+
+bool ParseGroupedScan(const std::string& text, size_t defaultSize, std::vector<GroupedElement>& elements,
+                      std::string* error) {
+    elements.clear();
+    auto fail = [&](const std::string& message) {
+        if (error) *error = message;
+        return false;
+    };
+    std::istringstream stream(text);
+    std::string token;
+    while (stream >> token) {
+        GroupedElement element;
+        if (token == "*" || token == "?" || token == "??") {
+            element.wildcard = true;
+            element.size = 1;
+            elements.push_back(std::move(element));
+            continue;
+        }
+        std::string value = token;
+        char kind = 0;
+        const auto colon = token.find(':');
+        if (colon != std::string::npos) {
+            const std::string prefix = token.substr(0, colon);
+            value = token.substr(colon + 1);
+            if (prefix == "1" || prefix == "2" || prefix == "4" || prefix == "8") {
+                element.size = static_cast<size_t>(std::strtoul(prefix.c_str(), nullptr, 10));
+            } else if (prefix == "f" || prefix == "F") {
+                kind = 'f';
+                element.size = 4;
+            } else if (prefix == "d" || prefix == "D") {
+                kind = 'd';
+                element.size = 8;
+            } else {
+                return fail("Unknown element type '" + prefix + "' in \"" + token + "\"");
+            }
+        } else {
+            element.size = defaultSize ? defaultSize : 4;
+        }
+        if (value.empty()) return fail("Missing value in \"" + token + "\"");
+        // "4:*" is a wildcard of a known width: a field of the structure whose
+        // value is unknown, as opposed to a bare "*" that skips a single byte.
+        if (value == "*" || value == "?" || value == "??") {
+            element.wildcard = true;
+            elements.push_back(std::move(element));
+            continue;
+        }
+
+        if (kind == 'f' || kind == 'd') {
+            char* end = nullptr;
+            const double real = std::strtod(value.c_str(), &end);
+            if (!end || *end != '\0') return fail("Invalid number \"" + value + "\"");
+            element.bytes.resize(element.size);
+            if (kind == 'f') {
+                const float narrow = static_cast<float>(real);
+                std::memcpy(element.bytes.data(), &narrow, 4);
+            } else {
+                std::memcpy(element.bytes.data(), &real, 8);
+            }
+        } else {
+            uint64_t number = 0;
+            if (!value.empty() && value[0] == '#') {
+                const std::string digits = value.substr(1);
+                if (digits.empty()) return fail("Missing number after '#'");
+                char* end = nullptr;
+                const long long signedValue = std::strtoll(digits.c_str(), &end, 10);
+                if (!end || *end != '\0') return fail("Invalid decimal \"" + digits + "\"");
+                number = static_cast<uint64_t>(signedValue);
+            } else {
+                std::string digits = value;
+                if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X')) digits.erase(0, 2);
+                if (digits.empty() || digits.size() > 16) return fail("Invalid number \"" + value + "\"");
+                for (const char ch : digits)
+                    if (!std::isxdigit(static_cast<unsigned char>(ch))) return fail("Invalid number \"" + value + "\"");
+                number = std::strtoull(digits.c_str(), nullptr, 16);
+            }
+            element.bytes.resize(element.size);
+            for (size_t i = 0; i < element.size; ++i)
+                element.bytes[i] = static_cast<uint8_t>(number >> (8 * i));
+        }
+        elements.push_back(std::move(element));
+    }
+    if (elements.empty()) return fail("Enter at least one value");
+    bool anyValue = false;
+    for (const auto& element : elements) anyValue |= !element.wildcard;
+    if (!anyValue) return fail("A group needs at least one value");
+    if (error) error->clear();
+    return true;
+}
+
+void FindGroupedValues(const uint8_t* data, size_t size, uint64_t base,
+                       const std::vector<GroupedElement>& elements, size_t window, bool ordered,
+                       size_t maxResults, std::vector<GroupedHit>& out) {
+    out.clear();
+    if (!data || elements.empty() || window == 0) return;
+    // The scan is anchored on the first real value; wildcards only take up
+    // room between the others.
+    size_t first = 0;
+    while (first < elements.size() && elements[first].wildcard) ++first;
+    if (first >= elements.size()) return;
+    const auto& anchor = elements[first];
+    if (anchor.bytes.empty() || anchor.bytes.size() > size) return;
+
+    auto matchesAt = [&](const GroupedElement& element, size_t position) {
+        if (position + element.bytes.size() > size) return false;
+        return std::memcmp(data + position, element.bytes.data(), element.bytes.size()) == 0;
+    };
+
+    const size_t last = size - anchor.bytes.size();
+    for (size_t p = 0; p <= last && out.size() < maxResults; ++p) {
+        const void* hit = std::memchr(data + p, anchor.bytes[0], last - p + 1);
+        if (!hit) break;
+        p = static_cast<size_t>(static_cast<const uint8_t*>(hit) - data);
+        if (!matchesAt(anchor, p)) continue;
+
+        // Every other value must sit inside the window that starts here.
+        const size_t stop = std::min(size, p + window);
+        std::vector<uint64_t> offsets(elements.size(), 0);
+        offsets[first] = 0;
+        bool complete = true;
+        size_t cursor = p + anchor.bytes.size();
+        for (size_t i = 0; i < elements.size() && complete; ++i) {
+            if (i == first) continue;
+            if (elements[i].wildcard) {
+                // A wildcard occupies its own width, so the values after it
+                // are looked for past the field it stands for.
+                if (!ordered || i < first) continue;
+                if (cursor + elements[i].size > stop) {
+                    complete = false;
+                    break;
+                }
+                offsets[i] = static_cast<uint64_t>(cursor - p);
+                cursor += elements[i].size;
+                continue;
+            }
+            const size_t from = ordered ? (i > first ? cursor : p) : p;
+            size_t found = from;
+            bool ok = false;
+            while (found < stop && found + elements[i].bytes.size() <= stop) {
+                if (matchesAt(elements[i], found)) {
+                    ok = true;
+                    break;
+                }
+                ++found;
+            }
+            if (!ok) {
+                complete = false;
+                break;
+            }
+            offsets[i] = static_cast<uint64_t>(found - p);
+            if (ordered && i > first) cursor = found + elements[i].bytes.size();
+        }
+        if (!complete) continue;
+        GroupedHit result;
+        result.address = base + p;
+        result.offsets = std::move(offsets);
+        out.push_back(std::move(result));
+    }
 }
 
 } // namespace cortex::services
