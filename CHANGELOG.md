@@ -2,7 +2,9 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [v0.8.0] - Unreleased
+## [v1.0.0] - 2026-09-30
+
+First stable release. It is the Dear ImGui desktop that was prepared as v0.8.0 (never published), validated against a real game (AssaultCube) in addition to the automated suites. Versions 0.7.0 and 0.8.0 were not published; their changes are all below.
 
 ### Native desktop application
 
@@ -53,7 +55,7 @@ All notable changes to Cortex are documented in this file.
 ### MCP
 
 - The tool manifest now lists `debug_breakpoint_trigger_set`, `debug_breakpoint_trigger_clear` and `symbols_module`.
-- MCP server metadata reports version `0.8.0`.
+- MCP server metadata reports version `1.0.0`.
 
 ### Build and validation
 
@@ -65,7 +67,7 @@ All notable changes to Cortex are documented in this file.
 
 ## [v0.7.0] - 2026-09-21 (not published)
 
-This Qt/QML release was prepared but never published; its changes ship as part of v0.8.0, which replaces the Qt desktop with the native Dear ImGui application.
+This Qt/QML release was prepared but never published; its changes ship as part of v1.0.0, which replaces the Qt desktop with the native Dear ImGui application.
 
 ### Unified desktop application
 

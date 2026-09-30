@@ -35,7 +35,7 @@
 
 ## Quick start
 
-1. Download **`cortex-v0.8.0-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive.
+1. Download **`cortex-v1.0.0-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive.
 2. Run **`cortex.exe`**, click **Select process** and attach to your target.
 3. Find a value in **Memory › Value scan** (*First scan*, change it in the target, *Next scan*).
 4. Double-click a result to keep it in **Addresses**, then right-click it to open it in the Memory viewer, Disassembler, Debugger or RE.
@@ -50,13 +50,13 @@ New to Cortex? Follow the [illustrated walkthrough](docs/ui-walkthrough.md) ([fr
 <td width="50%" valign="top">
 
 **Memory**
-Cheat Engine level scanning — every type (byte through double, string, array of bytes with wildcards, all numeric), exact / comparative / unknown-initial scans and *by* deltas, region-type and protection filters, fast scan and threads. An address list with freezes, `module+offset` and pointer entries, full address expressions, groups, colours, dropdowns and per-entry global hotkeys, that opens and saves Cheat Engine `.CT` tables. A 64 KB hex viewer with change highlighting and a data inspector, pointer maps and a pointer scanner, structures with inference, snapshots with diff and rewind.
+Cheat Engine level scanning — every type (byte through double, string, array of bytes with wildcards, all numeric), exact / comparative / unknown-initial scans and *by* deltas, region-type and protection filters, fast scan and threads. An address list with freezes, `module+offset` and pointer entries, full address expressions, groups, colours, dropdowns and per-entry global hotkeys, that opens and saves Cheat Engine `.CT` tables. A 64 KB hex viewer with change highlighting and a data inspector, pointer maps, a pointer scanner and a **pointer spider** (list or node graph), **structure dissect** across several instances, grouped scans, user-defined value types, memory dumps to file, structures with inference, snapshots with diff and rewind.
 
 </td>
 <td width="50%" valign="top">
 
 **Code**
-Zydis-backed x86/x64 disassembly that can follow the instruction pointer, CFG, structured CFG and cross-references, symbols (PDB and DWARF), an x86/x64 **assembler** and Auto-Assembler style **code injection** (allocate a cave, relocate the replaced instructions, jump and return, restore), AOB signatures, and reversible patches: bytes, NOP, assembly, detours, trampolines and code caves.
+Zydis-backed x86/x64 disassembly that can follow the instruction pointer, CFG, structured CFG and cross-references, symbols (PDB and DWARF), an x86/x64 **assembler** and Auto-Assembler style **code injection** (allocate a cave, relocate the replaced instructions, jump and return, restore), AOB signatures, and reversible patches: bytes, NOP, assembly, detours, trampolines and code caves. **Auto Assembler** scripts (`[ENABLE]` / `[DISABLE]`, `alloc`, `aobscan`, `registersymbol`, …) live in the address list and in `.CT` tables, and a **speedhack** scales the target's clock.
 
 </td>
 </tr>
@@ -198,6 +198,8 @@ cmake --build build/runtime-x64 --target core
 `-DBUILD_TESTING=ON` adds the GUI smoke modes and the application-model unit tests to `ctest`; `-DCORTEX_IMGUI_TEST_MODES=OFF` builds `cortex.exe` without the GUI test modes. For hands-on testing, prefer the CI portable artifact, which bundles matching x64/x86 runtimes.
 
 ## Quality gates
+
+Version 1.0 was also exercised by hand on a real game (AssaultCube 1.3.0.2): scans, freezes, code injection, what-accesses, pointer scans, dissect and spider, `.CT` round trips, hotkeys and Lua, with screenshots.
 
 Every change is checked on Windows by CI: the desktop build with headless, native-window, workspace, attached-target, multi-session and cross-bitness GUI suites; x64 and x86 runtimes; integrated MCP end-to-end tests that also call every read-only tool; private prompt and event channels; project, patch, snapshot, script, input, instrumentation, symbol and structure contracts; portable dependency closure; and the MCP schema, protocol and semantic contracts grouped in [`contracts.yml`](.github/workflows/contracts.yml).
 

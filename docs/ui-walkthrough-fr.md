@@ -2,7 +2,7 @@
 
 Cette procédure montre le parcours principal de l'application de bureau Cortex : sélectionner une cible, scanner une valeur, conserver une adresse, naviguer dans la mémoire et le désassemblage, utiliser le débogueur, puis passer aux outils RE.
 
-Les captures ont été réalisées avec Cortex v0.8 (Dear ImGui) attaché à la cible de test du dépôt, `cortex_test_target_x64.exe`. La valeur scannée `0xDEADBEEF` (`-559038737` en entier signé 32 bits) et les adresses visibles sont uniquement des données de démonstration.
+Les captures ont été réalisées avec Cortex v1.0 (Dear ImGui) attaché à la cible de test du dépôt, `cortex_test_target_x64.exe`. La valeur scannée `0xDEADBEEF` (`-559038737` en entier signé 32 bits) et les adresses visibles sont uniquement des données de démonstration.
 
 > Utilise Cortex uniquement sur un logiciel ou un système que tu possèdes ou que tu es autorisé à inspecter.
 

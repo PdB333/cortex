@@ -78,7 +78,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
         return 0;
     }
     if (command == "--version" || command == "version") {
-        std::puts("cortex 0.8.0-dev-imgui");
+        std::puts("cortex 1.0.0");
         return 0;
     }
 #if CORTEX_WITH_TEST_MODES

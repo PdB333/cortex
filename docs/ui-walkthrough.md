@@ -2,7 +2,7 @@
 
 This walkthrough covers the main workflow of the Cortex desktop application: select a target, scan a value, keep useful addresses, inspect memory and code, use the debugger, and continue into reverse-engineering tools.
 
-The screenshots were captured from the Cortex v0.8 desktop (Dear ImGui) attached to the repository's test target, `cortex_test_target_x64.exe`. The scanned value `0xDEADBEEF` (`-559038737` as a signed 32-bit integer) and every visible address are demonstration data only.
+The screenshots were captured from the Cortex v1.0 desktop (Dear ImGui) attached to the repository's test target, `cortex_test_target_x64.exe`. The scanned value `0xDEADBEEF` (`-559038737` as a signed 32-bit integer) and every visible address are demonstration data only.
 
 > Use Cortex only with software and systems you own or are authorized to inspect.
 

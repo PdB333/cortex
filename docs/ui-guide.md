@@ -1,6 +1,6 @@
 # Cortex UI guide
 
-This is the user-facing reference for the Cortex v0.8 desktop application (Dear ImGui on Win32 + Direct3D 11). For a first session, start with [Getting started](getting-started.md).
+This is the user-facing reference for the Cortex v1.0 desktop application (Dear ImGui on Win32 + Direct3D 11). For a first session, start with [Getting started](getting-started.md).
 
 ## Layout
 

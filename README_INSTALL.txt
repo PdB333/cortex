@@ -1,7 +1,7 @@
-CORTEX v0.8.0 - INSTALLATION AND QUICK START
+CORTEX v1.0.0 - INSTALLATION AND QUICK START
 ============================================
 
-Cortex v0.8.0 ships as a single portable Windows application: cortex.exe.
+Cortex v1.0.0 ships as a single portable Windows application: cortex.exe.
 The x64 and x86 instrumentation runtimes live in the runtime folder and are
 selected automatically for each target. Nothing else has to be installed
 (no Qt, no Visual C++ runtime).
@@ -11,7 +11,7 @@ INSTALLATION
 
 1. Download the archive:
 
-       cortex-v0.8.0-windows-portable.zip
+       cortex-v1.0.0-windows-portable.zip
 
 2. Extract the whole archive into a normal, writable folder, for example:
 

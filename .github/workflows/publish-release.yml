@@ -43,15 +43,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v0.8.0-${{ github.ref }}
+  group: publish-v1.0.0-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RELEASE_TAG: v0.8.0
+  RELEASE_TAG: v1.0.0
 
 jobs:
   windows-x64-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v1.0.0')
     runs-on: windows-2025
     timeout-minutes: 50
     steps:
@@ -130,7 +130,7 @@ jobs:
           retention-days: 2
 
   windows-x86-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v1.0.0')
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -180,7 +180,7 @@ jobs:
           retention-days: 2
 
   package:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v0.8.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Release v1.0.0')
     needs: [windows-x64-stage, windows-x86-stage]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -236,8 +236,8 @@ jobs:
           $versionError = $versionProcess.StandardError.ReadToEnd()
           $versionProcess.WaitForExit()
           Write-Host ("release version output: {0}" -f $versionText.Trim())
-          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "0\.8\.0") {
-            throw "release binary does not report v0.8.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
+          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "1\.0\.0") {
+            throw "release binary does not report v1.0.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
           }
 
           $oldPath = $env:PATH
@@ -268,18 +268,18 @@ jobs:
           }
 
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v0.8.0-windows-portable.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v1.0.0-windows-portable.zip" -CompressionLevel Optimal
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: cortex-v0.8.0-windows-portable
-          path: dist/cortex-v0.8.0-windows-portable.zip
+          name: cortex-v1.0.0-windows-portable
+          path: dist/cortex-v1.0.0-windows-portable.zip
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v0.8.0')
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release v1.0.0')
     needs: package
     runs-on: ubuntu-latest
     steps:
@@ -289,13 +289,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v0.8.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v1.0.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Download release archive
         uses: actions/download-artifact@v4
         with:
-          name: cortex-v0.8.0-windows-portable
+          name: cortex-v1.0.0-windows-portable
           path: dist
 
       - name: Publish GitHub release
@@ -312,4 +312,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
-            dist/cortex-v0.8.0-windows-portable.zip
+            dist/cortex-v1.0.0-windows-portable.zip

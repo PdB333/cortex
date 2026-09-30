@@ -1185,7 +1185,7 @@ void DrawApp(AppState& app) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::TextDisabled("Cortex v0.8.0-dev-imgui");
+            ImGui::TextDisabled("Cortex v1.0.0");
             ImGui::Separator();
             if (ImGui::MenuItem("Diagnostics"))
                 app.workspaces.Select("diagnostics");

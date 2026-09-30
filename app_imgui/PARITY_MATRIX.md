@@ -78,7 +78,7 @@ Qt invokable remains without an explicit migration outcome.
 | deterministic GUI smoke tests | green in CI (headless, native window, workspace, attached, multi-session, cross-bitness suites) |
 | portable dependency-closure validation | green in CI (`imgui-ui.yml`) |
 | performance, memory and startup comparison versus Qt | runs in CI (`ui-migration-benchmarks.yml`) |
-| Windows packaging/release workflow | `publish-release.yml` (publishes only on a `Release v0.8.0` commit) |
+| Windows packaging/release workflow | `publish-release.yml` (publishes only on a `Release v1.0.0` commit) |
 | Linux renderer/runtime decision | deferred, see [`PLATFORM_SCOPE.md`](PLATFORM_SCOPE.md) |
 | manual validation on real authorized targets | pending |
 

@@ -248,7 +248,7 @@ This permission remains per operation; multi-target routing does not implicitly 
 
 ## Server metadata
 
-`initialize` and `server/discover` report the server name and version `0.8.0`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
+`initialize` and `server/discover` report the server name and version `1.0.0`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
 
 ## Compatibility
 
