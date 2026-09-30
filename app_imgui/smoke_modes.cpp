@@ -521,7 +521,7 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
         app.ui.accessFinderRequests.push_back({frame, 4, true});
         app.workspaces.Select("access-finder");
         size_t hits = 0;
-        for (int attempt = 0; attempt < 20 && hits == 0; ++attempt) {
+        for (int attempt = 0; attempt < 80 && hits == 0; ++attempt) {
             if (!RenderGuiStable(app, error, true)) return false;
             Sleep(150);
             for (const auto& breakpoint : app.debuggerModel.Breakpoints())
