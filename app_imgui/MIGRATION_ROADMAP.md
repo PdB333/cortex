@@ -102,8 +102,8 @@ Presets (see `WorkspaceRegistry::ApplyPreset`):
 - [x] deterministic headless + native Win32/D3D11 window smoke modes run in CI
 - [x] portable dependency-closure + clean-PATH headless/window validation
 - [x] automated Qt-vs-ImGui size/startup/peak-working-set benchmark runs in CI (`ui-migration-benchmarks.yml`; results in the run summary)
-- [x] Windows Dear ImGui v0.8 candidate packaging and guarded release workflow
-- [x] v0.8 platform scope decided: Windows x64 desktop; Linux desktop renderer explicitly deferred (see `PLATFORM_SCOPE.md`)
+- [x] Windows Dear ImGui 1.0 candidate packaging and guarded release workflow
+- [x] v1.0 platform scope decided: Windows x64 desktop; Linux desktop renderer explicitly deferred (see `PLATFORM_SCOPE.md`)
 - [x] MCP E2E sweeps every read-only tool in the manifest (no 5xx allowed)
 - [ ] remove Qt/QML (`app/`) — the parity matrix is green; do it in a separate change after this branch merges. Shared code it used (debugger backends, icon) already lives in `host/debugger/` and `resources/windows/`
 

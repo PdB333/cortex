@@ -1,6 +1,6 @@
 # Dear ImGui platform scope
 
-## v0.8 migration target
+## v1.0 migration target
 
 The Dear ImGui desktop migration targets **Windows x64** as the supported
 desktop application:
@@ -17,16 +17,16 @@ the x86 requirement is target instrumentation compatibility, not a separate
 
 ## Linux decision
 
-A Linux desktop UI is **not a v0.8 release requirement**. The frozen Qt/QML
+A Linux desktop UI is **not a v1.0 release requirement**. The frozen Qt/QML
 frontend previously provided a Linux smoke build, but Linux runtime parity is
 not at the Windows level and the Dear ImGui candidate has no selected Linux
 window/renderer backend.
 
-Qt removal therefore does not imply a v0.8 Linux GUI replacement. Portable
+Qt removal therefore does not imply a v1.0 Linux GUI replacement. Portable
 core/target-model code and Linux-specific backend work remain independent of
 the Windows desktop migration.
 
-If a Linux desktop becomes a product requirement after v0.8, it should be
+If a Linux desktop becomes a product requirement after v1.0, it should be
 implemented as a separate platform adapter around the same toolkit-neutral
 application/services layer (for example GLFW/SDL plus an OpenGL or Vulkan
 Dear ImGui backend). That work should not reintroduce Qt dependencies into the
@@ -49,4 +49,4 @@ All of these gates run in CI; manual validation on real authorized targets is
 the remaining step before release (see `PARITY_MATRIX.md`).
 
 Linux desktop support is explicitly deferred and is not used to claim Windows
-v0.8 release parity.
+v1.0 release parity.
