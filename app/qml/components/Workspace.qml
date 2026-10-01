@@ -1,0 +1,130 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import Cortex 1.0
+
+Rectangle {
+    id: root
+    color: Theme.background
+
+    function focusScanner() {
+        if (CortexApp.selectedSection !== "Scanner") CortexApp.selectSection("Scanner")
+        Qt.callLater(function() {
+            if (pageLoader.item && pageLoader.item.focusSearch) pageLoader.item.focusSearch()
+        })
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Theme.workspaceBarHeight
+            color: Theme.panel
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 9
+
+                Label {
+                    text: CortexApp.selectedSection
+                    color: Theme.text
+                    font.family: Theme.uiFont
+                    font.pixelSize: 12
+                }
+                Rectangle {
+                    Layout.preferredWidth: 1
+                    Layout.preferredHeight: 16
+                    color: Theme.borderStrong
+                }
+                Label {
+                    text: CortexApp.currentTargetIndex >= 0 ? CortexApp.currentTargetName : "No active target"
+                    color: Theme.textMuted
+                    font.family: Theme.uiFont
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: CortexApp.sessionActive ? CortexApp.capabilitySummary() : CortexApp.sessionStatus
+                    color: CortexApp.sessionActive ? Theme.textDisabled : (CortexApp.lastError.length ? Theme.error : Theme.textDisabled)
+                    font.family: Theme.uiFont
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 480
+                }
+            }
+
+            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: Theme.border }
+        }
+
+        Loader {
+            id: pageLoader
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            sourceComponent: CortexApp.selectedSection === "Overview" ? overviewComponent
+                           : CortexApp.selectedSection === "Addresses" ? addressesComponent
+                           : CortexApp.selectedSection === "Project" ? projectComponent
+                           : CortexApp.selectedSection === "RE" ? reComponent
+                           : CortexApp.selectedSection === "Memory" ? memoryComponent
+                           : CortexApp.selectedSection === "Scanner" ? scannerComponent
+                           : CortexApp.selectedSection === "Pointers" ? pointersComponent
+                           : CortexApp.selectedSection === "Disassembly" ? disassemblyComponent
+                           : CortexApp.selectedSection === "Structures" ? structuresComponent
+                           : CortexApp.selectedSection === "Modules" ? modulesComponent
+                           : CortexApp.selectedSection === "Symbols" ? symbolsComponent
+                           : CortexApp.selectedSection === "Snapshots" ? snapshotsComponent
+                           : CortexApp.selectedSection === "Debugger" ? debuggerComponent
+                           : CortexApp.selectedSection === "Breakpoints" ? breakpointsComponent
+                           : CortexApp.selectedSection === "Traces" ? tracesComponent
+                           : CortexApp.selectedSection === "Patches" ? patchesComponent
+                           : CortexApp.selectedSection === "Watches" ? watchesComponent
+                           : CortexApp.selectedSection === "Hooks" ? hooksComponent
+                           : CortexApp.selectedSection === "Network" ? networkComponent
+                           : CortexApp.selectedSection === "Screenshots" ? screenshotsComponent
+                           : CortexApp.selectedSection === "Diagnostics" ? diagnosticsComponent
+                           : CortexApp.selectedSection === "Scripts" ? scriptsComponent
+                           : CortexApp.selectedSection === "Input" ? inputComponent
+                           : CortexApp.selectedSection === "Actions" ? actionsComponent
+                           : CortexApp.selectedSection === "Settings" ? settingsComponent
+                           : CortexApp.selectedSection === "MCP" ? mcpComponent
+                           : CortexApp.selectedSection === "Semantic" ? semanticComponent
+                           : CortexApp.selectedSection === "Sessions" ? sessionsComponent
+                           : genericComponent
+        }
+    }
+
+    Component { id: overviewComponent; OverviewView {} }
+    Component { id: addressesComponent; AddressTableView {} }
+    Component { id: projectComponent; ProjectView {} }
+    Component { id: reComponent; ReView {} }
+    Component { id: memoryComponent; MemoryView {} }
+    Component { id: scannerComponent; ScannerView {} }
+    Component { id: pointersComponent; PointerMapsView {} }
+    Component { id: disassemblyComponent; DisassemblyView {} }
+    Component { id: structuresComponent; StructuresView {} }
+    Component { id: modulesComponent; ModulesView {} }
+    Component { id: symbolsComponent; SymbolsView {} }
+    Component { id: snapshotsComponent; SnapshotsView {} }
+    Component { id: debuggerComponent; DebuggerView {} }
+    Component { id: breakpointsComponent; BreakpointsView {} }
+    Component { id: tracesComponent; TracesView {} }
+    Component { id: patchesComponent; PatchesView {} }
+    Component { id: watchesComponent; WatchesView {} }
+    Component { id: hooksComponent; HooksView {} }
+    Component { id: networkComponent; NetworkView {} }
+    Component { id: screenshotsComponent; ScreenshotsView {} }
+    Component { id: diagnosticsComponent; DiagnosticsView {} }
+    Component { id: scriptsComponent; ScriptsView {} }
+    Component { id: inputComponent; InputView {} }
+    Component { id: actionsComponent; ActionsView {} }
+    Component { id: settingsComponent; SettingsView {} }
+    Component { id: mcpComponent; McpView { semanticOnly: false } }
+    Component { id: semanticComponent; McpView { semanticOnly: true } }
+    Component { id: sessionsComponent; SessionsView {} }
+    Component { id: genericComponent; GenericToolView {} }
+}
+

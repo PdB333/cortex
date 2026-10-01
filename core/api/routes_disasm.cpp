@@ -1,6 +1,7 @@
 #include "routes.h"
 #include "../disasm/disasm.h"
 #include "../overlay/overlay.h"
+#include "../process/address.h"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -18,8 +19,9 @@ void RegisterDisasmRoutes(httplib::Server& svr) {
         }
 
         try {
-            uintptr_t address = static_cast<uintptr_t>(
-                std::stoull(req.get_param_value("address"), nullptr, 0));
+            std::string addressError;
+            uintptr_t address = process::ResolveAddress(json(req.get_param_value("address")), &addressError);
+            if (!address) throw std::runtime_error(addressError.empty() ? "invalid_address" : addressError);
             int count = req.has_param("count") ? std::stoi(req.get_param_value("count")) : 20;
 
             bool ok = false;

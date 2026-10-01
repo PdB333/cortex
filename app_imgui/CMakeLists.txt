@@ -1,0 +1,411 @@
+cmake_minimum_required(VERSION 3.21)
+project(cortex_imgui_app LANGUAGES CXX)
+
+include(CTest)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+set(CMAKE_DISABLE_FIND_PACKAGE_Doxygen TRUE CACHE BOOL "" FORCE)
+
+# Dear ImGui docking branch, pinned for reproducible preview builds.
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        3bae66c735670619baf51391eba7f3d90a25d125
+)
+FetchContent_MakeAvailable(imgui)
+
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        5c00bbf36ba8ff47b4fb97712fc38cb2884e5b98
+)
+FetchContent_MakeAvailable(httplib)
+
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        9cca280a4d0ccf0c08f47a99aa71d1b0e52f8d03
+)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(json)
+
+FetchContent_Declare(
+    zycore
+    GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
+    GIT_TAG        74620eefd233bec20daeb66e78e744ff06e273b7
+)
+FetchContent_MakeAvailable(zycore)
+
+FetchContent_Declare(
+    zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG        569320ad3c4856da13b9dbf1f0d9e20bda63870e
+)
+set(ZYDIS_BUILD_TOOLS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_TESTS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_DOXYGEN OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_MAN OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(zydis)
+
+# Lua 5.4.7 for the desktop Lua engine, compiled as C++ so errors raised
+# from C++ callbacks unwind instead of longjmp-ing over destructors.
+FetchContent_Declare(
+    lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        1ab3208a1fceb12fca8f24ba57d6e13c5bff15e3
+)
+FetchContent_MakeAvailable(lua)
+set(CORTEX_LUA_SOURCES
+    lapi.c lauxlib.c lbaselib.c lcode.c lcorolib.c lctype.c ldblib.c
+    ldebug.c ldo.c ldump.c lfunc.c lgc.c linit.c liolib.c llex.c
+    lmathlib.c lmem.c loadlib.c lobject.c lopcodes.c loslib.c
+    lparser.c lstate.c lstring.c lstrlib.c ltable.c ltablib.c ltm.c
+    lundump.c lutf8lib.c lvm.c lzio.c
+)
+list(TRANSFORM CORTEX_LUA_SOURCES PREPEND ${lua_SOURCE_DIR}/)
+set_source_files_properties(${CORTEX_LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(cortex_desktop_lua STATIC ${CORTEX_LUA_SOURCES})
+target_include_directories(cortex_desktop_lua PUBLIC ${lua_SOURCE_DIR})
+target_compile_definitions(cortex_desktop_lua PUBLIC LUA_COMPAT_5_3)
+
+add_library(cortex_imgui_vendor STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+)
+target_include_directories(cortex_imgui_vendor PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_compile_definitions(cortex_imgui_vendor PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+)
+
+
+# The --gui-*-suite and --*-smoke modes used by CI and release validation.
+# Turn off to ship a binary without them.
+option(CORTEX_IMGUI_TEST_MODES "Build the GUI smoke and integration test modes into cortex.exe" ON)
+
+add_executable(cortex_imgui WIN32
+    main.cpp
+    cli.cpp
+    desktop_ui.cpp
+    application/settings.cpp
+    application/hotkeys.cpp
+    application/cheat_table.cpp
+    application/address_expression.cpp
+    application/lua_engine.cpp
+    application/runtime_model_base.cpp
+    application/ai_activity_model.cpp
+    application/debugger_model.cpp
+    application/project_model.cpp
+    application/patches_model.cpp
+    application/symbols_model.cpp
+    application/structures_model.cpp
+    application/pointer_maps_model.cpp
+    application/prompt_model.cpp
+    application/snapshots_model.cpp
+    application/re_model.cpp
+    application/instrumentation_model.cpp
+    application/watches_model.cpp
+    application/actions_model.cpp
+    application/network_model.cpp
+    application/diagnostics_model.cpp
+    application/scripts_model.cpp
+    application/input_model.cpp
+    application/screenshot_model.cpp
+    application/runtime_events_model.cpp
+    ui/bottom_panel_workspace.cpp
+    ui/addresses_workspace.cpp
+    ui/memory_workspace.cpp
+    ui/memory_address_list.cpp
+    ui/memory_browser_workspace.cpp
+    ui/modules_workspace.cpp
+    ui/overview_workspace.cpp
+    ui/patches_workspace.cpp
+    ui/project_workspace.cpp
+    ui/symbols_workspace.cpp
+    ui/structures_workspace.cpp
+    ui/pointer_maps_workspace.cpp
+    ui/snapshots_workspace.cpp
+    ui/re_workspace.cpp
+    ui/instrumentation_workspace.cpp
+    ui/watches_workspace.cpp
+    ui/actions_workspace.cpp
+    ui/network_workspace.cpp
+    ui/diagnostics_workspace.cpp
+    ui/scripts_workspace.cpp
+    ui/input_workspace.cpp
+    ui/screenshot_workspace.cpp
+    ui/events_workspace.cpp
+    ui/disassembly_workspace.cpp
+    ui/debugger_workspace.cpp
+    ui/runtime_workspace.cpp
+    ui/sessions_workspace.cpp
+    ui/settings_workspace.cpp
+    ui/trace_workspace.cpp
+    ui/tools_workspace.cpp
+    ui/access_finder_workspace.cpp
+    ui/file_dialog.cpp
+    ui/lua_workspace.cpp
+    ui/theme.cpp
+    ui/fonts.cpp
+
+    ../host/probe_cli.cpp
+    ../injector/main.cpp
+    ../mcp_bridge/main.cpp
+    ../mcp_bridge/host_mode.cpp
+    ../tools/diagnostics_host/main.cpp
+    ../tools/symbolize_main.cpp
+    ../host/diagnostics/external_host.cpp
+    ../host/diagnostics/analyzer.cpp
+    ../core/symbols/symbols.cpp
+    ../core/symbols/external.cpp
+    ../resources/windows/cortex.rc
+    ../host/debugger/windows_debug_provider.cpp
+    ../host/debugger/windows_debugger_backend.cpp
+    ../host/debugger/veh_debug_provider.cpp
+
+    ../core/target/local_backend.cpp
+    ../core/target/session_manager.cpp
+    ../core/target/module_provider.cpp
+    ../core/target/thread_provider.cpp
+
+    ../core/services/memory_service.cpp
+    ../core/services/value_scanner.cpp
+    ../core/services/memory_tools.cpp
+    ../core/services/pointer_scanner.cpp
+    ../core/services/signature.cpp
+    ../core/services/instruction_operands.cpp
+    ../core/services/assembler.cpp
+    ../core/services/auto_assembler.cpp
+    ../core/services/speedhack.cpp
+    ../core/services/custom_types.cpp
+    ../core/services/structure_dissect.cpp
+    ../core/services/module_service.cpp
+    ../core/services/disassembly_service.cpp
+    ../core/services/debugger_service.cpp
+    ../core/services/payload_client.cpp
+    ../core/services/operation_manager.cpp
+    ../core/services/crash_report_service.cpp
+)
+
+target_include_directories(cortex_imgui PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../host/debugger
+    ${CMAKE_CURRENT_SOURCE_DIR}/../sdk/include
+    ${httplib_SOURCE_DIR}
+)
+
+if(CORTEX_IMGUI_TEST_MODES)
+    target_sources(cortex_imgui PRIVATE smoke_modes.cpp)
+    target_compile_definitions(cortex_imgui PRIVATE CORTEX_WITH_TEST_MODES=1)
+else()
+    target_compile_definitions(cortex_imgui PRIVATE CORTEX_WITH_TEST_MODES=0)
+endif()
+
+target_compile_definitions(cortex_imgui PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+)
+
+target_link_libraries(cortex_imgui PRIVATE
+    cortex_imgui_vendor
+    cortex_desktop_lua
+    nlohmann_json::nlohmann_json
+    Zydis
+    d3d11
+    dxgi
+    user32
+    gdi32
+    dwmapi
+    d3dcompiler
+    shell32
+    advapi32
+    psapi
+    ws2_32
+    bcrypt
+    dbghelp
+    windowscodecs
+    ole32
+    crypt32
+    comdlg32
+)
+
+if(MINGW)
+    target_link_options(cortex_imgui PRIVATE -static-libgcc -static-libstdc++)
+endif()
+
+set_target_properties(cortex_imgui PROPERTIES
+    OUTPUT_NAME "cortex"
+)
+
+if(BUILD_TESTING)
+    add_test(
+        NAME cortex_imgui_workspace_suite
+        COMMAND $<TARGET_FILE:cortex_imgui> --gui-workspace-suite
+    )
+    set_tests_properties(cortex_imgui_workspace_suite PROPERTIES TIMEOUT 30)
+
+    add_test(
+        NAME cortex_imgui_window_smoke
+        COMMAND $<TARGET_FILE:cortex_imgui> --window-smoke-test
+    )
+    set_tests_properties(cortex_imgui_window_smoke PROPERTIES TIMEOUT 30)
+
+    add_test(
+        NAME cortex_imgui_ai_activity_smoke
+        COMMAND $<TARGET_FILE:cortex_imgui> --ai-activity-smoke
+    )
+    set_tests_properties(cortex_imgui_ai_activity_smoke PROPERTIES TIMEOUT 30)
+
+    # Application models against a scripted runtime transport: no target
+    # process, pipe or window needed.
+    add_executable(cortex_app_models_tests
+        ../tests/app_models_tests.cpp
+        application/hotkeys.cpp
+        application/cheat_table.cpp
+        application/runtime_model_base.cpp
+        application/actions_model.cpp
+        application/patches_model.cpp
+        application/prompt_model.cpp
+        application/runtime_events_model.cpp
+        application/snapshots_model.cpp
+        application/symbols_model.cpp
+        application/watches_model.cpp
+    )
+    target_include_directories(cortex_app_models_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_app_models_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_app_models_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_app_models_tests COMMAND cortex_app_models_tests)
+    set_tests_properties(cortex_app_models_tests PROPERTIES TIMEOUT 30)
+
+    # Value scanner against an in-memory fake process.
+    add_executable(cortex_value_scanner_tests
+        ../tests/value_scanner_tests.cpp
+        ../core/services/value_scanner.cpp
+    )
+    target_include_directories(cortex_value_scanner_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_value_scanner_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_value_scanner_tests COMMAND cortex_value_scanner_tests)
+    set_tests_properties(cortex_value_scanner_tests PROPERTIES TIMEOUT 60)
+
+    # PE parsing, strings, code caves, signatures and the pointer scanner.
+    add_executable(cortex_memory_tools_tests
+        ../tests/memory_tools_tests.cpp
+        ../core/services/memory_tools.cpp
+        ../core/services/pointer_scanner.cpp
+        ../core/services/signature.cpp
+        ../core/services/instruction_operands.cpp
+        ../core/services/assembler.cpp
+    )
+    target_include_directories(cortex_memory_tools_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_memory_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_memory_tools_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_memory_tools_tests COMMAND cortex_memory_tools_tests)
+    set_tests_properties(cortex_memory_tools_tests PROPERTIES TIMEOUT 60)
+
+    # The desktop Lua engine and address expressions against a fake process.
+    add_executable(cortex_lua_engine_tests
+        ../tests/lua_engine_tests.cpp
+        application/lua_engine.cpp
+        application/address_expression.cpp
+        ../core/services/value_scanner.cpp
+    )
+    target_include_directories(cortex_lua_engine_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_lua_engine_tests PRIVATE cortex_desktop_lua)
+    if(MINGW)
+        target_link_options(cortex_lua_engine_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_lua_engine_tests COMMAND cortex_lua_engine_tests)
+    set_tests_properties(cortex_lua_engine_tests PROPERTIES TIMEOUT 60)
+
+    # The x86/x64 text assembler on top of the Zydis encoder.
+    add_executable(cortex_assembler_tests
+        ../tests/assembler_tests.cpp
+        ../core/services/assembler.cpp
+    )
+    target_include_directories(cortex_assembler_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_assembler_tests PRIVATE Zydis)
+    if(MINGW)
+        target_link_options(cortex_assembler_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_assembler_tests COMMAND cortex_assembler_tests)
+    set_tests_properties(cortex_assembler_tests PROPERTIES TIMEOUT 60)
+
+    # The Auto Assembler script interpreter against a fake process.
+    add_executable(cortex_auto_assembler_tests
+        ../tests/auto_assembler_tests.cpp
+        ../core/services/auto_assembler.cpp
+        ../core/services/assembler.cpp
+    )
+    target_include_directories(cortex_auto_assembler_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_auto_assembler_tests PRIVATE Zydis)
+    if(MINGW)
+        target_link_options(cortex_auto_assembler_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_auto_assembler_tests COMMAND cortex_auto_assembler_tests)
+    set_tests_properties(cortex_auto_assembler_tests PROPERTIES TIMEOUT 60)
+
+    # The speedhack hooks against a fake process.
+    add_executable(cortex_speedhack_tests
+        ../tests/speedhack_tests.cpp
+        ../core/services/speedhack.cpp
+        ../core/services/assembler.cpp
+    )
+    target_include_directories(cortex_speedhack_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_speedhack_tests PRIVATE Zydis)
+    if(MINGW)
+        target_link_options(cortex_speedhack_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_speedhack_tests COMMAND cortex_speedhack_tests)
+    set_tests_properties(cortex_speedhack_tests PROPERTIES TIMEOUT 60)
+
+    # User-defined value types and memory dumps.
+    add_executable(cortex_custom_types_tests
+        ../tests/custom_types_tests.cpp
+        ../core/services/custom_types.cpp
+        ../core/services/memory_tools.cpp
+    )
+    target_include_directories(cortex_custom_types_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_custom_types_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_custom_types_tests COMMAND cortex_custom_types_tests)
+    set_tests_properties(cortex_custom_types_tests PROPERTIES TIMEOUT 60)
+
+    # Dissecting a structure and the pointer spider.
+    add_executable(cortex_structure_dissect_tests
+        ../tests/structure_dissect_tests.cpp
+        ../core/services/structure_dissect.cpp
+    )
+    target_include_directories(cortex_structure_dissect_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    if(MINGW)
+        target_link_options(cortex_structure_dissect_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_structure_dissect_tests COMMAND cortex_structure_dissect_tests)
+    set_tests_properties(cortex_structure_dissect_tests PROPERTIES TIMEOUT 60)
+endif()

@@ -1,4 +1,4 @@
-#include "native_routes.h"
+﻿#include "native_routes.h"
 
 #include <nlohmann/json.hpp>
 
@@ -84,6 +84,29 @@ void ClearNativeRoutes() {
     g_routes.clear();
 }
 
+bool HasNativeRoute(const std::string& method, const std::string& target) {
+    std::string path = target;
+    const size_t question = target.find('?');
+    if (question != std::string::npos) path = target.substr(0, question);
+    std::vector<RouteEntry> routes;
+    {
+        std::lock_guard<std::mutex> lock(g_routesMutex);
+        routes = g_routes;
+    }
+    const std::string wantedMethod = Upper(method);
+    for (const auto& route : routes) {
+        if (route.method != wantedMethod) continue;
+        try {
+            if (std::regex_match(path, std::regex(route.pattern))) return true;
+        } catch (const std::regex_error&) {}
+    }
+    return false;
+}
+
+size_t NativeRouteCount() {
+    std::lock_guard<std::mutex> lock(g_routesMutex);
+    return g_routes.size();
+}
 NativeRouteResult DispatchNativeRoute(const std::string& method,
                                       const std::string& target,
                                       const std::string& body,
@@ -149,3 +172,4 @@ NativeRouteResult DispatchNativeRoute(const std::string& method,
 }
 
 } // namespace api
+

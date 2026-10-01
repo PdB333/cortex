@@ -58,11 +58,17 @@ executable path/hash, project binding, or platform-specific application identifi
 - x86/x64 CI executes the model contract tests;
 - mutation support remains a capability, not an assumption attached to every target.
 
-## Next P4 increments
+## Status
 
-- add JSON serialization for nodes/targets;
-- add a Windows local-node enumerator;
-- describe current Cortex process capabilities through the generic model;
-- expose read-only target discovery through REST/MCP;
-- introduce a backend interface after the Windows descriptor path is stable;
-- only then add remote-node transport and Linux implementation.
+Done since the first P4 increment:
+
+- the `Backend` / `Catalog` interfaces and the Windows `LocalBackend` enumerator (`core/target/`);
+- capability descriptions for Windows process targets, shown in the desktop's Sessions workspace;
+- read-only target discovery and dynamic attach through MCP (`cortex_processes`, `cortex_attach`,
+  `cortex_targets`, `cortex_detach`) and multi-target routing with `_cortex_target`.
+
+Next:
+
+- remote-node transport;
+- the Linux backend through the same contract;
+- persistent cross-restart target selectors (module fingerprint, executable hash, project binding).

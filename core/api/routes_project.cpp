@@ -14,6 +14,30 @@ namespace {
 
 uintptr_t ParseAddress(const json& jaddr) { return process::ResolveAddress(jaddr); }
 
+std::string DecodePathSegment(const std::string& encoded) {
+    std::string decoded;
+    decoded.reserve(encoded.size());
+    auto hex = [](char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return 10 + value - 'a';
+        if (value >= 'A' && value <= 'F') return 10 + value - 'A';
+        return -1;
+    };
+    for (size_t i = 0; i < encoded.size(); ++i) {
+        if (encoded[i] == '%' && i + 2 < encoded.size()) {
+            const int hi = hex(encoded[i + 1]);
+            const int lo = hex(encoded[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                decoded.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        decoded.push_back(encoded[i]);
+    }
+    return decoded;
+}
+
 // Same hex-string-or-number flexibility as ParseAddress, but signed --
 // pointer path offsets are routinely negative (Cheat Engine et al. show
 // them as e.g. "-0x4").
@@ -47,7 +71,7 @@ void RegisterProjectRoutes(httplib::Server& svr) {
     });
 
     svr.Delete(R"(/project/address/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-        std::string name = req.matches[1];
+        std::string name = DecodePathSegment(req.matches[1]);
         bool ok = project::RemoveAddress(name);
         res.set_content(json{{"ok", ok}}.dump(), "application/json");
         overlay::LogApiCall("DELETE /project/address/" + name);
@@ -73,14 +97,14 @@ void RegisterProjectRoutes(httplib::Server& svr) {
     });
 
     svr.Delete(R"(/project/pointer_path/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-        std::string name = req.matches[1];
+        std::string name = DecodePathSegment(req.matches[1]);
         bool ok = project::RemovePointerPath(name);
         res.set_content(json{{"ok", ok}}.dump(), "application/json");
         overlay::LogApiCall("DELETE /project/pointer_path/" + name);
     });
 
     svr.Get(R"(/project/resolve/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
-        std::string name = req.matches[1];
+        std::string name = DecodePathSegment(req.matches[1]);
         auto addr = project::ResolvePointerPath(name);
         json out;
         out["ok"] = addr.has_value();

@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "cli_entry_points.h"
 #include <tlhelp32.h>
 #include <bcrypt.h>
 #include <httplib.h>
@@ -66,7 +67,7 @@ std::vector<uint8_t> HexBytes(std::string s){if(s.rfind("0x",0)==0)s.erase(0,2);
 std::string BytesHex(const std::vector<uint8_t>&b){std::ostringstream o;o<<std::hex<<std::setfill('0');for(uint8_t v:b)o<<std::setw(2)<<unsigned(v);return o.str();}
 }
 
-int main(int argc,char**argv){int port=6970;std::string processName;
+int CortexServeMain(int argc,char**argv){int port=6970;std::string processName;
  for(int i=1;i<argc;++i){std::string a=argv[i];if(a=="--pid"&&i+1<argc)g_pid=std::stoul(argv[++i]);else if(a=="--process"&&i+1<argc)processName=argv[++i];else if(a=="--port"&&i+1<argc)port=std::stoi(argv[++i]);else if(a=="--token"&&i+1<argc)g_token=argv[++i];}
  if(!g_pid&&!processName.empty())g_pid=FindPid(processName);if(!g_pid){std::cerr<<"Usage: cortex_host --pid <pid> | --process <game.exe> [--port 6970]\n";return 2;}
  g_process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ|PROCESS_VM_WRITE|PROCESS_VM_OPERATION,FALSE,g_pid);if(!g_process){std::cerr<<"OpenProcess failed: "<<GetLastError()<<'\n';return 3;}

@@ -1,5 +1,5 @@
 #include "kiero.h"
-#include <Windows.h>
+#include <windows.h>
 #include <assert.h>
 
 #if KIERO_INCLUDE_D3D9
@@ -23,7 +23,7 @@
 #endif
 
 #if KIERO_INCLUDE_OPENGL
-# include <gl/GL.h>
+# include <GL/gl.h>
 #endif
 
 #if KIERO_INCLUDE_VULKAN

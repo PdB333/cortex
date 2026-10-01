@@ -1,4 +1,4 @@
-#include "server.h"
+﻿#include "server.h"
 #include "routes.h"
 #include "mcp_pipe.h"
 #include "request_id.h"
@@ -30,6 +30,7 @@ namespace {
     ULONGLONG g_startTimeMs = 0;
     std::string g_token;
     std::string g_tokenPath;
+    std::string g_mcpTokenPath;
     std::string g_lastError;
     std::mutex g_stateMutex;
     std::atomic<uint64_t> g_requestSequence{0};
@@ -74,6 +75,27 @@ namespace {
         return token;
     }
 
+    std::string CreatePrivateMcpToken() {
+        g_mcpTokenPath = config::GetModuleDir() + "\\cortex.mcp." +
+                         std::to_string(static_cast<unsigned long long>(GetCurrentProcessId())) + ".token";
+        const std::string token = GenerateToken();
+        if (token.empty()) return {};
+
+        HANDLE file = CreateFileA(g_mcpTokenPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return {};
+        const std::string payload = token + "\r\n";
+        DWORD written = 0;
+        const bool ok = WriteFile(file, payload.data(), static_cast<DWORD>(payload.size()), &written, nullptr) &&
+                        written == payload.size() && FlushFileBuffers(file);
+        CloseHandle(file);
+        if (!ok) {
+            DeleteFileA(g_mcpTokenPath.c_str());
+            g_mcpTokenPath.clear();
+            return {};
+        }
+        return token;
+    }
     bool IsLocalAuthority(const std::string& authority) {
         if (!authority.empty() && authority.front() == '[') {
             const size_t rb = authority.find(']');
@@ -135,20 +157,24 @@ namespace {
     }
 }
 
-bool Start(int port, const std::string& configuredToken) {
+bool Start(int port, const std::string& configuredToken, bool httpEnabled) {
     if (g_server) return true;
-    if (port <= 0 || port > 65535) {
+    if (httpEnabled && (port <= 0 || port > 65535)) {
         SetLastError("invalid_port");
         return false;
     }
-    g_port = port;
+    g_port = 0;
     g_startTimeMs = GetTickCount64();
     g_requestSequence.store(0, std::memory_order_relaxed);
     SetLastError({});
-    g_token = LoadOrCreateToken(configuredToken);
-    if (g_token.size() < 32) {
-        SetLastError("token_generation_failed");
-        return false;
+    g_token.clear();
+    g_tokenPath.clear();
+    if (httpEnabled) {
+        g_token = LoadOrCreateToken(configuredToken);
+        if (g_token.size() < 32) {
+            SetLastError("token_generation_failed");
+            return false;
+        }
     }
 
     g_server = std::make_unique<httplib::Server>();
@@ -243,25 +269,54 @@ bool Start(int port, const std::string& configuredToken) {
     RegisterMcpRoutes(routes);
     RegisterLuaRoutes(routes);
     RegisterOcrRoutes(routes);
+    RegisterReRoutes(routes);
 
-    if (!g_server->bind_to_port("127.0.0.1", port)) {
-        SetLastError("bind_failed");
+    nlohmann::json contractReport;
+    if (!ValidateApiContracts(contractReport)) {
+        SetLastError("api_contract_validation_failed:" + contractReport.dump());
+        ClearNativeRoutes();
+        g_server.reset();
+        return false;
+    }
+    dbglog::Line("API contracts validated: %llu tools / %llu native routes",
+                 static_cast<unsigned long long>(contractReport.value("tool_count", 0u)),
+                 static_cast<unsigned long long>(contractReport.value("native_route_count", 0u)));
+
+    const std::string mcpToken = CreatePrivateMcpToken();
+    if (mcpToken.size() < 32) {
+        SetLastError("mcp_token_generation_failed");
         ClearNativeRoutes();
         g_server.reset();
         return false;
     }
 
-    if (!mcp_pipe::Start(g_token)) {
+    if (!mcp_pipe::Start(mcpToken)) {
         SetLastError("mcp_pipe_failed:" + mcp_pipe::GetLastError());
+        DeleteFileA(g_mcpTokenPath.c_str());
+        g_mcpTokenPath.clear();
         ClearNativeRoutes();
         g_server.reset();
         return false;
     }
 
-    g_thread = std::thread([] {
-        if (!g_server->listen_after_bind()) SetLastError("listen_failed");
-    });
-    dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    const bool httpBound = httpEnabled && g_server->bind_to_port("127.0.0.1", port);
+    if (httpBound) {
+        g_port = port;
+        g_thread = std::thread([] {
+            if (!g_server->listen_after_bind()) SetLastError("listen_failed");
+        });
+    } else {
+        // Native MCP is the primary unified-app transport. A second attached
+        // target may legitimately find the legacy loopback port already in use.
+        // Keep its private pipe/runtime alive instead of failing the payload.
+        g_port = 0;
+        if (httpEnabled)
+            dbglog::Line("HTTP compatibility port %d unavailable; native MCP remains active", port);
+        else
+            dbglog::Line("HTTP compatibility API disabled; native MCP remains active");
+    }
+    if (httpEnabled) dbglog::Line("API token file: %s", g_tokenPath.c_str());
+    dbglog::Line("MCP private token file: %s", g_mcpTokenPath.c_str());
     dbglog::Line("MCP native pipe: %s", mcp_pipe::GetPipeName().c_str());
     return true;
 }
@@ -274,6 +329,11 @@ void Stop() {
     if (g_thread.joinable()) g_thread.join();
     g_server.reset();
     ClearNativeRoutes();
+    if (!g_mcpTokenPath.empty()) {
+        DeleteFileA(g_mcpTokenPath.c_str());
+        g_mcpTokenPath.clear();
+    }
+    g_port = 0;
 }
 
 int GetPort() { return g_port; }
@@ -282,7 +342,7 @@ unsigned long long GetUptimeMs() {
     return GetTickCount64() - g_startTimeMs;
 }
 
-bool IsRunning() { return g_server && g_server->is_running(); }
+bool IsRunning() { return g_server && (g_server->is_running() || !mcp_pipe::GetPipeName().empty()); }
 std::string GetLastError() {
     std::lock_guard<std::mutex> lock(g_stateMutex);
     return g_lastError;
@@ -291,3 +351,5 @@ std::string GetTokenPath() { return g_tokenPath; }
 std::string GetToken() { std::lock_guard<std::mutex> lock(g_stateMutex); return g_token; }
 
 } // namespace api
+
+

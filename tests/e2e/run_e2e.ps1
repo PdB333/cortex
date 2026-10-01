@@ -22,17 +22,19 @@ $HostExe = Join-Path $BuildRoot "cortex_host.exe"
 $CoreDll = Join-Path $BuildRoot "cortex_core.dll"
 $FakeModDll = Join-Path $BuildRoot "cortex_e2e_mod.dll"
 $TargetExe = Join-Path $BuildRoot "cortex_test_target_$Architecture.exe"
+$SilentGuiExe = Join-Path $BuildRoot "cortex_silent_gui_target_$Architecture.exe"
 $D3D9Exe = Join-Path $BuildRoot "cortex_test_target_d3d9_$Architecture.exe"
 $D3D11Exe = Join-Path $BuildRoot "cortex_test_target_d3d11_$Architecture.exe"
 $TokenPath = Join-Path $BuildRoot "cortex.token"
 $ConfigPath = Join-Path $BuildRoot "cortex.ini"
 $BaseUri = "http://127.0.0.1:6969"
 
-foreach ($path in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $D3D9Exe, $D3D11Exe)) {
+foreach ($path in @($HostExe, $CoreDll, $FakeModDll, $TargetExe, $SilentGuiExe, $D3D9Exe, $D3D11Exe)) {
     if (-not (Test-Path $path)) { throw "Missing E2E artifact: $path" }
 }
 
 @"
+http_api_enabled=true
 diagnostics_enabled=true
 diagnostics_write_minidump=true
 diagnostics_crash_directory=$CrashRoot
@@ -70,6 +72,8 @@ function Wait-For {
     throw "Timed out waiting for $Description"
 }
 
+$script:HasOperationTimeout = (Get-Command Invoke-WebRequest).Parameters.ContainsKey("OperationTimeoutSeconds")
+
 function Request-Json {
     param(
         [string]$Method,
@@ -88,6 +92,9 @@ function Request-Json {
         TimeoutSec = 10
         SkipHttpErrorCheck = $true
     }
+    # From PowerShell 7.4, -TimeoutSec only bounds the connection; a response
+    # that stops sending data would otherwise wait forever.
+    if ($script:HasOperationTimeout) { $request.OperationTimeoutSeconds = 30 }
     if ($null -ne $Body) {
         $request.ContentType = $ContentType
         $request.Body = if ($Body -is [string]) { $Body } else { $Body | ConvertTo-Json -Depth 12 -Compress }
@@ -195,6 +202,33 @@ function Run-Scenario([string]$Name, [scriptblock]$Body) {
     }
 }
 
+Run-Scenario "silent-runtime-gui-injection" {
+    $process = $null
+    $statePath = Join-Path $ResultsRoot "silent-runtime-state.json"
+    $previousState = $env:CORTEX_SILENT_STATE
+    try {
+        Remove-Item $statePath -ErrorAction SilentlyContinue
+        $env:CORTEX_SILENT_STATE = $statePath
+        $process = Start-Process -FilePath $SilentGuiExe -PassThru
+        Wait-For -TimeoutMs 10000 -Description "silent GUI state" -Condition { Test-Path $statePath }
+        $before = Get-Content $statePath -Raw | ConvertFrom-Json
+        Assert-That (-not [bool]$before.console_window) "GUI target unexpectedly started with a console"
+
+        Inject-Dll $process.Id $CoreDll
+        $mcpTokenPath = Join-Path $BuildRoot "cortex.mcp.$($process.Id).token"
+        Wait-For -TimeoutMs 15000 -Description "native MCP startup in silent GUI target" -Condition { Test-Path $mcpTokenPath }
+        Start-Sleep -Milliseconds 300
+
+        $after = Get-Content $statePath -Raw | ConvertFrom-Json
+        Assert-That (-not [bool]$after.console_window) "Cortex injection created a console window in a GUI target"
+        Assert-That ([string]$after.console_class -ne "ConsoleWindowClass") "Cortex injection created ConsoleWindowClass"
+    } finally {
+        Stop-ProcessSafe $process
+        if ($null -eq $previousState) { Remove-Item Env:CORTEX_SILENT_STATE -ErrorAction SilentlyContinue }
+        else { $env:CORTEX_SILENT_STATE = $previousState }
+    }
+}
+
 Run-Scenario "api-memory-security" {
     $fixture = $null
     try {
@@ -210,6 +244,53 @@ Run-Scenario "api-memory-security" {
         Assert-That (($tools | ConvertTo-Json -Depth 8) -match "memory_read") "Tools manifest is incomplete"
         $openApi = Request-Json GET "/openapi.json"
         Assert-That (($openApi | ConvertTo-Json -Depth 12) -match "/memory/read") "OpenAPI is incomplete"
+        # Every manifest tool must map to a registered handler with a valid schema.
+        $contracts = Request-Json GET "/schema/validate" -ExpectedStatus @(200, 500)
+        Assert-That $contracts.ok "API contract validation failed: $($contracts.errors | ConvertTo-Json -Depth 6 -Compress)"
+        Assert-That ([int]$contracts.tool_count -gt 0) "API contract validation reported no tools"
+
+        # Read-only sweep: every GET tool must answer without a server error
+        # and leave the runtime healthy. Required query parameters are filled
+        # from the fixture; tools that need an object id or a live thread are
+        # covered by their own scenarios, and /events is a never-ending
+        # Server-Sent Events stream.
+        $queryValues = @{
+            address = $fixture.Manifest.anchor
+            module = "cortex_test_target_$Architecture.exe"
+            name = "main"
+        }
+        $swept = 0
+        $skipped = @()
+        foreach ($tool in @($tools)) {
+            if ($tool.method -ne "GET" -or $tool.path -match "\{") { continue }
+            if ($tool.name -eq "events") { $skipped += "events (stream)"; continue }
+            $query = @()
+            $fillable = $true
+            if ($tool.query) {
+                foreach ($field in $tool.query.PSObject.Properties) {
+                    $spec = $field.Value
+                    $required = ($spec -is [string] -and $spec.StartsWith("required")) -or
+                                ($spec -isnot [string] -and $spec.required -eq $true)
+                    if (-not $required) { continue }
+                    if ($queryValues.ContainsKey($field.Name)) {
+                        $query += "$($field.Name)=$([uri]::EscapeDataString([string]$queryValues[$field.Name]))"
+                    } else {
+                        $fillable = $false
+                    }
+                }
+            }
+            if (-not $fillable) { $skipped += $tool.name; continue }
+            if ($tool.name -eq "screenshot") { $query += "timeout_ms=3000" }
+            $path = $tool.path + $(if ($query.Count) { "?" + ($query -join "&") } else { "" })
+            # A capture that cannot finish in time reports 504, which is an
+            # answer, not a server fault.
+            $allowed = @(200..499) + $(if ($tool.name -eq "screenshot") { @(504) } else { @() })
+            [void](Request-Json GET $path -ExpectedStatus $allowed)
+            ++$swept
+        }
+        Assert-That ($swept -ge 30) "Read-only sweep covered only $swept GET tools"
+        Assert-That (Request-Json GET "/health").ok "Runtime unhealthy after the read-only sweep"
+        Write-Host "Read-only sweep: $swept GET tools answered; skipped (need ids/threads): $($skipped -join ', ')"
 
         [void](Request-Json GET "/modules" -Token "" -ExpectedStatus @(401))
         [void](Request-Json GET "/modules" -Token "wrong-token" -ExpectedStatus @(401))

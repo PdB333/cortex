@@ -1,0 +1,2514 @@
+#include "tools_workspace.h"
+#include "file_dialog.h"
+#include "tools_tabs.h"
+#include "address_resolver.h"
+#include "widgets.h"
+#include "address_context_menu.h"
+
+#include "process/remote_memory.h"
+
+#include <imgui.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <filesystem>
+
+namespace cortex::ui {
+namespace {
+
+std::string Hex(uint64_t value) {
+    char buffer[32] = {};
+    std::snprintf(buffer, sizeof(buffer), "0x%llX", static_cast<unsigned long long>(value));
+    return buffer;
+}
+
+std::string Size(uint64_t bytes) {
+    char buffer[48] = {};
+    if (bytes >= 1024ull * 1024 * 1024) std::snprintf(buffer, sizeof(buffer), "%.2f GB", bytes / 1073741824.0);
+    else if (bytes >= 1024ull * 1024) std::snprintf(buffer, sizeof(buffer), "%.1f MB", bytes / 1048576.0);
+    else if (bytes >= 1024) std::snprintf(buffer, sizeof(buffer), "%.1f KB", bytes / 1024.0);
+    else std::snprintf(buffer, sizeof(buffer), "%llu B", static_cast<unsigned long long>(bytes));
+    return buffer;
+}
+
+std::string Lower(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return text;
+}
+
+std::string Trim(const std::string& text) {
+    const auto begin = text.find_first_not_of(" \t");
+    if (begin == std::string::npos) return {};
+    const auto end = text.find_last_not_of(" \t");
+    return text.substr(begin, end - begin + 1);
+}
+
+bool ParseHex(const std::string& raw, uint64_t& value) {
+    std::string text = Trim(raw);
+    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text.erase(0, 2);
+    if (text.empty() || text.size() > 16) return false;
+    for (const char ch : text)
+        if (!std::isxdigit(static_cast<unsigned char>(ch))) return false;
+    value = std::strtoull(text.c_str(), nullptr, 16);
+    return true;
+}
+
+std::string Protection(const target::MemoryRegion& region) {
+    std::string text;
+    text += region.readable ? 'R' : '-';
+    text += region.writable ? 'W' : '-';
+    text += region.executable ? 'X' : '-';
+    if (region.copyOnWrite) text += " CoW";
+    if (region.protection & 0x100) text += " guard";
+    if (!region.readable && region.protection == 0x01) text = "no access";
+    return text;
+}
+
+const char* RegionType(target::MemoryRegionType type) {
+    switch (type) {
+        case target::MemoryRegionType::Private: return "Private";
+        case target::MemoryRegionType::Image: return "Image";
+        case target::MemoryRegionType::Mapped: return "Mapped";
+        default: return "-";
+    }
+}
+
+bool ToolTable(const char* id, int columns) {
+    return BeginDataTable(id, columns,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                              ImGuiTableFlags_Resizable | ImGuiTableFlags_Hideable,
+                          ImGui::GetContentRegionAvail(), 90.0f);
+}
+
+void KeyValue(const char* key, const std::string& value) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextDisabled("%s", key);
+    ImGui::TableSetColumnIndex(1);
+    MonoTextUnformatted(value.c_str());
+}
+
+} // namespace
+
+void ToolsWorkspace::Reset(const std::string& targetId) {
+    targetId_ = targetId;
+    modules_.clear();
+    lastModules_ = {};
+    regions_.clear();
+    regionsLoaded_ = false;
+    pe_ = services::PeImage{};
+    peLoaded_ = false;
+    peModule_ = 0;
+    strings_.clear();
+    stringsView_.clear();
+    stringsViewKey_ = "\x01";
+    stringsInfo_.clear();
+    caves_.clear();
+    cavesInfo_.clear();
+    signature_ = services::Signature{};
+    signatureInfo_.clear();
+    testInfo_.clear();
+    if (pointerRunning_ && pointerCancel_) pointerCancel_->store(true);
+    pointers_ = services::PointerScanResult{};
+    pointersLoaded_ = false;
+    pointerInfo_.clear();
+}
+
+void ToolsWorkspace::RefreshModules(UiContext& context) {
+    if (!context.modules) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (lastModules_.time_since_epoch().count() != 0 && now - lastModules_ < std::chrono::seconds(5)) return;
+    lastModules_ = now;
+    std::string error;
+    auto modules = context.modules->List(&error);
+    std::sort(modules.begin(), modules.end(),
+              [](const auto& left, const auto& right) { return left.base < right.base; });
+    modules_ = std::move(modules);
+}
+
+const target::ModuleInfo* ToolsWorkspace::ModuleAt(int index) const {
+    return index >= 0 && index < static_cast<int>(modules_.size()) ? &modules_[static_cast<size_t>(index)] : nullptr;
+}
+
+bool ToolsWorkspace::ModuleCombo(const char* id, int& index) {
+    bool changed = false;
+    const auto* current = ModuleAt(index);
+    ImGui::SetNextItemWidth(std::min(Px(280), ImGui::GetContentRegionAvail().x));
+    if (ImGui::BeginCombo(id, current ? current->name.c_str() : "(no module)", ImGuiComboFlags_HeightLarge)) {
+        for (int i = 0; i < static_cast<int>(modules_.size()); ++i) {
+            if (ImGui::Selectable(modules_[static_cast<size_t>(i)].name.c_str(), i == index)) {
+                index = i;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+std::string ToolsWorkspace::AddressText(uint64_t address) const {
+    for (const auto& module : modules_) {
+        if (address < module.base || address >= module.base + module.size) continue;
+        char buffer[32] = {};
+        std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(address - module.base));
+        return module.name + buffer;
+    }
+    return Hex(address);
+}
+
+bool ToolsWorkspace::Resolve(UiContext& context, const char* raw, uint64_t& address) {
+    const std::string text = Trim(raw ? raw : "");
+    if (ParseHex(text, address) && address) return true;
+    return !text.empty() && EvaluateContextAddress(context, text, address);
+}
+
+services::MemoryReader ToolsWorkspace::Reader(UiContext& context) const {
+    auto session = context.sessions ? context.sessions->Active() : nullptr;
+    return [session](uint64_t address, void* buffer, size_t size) {
+        return session && session->ReadMemory(address, buffer, size, nullptr);
+    };
+}
+
+bool ToolsWorkspace::ReadModuleSections(UiContext& context, const target::ModuleInfo& module, bool executableOnly,
+                                        std::vector<std::pair<uint64_t, std::vector<uint8_t>>>& sections,
+                                        std::string& error) {
+    sections.clear();
+    const auto read = Reader(context);
+    services::PeImage image;
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    if (services::ParsePeImage(read, module.base, image, nullptr) && !image.sections.empty()) {
+        for (const auto& section : image.sections) {
+            if (executableOnly && !section.Executable()) continue;
+            const uint64_t size = std::max(section.virtualSize, section.rawSize);
+            if (size) ranges.push_back({module.base + section.virtualAddress, size});
+        }
+    } else if (!executableOnly) {
+        ranges.push_back({module.base, module.size});
+    }
+    if (ranges.empty()) {
+        error = executableOnly ? "The module has no executable section" : "Nothing to read";
+        return false;
+    }
+    for (const auto& range : ranges) {
+        std::vector<uint8_t> bytes(static_cast<size_t>(std::min<uint64_t>(range.second, 512ull * 1024 * 1024)));
+        if (!read(range.first, bytes.data(), bytes.size())) {
+            for (size_t offset = 0; offset < bytes.size(); offset += 4096) {
+                const size_t count = std::min<size_t>(4096, bytes.size() - offset);
+                if (!read(range.first + offset, bytes.data() + offset, count)) std::memset(bytes.data() + offset, 0, count);
+            }
+        }
+        sections.emplace_back(range.first, std::move(bytes));
+    }
+    return true;
+}
+
+std::vector<services::PointerModule> ToolsWorkspace::CurrentPointerModules() const {
+    std::vector<services::PointerModule> modules;
+    modules.reserve(modules_.size());
+    for (const auto& module : modules_) modules.push_back({module.name, module.base, module.size});
+    return modules;
+}
+
+// ------------------------------------------------------------------ regions
+
+void ToolsWorkspace::DrawRegions(UiContext& context) {
+    const auto session = context.sessions->Active();
+    if (!regionsLoaded_ || ImGui::Button("Refresh")) {
+        regions_ = session->MemoryRegions();
+        regionsLoaded_ = true;
+    }
+    FlowSameLine(Px(220));
+    ImGui::SetNextItemWidth(Px(220));
+    ImGui::InputTextWithHint("##RegionFilter", "filter: module, address, RWX", regionFilter_, sizeof(regionFilter_));
+    FlowSameLine(CheckboxWidth("Writable only"));
+    ImGui::Checkbox("Writable only", &regionsWritableOnly_);
+
+    const std::string filter = Lower(regionFilter_);
+    std::vector<size_t> view;
+    uint64_t total = 0;
+    uint64_t writable = 0;
+    for (size_t i = 0; i < regions_.size(); ++i) {
+        const auto& region = regions_[i];
+        total += region.size;
+        if (region.writable) writable += region.size;
+        if (regionsWritableOnly_ && !region.writable) continue;
+        if (!filter.empty()) {
+            const std::string haystack = Lower(Hex(region.base) + " " + AddressText(region.base) + " " +
+                                               Protection(region) + " " + RegionType(region.type));
+            if (haystack.find(filter) == std::string::npos) continue;
+        }
+        view.push_back(i);
+    }
+    ImGui::TextDisabled("%zu regions, %s committed, %s writable", regions_.size(), Size(total).c_str(),
+                        Size(writable).c_str());
+
+    if (!ToolTable("RegionsTable", 5)) return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Base", ImGuiTableColumnFlags_WidthStretch, 0.26f);
+    ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthStretch, 0.14f);
+    ImGui::TableSetupColumn("Protection", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.12f);
+    ImGui::TableSetupColumn("Owner", ImGuiTableColumnFlags_WidthStretch, 0.32f);
+    ImGui::TableHeadersRow();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(view.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const auto& region = regions_[view[static_cast<size_t>(row)]];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(row);
+            {
+                MonoFont mono;
+                if (ImGui::Selectable(Hex(region.base).c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    context.NavigateTo("memory-browser", region.base);
+            }
+            if (ImGui::BeginPopupContextItem("RegionMenu")) {
+                if (ImGui::MenuItem("Browse memory")) context.NavigateTo("memory-browser", region.base);
+                if (ImGui::MenuItem("Disassemble")) context.NavigateTo("disassembly", region.base);
+                if (ImGui::MenuItem("Scan only this region")) {
+                    context.commands.push_back("scan_range " + Hex(region.base) + " " +
+                                               Hex(region.base + region.size - 1));
+                    context.requestWorkspace = "memory";
+                }
+                if (ImGui::MenuItem("Copy base address")) ImGui::SetClipboardText(Hex(region.base).c_str());
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(Size(region.size).c_str());
+            ImGui::TableSetColumnIndex(2);
+            MonoTextUnformatted(Protection(region).c_str());
+            ImGui::TableSetColumnIndex(3);
+            ImGui::TextUnformatted(RegionType(region.type));
+            ImGui::TableSetColumnIndex(4);
+            const std::string owner = AddressText(region.base);
+            ImGui::TextUnformatted(owner.rfind("0x", 0) == 0 ? "" : owner.substr(0, owner.find('+')).c_str());
+            ImGui::PopID();
+        }
+    }
+    ImGui::EndTable();
+}
+
+// ------------------------------------------------------------------ PE headers
+
+void ToolsWorkspace::DrawPe(UiContext& context) {
+    if (ModuleCombo("##PeModule", peModule_)) peLoaded_ = false;
+    FlowSameLine(ButtonWidth("Reload"));
+    if (ImGui::Button("Reload")) peLoaded_ = false;
+    const auto* module = ModuleAt(peModule_);
+    if (!module) {
+        HintText("No module is loaded.");
+        return;
+    }
+    if (!peLoaded_) {
+        peError_.clear();
+        if (!services::ParsePeImage(Reader(context), module->base, pe_, &peError_)) pe_ = services::PeImage{};
+        peLoaded_ = true;
+    }
+    if (!peError_.empty()) {
+        ImGui::TextColored(WarningTextColor(), "%s", peError_.c_str());
+        return;
+    }
+
+    if (!ImGui::BeginTabBar("PeTabs")) return;
+    if (ImGui::BeginTabItem("Summary")) {
+        if (BeginDataTable("PeSummary", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, ImGui::GetContentRegionAvail())) {
+            ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, Px(170));
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+            char text[96] = {};
+            KeyValue("Module", module->name);
+            KeyValue("Path", module->path);
+            KeyValue("Loaded at", Hex(pe_.base) + (pe_.base != pe_.preferredBase ? "  (relocated from " + Hex(pe_.preferredBase) + ")" : ""));
+            KeyValue("Format", pe_.pe32Plus ? "PE32+ (64-bit)" : "PE32 (32-bit)");
+            KeyValue("Machine", services::PeMachineName(pe_.machine));
+            const std::time_t stamp = static_cast<std::time_t>(pe_.timeDateStamp);
+            if (std::strftime(text, sizeof(text), "%Y-%m-%d %H:%M:%S UTC", std::gmtime(&stamp)) == 0) text[0] = '\0';
+            KeyValue("Link time", std::string(text) + "  (" + Hex(pe_.timeDateStamp) + ")");
+            KeyValue("Entry point", AddressText(pe_.base + pe_.entryPoint) + "  (RVA " + Hex(pe_.entryPoint) + ")");
+            KeyValue("Image size", Size(pe_.sizeOfImage) + "  (" + Hex(pe_.sizeOfImage) + ")");
+            KeyValue("Subsystem", services::PeSubsystemName(pe_.subsystem));
+            std::string flags;
+            if (pe_.dllCharacteristics & 0x0040) flags += "ASLR ";
+            if (pe_.dllCharacteristics & 0x0020) flags += "high-entropy-VA ";
+            if (pe_.dllCharacteristics & 0x0100) flags += "DEP ";
+            if (pe_.dllCharacteristics & 0x4000) flags += "CFG ";
+            if (pe_.dllCharacteristics & 0x0400) flags += "no-SEH ";
+            KeyValue("Security", flags.empty() ? std::string("none") : flags);
+            KeyValue("Image type", (pe_.characteristics & 0x2000) ? "DLL" : "Executable");
+            KeyValue("Checksum", Hex(pe_.checksum));
+            KeyValue("Alignment", "section " + Hex(pe_.sectionAlignment) + ", file " + Hex(pe_.fileAlignment));
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Sections")) {
+        if (ToolTable("PeSections", 5)) {
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("Address");
+            ImGui::TableSetupColumn("Virtual size");
+            ImGui::TableSetupColumn("Raw size");
+            ImGui::TableSetupColumn("Flags");
+            ImGui::TableHeadersRow();
+            for (size_t i = 0; i < pe_.sections.size(); ++i) {
+                const auto& section = pe_.sections[i];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(section.name.c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    context.NavigateTo(section.Executable() ? "disassembly" : "memory-browser",
+                                       pe_.base + section.virtualAddress);
+                ImGui::PopID();
+                ImGui::TableSetColumnIndex(1);
+                MonoTextUnformatted(AddressText(pe_.base + section.virtualAddress).c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(Size(section.virtualSize).c_str());
+                ImGui::TableSetColumnIndex(3);
+                ImGui::TextUnformatted(Size(section.rawSize).c_str());
+                ImGui::TableSetColumnIndex(4);
+                MonoTextUnformatted(services::PeSectionFlags(section.characteristics).c_str());
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Directories")) {
+        if (ToolTable("PeDirectories", 3)) {
+            ImGui::TableSetupColumn("Directory");
+            ImGui::TableSetupColumn("Address");
+            ImGui::TableSetupColumn("Size");
+            ImGui::TableHeadersRow();
+            for (const auto& directory : pe_.directories) {
+                if (!directory.virtualAddress) continue;
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(directory.name);
+                ImGui::TableSetColumnIndex(1);
+                MonoTextUnformatted(AddressText(pe_.base + directory.virtualAddress).c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(Size(directory.size).c_str());
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+    const std::string exportsLabel = "Exports (" + std::to_string(pe_.exports.size()) + ")###Exports";
+    if (ImGui::BeginTabItem(exportsLabel.c_str())) {
+        ImGui::SetNextItemWidth(Px(260));
+        ImGui::InputTextWithHint("##PeFilter", "filter", peFilter_, sizeof(peFilter_));
+        const std::string filter = Lower(peFilter_);
+        std::vector<size_t> view;
+        for (size_t i = 0; i < pe_.exports.size(); ++i)
+            if (filter.empty() || Lower(pe_.exports[i].name).find(filter) != std::string::npos) view.push_back(i);
+        if (ToolTable("PeExports", 4)) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+            ImGui::TableSetupColumn("Ordinal", ImGuiTableColumnFlags_WidthStretch, 0.1f);
+            ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+            ImGui::TableSetupColumn("Forwarded to", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+            ImGui::TableHeadersRow();
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(view.size()));
+            while (clipper.Step()) {
+                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                    const auto& entry = pe_.exports[view[static_cast<size_t>(row)]];
+                    const uint64_t address = pe_.base + entry.rva;
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::PushID(row);
+                    const std::string name = entry.name.empty() ? "#" + std::to_string(entry.ordinal) : entry.name;
+                    if (ImGui::Selectable(name.c_str(), false,
+                                          ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && entry.forwarder.empty())
+                        context.NavigateTo("disassembly", address);
+                    if (ImGui::BeginPopupContextItem("ExportMenu")) {
+                        AddressContextOptions options;
+                        options.label = name;
+                        DrawAddressContextActions(context, address, options);
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopID();
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%u", entry.ordinal);
+                    ImGui::TableSetColumnIndex(2);
+                    MonoTextUnformatted(Hex(address).c_str());
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::TextUnformatted(entry.forwarder.c_str());
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+    const std::string importsLabel = "Imports (" + std::to_string(pe_.imports.size()) + ")###Imports";
+    if (ImGui::BeginTabItem(importsLabel.c_str())) {
+        ImGui::SetNextItemWidth(Px(260));
+        ImGui::InputTextWithHint("##PeImportFilter", "filter", peFilter_, sizeof(peFilter_));
+        const std::string filter = Lower(peFilter_);
+        std::vector<size_t> view;
+        for (size_t i = 0; i < pe_.imports.size(); ++i) {
+            const auto& entry = pe_.imports[i];
+            if (filter.empty() || Lower(entry.name).find(filter) != std::string::npos ||
+                Lower(entry.module).find(filter) != std::string::npos)
+                view.push_back(i);
+        }
+        if (ToolTable("PeImports", 4)) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("Module", ImGuiTableColumnFlags_WidthStretch, 0.22f);
+            ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+            ImGui::TableSetupColumn("IAT slot", ImGuiTableColumnFlags_WidthStretch, 0.24f);
+            ImGui::TableSetupColumn("Points to", ImGuiTableColumnFlags_WidthStretch, 0.24f);
+            ImGui::TableHeadersRow();
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(view.size()));
+            while (clipper.Step()) {
+                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                    const auto& entry = pe_.imports[view[static_cast<size_t>(row)]];
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::PushID(row);
+                    if (ImGui::Selectable(entry.module.c_str(), false,
+                                          ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && entry.value)
+                        context.NavigateTo("disassembly", entry.value);
+                    if (ImGui::BeginPopupContextItem("ImportMenu")) {
+                        if (ImGui::MenuItem("Disassemble the imported function") && entry.value)
+                            context.NavigateTo("disassembly", entry.value);
+                        if (ImGui::MenuItem("Browse the IAT slot")) context.NavigateTo("memory-browser", entry.slot);
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopID();
+                    ImGui::TableSetColumnIndex(1);
+                    if (entry.name.empty()) ImGui::Text("#%u", entry.ordinal);
+                    else ImGui::TextUnformatted(entry.name.c_str());
+                    ImGui::TableSetColumnIndex(2);
+                    MonoTextUnformatted(AddressText(entry.slot).c_str());
+                    ImGui::TableSetColumnIndex(3);
+                    MonoTextUnformatted(AddressText(entry.value).c_str());
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+}
+
+// ------------------------------------------------------------------ strings
+
+void ToolsWorkspace::DrawStrings(UiContext& context) {
+    ModuleCombo("##StringsModule", stringsModule_);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Min length", &stringsMin_)) stringsMin_ = std::clamp(stringsMin_, 2, 256);
+    FlowSameLine(CheckboxWidth("ASCII"));
+    ImGui::Checkbox("ASCII", &stringsAscii_);
+    FlowSameLine(CheckboxWidth("UTF-16"));
+    ImGui::Checkbox("UTF-16", &stringsUtf16_);
+    FlowSameLine(ButtonWidth("Find strings"));
+    if (ImGui::Button("Find strings")) {
+        if (const auto* module = ModuleAt(stringsModule_)) {
+            const auto chosen = *module;
+            context.RunInBackground("Searching strings in " + chosen.name, [this, &context, chosen]() {
+                std::vector<std::pair<uint64_t, std::vector<uint8_t>>> sections;
+                std::string error;
+                strings_.clear();
+                if (!ReadModuleSections(context, chosen, false, sections, error)) {
+                    stringsInfo_ = error;
+                    return;
+                }
+                for (const auto& section : sections)
+                    services::FindStrings(section.second.data(), section.second.size(), section.first,
+                                          static_cast<size_t>(stringsMin_), stringsAscii_, stringsUtf16_, 200000,
+                                          strings_);
+                stringsInfo_ = std::to_string(strings_.size()) + " string(s) in " + chosen.name +
+                               (strings_.size() >= 200000 ? " (limit reached)" : "");
+                stringsViewKey_ = "\x01";
+            });
+        }
+    }
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##StringsFilter", "filter the strings", stringsFilter_, sizeof(stringsFilter_));
+    if (!stringsInfo_.empty()) ImGui::TextDisabled("%s", stringsInfo_.c_str());
+
+    const std::string key = Lower(stringsFilter_);
+    if (key != stringsViewKey_) {
+        stringsViewKey_ = key;
+        stringsView_.clear();
+        for (size_t i = 0; i < strings_.size(); ++i)
+            if (key.empty() || Lower(strings_[i].text).find(key) != std::string::npos) stringsView_.push_back(i);
+    }
+    if (strings_.empty()) {
+        HintText("Pick a module and press Find strings to list its ASCII and UTF-16 text.");
+        return;
+    }
+    if (!ToolTable("StringsTable", 3)) return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.26f);
+    ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(60));
+    ImGui::TableSetupColumn("Text", ImGuiTableColumnFlags_WidthStretch, 0.74f);
+    ImGui::TableHeadersRow();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(stringsView_.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const auto& entry = strings_[stringsView_[static_cast<size_t>(row)]];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(row);
+            {
+                MonoFont mono;
+                if (ImGui::Selectable(AddressText(entry.address).c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    context.NavigateTo("memory-browser", entry.address);
+            }
+            if (ImGui::BeginPopupContextItem("StringMenu")) {
+                if (ImGui::MenuItem("Copy text")) ImGui::SetClipboardText(entry.text.c_str());
+                if (ImGui::MenuItem("Copy address")) ImGui::SetClipboardText(Hex(entry.address).c_str());
+                ImGui::Separator();
+                AddressContextOptions options;
+                options.label = entry.text.substr(0, 40);
+                DrawAddressContextActions(context, entry.address, options);
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(entry.utf16 ? "UTF-16" : "ASCII");
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(entry.text.c_str());
+        }
+    }
+    ImGui::EndTable();
+}
+
+// ------------------------------------------------------------------ code caves
+
+void ToolsWorkspace::DrawCaves(UiContext& context) {
+    ModuleCombo("##CavesModule", cavesModule_);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Min size", &cavesMin_)) cavesMin_ = std::clamp(cavesMin_, 4, 65536);
+    FlowSameLine(CheckboxWidth("Executable sections only"));
+    ImGui::Checkbox("Executable sections only", &cavesExecutableOnly_);
+    FlowSameLine(ButtonWidth("Find code caves"));
+    if (ImGui::Button("Find code caves")) {
+        if (const auto* module = ModuleAt(cavesModule_)) {
+            const auto chosen = *module;
+            context.RunInBackground("Searching code caves in " + chosen.name, [this, &context, chosen]() {
+                std::vector<std::pair<uint64_t, std::vector<uint8_t>>> sections;
+                std::string error;
+                caves_.clear();
+                if (!ReadModuleSections(context, chosen, cavesExecutableOnly_, sections, error)) {
+                    cavesInfo_ = error;
+                    return;
+                }
+                for (const auto& section : sections)
+                    services::FindCodeCaves(section.second.data(), section.second.size(), section.first,
+                                            static_cast<size_t>(cavesMin_), 50000, caves_);
+                std::sort(caves_.begin(), caves_.end(),
+                          [](const auto& left, const auto& right) { return left.size > right.size; });
+                cavesInfo_ = std::to_string(caves_.size()) + " cave(s) in " + chosen.name + ", largest first";
+            });
+        }
+    }
+    if (!cavesInfo_.empty()) ImGui::TextDisabled("%s", cavesInfo_.c_str());
+    if (caves_.empty()) {
+        HintText("Code caves are runs of 00 or CC bytes that a patch can jump to. Pick a module and search.");
+        return;
+    }
+    if (!ToolTable("CavesTable", 3)) return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+    ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+    ImGui::TableSetupColumn("Filler", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+    ImGui::TableHeadersRow();
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(caves_.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const auto& cave = caves_[static_cast<size_t>(row)];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(row);
+            {
+                MonoFont mono;
+                if (ImGui::Selectable(AddressText(cave.address).c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    context.NavigateTo("disassembly", cave.address);
+            }
+            if (ImGui::BeginPopupContextItem("CaveMenu")) {
+                if (ImGui::MenuItem("Copy address")) ImGui::SetClipboardText(Hex(cave.address).c_str());
+                ImGui::Separator();
+                DrawAddressContextActions(context, cave.address);
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%llu bytes", static_cast<unsigned long long>(cave.size));
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%02X", cave.filler);
+        }
+    }
+    ImGui::EndTable();
+}
+
+// ------------------------------------------------------------------ signature
+
+void ToolsWorkspace::DrawSignature(UiContext& context) {
+    const auto session = context.sessions->Active();
+    ImGui::TextDisabled("Instruction address");
+    ImGui::SetNextItemWidth(std::min(Px(320), ImGui::GetContentRegionAvail().x));
+    ImGui::InputTextWithHint("##SignatureAddress", "game.exe+1A2B0 or 7FF6...", signatureAddress_,
+                             sizeof(signatureAddress_));
+    FlowSameLine(ButtonWidth("Generate"));
+    const bool generate = ImGui::Button("Generate");
+    ImGui::Checkbox("Wildcard 32-bit displacements", &signatureDisplacements_);
+    FlowSameLine(CheckboxWidth("Wildcard large immediates"));
+    ImGui::Checkbox("Wildcard large immediates", &signatureImmediates_);
+
+    if (generate) {
+        uint64_t address = 0;
+        signature_ = services::Signature{};
+        if (!Resolve(context, signatureAddress_, address)) {
+            signatureInfo_ = "Enter an address or module+offset";
+        } else {
+            const target::ModuleInfo* module = nullptr;
+            for (const auto& candidate : modules_)
+                if (address >= candidate.base && address < candidate.base + candidate.size) module = &candidate;
+            std::vector<std::pair<uint64_t, std::vector<uint8_t>>> sections;
+            std::string error;
+            std::vector<uint8_t> haystack;
+            if (module && ReadModuleSections(context, *module, true, sections, error)) {
+                for (const auto& section : sections) {
+                    haystack.insert(haystack.end(), section.second.begin(), section.second.end());
+                    haystack.insert(haystack.end(), 32, 0);
+                }
+            }
+            std::vector<uint8_t> code(128);
+            size_t size = code.size();
+            while (size >= 16 && !session->ReadMemory(address, code.data(), size, nullptr)) size /= 2;
+            services::SignatureOptions options;
+            options.x64 = session->Target().architecture != target::Architecture::X86;
+            options.wildcardDisplacements = signatureDisplacements_;
+            options.wildcardImmediates = signatureImmediates_;
+            if (size < 16) {
+                signatureInfo_ = "The address cannot be read";
+            } else if (!services::GenerateSignature(code.data(), size, haystack.data(), haystack.size(), options,
+                                                    signature_, &error)) {
+                signatureInfo_ = error;
+            } else {
+                const std::string where = module ? module->name : std::string("the searched code");
+                signatureInfo_ = signature_.matches == 1
+                    ? "Unique in " + where + " (" + std::to_string(signature_.instructions) + " instructions)"
+                    : std::to_string(signature_.matches) + "+ matches in " + where +
+                          ": the code around this address repeats; try an instruction nearby";
+                if (!module) signatureInfo_ = "Not inside a module: uniqueness was not checked";
+            }
+        }
+    }
+
+    if (!signature_.bytes.empty()) {
+        ImGui::Spacing();
+        std::string text = signature_.Text();
+        ImGui::SetNextItemWidth(-ButtonWidth("Copy") - ImGui::GetStyle().ItemSpacing.x);
+        {
+            MonoFont mono;
+            ImGui::InputText("##SignatureText", text.data(), text.size() + 1, ImGuiInputTextFlags_ReadOnly);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Copy")) ImGui::SetClipboardText(text.c_str());
+    }
+    if (!signatureInfo_.empty())
+        ImGui::TextColored(signature_.matches == 1 ? StaticAddressColor() : WarningTextColor(), "%s",
+                           signatureInfo_.c_str());
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Find a byte pattern in a module");
+    ModuleCombo("##TestModule", peModule_);
+    FlowSameLine(Px(200));
+    ImGui::SetNextItemWidth(std::max(Px(200), ImGui::GetContentRegionAvail().x - ButtonWidth("Find") - Px(8)));
+    ImGui::InputTextWithHint("##TestPattern", "48 8B 05 ?? ?? ?? ?? 48 85 C0", testPattern_, sizeof(testPattern_));
+    ImGui::SameLine();
+    if (ImGui::Button("Find") && ModuleAt(peModule_)) {
+        std::vector<uint8_t> bytes;
+        std::vector<uint8_t> mask;
+        bool valid = true;
+        std::string token;
+        for (const char ch : std::string(testPattern_) + " ") {
+            if (!std::isspace(static_cast<unsigned char>(ch))) {
+                token += ch;
+                continue;
+            }
+            if (token.empty()) continue;
+            if (token == "?" || token == "??" || token == "*") {
+                bytes.push_back(0);
+                mask.push_back(0);
+            } else if (token.size() == 2 && std::isxdigit(static_cast<unsigned char>(token[0])) &&
+                       std::isxdigit(static_cast<unsigned char>(token[1]))) {
+                bytes.push_back(static_cast<uint8_t>(std::strtoul(token.c_str(), nullptr, 16)));
+                mask.push_back(0xFF);
+            } else {
+                valid = false;
+            }
+            token.clear();
+        }
+        std::vector<std::pair<uint64_t, std::vector<uint8_t>>> sections;
+        std::string error;
+        if (!valid || bytes.empty()) {
+            testInfo_ = "Bytes must look like: 48 8B 05 ?? ?? ?? ??";
+        } else if (!ReadModuleSections(context, *ModuleAt(peModule_), false, sections, error)) {
+            testInfo_ = error;
+        } else {
+            size_t total = 0;
+            uint64_t first = 0;
+            for (const auto& section : sections) {
+                uint64_t offset = 0;
+                const size_t count = services::CountPatternMatches(section.second.data(), section.second.size(), bytes,
+                                                                   mask, 1000, &offset);
+                if (count && total == 0) first = section.first + offset;
+                total += count;
+            }
+            testInfo_ = total == 0 ? "No match"
+                : std::to_string(total) + (total >= 1000 ? "+" : "") + " match(es), first at " + AddressText(first);
+            if (total) context.NavigateTo("disassembly", first);
+        }
+    }
+    if (!testInfo_.empty()) ImGui::TextDisabled("%s", testInfo_.c_str());
+}
+
+// ------------------------------------------------------------------ pointer scan
+
+void ToolsWorkspace::PollPointerScan(UiContext& context) {
+    if (!pointerRunning_ || !pointerFuture_.valid()) return;
+    if (pointerFuture_.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) return;
+    const auto outcome = pointerFuture_.get();
+    pointerRunning_ = false;
+    if (!outcome.first) {
+        pointerInfo_ = outcome.second == "scan_cancelled" ? "Pointer scan cancelled" : "Pointer scan failed: " + outcome.second;
+        context.status = pointerInfo_;
+        return;
+    }
+    pointers_ = std::move(*pointerPending_);
+    pointerPending_.reset();
+    pointersLoaded_ = true;
+    pointerLive_.clear();
+    char text[160] = {};
+    std::snprintf(text, sizeof(text), "%zu path(s) from %llu indexed pointers in %.1f s%s", pointers_.paths.size(),
+                  static_cast<unsigned long long>(pointers_.pointersIndexed), pointers_.milliseconds / 1000.0,
+                  pointers_.truncated ? " - limit reached, shorter paths first" : "");
+    pointerInfo_ = text;
+    context.status = pointerInfo_;
+}
+
+void ToolsWorkspace::DrawPointers(UiContext& context) {
+    const auto session = context.sessions->Active();
+    const unsigned pointerSize = session->Target().architecture == target::Architecture::X86 ? 4u : 8u;
+    if (!pointerFile_[0] && context.settings) {
+        const auto directory = context.settings->Path().parent_path() / "pointer-scans";
+        std::snprintf(pointerFile_, sizeof(pointerFile_), "%s", (directory / "pointerscan.json").u8string().c_str());
+    }
+
+    ImGui::TextDisabled("Address to find");
+    ImGui::SetNextItemWidth(std::min(Px(300), ImGui::GetContentRegionAvail().x));
+    ImGui::InputTextWithHint("##PointerTarget", "the address found by a value scan", pointerTarget_,
+                             sizeof(pointerTarget_));
+    ImGui::SetNextItemWidth(Px(100));
+    if (ImGui::InputInt("Max level", &pointerLevel_)) pointerLevel_ = std::clamp(pointerLevel_, 1, 12);
+    FlowSameLine(Px(190));
+    ImGui::SetNextItemWidth(Px(90));
+    ImGui::InputText("Max offset (hex)", pointerOffset_, sizeof(pointerOffset_), ImGuiInputTextFlags_CharsHexadecimal);
+    FlowSameLine(Px(210));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Max results", &pointerMaxResults_, 1000, 10000))
+        pointerMaxResults_ = std::clamp(pointerMaxResults_, 1, 10000000);
+    FlowSameLine(CheckboxWidth("Mapped memory"));
+    ImGui::Checkbox("Mapped memory", &pointerMapped_);
+
+    if (pointerRunning_) {
+        const double total = pointerProgress_ ? static_cast<double>(pointerProgress_->total.load()) : 0.0;
+        const double done = pointerProgress_ ? static_cast<double>(pointerProgress_->done.load()) : 0.0;
+        const float fraction = total > 0 ? static_cast<float>(std::min(1.0, done / total)) : 0.0f;
+        ImGui::ProgressBar(fraction, ImVec2(ImGui::GetContentRegionAvail().x - ButtonWidth("Cancel") - Px(8), 0),
+                           fraction >= 1.0f ? "searching paths..." : nullptr);
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel") && pointerCancel_) pointerCancel_->store(true);
+    } else if (ImGui::Button("Start pointer scan")) {
+        uint64_t target = 0;
+        uint64_t offset = 0;
+        lastModules_ = {};
+        RefreshModules(context);
+        if (!Resolve(context, pointerTarget_, target)) {
+            pointerInfo_ = "Enter the address to find";
+        } else if (!ParseHex(pointerOffset_, offset) || offset == 0 || offset > 0x100000) {
+            pointerInfo_ = "The maximum offset must be between 1 and 100000 (hex)";
+        } else {
+            services::PointerScanOptions options;
+            options.target = target;
+            options.maxLevel = pointerLevel_;
+            options.maxOffset = static_cast<uint32_t>(offset);
+            options.maxResults = static_cast<size_t>(pointerMaxResults_);
+            options.pointerSize = pointerSize;
+            options.includeMapped = pointerMapped_;
+            options.modules = CurrentPointerModules();
+            pointerPending_ = std::make_shared<services::PointerScanResult>();
+            pointerCancel_ = std::make_shared<std::atomic_bool>(false);
+            pointerProgress_ = std::make_shared<services::ScanProgress>();
+            auto pending = pointerPending_;
+            auto cancel = pointerCancel_;
+            auto progress = pointerProgress_;
+            pointerRunning_ = true;
+            pointerInfo_ = "Indexing pointers...";
+            pointerFuture_ = std::async(std::launch::async, [session, options, pending, cancel, progress]() {
+                std::string error;
+                const bool ok = services::PointerScanner::Scan(session, options, *pending, &error, cancel.get(),
+                                                               progress.get());
+                return std::make_pair(ok, error);
+            });
+        }
+    }
+    if (!pointerRunning_) {
+        FlowSameLine(Px(420));
+        ImGui::SetNextItemWidth(Px(200));
+        ImGui::InputTextWithHint("##PointerRescan", "new address after a restart", pointerRescan_, sizeof(pointerRescan_));
+        ImGui::SameLine();
+        ImGui::BeginDisabled(pointers_.paths.empty());
+        if (ImGui::Button("Rescan")) {
+            uint64_t target = 0;
+            lastModules_ = {};
+            RefreshModules(context);
+            if (!Resolve(context, pointerRescan_, target)) {
+                pointerInfo_ = "Enter the value's new address";
+            } else {
+                const size_t before = pointers_.paths.size();
+                const size_t kept = services::PointerScanner::Rescan(session, pointers_, target, CurrentPointerModules());
+                pointerInfo_ = std::to_string(kept) + " of " + std::to_string(before) + " path(s) still lead to " +
+                               Hex(target);
+                pointerLive_.clear();
+            }
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("After the game restarts, scan the value again and enter its new\n"
+                              "address: only the paths that still reach it are kept.");
+    }
+
+    ImGui::SetNextItemWidth(std::max(Px(200), ImGui::GetContentRegionAvail().x - ButtonWidth("Save") -
+                                                  ButtonWidth("Load") - Px(16)));
+    ImGui::InputText("##PointerFile", pointerFile_, sizeof(pointerFile_));
+    ImGui::SameLine();
+    ImGui::BeginDisabled(pointers_.paths.empty());
+    if (ImGui::Button("Save")) {
+        std::error_code ignored;
+        std::filesystem::create_directories(std::filesystem::u8path(pointerFile_).parent_path(), ignored);
+        std::string error;
+        pointerInfo_ = services::PointerScanner::Save(pointerFile_, pointers_, &error)
+            ? "Saved " + std::to_string(pointers_.paths.size()) + " path(s)" : error;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Load")) {
+        std::string error;
+        services::PointerScanResult loaded;
+        if (services::PointerScanner::Load(pointerFile_, loaded, &error)) {
+            pointers_ = std::move(loaded);
+            pointersLoaded_ = true;
+            pointerLive_.clear();
+            pointerInfo_ = "Loaded " + std::to_string(pointers_.paths.size()) +
+                           " path(s); use Rescan with the value's current address to keep valid ones";
+        } else {
+            pointerInfo_ = error;
+        }
+    }
+    if (!pointerInfo_.empty()) ImGui::TextDisabled("%s", pointerInfo_.c_str());
+
+    if (pointers_.paths.empty()) {
+        HintText("Scan a value first, then find the static chains of pointers that lead to its address. "
+                 "They keep working after the game restarts.");
+        return;
+    }
+
+    // Resolve the visible rows at most twice a second.
+    const auto now = std::chrono::steady_clock::now();
+    const bool refresh = now - lastPointerRefresh_ > std::chrono::milliseconds(500);
+    if (refresh) lastPointerRefresh_ = now;
+    const auto currentModules = CurrentPointerModules();
+
+    if (!ToolTable("PointerTable", 3)) return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+    ImGui::TableSetupColumn("Points to", ImGuiTableColumnFlags_WidthStretch, 0.22f);
+    ImGui::TableSetupColumn("Value (4 bytes)", ImGuiTableColumnFlags_WidthStretch, 0.18f);
+    ImGui::TableHeadersRow();
+    if (pointerLive_.size() != pointers_.paths.size()) pointerLive_.assign(pointers_.paths.size(), ~0ull);
+    ImGuiListClipper clipper;
+    clipper.Begin(static_cast<int>(pointers_.paths.size()));
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+            const auto& path = pointers_.paths[static_cast<size_t>(row)];
+            uint64_t& resolved = pointerLive_[static_cast<size_t>(row)];
+            if (refresh || resolved == ~0ull) {
+                uint64_t address = 0;
+                resolved = services::PointerScanner::Resolve(session, pointers_, path, currentModules, address)
+                    ? address : 0;
+            }
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(row);
+            const std::string text = services::PointerScanner::Format(pointers_, path);
+            ImGui::PushStyleColor(ImGuiCol_Text, StaticAddressColor());
+            {
+                MonoFont mono;
+                if (ImGui::Selectable(text.c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    PendingAddressEntry entry;
+                    entry.description = "Pointer " + text;
+                    entry.module = pointers_.modules[path.module].name;
+                    entry.baseOffset = path.baseOffset;
+                    entry.offsets = path.offsets;
+                    entry.pointerSize = pointers_.pointerSize;
+                    context.pendingAddresses.push_back(std::move(entry));
+                    context.status = "Pointer added to the Memory address list";
+                }
+            }
+            ImGui::PopStyleColor();
+            if (ImGui::BeginPopupContextItem("PointerMenu")) {
+                if (ImGui::MenuItem("Add to the address list")) {
+                    PendingAddressEntry entry;
+                    entry.description = "Pointer " + text;
+                    entry.module = pointers_.modules[path.module].name;
+                    entry.baseOffset = path.baseOffset;
+                    entry.offsets = path.offsets;
+                    entry.pointerSize = pointers_.pointerSize;
+                    context.pendingAddresses.push_back(std::move(entry));
+                    context.status = "Pointer added to the Memory address list";
+                }
+                if (ImGui::MenuItem("Copy path")) ImGui::SetClipboardText(text.c_str());
+                ImGui::BeginDisabled(resolved == 0);
+                if (ImGui::MenuItem("Browse the address")) context.NavigateTo("memory-browser", resolved);
+                ImGui::EndDisabled();
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            if (resolved == 0) {
+                ImGui::TextDisabled("??");
+            } else {
+                const bool same = resolved == pointers_.target;
+                MonoText("%s", Hex(resolved).c_str());
+                if (!same && ImGui::IsItemHovered()) ImGui::SetTooltip("No longer the scanned address");
+            }
+            ImGui::TableSetColumnIndex(2);
+            int32_t value = 0;
+            if (resolved && session->ReadMemory(resolved, &value, sizeof(value), nullptr)) ImGui::Text("%d", value);
+            else ImGui::TextDisabled("??");
+        }
+    }
+    ImGui::EndTable();
+}
+
+// ------------------------------------------------------------------ symbols
+
+// User-defined symbols (Cheat Engine's registerSymbol) and the exports of
+// every module: all of them work in any address field.
+void ToolsWorkspace::DrawSymbols(UiContext& context) {
+    HintText("Names registered here work in every address field, in cheat tables and in Lua "
+             "(registerSymbol). Module exports resolve as module.Export or just Export.");
+    ImGui::SetNextItemWidth(Px(150));
+    ImGui::InputTextWithHint("##SymbolName", "name", symbolName_, sizeof(symbolName_));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(260));
+    const bool enter = ImGui::InputTextWithHint("##SymbolAddress", "address or expression", symbolAddress_,
+                                                sizeof(symbolAddress_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (ImGui::Button("Register") || enter) {
+        const std::string name = Trim(symbolName_);
+        uint64_t address = 0;
+        std::string error;
+        if (name.empty() || name.find_first_of(" +-*[]()\"'") != std::string::npos) {
+            context.status = "Enter a symbol name without spaces or operators";
+        } else if (!EvaluateContextAddress(context, symbolAddress_, address, &error)) {
+            context.status = "Cannot resolve the address: " + error;
+        } else {
+            context.userSymbols->Set(name, address);
+            context.status = "Registered " + name + " = " + Hex(address);
+            symbolName_[0] = '\0';
+            symbolAddress_[0] = '\0';
+        }
+    }
+
+    const auto symbols = context.userSymbols->List();
+    ImGui::SeparatorText(("Registered symbols (" + std::to_string(symbols.size()) + ")").c_str());
+    if (symbols.empty()) {
+        ImGui::TextDisabled("None yet.");
+    } else if (BeginDataTable("UserSymbols", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable,
+                              ImVec2(0, std::min(Px(200), ImGui::GetFrameHeightWithSpacing() * (static_cast<float>(symbols.size()) + 1.5f))))) {
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, ButtonWidth("Remove"));
+        ImGui::TableHeadersRow();
+        for (const auto& symbol : symbols) {
+            ImGui::PushID(symbol.first.c_str());
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(symbol.first.c_str());
+            ImGui::TableSetColumnIndex(1);
+            {
+                MonoFont mono;
+                ImGui::Selectable((AddressText(symbol.second) + "##Address").c_str());
+            }
+            AddressContextOptions options;
+            options.label = symbol.first;
+            if (ImGui::BeginPopupContextItem("SymbolMenu")) {
+                DrawAddressContextActions(context, symbol.second, options);
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(2);
+            if (ImGui::SmallButton("Remove")) context.userSymbols->Remove(symbol.first);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::SeparatorText("Module exports");
+    ImGui::SetNextItemWidth(Px(260));
+    const bool search = ImGui::InputTextWithHint("##SymbolSearch", "export name contains...", symbolSearch_,
+                                                 sizeof(symbolSearch_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (ImGui::Button("Search") || search) {
+        symbolSearched_ = Trim(symbolSearch_);
+        symbolMatches_ = ContextSymbols(context, true).Search(symbolSearched_, 2000);
+        context.status = std::to_string(symbolMatches_.size()) + " export(s) found" +
+                         (symbolMatches_.size() >= 2000 ? " (first 2000)" : "");
+    }
+    if (symbolMatches_.empty()) {
+        if (!symbolSearched_.empty()) ImGui::TextDisabled("No export matches.");
+        return;
+    }
+    if (BeginDataTable("ExportMatches", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                               ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Symbol", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(symbolMatches_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& match = symbolMatches_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(match.first.c_str());
+                ImGui::TableSetColumnIndex(1);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable((Hex(match.second) + "##Export").c_str(), false, ImGuiSelectableFlags_SpanAllColumns);
+                }
+                AddressContextOptions options;
+                options.label = match.first;
+                if (ImGui::BeginPopupContextItem("ExportMenu")) {
+                    if (ImGui::MenuItem("Copy name")) ImGui::SetClipboardText(match.first.c_str());
+                    ImGui::Separator();
+                    DrawAddressContextActions(context, match.second, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
+// ------------------------------------------------------------------ assembler
+
+// Whole instructions covering at least `minimum` bytes, so the trampoline
+// does not cut an instruction in half.
+int ToolsWorkspace::StealLength(UiContext& context, uint64_t address, int minimum) const {
+    if (!context.disassembly) return minimum;
+    std::vector<services::DisassemblyInstruction> instructions;
+    std::string error;
+    if (!context.disassembly->Decode(address, 12, instructions, &error)) return minimum;
+    int length = 0;
+    for (const auto& instruction : instructions) {
+        length += static_cast<int>(instruction.bytes.size());
+        if (length >= minimum) break;
+    }
+    return length >= minimum ? length : minimum;
+}
+
+bool ToolsWorkspace::AssembleCurrent(UiContext& context, uint64_t address,
+                                     services::AssembleBlockResult& result, std::string& error) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    services::AssembleRequest request;
+    request.text = assemblerSource_.data();
+    request.address = address;
+    request.x64 = !session || session->Target().architecture != target::Architecture::X86;
+    request.evaluate = [&context](const std::string& text, uint64_t& value, std::string& message) {
+        if (EvaluateContextAddress(context, text, value, &message)) return true;
+        if (message.empty()) message = "Unknown symbol: " + text;
+        return false;
+    };
+    return services::AssembleBlock(request, result, &error);
+}
+
+// A classic trampoline: a jmp at the site into a cave that runs the new
+// code, the original instructions, then jumps back after them.
+bool ToolsWorkspace::InjectCode(UiContext& context, uint64_t site, std::string& error) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session || !context.memory) {
+        error = "No target";
+        return false;
+    }
+    const uint64_t pid = session->Target().processId;
+    const bool x64 = session->Target().architecture != target::Architecture::X86;
+
+    auto assembleLine = [&](const std::string& text, uint64_t at, std::vector<uint8_t>& bytes) {
+        services::AssembleRequest request;
+        request.text = text;
+        request.address = at;
+        request.x64 = x64;
+        request.evaluate = [&context](const std::string& name, uint64_t& value, std::string& message) {
+            return EvaluateContextAddress(context, name, value, &message);
+        };
+        std::string message;
+        return services::AssembleLine(request, bytes, &message);
+    };
+
+    // A cave big enough for the new code, the stolen bytes and a jump back.
+    const size_t sourceLength = std::strlen(assemblerSource_.data());
+    const size_t caveSize = std::max<size_t>(512, sourceLength * 2) + 96;
+    uint64_t cave = 0;
+    if (!cortex::remote_memory::Allocate(pid, caveSize, site, cave, &error)) return false;
+
+    auto bail = [&](const std::string& message) {
+        cortex::remote_memory::Free(pid, cave, nullptr);
+        error = message;
+        return false;
+    };
+
+    // The jump that will sit at the site tells us how many bytes to steal.
+    std::vector<uint8_t> siteJump;
+    {
+        char target[32] = {};
+        std::snprintf(target, sizeof(target), "%llX", static_cast<unsigned long long>(cave));
+        if (!assembleLine(std::string("jmp ") + target, site, siteJump)) return bail("Cannot encode the jump to the cave");
+    }
+    int steal = std::max<int>(injectSteal_, static_cast<int>(siteJump.size()));
+    steal = StealLength(context, site, steal);
+
+    std::vector<uint8_t> original;
+    std::string readError;
+    if (!context.memory->Read(site, static_cast<size_t>(steal), original, &readError) ||
+        original.size() != static_cast<size_t>(steal))
+        return bail("Cannot read the original bytes: " + readError);
+
+    // The cave: new code, the original instructions, a jump back.
+    std::vector<uint8_t> caveBytes;
+    if (sourceLength) {
+        services::AssembleBlockResult result;
+        std::string assembleError;
+        services::AssembleRequest request;
+        request.text = assemblerSource_.data();
+        request.address = cave;
+        request.x64 = x64;
+        request.evaluate = [&context](const std::string& name, uint64_t& value, std::string& message) {
+            return EvaluateContextAddress(context, name, value, &message);
+        };
+        if (!services::AssembleBlock(request, result, &assembleError)) return bail(assembleError);
+        caveBytes = std::move(result.bytes);
+    }
+    // Relocate the replaced instructions so their relative branches and
+    // RIP-relative operands still reach the same targets from the cave.
+    std::vector<uint8_t> relocated;
+    std::string relocateError;
+    if (!services::RelocateCode(original.data(), original.size(), site, cave + caveBytes.size(), x64, relocated,
+                                &relocateError))
+        return bail("Cannot relocate the replaced code: " + relocateError);
+    caveBytes.insert(caveBytes.end(), relocated.begin(), relocated.end());
+    std::vector<uint8_t> jumpBack;
+    char back[32] = {};
+    std::snprintf(back, sizeof(back), "%llX", static_cast<unsigned long long>(site + steal));
+    if (!assembleLine(std::string("jmp ") + back, cave + caveBytes.size(), jumpBack))
+        return bail("Cannot encode the jump back");
+    caveBytes.insert(caveBytes.end(), jumpBack.begin(), jumpBack.end());
+    if (caveBytes.size() > caveSize) return bail("The code is larger than the cave");
+
+    if (!cortex::remote_memory::WriteCode(pid, cave, caveBytes.data(), caveBytes.size(), &error))
+        return bail("Cannot write the cave: " + error);
+
+    // The site: the jump to the cave, padded with NOPs to the steal length.
+    std::vector<uint8_t> patch = siteJump;
+    patch.resize(static_cast<size_t>(steal), 0x90);
+    if (!cortex::remote_memory::WriteCode(pid, site, patch.data(), patch.size(), &error))
+        return bail("Cannot patch the site: " + error);
+
+    injections_.push_back({site, cave, caveSize, original, std::string(assemblerAddress_)});
+    assemblerError_ = false;
+    assemblerInfo_ = "Injected at " + Hex(site) + ": " + std::to_string(steal) + " byte(s) replaced, cave at " +
+                     Hex(cave);
+    return true;
+}
+
+void ToolsWorkspace::DrawAssembler(UiContext& context) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    const bool x64 = !session || session->Target().architecture != target::Architecture::X86;
+    const uint64_t pid = session ? session->Target().processId : 0;
+
+    ImGui::RadioButton("Assemble && write", &assemblerMode_, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Code injection", &assemblerMode_, 1);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s)", x64 ? "x64" : "x86");
+
+    ImGui::TextDisabled(assemblerMode_ == 0 ? "Write bytes at" : "Inject at");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(260));
+    ImGui::InputTextWithHint("##AsmAddress", "game.exe+1234 or an expression", assemblerAddress_,
+                             sizeof(assemblerAddress_));
+    uint64_t address = 0;
+    const bool haveAddress = *assemblerAddress_ && Resolve(context, assemblerAddress_, address);
+    ImGui::SameLine();
+    if (haveAddress) {
+        MonoText("= %s", AddressText(address).c_str());
+    } else if (*assemblerAddress_) {
+        ImGui::TextColored(WarningTextColor(), "unresolved");
+    } else {
+        ImGui::TextDisabled("enter an address");
+    }
+
+    if (assemblerMode_ == 1) {
+        ImGui::SetNextItemWidth(Px(120));
+        if (ImGui::InputInt("Bytes to replace", &injectSteal_)) injectSteal_ = std::clamp(injectSteal_, 5, 64);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Auto") && haveAddress) injectSteal_ = StealLength(context, address, x64 ? 5 : 5);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Round up to whole instructions at the address");
+    }
+
+    HintText(assemblerMode_ == 0
+                 ? "Intel syntax, one instruction per line. Numbers are hex (10 = 0x10, #16 decimal). "
+                   "Labels end in ':'. Module names, exports and symbols resolve as addresses."
+                 : "The code runs in a cave Cortex allocates near the address. Original instructions are "
+                   "preserved and control returns after them. Relative operands in the replaced bytes may "
+                   "need adjusting.");
+
+    const float editorHeight = std::max(Px(140.0f), ImGui::GetContentRegionAvail().y - Px(150.0f));
+    {
+        MonoFont mono;
+        ImGui::InputTextMultiline("##AsmSource", assemblerSource_.data(), assemblerSource_.size(),
+                                  ImVec2(-1, editorHeight), ImGuiInputTextFlags_AllowTabInput);
+    }
+
+    const bool writes = context.mutationAllowed;
+    if (assemblerMode_ == 0) {
+        if (ImGui::Button("Assemble", ImVec2(Px(120), 0)) && haveAddress) {
+            services::AssembleBlockResult result;
+            std::string error;
+            assemblerError_ = !AssembleCurrent(context, address, result, error);
+            if (assemblerError_) {
+                assembledBytes_.clear();
+                assemblerInfo_ = error;
+            } else {
+                assembledBytes_ = result.bytes;
+                assembledAt_ = address;
+                assemblerInfo_ = std::to_string(result.bytes.size()) + " byte(s) assembled at " + Hex(address);
+            }
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!writes || assembledBytes_.empty() || !haveAddress || address != assembledAt_);
+        if (ImGui::Button("Write to target", ImVec2(Px(150), 0))) {
+            std::string error;
+            const bool ok = cortex::remote_memory::WriteCode(pid, address, assembledBytes_.data(),
+                                                             assembledBytes_.size(), &error);
+            assemblerError_ = !ok;
+            assemblerInfo_ = ok ? "Wrote " + std::to_string(assembledBytes_.size()) + " byte(s) to " + Hex(address)
+                                : "Write failed: " + error;
+            if (ok) context.status = assemblerInfo_;
+        }
+        ImGui::EndDisabled();
+        if (!writes) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Allow writes to patch the target");
+        }
+    } else {
+        ImGui::BeginDisabled(!writes || !haveAddress);
+        if (ImGui::Button("Inject", ImVec2(Px(120), 0))) {
+            std::string error;
+            if (InjectCode(context, address, error)) {
+                context.status = assemblerInfo_;
+            } else {
+                assemblerError_ = true;
+                assemblerInfo_ = error;
+            }
+        }
+        ImGui::EndDisabled();
+        if (!writes) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("Allow writes to inject");
+        }
+    }
+
+    if (!assemblerInfo_.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, assemblerError_ ? ChangedValueColor() : StaticAddressColor());
+        ImGui::TextWrapped("%s", assemblerInfo_.c_str());
+        ImGui::PopStyleColor();
+        if (!assemblerError_ && !assembledBytes_.empty() && assemblerMode_ == 0) {
+            MonoFont mono;
+            std::string hex;
+            char byte[4] = {};
+            for (size_t i = 0; i < assembledBytes_.size() && i < 64; ++i) {
+                std::snprintf(byte, sizeof(byte), "%02X ", assembledBytes_[i]);
+                hex += byte;
+            }
+            if (assembledBytes_.size() > 64) hex += "...";
+            ImGui::TextWrapped("%s", hex.c_str());
+        }
+    }
+
+    // Active injections, with Restore.
+    if (!injections_.empty()) {
+        ImGui::SeparatorText(("Active injections (" + std::to_string(injections_.size()) + ")").c_str());
+        for (size_t i = 0; i < injections_.size();) {
+            auto& injection = injections_[i];
+            ImGui::PushID(static_cast<int>(i));
+            MonoText("%s -> cave %s (%zu bytes)", Hex(injection.site).c_str(), Hex(injection.cave).c_str(),
+                     injection.original.size());
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!writes);
+            bool removed = false;
+            if (ImGui::SmallButton("Restore")) {
+                std::string error;
+                const bool ok = cortex::remote_memory::WriteCode(pid, injection.site, injection.original.data(),
+                                                                injection.original.size(), &error);
+                if (ok) cortex::remote_memory::Free(pid, injection.cave, nullptr);
+                context.status = ok ? "Injection at " + Hex(injection.site) + " restored"
+                                    : "Restore failed: " + error;
+                removed = ok;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+            if (removed) injections_.erase(injections_.begin() + static_cast<std::ptrdiff_t>(i));
+            else ++i;
+        }
+    }
+}
+
+// ------------------------------------------------------------------ grouped scan
+
+void ToolsWorkspace::DrawGroupedScan(UiContext& context) {
+    HintText("Finds several values that sit close together, which is how you locate a structure from the "
+             "few fields you know. Prefix an element with its type: 4:64 f:1.5 2:14. A bare * skips one "
+             "byte and 4:* a field whose value you do not know. Numbers are hexadecimal; #100 is decimal.");
+
+    ImGui::SetNextItemWidth(-1);
+    const bool submitted = ImGui::InputTextWithHint("##GroupedText", "4:64 f:1.5 2:14", groupedText_,
+                                                    sizeof(groupedText_), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Window", &groupedWindow_)) groupedWindow_ = std::clamp(groupedWindow_, 4, 4096);
+    FlowSameLine(Px(150));
+    static const char* const kSizes[] = {"1 byte", "2 bytes", "4 bytes", "8 bytes"};
+    int sizeIndex = groupedDefaultSize_ == 1 ? 0 : groupedDefaultSize_ == 2 ? 1 : groupedDefaultSize_ == 8 ? 3 : 2;
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::Combo("Default", &sizeIndex, kSizes, 4))
+        groupedDefaultSize_ = sizeIndex == 0 ? 1 : sizeIndex == 1 ? 2 : sizeIndex == 3 ? 8 : 4;
+    FlowSameLine(CheckboxWidth("In order"));
+    ImGui::Checkbox("In order", &groupedOrdered_);
+    FlowSameLine(CheckboxWidth("Writable memory only"));
+    ImGui::Checkbox("Writable memory only", &groupedWritableOnly_);
+    FlowSameLine(ButtonWidth("Scan"));
+    const bool scan = ImGui::Button("Scan") || submitted;
+
+    if (scan) {
+        std::string parseError;
+        if (!services::ParseGroupedScan(groupedText_, static_cast<size_t>(groupedDefaultSize_), groupedElements_,
+                                        &parseError)) {
+            groupedInfo_ = parseError;
+            grouped_.clear();
+        } else {
+            const auto elements = groupedElements_;
+            const size_t window = static_cast<size_t>(groupedWindow_);
+            const bool ordered = groupedOrdered_;
+            const bool writableOnly = groupedWritableOnly_;
+            context.RunInBackground("Grouped scan", [this, &context, elements, window, ordered, writableOnly]() {
+                grouped_.clear();
+                const auto session = context.sessions ? context.sessions->Active() : nullptr;
+                if (!session) {
+                    groupedInfo_ = "Select a process first";
+                    return;
+                }
+                constexpr size_t kMaxResults = 5000;
+                constexpr uint64_t kMaxBytes = 512ull * 1024 * 1024;
+                uint64_t scanned = 0;
+                std::vector<uint8_t> buffer;
+                for (const auto& region : session->MemoryRegions()) {
+                    if (!region.readable) continue;
+                    if (writableOnly && !region.writable) continue;
+                    if (grouped_.size() >= kMaxResults || scanned >= kMaxBytes) break;
+                    const size_t size = static_cast<size_t>(std::min<uint64_t>(region.size, kMaxBytes - scanned));
+                    buffer.assign(size, 0);
+                    if (!session->ReadMemory(region.base, buffer.data(), size, nullptr)) continue;
+                    scanned += size;
+                    std::vector<services::GroupedHit> hits;
+                    services::FindGroupedValues(buffer.data(), size, region.base, elements, window, ordered,
+                                                kMaxResults - grouped_.size(), hits);
+                    grouped_.insert(grouped_.end(), hits.begin(), hits.end());
+                }
+                groupedInfo_ = std::to_string(grouped_.size()) + " match(es) in " +
+                               std::to_string(scanned / (1024 * 1024)) + " MB" +
+                               (grouped_.size() >= kMaxResults ? " (limit reached)" : "");
+            });
+        }
+    }
+    if (!groupedInfo_.empty()) ImGui::TextDisabled("%s", groupedInfo_.c_str());
+    if (grouped_.empty()) return;
+
+    if (BeginDataTable("GroupedResults", 3,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+        ImGui::TableSetupColumn("Offsets", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+        ImGui::TableSetupColumn("Region", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(grouped_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& hit = grouped_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable((Hex(hit.address) + "##Grouped").c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns);
+                }
+                if (ImGui::BeginPopupContextItem("GroupedMenu")) {
+                    if (ImGui::MenuItem("Add to the address list")) {
+                        PendingAddressEntry entry;
+                        entry.address = hit.address;
+                        entry.description = "Grouped scan";
+                        entry.type = services::ScanDataType::Int32;
+                        context.pendingAddresses.push_back(entry);
+                        context.requestWorkspace = "memory";
+                    }
+                    ImGui::Separator();
+                    AddressContextOptions options;
+                    options.label = "Grouped scan";
+                    DrawAddressContextActions(context, hit.address, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::TableSetColumnIndex(1);
+                std::string offsets;
+                for (const auto offset : hit.offsets) {
+                    char buffer[16] = {};
+                    std::snprintf(buffer, sizeof(buffer), "%s+%llX", offsets.empty() ? "" : " ",
+                                  static_cast<unsigned long long>(offset));
+                    offsets += buffer;
+                }
+                MonoTextUnformatted(offsets.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(AddressText(hit.address).c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
+// ------------------------------------------------------------------ memory dump
+
+void ToolsWorkspace::DrawDump(UiContext& context) {
+    HintText("Writes a piece of the target's memory to a file, and puts a file back where it came from. "
+             "Pages that cannot be read are saved as zeros, so a whole region survives the guard pages "
+             "inside it.");
+
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) return;
+
+    ImGui::SetNextItemWidth(Px(260));
+    ImGui::InputTextWithHint("##DumpAddress", "address, module+RVA or expression", dumpAddress_,
+                             sizeof(dumpAddress_));
+    FlowSameLine(Px(160));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputTextWithHint("Size", "1000", dumpSize_, sizeof(dumpSize_));
+
+    // A module is the range people reach for most often, so it fills both.
+    FlowSameLine(Px(270));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Module");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(200));
+    if (ModuleCombo("##DumpModule", dumpModule_)) {
+        if (const auto* module = ModuleAt(dumpModule_)) {
+            std::snprintf(dumpAddress_, sizeof(dumpAddress_), "%s", Hex(module->base).c_str());
+            std::snprintf(dumpSize_, sizeof(dumpSize_), "%llX", static_cast<unsigned long long>(module->size));
+        }
+    }
+
+    uint64_t address = 0;
+    const bool haveAddress = Resolve(context, dumpAddress_, address);
+    uint64_t size = 0;
+    const bool haveSize = services::ParseAsmNumber(dumpSize_, size) && size;
+
+    FlowSameLine(ButtonWidth("Save to file..."));
+    ImGui::BeginDisabled(!haveAddress || !haveSize);
+    if (ImGui::Button("Save to file...")) {
+        std::string path = dumpPath_;
+        if (ShowSaveFileDialog(L"Memory dumps (*.bin)\0*.bin\0All files\0*.*\0", L"bin", path)) {
+            std::snprintf(dumpPath_, sizeof(dumpPath_), "%s", path.c_str());
+            services::MemoryDumpReport report;
+            std::string error;
+            dumpError_ = !services::DumpMemoryToFile(Reader(context), path, address, size, report, &error);
+            if (dumpError_) {
+                dumpInfo_ = error;
+            } else {
+                dumpInfo_ = "Wrote " + std::to_string(report.requested) + " byte(s) to " + path;
+                if (report.holes)
+                    dumpInfo_ += " (" + std::to_string(report.holes) + " unreadable, saved as zeros)";
+            }
+        }
+    }
+    ImGui::EndDisabled();
+
+    FlowSameLine(ButtonWidth("Load from file..."));
+    ImGui::BeginDisabled(!haveAddress || !context.mutationAllowed);
+    if (ImGui::Button("Load from file...")) {
+        std::string path = dumpPath_;
+        if (ShowOpenFileDialog(L"Memory dumps (*.bin)\0*.bin\0All files\0*.*\0", path)) {
+            std::snprintf(dumpPath_, sizeof(dumpPath_), "%s", path.c_str());
+            const auto writer = [session](uint64_t at, const void* buffer, size_t count) {
+                return session->WriteMemory(at, buffer, count, nullptr);
+            };
+            uint64_t written = 0;
+            std::string error;
+            dumpError_ = !services::LoadFileToMemory(writer, path, address, 0, 0, written, &error);
+            dumpInfo_ = dumpError_ ? error
+                                   : "Wrote " + std::to_string(written) + " byte(s) to " + Hex(address);
+        }
+    }
+    ImGui::EndDisabled();
+    if (!context.mutationAllowed) {
+        FlowSameLine(Px(200));
+        ImGui::TextDisabled("Allow writes to load a file back");
+    }
+
+    if (!dumpInfo_.empty()) {
+        if (dumpError_) ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.4f, 1.0f), "%s", dumpInfo_.c_str());
+        else ImGui::TextDisabled("%s", dumpInfo_.c_str());
+    }
+}
+
+// ------------------------------------------------------------------ custom types
+
+void ToolsWorkspace::LoadTypeEditor(const services::CustomType& type) {
+    std::snprintf(typeName_, sizeof(typeName_), "%s", type.name.c_str());
+    typeBase_ = static_cast<int>(type.base);
+    typeSize_ = static_cast<int>(type.size);
+    typeBigEndian_ = type.bigEndian;
+    typeSigned_ = type.signedValue;
+    typeBitOffset_ = static_cast<int>(type.bitOffset);
+    typeBitCount_ = static_cast<int>(type.bitCount);
+    typeScale_ = type.scale;
+    typeOffset_ = type.offset;
+}
+
+services::CustomType ToolsWorkspace::TypeFromEditor() const {
+    services::CustomType type;
+    type.name = typeName_;
+    type.base = static_cast<services::CustomTypeBase>(typeBase_);
+    type.size = static_cast<size_t>(typeSize_);
+    type.bigEndian = typeBigEndian_;
+    type.signedValue = typeSigned_;
+    type.bitOffset = static_cast<unsigned>(typeBitOffset_);
+    type.bitCount = static_cast<unsigned>(typeBitCount_);
+    type.scale = typeScale_;
+    type.offset = typeOffset_;
+    return type;
+}
+
+void ToolsWorkspace::DrawCustomTypes(UiContext& context) {
+    HintText("Value types of your own, for what the standard ones cannot read: a big-endian field, a value "
+             "the game keeps multiplied by ten, a few bits inside a word. A type shows raw * scale + offset "
+             "and writes the same the other way round. Pick one from an address list entry's Change type.");
+    if (!context.customTypes) return;
+    auto& table = *context.customTypes;
+
+    const auto& types = table.Types();
+    if (BeginDataTable("CustomTypes", 4,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable,
+                       ImVec2(0, Px(150)))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.4f);
+        ImGui::TableSetupColumn("Reads", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("Shows", ImGuiTableColumnFlags_WidthStretch, 0.3f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableHeadersRow();
+        std::string remove;
+        for (size_t row = 0; row < types.size(); ++row) {
+            const auto& type = types[row];
+            ImGui::PushID(static_cast<int>(row));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::Selectable((type.name + "##Type").c_str(), typeSelected_ == static_cast<int>(row),
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
+                typeSelected_ = static_cast<int>(row);
+                LoadTypeEditor(type);
+            }
+            ImGui::TableSetColumnIndex(1);
+            std::string reads = std::to_string(type.size) + (type.size == 1 ? " byte" : " bytes");
+            reads += type.base == services::CustomTypeBase::Float    ? ", float"
+                     : type.base == services::CustomTypeBase::Double ? ", double"
+                     : type.signedValue                              ? ", signed"
+                                                                     : ", unsigned";
+            if (type.bigEndian) reads += ", big-endian";
+            ImGui::TextUnformatted(reads.c_str());
+            ImGui::TableSetColumnIndex(2);
+            char shows[96] = {};
+            if (type.base == services::CustomTypeBase::Integer && (type.bitOffset || type.bitCount))
+                std::snprintf(shows, sizeof(shows), "bits %u..%u, x%g %+g", type.bitOffset,
+                              type.bitOffset + (type.bitCount ? type.bitCount : 1) - 1, type.scale, type.offset);
+            else
+                std::snprintf(shows, sizeof(shows), "x%g %+g", type.scale, type.offset);
+            ImGui::TextUnformatted(shows);
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("Remove")) remove = type.name;
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+        if (!remove.empty()) {
+            table.Remove(remove);
+            typeSelected_ = -1;
+            typeInfo_ = "Removed " + remove;
+            typeError_ = false;
+        }
+    }
+
+    ImGui::SeparatorText(typeSelected_ >= 0 ? "Edit the type" : "New type");
+    ImGui::SetNextItemWidth(Px(200));
+    ImGui::InputTextWithHint("##TypeName", "name", typeName_, sizeof(typeName_));
+    FlowSameLine(Px(180));
+    static const char* const kBases[] = {"Integer", "Float", "Double"};
+    ImGui::SetNextItemWidth(Px(140));
+    if (ImGui::Combo("Reads", &typeBase_, kBases, 3))
+        typeSize_ = typeBase_ == 1 ? 4 : typeBase_ == 2 ? 8 : typeSize_;
+    FlowSameLine(Px(150));
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Bytes", &typeSize_)) typeSize_ = std::clamp(typeSize_, 1, 8);
+    ImGui::EndDisabled();
+    FlowSameLine(CheckboxWidth("Big-endian"));
+    ImGui::Checkbox("Big-endian", &typeBigEndian_);
+    FlowSameLine(CheckboxWidth("Signed"));
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::Checkbox("Signed", &typeSigned_);
+    ImGui::EndDisabled();
+
+    ImGui::BeginDisabled(typeBase_ != 0);
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("First bit", &typeBitOffset_)) typeBitOffset_ = std::clamp(typeBitOffset_, 0, 63);
+    FlowSameLine(Px(150));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Bits", &typeBitCount_)) typeBitCount_ = std::clamp(typeBitCount_, 0, 64);
+    ImGui::EndDisabled();
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputDouble("Scale", &typeScale_, 0.0, 0.0, "%g");
+    FlowSameLine(Px(180));
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputDouble("Offset", &typeOffset_, 0.0, 0.0, "%g");
+
+    if (ImGui::Button(typeSelected_ >= 0 ? "Save" : "Add")) {
+        std::string error;
+        const auto type = TypeFromEditor();
+        typeError_ = !table.Set(type, &error);
+        typeInfo_ = typeError_ ? error : "Saved " + type.name;
+        if (!typeError_) {
+            const auto& updated = table.Types();
+            for (size_t row = 0; row < updated.size(); ++row)
+                if (updated[row].name == type.name) typeSelected_ = static_cast<int>(row);
+        }
+    }
+    FlowSameLine(ButtonWidth("New"));
+    if (ImGui::Button("New")) {
+        typeSelected_ = -1;
+        LoadTypeEditor(services::CustomType{});
+        typeInfo_.clear();
+        typeError_ = false;
+    }
+    FlowSameLine(ButtonWidth("Save to file..."));
+    if (ImGui::Button("Save to file...")) {
+        std::string path = typePath_;
+        if (ShowSaveFileDialog(L"Cortex types (*.ctypes)\0*.ctypes\0All files\0*.*\0", L"ctypes", path)) {
+            std::snprintf(typePath_, sizeof(typePath_), "%s", path.c_str());
+            std::string error;
+            typeError_ = !table.Save(path, &error);
+            typeInfo_ = typeError_ ? error : "Saved " + std::to_string(types.size()) + " type(s) to " + path;
+        }
+    }
+    FlowSameLine(ButtonWidth("Load from file..."));
+    if (ImGui::Button("Load from file...")) {
+        std::string path = typePath_;
+        if (ShowOpenFileDialog(L"Cortex types (*.ctypes)\0*.ctypes\0All files\0*.*\0", path)) {
+            std::snprintf(typePath_, sizeof(typePath_), "%s", path.c_str());
+            std::string error;
+            typeError_ = !table.Load(path, &error);
+            typeSelected_ = -1;
+            typeInfo_ = typeError_ ? error
+                                   : "Loaded " + std::to_string(table.Types().size()) + " type(s) from " + path;
+        }
+    }
+
+    if (!typeInfo_.empty()) {
+        if (typeError_) ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.4f, 1.0f), "%s", typeInfo_.c_str());
+        else ImGui::TextDisabled("%s", typeInfo_.c_str());
+    }
+}
+
+// ------------------------------------------------------------------ dissect
+
+services::AddressPredicate ToolsWorkspace::AddressPredicateFor(UiContext& context) const {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) return {};
+    // The regions are captured once: the predicate is called for every word
+    // the dissector and the spider look at.
+    auto ranges = std::make_shared<std::vector<std::pair<uint64_t, uint64_t>>>();
+    for (const auto& region : session->MemoryRegions())
+        if (region.readable) ranges->emplace_back(region.base, region.base + region.size);
+    std::sort(ranges->begin(), ranges->end());
+    return [ranges](uint64_t address) {
+        auto after = std::upper_bound(ranges->begin(), ranges->end(),
+                                      std::make_pair(address, std::numeric_limits<uint64_t>::max()));
+        if (after == ranges->begin()) return false;
+        --after;
+        return address >= after->first && address < after->second;
+    };
+}
+
+services::AddressDescriber ToolsWorkspace::AddressDescriberFor(UiContext& context) const {
+    auto modules = std::make_shared<std::vector<target::ModuleInfo>>(modules_);
+    (void)context;
+    return [modules](uint64_t address) -> std::string {
+        for (const auto& module : *modules) {
+            if (address < module.base || address >= module.base + module.size) continue;
+            char buffer[32] = {};
+            std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(address - module.base));
+            return module.name + buffer;
+        }
+        return {};
+    };
+}
+
+void ToolsWorkspace::DrawDissect(UiContext& context) {
+    HintText("Reads the same bytes at one or more instances of a structure and says what sits at each "
+             "offset: a pointer, a float, some text, a number. With several instances the fields that "
+             "disagree are the ones that belong to the instance — that is how you find health among the "
+             "padding. Separate the addresses with spaces or commas.");
+
+    ImGui::SetNextItemWidth(-1);
+    const bool submitted = ImGui::InputTextWithHint("##DissectAddresses", "address, address, ...",
+                                                    dissectAddresses_, sizeof(dissectAddresses_),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Bytes", &dissectSize_)) dissectSize_ = std::clamp(dissectSize_, 4, 8192);
+    FlowSameLine(Px(170));
+    static const char* const kSteps[] = {"1 byte", "2 bytes", "4 bytes", "8 bytes"};
+    int stepIndex = dissectAlignment_ == 1 ? 0 : dissectAlignment_ == 2 ? 1 : dissectAlignment_ == 8 ? 3 : 2;
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::Combo("Step", &stepIndex, kSteps, 4))
+        dissectAlignment_ = stepIndex == 0 ? 1 : stepIndex == 1 ? 2 : stepIndex == 3 ? 8 : 4;
+    FlowSameLine(CheckboxWidth("Hide empty fields"));
+    ImGui::Checkbox("Hide empty fields", &dissectHideZeros_);
+    FlowSameLine(CheckboxWidth("Only what differs"));
+    ImGui::Checkbox("Only what differs", &dissectOnlyDiffering_);
+    FlowSameLine(ButtonWidth("Dissect"));
+    const bool run = ImGui::Button("Dissect") || submitted;
+
+    if (run) {
+        std::vector<uint64_t> instances;
+        std::string text = dissectAddresses_;
+        for (auto& c : text)
+            if (c == ',' || c == ';') c = ' ';
+        std::istringstream stream(text);
+        std::string token;
+        bool bad = false;
+        while (stream >> token) {
+            uint64_t address = 0;
+            if (!Resolve(context, token.c_str(), address)) {
+                dissectInfo_ = "\"" + token + "\" is not an address";
+                bad = true;
+                break;
+            }
+            instances.push_back(address);
+        }
+        if (!bad) {
+            services::DissectOptions options;
+            options.size = static_cast<size_t>(dissectSize_);
+            options.alignment = static_cast<size_t>(dissectAlignment_);
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            options.pointerSize =
+                session && session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+            std::string error;
+            if (!services::DissectStructure(Reader(context), instances, options, AddressPredicateFor(context),
+                                            AddressDescriberFor(context), dissect_, &error)) {
+                dissectInfo_ = error;
+                dissect_.fields.clear();
+            } else {
+                dissectInfo_ = std::to_string(dissect_.fields.size()) + " field(s) over " +
+                               std::to_string(dissect_.instances.size()) + " instance(s)";
+                if (dissect_.unreadable)
+                    dissectInfo_ += ", " + std::to_string(dissect_.unreadable) + " unreadable";
+            }
+        }
+    }
+    if (!dissectInfo_.empty()) ImGui::TextDisabled("%s", dissectInfo_.c_str());
+    if (dissect_.fields.empty()) return;
+
+    const int columns = 3 + static_cast<int>(dissect_.instances.size());
+    if (BeginDataTable("DissectFields", columns,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        for (size_t i = 0; i < dissect_.instances.size(); ++i)
+            ImGui::TableSetupColumn((Hex(dissect_.instances[i]) + "##Instance" + std::to_string(i)).c_str(),
+                                    ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableSetupColumn("Points at", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+
+        for (size_t row = 0; row < dissect_.fields.size(); ++row) {
+            const auto& field = dissect_.fields[row];
+            if (dissectHideZeros_ && field.zero) continue;
+            if (dissectOnlyDiffering_ && !field.differs) continue;
+            ImGui::PushID(static_cast<int>(row));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            char offset[32] = {};
+            std::snprintf(offset, sizeof(offset), "+%llX", static_cast<unsigned long long>(field.offset));
+            {
+                MonoFont mono;
+                ImGui::Selectable(offset, false, ImGuiSelectableFlags_SpanAllColumns);
+            }
+            if (ImGui::BeginPopupContextItem("DissectMenu")) {
+                const uint64_t address = dissect_.instances.empty() ? 0 : dissect_.instances[0] + field.offset;
+                if (ImGui::MenuItem("Add to the address list")) {
+                    PendingAddressEntry entry;
+                    entry.address = address;
+                    entry.description = field.name;
+                    entry.type = field.kind == services::DissectKind::Float ? services::ScanDataType::Float
+                               : field.kind == services::DissectKind::Double ? services::ScanDataType::Double
+                               : field.kind == services::DissectKind::Pointer ? services::ScanDataType::Int64
+                               : field.kind == services::DissectKind::Text ? services::ScanDataType::String
+                                                                           : services::ScanDataType::Int32;
+                    context.pendingAddresses.push_back(entry);
+                    context.requestWorkspace = "memory";
+                }
+                if (field.kind == services::DissectKind::Pointer && ImGui::MenuItem("Dissect what it points at")) {
+                    std::string targets;
+                    for (const auto& value : field.values) targets += (targets.empty() ? "" : " ") + value;
+                    std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s", targets.c_str());
+                }
+                ImGui::Separator();
+                AddressContextOptions options;
+                options.label = field.name;
+                options.valueSize = static_cast<int>(field.size);
+                DrawAddressContextActions(context, address, options);
+                ImGui::EndPopup();
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextDisabled("%s", services::DissectKindName(field.kind));
+            for (size_t i = 0; i < field.values.size(); ++i) {
+                ImGui::TableSetColumnIndex(2 + static_cast<int>(i));
+                if (field.differs) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.78f, 0.35f, 1.0f));
+                MonoTextUnformatted(field.values[i].c_str());
+                if (field.differs) ImGui::PopStyleColor();
+            }
+            ImGui::TableSetColumnIndex(2 + static_cast<int>(dissect_.instances.size()));
+            if (!field.note.empty()) ImGui::TextDisabled("%s", field.note.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
+// ------------------------------------------------------------------ pointer spider
+
+void ToolsWorkspace::AddSpiderPath(UiContext& context, size_t nodeIndex) {
+    if (nodeIndex >= spider_.size()) return;
+    const auto& node = spider_[nodeIndex];
+    const auto offsets = services::SpiderOffsets(spider_, nodeIndex);
+    // The path reads the pointer at root + the first offset, follows it by the
+    // second, and so on; the entry's address is the slot the node was read
+    // from. The first offset belongs to the base, the rest are the pointer
+    // offsets of the entry.
+    PendingAddressEntry entry;
+    entry.address = node.address;
+    entry.description = "Spider " + SpiderPathText(nodeIndex);
+    entry.type = services::ScanDataType::Int64;
+    const uint64_t base = spiderBase_ + (offsets.empty() ? 0 : offsets.front());
+    entry.baseOffset = base;
+    if (offsets.size() > 1) entry.offsets.assign(offsets.begin() + 1, offsets.end());
+    // A base inside a module is kept as module + offset, so the entry survives
+    // a restart of the game.
+    for (const auto& module : modules_) {
+        if (base < module.base || base >= module.base + module.size) continue;
+        entry.module = module.name;
+        entry.baseOffset = base - module.base;
+        break;
+    }
+    if (const auto session = context.sessions ? context.sessions->Active() : nullptr)
+        entry.pointerSize = session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+    context.pendingAddresses.push_back(std::move(entry));
+    context.requestWorkspace = "memory";
+}
+
+std::string ToolsWorkspace::SpiderPathText(size_t nodeIndex) const {
+    return services::SpiderPath(spider_, nodeIndex);
+}
+
+void ToolsWorkspace::DrawSpider(UiContext& context) {
+    HintText("Follows every plausible pointer out of one address, level by level, so you can see what a "
+             "base pointer actually leads to. The pointer scanner does the opposite: it looks for paths "
+             "that reach a value you already found.");
+
+    ImGui::SetNextItemWidth(Px(280));
+    const bool submitted = ImGui::InputTextWithHint("##SpiderRoot", "address, module+RVA or expression",
+                                                    spiderRoot_, sizeof(spiderRoot_),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+    FlowSameLine(Px(150));
+    ImGui::SetNextItemWidth(Px(110));
+    if (ImGui::InputInt("Levels", &spiderLevel_)) spiderLevel_ = std::clamp(spiderLevel_, 1, 5);
+    FlowSameLine(Px(170));
+    ImGui::SetNextItemWidth(Px(120));
+    if (ImGui::InputInt("Offset span", &spiderSpan_)) spiderSpan_ = std::clamp(spiderSpan_, 8, 0x2000);
+    FlowSameLine(ButtonWidth("Explore"));
+    const bool run = ImGui::Button("Explore") || submitted;
+    FlowSameLine(ButtonWidth("Graph") + ButtonWidth("List") + Px(6));
+    if (spiderGraph_) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button("Graph")) spiderGraph_ = true;
+    if (spiderGraph_) ImGui::PopStyleColor();
+    ImGui::SameLine();
+    if (!spiderGraph_) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button("List")) spiderGraph_ = false;
+    if (!spiderGraph_) ImGui::PopStyleColor();
+
+    if (run) {
+        uint64_t root = 0;
+        if (!Resolve(context, spiderRoot_, root)) {
+            spiderInfo_ = "That address could not be resolved";
+            spider_.clear();
+        } else {
+            const auto session = context.sessions ? context.sessions->Active() : nullptr;
+            services::SpiderOptions options;
+            options.maxLevel = spiderLevel_;
+            options.maxOffset = static_cast<uint32_t>(spiderSpan_);
+            options.pointerSize =
+                session && session->Target().architecture == target::Architecture::X86 ? 4 : 8;
+            options.alignment = options.pointerSize;
+            std::string error;
+            if (!services::SpiderPointers(Reader(context), root, options, AddressPredicateFor(context),
+                                          AddressDescriberFor(context), spider_, &error)) {
+                spiderInfo_ = error;
+                spider_.clear();
+            } else {
+                spiderBase_ = root;
+                spiderInfo_ = std::to_string(spider_.size()) + " pointer(s) from " + Hex(root) +
+                              (spider_.size() >= options.maxNodes ? " (limit reached)" : "");
+                graphBuiltFor_ = static_cast<size_t>(-1);
+                graphSelected_ = -1;
+                graphPanX_ = 24.0f;
+                graphPanY_ = 24.0f;
+            }
+        }
+    }
+    if (!spiderInfo_.empty()) ImGui::TextDisabled("%s", spiderInfo_.c_str());
+    if (spider_.empty()) return;
+
+    if (spiderGraph_) DrawSpiderGraph(context);
+    else DrawSpiderList(context);
+}
+
+void ToolsWorkspace::DrawSpiderList(UiContext& context) {
+    if (BeginDataTable("SpiderNodes", 4,
+                       ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY |
+                           ImGuiTableFlags_Resizable,
+                       ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.35f);
+        ImGui::TableSetupColumn("Read from", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+        ImGui::TableSetupColumn("Points at", ImGuiTableColumnFlags_WidthStretch, 0.2f);
+        ImGui::TableSetupColumn("Where", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(spider_.size()));
+        while (clipper.Step()) {
+            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+                const auto& node = spider_[static_cast<size_t>(row)];
+                ImGui::PushID(row);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                {
+                    MonoFont mono;
+                    ImGui::Selectable(SpiderPathText(static_cast<size_t>(row)).c_str(), false,
+                                      ImGuiSelectableFlags_SpanAllColumns);
+                }
+                if (ImGui::BeginPopupContextItem("SpiderMenu")) {
+                    if (ImGui::MenuItem("Add the path to the address list")) AddSpiderPath(context, static_cast<size_t>(row));
+                    if (ImGui::MenuItem("Explore from here")) {
+                        std::snprintf(spiderRoot_, sizeof(spiderRoot_), "%s", Hex(node.value).c_str());
+                    }
+                    if (ImGui::MenuItem("Dissect what it points at")) {
+                        std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s",
+                                      Hex(node.value).c_str());
+                        active_ = Tab::Dissect;
+                    }
+                    ImGui::Separator();
+                    AddressContextOptions options;
+                    options.label = "Spider";
+                    DrawAddressContextActions(context, node.value, options);
+                    ImGui::EndPopup();
+                }
+                ImGui::TableSetColumnIndex(1);
+                MonoTextUnformatted(Hex(node.address).c_str());
+                ImGui::TableSetColumnIndex(2);
+                MonoTextUnformatted(Hex(node.value).c_str());
+                ImGui::TableSetColumnIndex(3);
+                if (!node.note.empty()) ImGui::TextDisabled("%s", node.note.c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
+    }
+}
+
+// One vertex per distinct object the pointers lead to (the root first), one
+// edge per pointer. Nodes come out of the spider breadth first, so the level
+// a vertex is first seen at is the shortest way to it, and an object reached
+// by several paths is one vertex with several edges into it.
+void ToolsWorkspace::BuildSpiderGraph() {
+    constexpr size_t kMaxVertices = 220;
+    graphVertices_.clear();
+    graphEdges_.clear();
+    graphTruncated_ = false;
+    std::unordered_map<uint64_t, int> index;
+    std::vector<int> perLevel;
+
+    const auto addVertex = [&](uint64_t value, int level, int firstNode, const std::string& note) {
+        GraphVertex vertex;
+        vertex.value = value;
+        vertex.level = level;
+        vertex.firstNode = firstNode;
+        vertex.note = note;
+        vertex.label = note.empty() ? Hex(value) : note;
+        if (static_cast<size_t>(level) >= perLevel.size()) perLevel.resize(static_cast<size_t>(level) + 1, 0);
+        vertex.row = perLevel[static_cast<size_t>(level)]++;
+        graphVertices_.push_back(std::move(vertex));
+        index[value] = static_cast<int>(graphVertices_.size()) - 1;
+        return static_cast<int>(graphVertices_.size()) - 1;
+    };
+
+    std::string rootNote;
+    for (const auto& module : modules_) {
+        if (spiderBase_ < module.base || spiderBase_ >= module.base + module.size) continue;
+        char buffer[32] = {};
+        std::snprintf(buffer, sizeof(buffer), "+%llX", static_cast<unsigned long long>(spiderBase_ - module.base));
+        rootNote = module.name + buffer;
+        break;
+    }
+    addVertex(spiderBase_, 0, -1, rootNote);
+
+    std::set<std::tuple<int, int, uint32_t>> seenEdges;
+    for (size_t i = 0; i < spider_.size(); ++i) {
+        const auto& node = spider_[i];
+        const uint64_t parentValue = node.parent < 0 ? spiderBase_ : spider_[static_cast<size_t>(node.parent)].value;
+        const auto from = index.find(parentValue);
+        if (from == index.end()) continue;
+        int to;
+        const auto existing = index.find(node.value);
+        if (existing != index.end()) {
+            to = existing->second;
+        } else {
+            if (graphVertices_.size() >= kMaxVertices) {
+                graphTruncated_ = true;
+                continue;
+            }
+            to = addVertex(node.value, node.level + 1, static_cast<int>(i), node.note);
+        }
+        if (seenEdges.insert({from->second, to, node.offset}).second)
+            graphEdges_.push_back({from->second, to, node.offset});
+    }
+    graphBuiltFor_ = spider_.size();
+    graphBuiltBase_ = spiderBase_;
+}
+
+void ToolsWorkspace::DrawSpiderGraph(UiContext& context) {
+    if (graphBuiltFor_ != spider_.size() || graphBuiltBase_ != spiderBase_) BuildSpiderGraph();
+
+    ImGui::TextDisabled("%zu object(s), %zu pointer(s). Drag to move, wheel to zoom, click to select, "
+                        "right-click for actions.%s",
+                        graphVertices_.size(), graphEdges_.size(),
+                        graphTruncated_ ? " Only the nearest objects are drawn; the list has them all." : "");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset view")) {
+        graphPanX_ = 24.0f;
+        graphPanY_ = 24.0f;
+        graphZoom_ = 1.0f;
+    }
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImVec2 size = ImGui::GetContentRegionAvail();
+    size.y = std::max(size.y, Px(120));
+    ImGui::InvisibleButton("##SpiderCanvas", size,
+                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+                               ImGuiButtonFlags_MouseButtonMiddle);
+    const bool canvasHovered = ImGui::IsItemHovered();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
+    draw->AddRectFilled(origin, ImVec2(origin.x + size.x, origin.y + size.y),
+                        ImGui::GetColorU32(ImGuiCol_FrameBg));
+
+    // Pan with a drag, zoom about the pointer with the wheel.
+    ImGuiIO& io = ImGui::GetIO();
+    if (canvasHovered || ImGui::IsItemActive()) {
+        if (ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) ||
+                                      ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f))) {
+            graphPanX_ += io.MouseDelta.x;
+            graphPanY_ += io.MouseDelta.y;
+        }
+        if (io.MouseWheel != 0.0f) {
+            const float before = graphZoom_;
+            graphZoom_ = std::clamp(graphZoom_ * (io.MouseWheel > 0 ? 1.1f : 1.0f / 1.1f), 0.35f, 2.2f);
+            const float ratio = graphZoom_ / before;
+            const float mx = io.MousePos.x - origin.x;
+            const float my = io.MousePos.y - origin.y;
+            graphPanX_ = mx - (mx - graphPanX_) * ratio;
+            graphPanY_ = my - (my - graphPanY_) * ratio;
+        }
+    }
+
+    const float zoom = graphZoom_;
+    const float nodeW = Px(196) * zoom;
+    const float nodeH = Px(34) * zoom;
+    const float columnGap = Px(92) * zoom;
+    const float rowGap = Px(16) * zoom;
+    const auto topLeft = [&](const GraphVertex& v) {
+        return ImVec2(origin.x + graphPanX_ + static_cast<float>(v.level) * (nodeW + columnGap),
+                      origin.y + graphPanY_ + static_cast<float>(v.row) * (nodeH + rowGap));
+    };
+
+    // Which vertex the pointer is over, and the ones next to it, so the
+    // edges that matter stand out.
+    int hovered = -1;
+    for (size_t i = 0; i < graphVertices_.size(); ++i) {
+        const ImVec2 a = topLeft(graphVertices_[i]);
+        if (canvasHovered && io.MousePos.x >= a.x && io.MousePos.x <= a.x + nodeW && io.MousePos.y >= a.y &&
+            io.MousePos.y <= a.y + nodeH)
+            hovered = static_cast<int>(i);
+    }
+    const int focus = hovered >= 0 ? hovered : graphSelected_;
+
+    const ImU32 edgeColor = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.55f);
+    const ImU32 edgeFocus = ImGui::GetColorU32(ImGuiCol_PlotLinesHovered);
+    const ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImU32 dimText = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    ImFont* font = ImGui::GetFont();
+    const float fontSize = ImGui::GetFontSize() * std::clamp(zoom, 0.7f, 1.3f);
+
+    for (const auto& edge : graphEdges_) {
+        const ImVec2 a = topLeft(graphVertices_[static_cast<size_t>(edge.from)]);
+        const ImVec2 b = topLeft(graphVertices_[static_cast<size_t>(edge.to)]);
+        const bool active = focus >= 0 && (edge.from == focus || edge.to == focus);
+        const ImVec2 p1(a.x + nodeW, a.y + nodeH * 0.5f);
+        const ImVec2 p4(b.x, b.y + nodeH * 0.5f);
+        const float reach = std::max(columnGap * 0.6f, std::fabs(p4.x - p1.x) * 0.4f);
+        draw->AddBezierCubic(p1, ImVec2(p1.x + reach, p1.y), ImVec2(p4.x - reach, p4.y), p4,
+                             active ? edgeFocus : edgeColor, active ? 2.0f : 1.0f);
+        if (zoom >= 0.6f || active) {
+            char label[24] = {};
+            std::snprintf(label, sizeof(label), "+%X", edge.offset);
+            const ImVec2 mid((p1.x + p4.x) * 0.5f, (p1.y + p4.y) * 0.5f - fontSize * 0.55f);
+            draw->AddText(font, fontSize * 0.85f, mid, active ? textColor : dimText, label);
+        }
+    }
+
+    for (size_t i = 0; i < graphVertices_.size(); ++i) {
+        const auto& v = graphVertices_[i];
+        const ImVec2 a = topLeft(v);
+        const ImVec2 b(a.x + nodeW, a.y + nodeH);
+        if (b.x < origin.x || a.x > origin.x + size.x || b.y < origin.y || a.y > origin.y + size.y) continue;
+        const bool root = i == 0;
+        const bool isSelected = static_cast<int>(i) == graphSelected_;
+        const bool isHovered = static_cast<int>(i) == hovered;
+        ImU32 fill = ImGui::GetColorU32(root ? ImGuiCol_ButtonActive : ImGuiCol_Button);
+        if (isHovered) fill = ImGui::GetColorU32(ImGuiCol_ButtonHovered);
+        draw->AddRectFilled(a, b, fill, Px(6) * zoom);
+        draw->AddRect(a, b, isSelected ? edgeFocus : ImGui::GetColorU32(ImGuiCol_Border), Px(6) * zoom, 0,
+                      isSelected ? 2.0f : 1.0f);
+        // A bar on the left: a module (static, survives a restart) or not.
+        draw->AddRectFilled(a, ImVec2(a.x + Px(4) * zoom, b.y),
+                            v.note.empty() ? ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.5f)
+                                           : IM_COL32(88, 190, 140, 255),
+                            Px(6) * zoom, ImDrawFlags_RoundCornersLeft);
+        const float pad = Px(10) * zoom;
+        // A module label ("game.exe+1A2B") is shortened in the module name, so
+        // the offset, which is what tells two nodes apart, always stays.
+        std::string first = v.label;
+        const float room = nodeW - pad * 2.0f;
+        const auto widthOf = [&](const std::string& text) {
+            return font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text.c_str()).x;
+        };
+        if (widthOf(first) > room) {
+            const size_t plus = first.rfind('+');
+            std::string prefix = plus == std::string::npos ? first : first.substr(0, plus);
+            const std::string suffix = plus == std::string::npos ? std::string() : first.substr(plus);
+            while (prefix.size() > 1) {
+                prefix.pop_back();
+                first = prefix + "..." + suffix;
+                if (widthOf(first) <= room) break;
+            }
+        }
+        draw->AddText(font, fontSize, ImVec2(a.x + pad, a.y + nodeH * 0.5f - fontSize * 0.95f), textColor,
+                      first.c_str());
+        if (zoom >= 0.6f)
+            draw->AddText(font, fontSize * 0.82f, ImVec2(a.x + pad, a.y + nodeH * 0.5f + fontSize * 0.05f), dimText,
+                          v.note.empty() ? "" : Hex(v.value).c_str());
+    }
+    draw->PopClipRect();
+
+    if (canvasHovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+        !ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f))
+        graphSelected_ = hovered;
+    if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && hovered >= 0) {
+        graphSelected_ = hovered;
+        graphMenuVertex_ = hovered;
+        ImGui::OpenPopup("SpiderGraphMenu");
+    }
+    if (hovered >= 0 && !ImGui::IsPopupOpen("SpiderGraphMenu")) {
+        const auto& v = graphVertices_[static_cast<size_t>(hovered)];
+        ImGui::BeginTooltip();
+        MonoTextUnformatted(Hex(v.value).c_str());
+        if (!v.note.empty()) ImGui::TextDisabled("%s", v.note.c_str());
+        if (v.firstNode >= 0) ImGui::TextDisabled("%s", SpiderPathText(static_cast<size_t>(v.firstNode)).c_str());
+        ImGui::EndTooltip();
+    }
+    if (ImGui::BeginPopup("SpiderGraphMenu")) {
+        if (graphMenuVertex_ >= 0 && graphMenuVertex_ < static_cast<int>(graphVertices_.size())) {
+            const auto& v = graphVertices_[static_cast<size_t>(graphMenuVertex_)];
+            if (v.firstNode >= 0 && ImGui::MenuItem("Add the path to the address list"))
+                AddSpiderPath(context, static_cast<size_t>(v.firstNode));
+            if (ImGui::MenuItem("Explore from here")) {
+                std::snprintf(spiderRoot_, sizeof(spiderRoot_), "%s", Hex(v.value).c_str());
+            }
+            if (ImGui::MenuItem("Dissect what it points at")) {
+                std::snprintf(dissectAddresses_, sizeof(dissectAddresses_), "%s", Hex(v.value).c_str());
+                active_ = Tab::Dissect;
+            }
+            ImGui::Separator();
+            AddressContextOptions options;
+            options.label = "Spider";
+            DrawAddressContextActions(context, v.value, options);
+        }
+        ImGui::EndPopup();
+    }
+}
+
+// ------------------------------------------------------------------ speedhack
+
+services::SpeedhackHost ToolsWorkspace::SpeedhackHostFor(UiContext& context, uint64_t pid) const {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    services::SpeedhackHost host;
+    host.read = [session](uint64_t address, void* buffer, size_t size) {
+        return session && session->ReadMemory(address, buffer, size, nullptr);
+    };
+    host.write = [pid](uint64_t address, const void* buffer, size_t size) {
+        return cortex::remote_memory::WriteCode(pid, address, buffer, size, nullptr);
+    };
+    host.allocate = [pid](size_t size, uint64_t nearAddress, uint64_t& address, std::string& error) {
+        return cortex::remote_memory::Allocate(pid, size, nearAddress, address, &error);
+    };
+    host.release = [pid](uint64_t address, std::string& error) {
+        return cortex::remote_memory::Free(pid, address, &error);
+    };
+    host.symbol = [&context](const std::string& name, uint64_t& value) {
+        return ContextSymbols(context).Resolve(name, value);
+    };
+    return host;
+}
+
+void ToolsWorkspace::DrawSpeedhack(UiContext& context) {
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    const uint64_t pid = session ? session->Target().processId : 0;
+    const bool x64 = !session || session->Target().architecture != target::Architecture::X86;
+
+    HintText("Hooks the target's timing functions so the game runs faster or slower. The clock is scaled "
+             "from the moment it is turned on, so it never jumps backwards.");
+
+    ImGui::SetNextItemWidth(Px(320));
+    bool changed = ImGui::SliderFloat("##Speed", &speedValue_, 0.05f, 25.0f, "%.2fx",
+                                      ImGuiSliderFlags_Logarithmic);
+    ImGui::SameLine();
+    ImGui::TextDisabled("speed");
+    for (const float preset : {0.25f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f}) {
+        char label[16] = {};
+        std::snprintf(label, sizeof(label), "%gx", preset);
+        FlowSameLine(ButtonWidth(label));
+        if (ImGui::Button(label)) {
+            speedValue_ = preset;
+            changed = true;
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(!context.mutationAllowed || !session);
+    if (!speed_.active) {
+        if (ImGui::Button("Enable speedhack", ImVec2(Px(180), Px(32)))) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, pid);
+            if (services::InstallSpeedhack(host, x64, speedValue_, speed_, &error)) {
+                speedPid_ = pid;
+                speedInfo_ = "Speed x" + std::to_string(speed_.multiplier).substr(0, 5) + " on " +
+                             std::to_string(speed_.hooks.size()) + " function(s)";
+                context.status = speedInfo_;
+            } else {
+                speedInfo_ = "Speedhack failed: " + error;
+            }
+        }
+    } else {
+        if (ImGui::Button("Disable speedhack", ImVec2(Px(180), Px(32)))) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, speedPid_);
+            speedInfo_ = services::RemoveSpeedhack(host, speed_, &error) ? "Speed back to normal"
+                                                                        : "Restore failed: " + error;
+            speedValue_ = 1.0f;
+            context.status = speedInfo_;
+        }
+    }
+    ImGui::EndDisabled();
+    if (!context.mutationAllowed) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Allow writes to change the speed");
+    }
+
+    // Moving the slider while it runs only rewrites the multiplier.
+    if (changed && speed_.active && context.mutationAllowed) {
+        std::string error;
+        const auto host = SpeedhackHostFor(context, speedPid_);
+        if (!services::UpdateSpeedhack(host, speed_, speedValue_, &error)) speedInfo_ = "Update failed: " + error;
+    }
+
+    if (!speedInfo_.empty()) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", speedInfo_.c_str());
+    }
+
+    if (!speed_.hooks.empty()) {
+        ImGui::SeparatorText("Hooked");
+        for (const auto& hook : speed_.hooks) MonoText("%s  %s", hook.function.c_str(), AddressText(hook.address).c_str());
+    }
+    if (!speed_.skipped.empty()) {
+        ImGui::SeparatorText("Not hooked");
+        for (const auto& skipped : speed_.skipped) ImGui::TextWrapped("%s", skipped.c_str());
+    }
+}
+
+// ------------------------------------------------------------------ frame
+
+void ToolsWorkspace::Draw(UiContext& context) {
+    PollPointerScan(context);
+    const auto session = context.sessions ? context.sessions->Active() : nullptr;
+    if (!session) {
+        HintText("Select a process to use the memory tools.");
+        return;
+    }
+    if (session->Target().id != targetId_) {
+        // Leaving a target: put its timing functions back first.
+        if (speed_.active) {
+            std::string error;
+            const auto host = SpeedhackHostFor(context, speedPid_);
+            services::RemoveSpeedhack(host, speed_, &error);
+            speedValue_ = 1.0f;
+            speedInfo_.clear();
+        }
+        Reset(session->Target().id);
+    }
+    RefreshModules(context);
+
+    uint64_t address = 0;
+    if (context.ConsumeNavigation("tools", address)) {
+        if (address) {
+            std::snprintf(signatureAddress_, sizeof(signatureAddress_), "%s", Hex(address).c_str());
+            std::snprintf(pointerTarget_, sizeof(pointerTarget_), "%s", Hex(address).c_str());
+        }
+        requested_ = Tab::Regions;
+        for (size_t index = 0; index < ToolTabs().size(); ++index)
+            if (context.toolsTabRequest == ToolTabs()[index].request) requested_ = static_cast<Tab>(index);
+        tabPending_ = true;
+        context.toolsTabRequest.clear();
+    }
+
+    // The tools are picked from one combo instead of a row of buttons: with
+    // fourteen of them the row wrapped onto several lines and took a good part
+    // of the panel. The same list is in the Tools menu.
+    const auto& tools = ToolTabs();
+    if (tabPending_) {
+        active_ = requested_;
+        tabPending_ = false;
+    }
+    const size_t current = std::min<size_t>(static_cast<size_t>(active_), tools.size() - 1);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Tool");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(Px(210));
+    if (ImGui::BeginCombo("##ToolSelect", tools[current].label, ImGuiComboFlags_HeightLargest)) {
+        for (const char* group : ToolGroups()) {
+            ImGui::SeparatorText(group);
+            for (size_t index = 0; index < tools.size(); ++index) {
+                if (std::string(tools[index].group) != group) continue;
+                const bool selected = index == current;
+                if (ImGui::Selectable(tools[index].label, selected)) active_ = static_cast<Tab>(index);
+                if (selected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tools[index].hint);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s", tools[current].hint);
+    ImGui::Separator();
+
+    switch (active_) {
+        case Tab::Regions: DrawRegions(context); break;
+        case Tab::Pe: DrawPe(context); break;
+        case Tab::Strings: DrawStrings(context); break;
+        case Tab::Caves: DrawCaves(context); break;
+        case Tab::Signature: DrawSignature(context); break;
+        case Tab::Pointers: DrawPointers(context); break;
+        case Tab::Symbols: DrawSymbols(context); break;
+        case Tab::Assembler: DrawAssembler(context); break;
+        case Tab::Grouped: DrawGroupedScan(context); break;
+        case Tab::Speed: DrawSpeedhack(context); break;
+        case Tab::Dump: DrawDump(context); break;
+        case Tab::Types: DrawCustomTypes(context); break;
+        case Tab::Dissect: DrawDissect(context); break;
+        case Tab::Spider: DrawSpider(context); break;
+    }
+}
+
+} // namespace cortex::ui

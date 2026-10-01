@@ -35,18 +35,25 @@
 #include "struct/structs.h"
 #include "call/call.h"
 #include "watch/watch.h"
+#include "re/re_tools.h"
 
 namespace {
     HMODULE g_hModule = nullptr;
     // 0=running, 1=shutdown in progress, 2=shutdown complete.
     std::atomic<int> g_shutdownState{0};
+    std::atomic<bool> g_consoleOwnedByCortex{false};
 
     void SetupConsole() {
-        AllocConsole();
+        const bool allocated = AllocConsole() != FALSE;
+        if (allocated) g_consoleOwnedByCortex.store(true, std::memory_order_release);
+        if (!allocated && GetConsoleWindow() == nullptr) {
+            dbglog::Line("debug console requested but unavailable");
+            return;
+        }
         FILE* f;
         freopen_s(&f, "CONOUT$", "w", stdout);
         freopen_s(&f, "CONOUT$", "w", stderr);
-        SetConsoleTitleA("Cortex - debug console");
+        if (allocated) SetConsoleTitleA("Cortex - debug console");
         printf("[Cortex] console attached\n");
     }
 
@@ -152,7 +159,7 @@ namespace {
             dbglog::Line("diagnostics::SharedChannelInit %s", sharedReady ? "done" : "failed");
         }
 
-        project::Init();
+        project::Init(cfg.project_directory);
         dbglog::Line("project::Init done");
 
         structs::Init();
@@ -167,9 +174,16 @@ namespace {
         watch::Init();
         dbglog::Line("watch::Init done");
 
-        if (api::Start(cfg.port, cfg.api_token)) {
-            printf("[Cortex] API listening on http://127.0.0.1:%d\n", cfg.port);
-            dbglog::Line("api::Start done, port=%d", cfg.port);
+        retools::Init();
+        dbglog::Line("retools::Init done");
+
+        if (api::Start(cfg.port, cfg.api_token, cfg.http_api_enabled)) {
+            if (cfg.http_api_enabled && api::GetPort() != 0)
+                printf("[Cortex] API listening on http://127.0.0.1:%d\n", api::GetPort());
+            if (cfg.http_api_enabled && api::GetPort() != 0)
+                dbglog::Line("api::Start done, HTTP compatibility port=%d", api::GetPort());
+            else
+                dbglog::Line("api::Start done, native MCP only");
         } else {
             printf("[Cortex] API failed: %s\n", api::GetLastError().c_str());
             dbglog::Line("api::Start failed: %s", api::GetLastError().c_str());
@@ -182,8 +196,13 @@ namespace {
         int expected = 0;
         if (!g_shutdownState.compare_exchange_strong(expected, 1)) return expected == 2 ? 0 : 1;
         api::Stop();
+        retools::Shutdown();
         watch::Shutdown();
-        remotecall::Shutdown();
+        if (!remotecall::Shutdown()) {
+            dbglog::Line("shutdown refused: a native call is still executing on a target thread");
+            g_shutdownState = 0;
+            return 1;
+        }
         freeze::Shutdown();
         diagnostics::SharedChannelShutdown();
         diagnostics::HookRegistryShutdown();
@@ -203,7 +222,7 @@ namespace {
         diagnostics::Shutdown();
         diagnostics::RegistryShutdown();
         MH_Uninitialize();
-        FreeConsole();
+        if (g_consoleOwnedByCortex.exchange(false, std::memory_order_acq_rel)) FreeConsole();
         g_shutdownState = 2;
         return 0;
     }
@@ -234,3 +253,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     }
     return TRUE;
 }
+
+
+

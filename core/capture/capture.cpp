@@ -10,7 +10,7 @@
 #ifdef CORTEX_D3D12
 #include <d3d12.h>
 #endif
-#include <gl/GL.h>
+#include <GL/gl.h>
 
 namespace capture {
 

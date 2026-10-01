@@ -1,0 +1,231 @@
+name: UI Migration Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "app_imgui/**"
+      - "core/**"
+      - ".github/workflows/ui-migration-benchmarks.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ui-migration-benchmarks-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW and Qt 6
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-declarative
+            mingw-w64-x86_64-qt6-tools
+
+      - name: Build frozen Qt reference
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S app -B build/qt-reference -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/qt-reference --parallel 2
+
+      - name: Deploy frozen Qt reference runtime
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          if command -v windeployqt6 >/dev/null 2>&1; then
+            DEPLOY=windeployqt6
+          else
+            DEPLOY=windeployqt
+          fi
+          "$DEPLOY" --release --qmldir app/qml --no-translations build/qt-reference/cortex.exe
+
+          for pass in 1 2 3 4 5 6 7 8; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "build/qt-reference/$base" ]; then
+                  cp "$dep" "build/qt-reference/$base"
+                  copied=1
+                fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find build/qt-reference -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+      - name: Build Dear ImGui candidate
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S app_imgui -B build/imgui-candidate -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/imgui-candidate --parallel 2
+
+      - name: Measure startup, memory and executable size
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function New-CortexStartInfo(
+            [string]$Executable,
+            [string]$Argument,
+            [hashtable]$Environment
+          ) {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path $Executable).Path
+            if ($Argument) {
+              [void]$psi.ArgumentList.Add($Argument)
+            }
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $psi.CreateNoWindow = $true
+            foreach ($key in $Environment.Keys) {
+              $psi.Environment[$key] = [string]$Environment[$key]
+            }
+            return $psi
+          }
+
+          function Measure-CliSample(
+            [string]$Name,
+            [string]$Executable
+          ) {
+            $psi = New-CortexStartInfo $Executable "--version" @{}
+            $timer = [System.Diagnostics.Stopwatch]::StartNew()
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(20000)) {
+              $process.Kill()
+              throw "$Name CLI startup sample timed out"
+            }
+            $timer.Stop()
+            $stderr = $stderrTask.Result
+            if ($process.ExitCode -ne 0) {
+              throw "$Name CLI startup sample failed ($($process.ExitCode)): $stderr"
+            }
+            [Math]::Round($timer.Elapsed.TotalMilliseconds, 3)
+          }
+
+          function Measure-UiWorkingSet(
+            [string]$Name,
+            [string]$Executable,
+            [string]$Argument,
+            [hashtable]$Environment
+          ) {
+            $psi = New-CortexStartInfo $Executable $Argument $Environment
+            $process = [System.Diagnostics.Process]::Start($psi)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+
+            [int64]$peak = 0
+            $sampleDeadline = [DateTime]::UtcNow.AddMilliseconds(1500)
+            while ([DateTime]::UtcNow -lt $sampleDeadline) {
+              if ($process.HasExited) { break }
+              try {
+                $process.Refresh()
+                if ($process.WorkingSet64 -gt $peak) {
+                  $peak = [int64]$process.WorkingSet64
+                }
+              } catch {}
+              Start-Sleep -Milliseconds 10
+            }
+
+            if (-not $process.HasExited) {
+              $process.Kill()
+              $process.WaitForExit()
+            } else {
+              $stderr = $stderrTask.Result
+              if ($process.ExitCode -ne 0) {
+                throw "$Name UI exited during working-set sampling ($($process.ExitCode)): $stderr"
+              }
+            }
+
+            if ($peak -le 0) {
+              throw "$Name UI working-set sample produced no memory measurement"
+            }
+            return $peak
+          }
+
+          $definitions = @(
+            [pscustomobject]@{
+              name = "qt_reference"
+              exe = "build/qt-reference/cortex.exe"
+              ui_arg = ""
+              ui_env = @{ QT_QPA_PLATFORM = "offscreen" }
+            },
+            [pscustomobject]@{
+              name = "imgui_candidate"
+              exe = "build/imgui-candidate/cortex.exe"
+              ui_arg = ""
+              ui_env = @{}
+            }
+          )
+
+          $result = [ordered]@{
+            schema = "cortex.ui.migration.benchmark.v2"
+            commit = $env:GITHUB_SHA
+            generated_utc = [DateTime]::UtcNow.ToString("o")
+            samples = [ordered]@{}
+          }
+
+          foreach ($definition in $definitions) {
+            $startup = @()
+            $working = @()
+            foreach ($iteration in 1..5) {
+              $startup += Measure-CliSample $definition.name $definition.exe
+              $working += Measure-UiWorkingSet $definition.name $definition.exe $definition.ui_arg $definition.ui_env
+            }
+
+            $startup = @($startup | Sort-Object)
+            $working = @($working | Sort-Object)
+            $result.samples[$definition.name] = [ordered]@{
+              executable_bytes = (Get-Item $definition.exe).Length
+              median_cli_startup_ms = $startup[2]
+              median_ui_peak_working_set_bytes = $working[2]
+              cli_startup_runs_ms = $startup
+              ui_peak_working_set_runs_bytes = $working
+            }
+          }
+
+          New-Item -ItemType Directory -Force build/benchmarks | Out-Null
+          $result | ConvertTo-Json -Depth 8 | Set-Content build/benchmarks/ui-migration.json
+
+          $qt = $result.samples.qt_reference
+          $imgui = $result.samples.imgui_candidate
+          Write-Host ("BENCHMARK Qt exe={0} cli_startup_ms={1} ui_peak_ws={2}" -f $qt.executable_bytes, $qt.median_cli_startup_ms, $qt.median_ui_peak_working_set_bytes)
+          Write-Host ("BENCHMARK ImGui exe={0} cli_startup_ms={1} ui_peak_ws={2}" -f $imgui.executable_bytes, $imgui.median_cli_startup_ms, $imgui.median_ui_peak_working_set_bytes)
+
+          @(
+            "## UI migration benchmark"
+            ""
+            "| Metric | Qt reference | Dear ImGui candidate |"
+            "| --- | ---: | ---: |"
+            "| Executable bytes | $($qt.executable_bytes) | $($imgui.executable_bytes) |"
+            "| Median CLI startup (ms) | $($qt.median_cli_startup_ms) | $($imgui.median_cli_startup_ms) |"
+            "| Median UI peak working set (bytes) | $($qt.median_ui_peak_working_set_bytes) | $($imgui.median_ui_peak_working_set_bytes) |"
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-ui-migration-benchmark
+          path: build/benchmarks/ui-migration.json
+          if-no-files-found: error
+          retention-days: 30

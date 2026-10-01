@@ -7,6 +7,8 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <iomanip>
+#include <cctype>
+#include <stdexcept>
 
 using json = nlohmann::json;
 
@@ -29,15 +31,26 @@ std::string BytesToHex(const std::vector<uint8_t>& buf) {
 }
 
 std::vector<uint8_t> HexToBytes(const std::string& hex) {
-    std::vector<uint8_t> out;
-    std::string s = hex;
-    if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s = s.substr(2);
-    for (size_t i = 0; i + 1 < s.size(); i += 2) {
-        out.push_back(static_cast<uint8_t>(std::stoi(s.substr(i, 2), nullptr, 16)));
+    std::string compact;
+    compact.reserve(hex.size());
+    for (unsigned char c : hex) {
+        if (std::isspace(c) || c == '_') continue;
+        compact.push_back(static_cast<char>(c));
     }
+    if (compact.size() >= 2 && compact[0] == '0' && (compact[1] == 'x' || compact[1] == 'X'))
+        compact.erase(0, 2);
+    if (compact.empty() || (compact.size() % 2) != 0)
+        throw std::invalid_argument("invalid_hex_bytes");
+    for (unsigned char c : compact) {
+        if (!std::isxdigit(c)) throw std::invalid_argument("invalid_hex_bytes");
+    }
+
+    std::vector<uint8_t> out;
+    out.reserve(compact.size() / 2);
+    for (size_t i = 0; i < compact.size(); i += 2)
+        out.push_back(static_cast<uint8_t>(std::stoul(compact.substr(i, 2), nullptr, 16)));
     return out;
 }
-
 json PatchToJson(const patch::PatchInfo& p) {
     return json{{"id", p.id}, {"address", HexAddr(p.address)},
                 {"original_bytes", BytesToHex(p.originalBytes)},

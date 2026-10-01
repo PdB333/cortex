@@ -22,6 +22,25 @@ FetchContent_Declare(
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
 
+FetchContent_Declare(
+    zycore
+    GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
+    GIT_TAG 74620eefd233bec20daeb66e78e744ff06e273b7
+)
+FetchContent_MakeAvailable(zycore)
+
+FetchContent_Declare(
+    zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG 569320ad3c4856da13b9dbf1f0d9e20bda63870e
+)
+set(ZYDIS_BUILD_TOOLS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_TESTS OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_DOXYGEN OFF CACHE INTERNAL "")
+set(ZYDIS_BUILD_MAN OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(zydis)
+
 set(CORTEX_ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(CORTEX_SERVE_SOURCE ${CORTEX_ROOT}/host/main.cpp)
 set(CORTEX_INJECT_SOURCE ${CORTEX_ROOT}/injector/main.cpp)
@@ -29,28 +48,32 @@ set(CORTEX_MCP_SOURCE ${CORTEX_ROOT}/mcp_bridge/main.cpp)
 set(CORTEX_DIAG_SOURCE ${CORTEX_ROOT}/tools/diagnostics_host/main.cpp)
 set(CORTEX_SYMBOLIZE_SOURCE ${CORTEX_ROOT}/tools/symbolize_main.cpp)
 
-set_source_files_properties(${CORTEX_SERVE_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexServeMain")
-set_source_files_properties(${CORTEX_INJECT_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexInjectMain")
-set_source_files_properties(${CORTEX_MCP_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexMcpMain")
-set_source_files_properties(${CORTEX_DIAG_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexDiagnoseMain")
-set_source_files_properties(${CORTEX_SYMBOLIZE_SOURCE} PROPERTIES
-    COMPILE_DEFINITIONS "main=CortexSymbolizeMain")
 
 add_executable(cortex_host
     ${CORTEX_ROOT}/host/unified_main.cpp
+    ${CORTEX_ROOT}/host/probe_cli.cpp
     ${CORTEX_SERVE_SOURCE}
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
+    ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp
     ${CORTEX_ROOT}/host/diagnostics/analyzer.cpp
     ${CORTEX_ROOT}/core/symbols/symbols.cpp
     ${CORTEX_ROOT}/core/symbols/external.cpp
+    ${CORTEX_ROOT}/host/debugger/windows_debug_provider.cpp
+    ${CORTEX_ROOT}/host/debugger/windows_debugger_backend.cpp
+    ${CORTEX_ROOT}/host/debugger/veh_debug_provider.cpp
+    ${CORTEX_ROOT}/core/target/local_backend.cpp
+    ${CORTEX_ROOT}/core/target/session_manager.cpp
+    ${CORTEX_ROOT}/core/target/module_provider.cpp
+    ${CORTEX_ROOT}/core/target/thread_provider.cpp
+    ${CORTEX_ROOT}/core/services/debugger_service.cpp
+    ${CORTEX_ROOT}/core/services/disassembly_service.cpp
+    ${CORTEX_ROOT}/core/services/payload_client.cpp
+    ${CORTEX_ROOT}/core/services/operation_manager.cpp
+    ${CORTEX_ROOT}/core/services/crash_report_service.cpp
 )
 
 target_include_directories(cortex_host PRIVATE
@@ -69,6 +92,7 @@ target_compile_definitions(cortex_host PRIVATE
 
 target_link_libraries(cortex_host PRIVATE
     nlohmann_json::nlohmann_json
+    Zydis
     ws2_32
     bcrypt
     dbghelp

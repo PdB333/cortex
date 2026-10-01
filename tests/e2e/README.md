@@ -8,7 +8,7 @@ validate Cortex beyond unit tests.
 The matrix runs independently on x86 and x64 and covers:
 
 - complete root CMake build with MinGW
-- real DLL injection through `cortex_host.exe inject`
+- real DLL injection through `cortex_host.exe inject` (the same injector `cortex.exe inject` uses)
 - public API startup and authentication enforcement
 - module enumeration
 - typed and batched memory reads
@@ -17,6 +17,10 @@ The matrix runs independently on x86 and x64 and covers:
 - module and RVA resolution
 - Lua execution
 - MCP initialize and tools/list
+- `/schema/validate` on the tool manifest and MCP schemas
+- a sweep calling every read-only GET tool of the manifest with its required
+  query parameters filled in; any 5xx fails the run and the runtime must stay
+  healthy afterwards
 - session export
 - an instrumented fake mod with registration, breadcrumbs, scopes, typed
   values, heartbeats, overlapping hooks, recursive hook calls, hook exceptions,

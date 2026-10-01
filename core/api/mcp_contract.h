@@ -43,24 +43,36 @@ inline bool StartsWith(const std::string& value, const std::string& prefix) {
 inline ToolRisk ClassifyTool(const std::string& name,
                              const std::string& method,
                              const std::string& path) {
-    // A GET route is observational even if its tool name shares a prefix with
-    // the mutating half of a subsystem (patch_list, freeze_list,
-    // watch_events, debug_breakpoint_log, ...).
+    // GET routes are observational even when their names share a subsystem
+    // prefix with the mutating/control half of that subsystem.
     if (method == "GET") return ToolRisk::Observe;
 
-    if (name == "call_function" || path == "/call/function") return ToolRisk::NativeCall;
+    if (StartsWith(path, "/call/") || StartsWith(name, "call_")) return ToolRisk::NativeCall;
+
+    // POST is sometimes used for structured analysis requests. Keep those
+    // callable in inspect mode unless their arguments can change runtime or
+    // persisted Cortex state.
+    if (name == "struct_read" || name == "struct_infer" || name == "trace_compare" ||
+        name == "pointermap_intersect" || name == "re_object_compare" ||
+        name == "re_cpp_subobjects") return ToolRisk::Analyze;
 
     if (StartsWith(name, "memory_write") || name == "memory_fill" ||
         StartsWith(name, "patch_") || StartsWith(name, "freeze_") ||
         StartsWith(name, "input_") || StartsWith(name, "lua_") ||
-        name == "snapshot_rewind" || name == "actions_rollback" ||
-        name == "session_import") {
+        name == "struct_write" || name == "snapshot_rewind" ||
+        name == "actions_rollback" || name == "session_import") {
         return ToolRisk::Mutate;
     }
 
-    if (StartsWith(name, "debug_") || name == "trace_start" ||
-        name == "actions_clear" || StartsWith(name, "watch_") ||
-        name == "project_note_add" || name == "project_pointer_path_set") {
+    if (StartsWith(name, "debug_") || StartsWith(name, "trace_") ||
+        StartsWith(name, "watch_") || StartsWith(name, "window_") ||
+        StartsWith(name, "project_") || StartsWith(name, "struct_") ||
+        StartsWith(name, "pointermap_") || StartsWith(name, "re_") || name == "network_capture" ||
+        name == "actions_clear" || name == "ghidra_import" || name == "ghidra_import_symbols" || name == "snapshot_delete" ||
+        name == "re_track_object" || name == "re_find_last_writer" || name == "re_trace_transition" ||
+        name == "re_session_fact_set" || name == "re_session_fact_delete" || name == "re_session_breakpoints" ||
+        name == "re_object_delete" || name == "re_test_run" || name == "re_experiment_run" ||
+        name == "re_session_apply_breakpoints") {
         return ToolRisk::Control;
     }
 
@@ -144,7 +156,8 @@ inline bool IsBoolField(const std::string& name) {
            name.find("_only") != std::string::npos ||
            name == "pause_process" || name == "copy_on_write" ||
            name == "stop_on_error" || name == "transactional" ||
-           name == "execute";
+           name == "execute" || name == "define" || name == "process_global" ||
+           name == "auto_capture";
 }
 
 inline bool IsIntegerField(const std::string& name) {
@@ -162,7 +175,11 @@ inline bool IsAddressField(const std::string& name) {
 }
 
 inline json SchemaForProperty(const std::string& name, const json& spec) {
-    if (spec.is_object() && spec.contains("type")) return spec;
+    if (spec.is_object() && (spec.contains("type") || spec.contains("oneOf") || spec.contains("anyOf"))) {
+        json typed = spec;
+        typed.erase("required");
+        return typed;
+    }
 
     const std::string description = spec.is_string() ? spec.get<std::string>() : spec.dump();
     std::string lower = description;
@@ -215,3 +232,10 @@ inline QuerySchemaResult BuildQuerySchema(const json& queryManifest) {
 }
 
 } // namespace api::mcp_contract
+
+
+
+
+
+
+

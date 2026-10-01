@@ -26,6 +26,7 @@ struct Entry {
     std::string type;
     std::string label;
     double lastValue = 0.0;
+    std::string lastValueText;
     bool hasValue = false;
 };
 
@@ -72,6 +73,20 @@ std::string FormatValue(const std::string& type, double v) {
     return buf;
 }
 
+std::string FormatRawValue(const uint8_t* raw, const std::string& type) {
+    if (type == "i8") { int8_t v; memcpy(&v, raw, 1); return std::to_string(v); }
+    if (type == "u8") { uint8_t v; memcpy(&v, raw, 1); return std::to_string(v); }
+    if (type == "i16") { int16_t v; memcpy(&v, raw, 2); return std::to_string(v); }
+    if (type == "u16") { uint16_t v; memcpy(&v, raw, 2); return std::to_string(v); }
+    if (type == "i32") { int32_t v; memcpy(&v, raw, 4); return std::to_string(v); }
+    if (type == "u32") { uint32_t v; memcpy(&v, raw, 4); return std::to_string(v); }
+    if (type == "i64") { int64_t v; memcpy(&v, raw, 8); return std::to_string(v); }
+    if (type == "u64") { uint64_t v; memcpy(&v, raw, 8); return std::to_string(v); }
+    char buf[64]{};
+    if (type == "float") { float v; memcpy(&v, raw, 4); snprintf(buf, sizeof(buf), "%g", v); return buf; }
+    if (type == "double") { double v; memcpy(&v, raw, 8); snprintf(buf, sizeof(buf), "%g", v); return buf; }
+    return {};
+}
 long long NowMs() { return static_cast<long long>(GetTickCount64()); }
 
 // Caller must hold g_mutex.
@@ -99,9 +114,11 @@ DWORD WINAPI WatchThread(LPVOID) {
             size_t size = TypeSize(e.type);
             if (size == 0 || !memory::ReadBytes(e.address, size, buf)) continue;
             double current = BytesToDouble(buf.data(), e.type);
+            std::string currentText = FormatRawValue(buf.data(), e.type);
 
             if (!e.hasValue) {
                 e.lastValue = current;
+                e.lastValueText = currentText;
                 e.hasValue = true;
                 continue;
             }
@@ -109,6 +126,7 @@ DWORD WINAPI WatchThread(LPVOID) {
                 PushEvent(ChangeEvent{id, e.address, e.label, FormatValue(e.type, e.lastValue),
                                        FormatValue(e.type, current), NowMs()});
                 e.lastValue = current;
+                e.lastValueText = currentText;
             }
         }
 
@@ -137,7 +155,7 @@ int Add(uintptr_t address, const std::string& type, const std::string& label) {
     if (TypeSize(type) == 0) return -1;
     std::lock_guard<std::mutex> lock(g_mutex);
     int id = g_nextId++;
-    g_entries[id] = Entry{address, type, label, 0.0, false};
+    g_entries[id] = Entry{address, type, label, 0.0, {}, false};
     return id;
 }
 
@@ -149,7 +167,7 @@ bool Remove(int id) {
 std::vector<WatchInfo> List() {
     std::lock_guard<std::mutex> lock(g_mutex);
     std::vector<WatchInfo> out;
-    for (auto& [id, e] : g_entries) out.push_back(WatchInfo{id, e.address, e.type, e.label});
+    for (auto& [id, e] : g_entries) out.push_back(WatchInfo{id, e.address, e.type, e.label, e.lastValueText, e.hasValue});
     return out;
 }
 

@@ -3,7 +3,7 @@
 
 namespace api {
 
-bool Start(int port, const std::string& configuredToken = {});
+bool Start(int port, const std::string& configuredToken = {}, bool httpEnabled = false);
 void Stop();
 
 int GetPort();

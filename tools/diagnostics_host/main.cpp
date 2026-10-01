@@ -1,4 +1,5 @@
 #include "../../host/diagnostics/external_host.h"
+#include "../../host/cli_entry_points.h"
 #include "../../host/diagnostics/analyzer.h"
 
 #include <windows.h>
@@ -120,7 +121,7 @@ int AnalyzeOnly(const Options& options) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+int CortexDiagnoseMain(int argc, char** argv) {
     Options options;
     if (!Parse(argc, argv, options)) {
         PrintUsage();
@@ -231,3 +232,8 @@ int main(int argc, char** argv) {
     CloseHandle(process);
     return 0;
 }
+
+#ifdef CORTEX_STANDALONE_TOOL
+// Standalone build of this tool (outside cortex.exe / cortex_host.exe).
+int main(int argc, char** argv) { return CortexDiagnoseMain(argc, argv); }
+#endif

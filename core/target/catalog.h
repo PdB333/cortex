@@ -45,6 +45,14 @@ public:
         return std::nullopt;
     }
 
+    SessionPtr Attach(const TargetDescriptor& target, std::string* error = nullptr) {
+        for (const auto& backend : backends_) {
+            if (backend->Node().id == target.nodeId) return backend->Attach(target, error);
+        }
+        if (error) *error = "backend_not_found";
+        return {};
+    }
+
     size_t BackendCount() const { return backends_.size(); }
 
 private:

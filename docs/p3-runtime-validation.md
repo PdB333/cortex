@@ -21,7 +21,7 @@ A renderer is not considered validated merely because its hook source compiles.
 | Win32 generic fixture | yes | yes | instrumented E2E |
 | D3D9 fixture | yes | yes | capture E2E |
 | D3D11 fixture | yes | yes | capture E2E |
-| OpenGL fixture | yes | yes | P3 build + launch smoke test |
+| OpenGL fixture | yes | yes | build + launch smoke test (`contracts.yml`, `opengl-fixture` job) |
 | D3D8 fixture | planned | n/a | x86-only backend |
 | D3D12 fixture | n/a | planned | x64-only backend |
 
@@ -29,13 +29,15 @@ The OpenGL fixture is `test_target/main_opengl.cpp`. It deliberately uses only W
 entry points so it can create a deterministic context on a stock Windows CI runner without a third-
 party windowing library.
 
+A non-destructive probe reporting process liveness, shared diagnostic channel, target/host bitness,
+window responsiveness and heartbeat age now exists as `cortex.exe probe --pid <pid>` (`probe-build`
+jobs in `contracts.yml`).
+
 ## P3 next increments
 
 - promote OpenGL from **launch** to **capture** by injecting Cortex and validating a PNG screenshot;
 - add a D3D8 x86 fixture and capture scenario;
 - add a D3D12 x64 fixture and capture scenario;
-- add a non-destructive diagnostics probe reporting process liveness, shared diagnostic channel,
-  target/host bitness, window responsiveness, and heartbeat age;
 - record renderer/backend information in validation evidence so failures can be attributed to hook
   installation versus capture;
 - keep a small representative real-application matrix outside CI and record incompatibilities rather

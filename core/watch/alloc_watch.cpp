@@ -103,6 +103,22 @@ bool SetAllocationWatch(bool enabled, size_t minSize) {
     return true;
 }
 
+bool AllocationWatchEnabled() {
+    return g_enabled.load(std::memory_order_relaxed);
+}
+
+size_t AllocationWatchMinSize() {
+    return g_minSize.load(std::memory_order_relaxed);
+}
+
+std::vector<AllocEvent> SnapshotAllocEvents() {
+    const bool previousInside = g_insideAllocWatch;
+    g_insideAllocWatch = true;
+    std::lock_guard<std::mutex> lock(g_eventsMutex);
+    std::vector<AllocEvent> out(g_events.begin(), g_events.end());
+    g_insideAllocWatch = previousInside;
+    return out;
+}
 std::vector<AllocEvent> DrainAllocEvents() {
     g_insideAllocWatch = true;
     std::lock_guard<std::mutex> lock(g_eventsMutex);
