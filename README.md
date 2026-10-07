@@ -128,7 +128,17 @@ MCP is built into `cortex.exe`. Configure your client once; the server starts ta
 }
 ```
 
-That server is read-only and attaches only to a process whose runtime is already loaded (`cortex.exe inject <pid>`, or the desktop). To let the agent load the runtime and change the target, add `"--allow-writes"` to `args`; that is your decision, not the agent's.
+That server is **read-only**: it attaches only to a process whose runtime is already loaded (`cortex.exe inject <pid>`, or the desktop), and every call that would change the target is refused. To let the agent load the runtime and change the target (memory writes, freezes, patches, breakpoints, input, prompts), add `"--allow-writes"` to `args`. That is your decision, not the agent's, and the agent cannot set it:
+
+```json
+{
+  "mcpServers": {
+    "cortex": { "command": "C:/Cortex/cortex.exe", "args": ["mcp", "--allow-writes"] }
+  }
+}
+```
+
+An MCP client written for v1.0.0 that changed a target must now be started with `--allow-writes`.
 
 - **Dynamic targets** — `cortex_processes`, `cortex_attach`, `cortex_targets`, `cortex_detach`, with `tools/list_changed` notifications.
 - **Many targets, no races** — each attached process has its own runtime connection; tools take a `_cortex_target` selector.
@@ -146,7 +156,7 @@ Details: [MCP internals](docs/mcp.md) · [Agent guide](agent/agents.md) · [Sema
 
 ```powershell
 cortex.exe                      # desktop application
-cortex.exe mcp [--pid N | --process name] [--tools compact|all]
+cortex.exe mcp [--pid N | --process name] [--tools compact|all] [--allow-writes]
 cortex.exe probe --pid 1234     # read-only target and runtime health
 cortex.exe diagnose --pid 1234  # crash and hang watcher
 cortex.exe analyze <folder>     # offline crash analysis

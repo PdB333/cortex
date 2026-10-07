@@ -18,6 +18,8 @@ The supported path is Model Context Protocol over stdio from `cortex.exe`:
 }
 ```
 
+This is read-only. To let the agent change the target, the person adds `"--allow-writes"` to `args` (`["mcp", "--allow-writes"]`); an agent cannot add it itself.
+
 ```text
 AI client -> cortex.exe mcp (stdio) -> authenticated Named Pipe -> cortex_core.dll in the target
 ```

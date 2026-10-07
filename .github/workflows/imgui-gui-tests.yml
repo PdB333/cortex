@@ -21,23 +21,8 @@ on:
       - "test_target/**"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-gui-tests.yml"
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "app_imgui/**"
-      - "host/debugger/**"
-      - "core/target/**"
-      - "core/services/**"
-      - "core/api/**"
-      - "core/prompt/**"
-      - "runtime_helper/**"
-      - "tests/gui/**"
-      - "tests/security_no_writes_regression.py"
-      - "tests/fixtures/mcp_tool_risks.json"
-      - "core/security/**"
-      - "mcp_bridge/**"
-      - "test_target/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/imgui-gui-tests.yml"
   workflow_dispatch:
 
 permissions:

@@ -5,6 +5,7 @@ on:
     branches:
       - next/lightweight-imgui-ui
       - test/imgui-full-migration
+      - main
     paths:
       - "app_imgui/**"
       - "core/target/**"
@@ -20,15 +21,8 @@ on:
       - "resources/windows/**"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "app_imgui/**"
-      - "core/target/**"
-      - "core/services/**"
-      - "core/api/mcp_pipe_protocol.h"
-      - "runtime_helper/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/imgui-ui.yml"
   workflow_dispatch:
 
 concurrency:

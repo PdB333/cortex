@@ -4,17 +4,9 @@ on:
   push:
     branches:
       - agent/unified-cortex-host
+      - main
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "CMakeLists.txt"
-      - "host/**"
-      - "injector/**"
-      - "mcp_bridge/**"
-      - "tools/**"
-      - "core/symbols/**"
-      - "docs/**"
-      - "README.md"
-      - ".github/workflows/unified-host.yml"
   workflow_dispatch:
 
 jobs:

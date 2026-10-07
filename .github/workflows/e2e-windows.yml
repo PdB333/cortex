@@ -4,20 +4,9 @@ on:
   push:
     branches:
       - agent/automated-e2e-matrix
+      - main
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "CMakeLists.txt"
-      - "app_imgui/**"
-      - "runtime_helper/**"
-      - "core/**"
-      - "host/**"
-      - "injector/**"
-      - "mcp_bridge/**"
-      - "sdk/**"
-      - "test_target/**"
-      - "tests/e2e/**"
-      - "tools/**"
-      - ".github/workflows/e2e-windows.yml"
   workflow_dispatch:
 
 concurrency:

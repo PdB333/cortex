@@ -19,6 +19,19 @@ The default profile is `compact`, which exposes the semantic Cortex tools rather
 }
 ```
 
+This configuration is **read-only**: calls that change the target are refused with `write_authority_required`. A client that must change the target (writes, freezes, patches, breakpoints, input, prompts, loading the runtime with `cortex_attach`) needs `--allow-writes`, which only the person editing this configuration can add:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "C:/path/to/cortex.exe",
+      "args": ["mcp", "--allow-writes"]
+    }
+  }
+}
+```
+
 This targetless MCP server remains useful before any process is attached. Its host-control catalog contains:
 
 - `cortex_processes` — refresh and filter the local process list;
@@ -31,7 +44,8 @@ After attach or detach, Cortex emits `notifications/tools/list_changed` and adve
 `--pid` and `--process` remain compatible startup auto-attach shortcuts:
 
 ```text
-cortex.exe mcp --pid 1234
+cortex.exe mcp --pid 1234                  # read-only; the runtime must already be loaded
+cortex.exe mcp --pid 1234 --allow-writes   # may also load the runtime and change the target
 cortex.exe mcp --process app.exe
 ```
 
@@ -252,6 +266,8 @@ This remains per operation; multi-target routing does not implicitly grant it on
 A tool with no explicit risk classification is refused (`tool_not_classified`), with or without authority. `tests/fixtures/mcp_tool_risks.json` lists the class of every primitive tool.
 
 **"Read-only" means no write to the target's memory, not no effect on the target.** `debug_threads`, `debug_registers`, `debug_breakpoint_list` and `debug_paused` need no write authority, but they use a debugger, and a debugger attached to a process suspends its threads while it handles events. Cortex does not hide this: every debugger attach and detach is published as an AI Activity event (kind `debugger`) and appended to `cortex_debugger_events.jsonl` beside `cortex.exe` and `cortex_core.dll` (phase, pid, backend, epoch `ts_ms`). A separate `--allow-debug` switch is not built.
+
+**`cortex_operation_cancel` needs no write authority, on purpose.** It only sets a cancellation flag on an operation that is already running, and that operation passed the authority and intent checks when it started. A cancelled semantic execution rolls back its own transaction, so cancelling returns the target toward its earlier state; it cannot start a change, widen one, or reach a tool the caller could not already call. Requiring authority would only stop a read-only session from cancelling a long observation. It is classified `host_control` in `tools/list`, and the regression test requires every listed tool to carry a class.
 
 **Known limit.** The runtime's pipe token is a file (`cortex.mcp.<pid>.token`) readable by the Windows user that runs Cortex. A client that has a shell or file access as that user can read it and speak to the pipe directly, outside every rule above. These controls hold for an agent whose only access to Cortex is its MCP tool calls.
 

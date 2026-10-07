@@ -2,7 +2,9 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [Unreleased]
+## [1.0.1] - Unreleased (proposed version)
+
+Security release. **Breaking for MCP clients that change a target:** they must now be started with `cortex.exe mcp --allow-writes` (see Security below). Read-only clients are unaffected. The version string reported by the server and the release artifacts are not changed by this entry; the number is a proposal for whoever cuts the release.
 
 ### Security
 
