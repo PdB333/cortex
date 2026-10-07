@@ -5,6 +5,7 @@
 #include <string>
 
 #include "config.h"
+#include "security/denial_log.h"
 #include "log.h"
 #include "diagnostics/diagnostics.h"
 #include "diagnostics/registry.h"
@@ -61,6 +62,8 @@ namespace {
         dbglog::Init();
         dbglog::Line("InitThread start");
         config::Config cfg = config::Load();
+        // Refused state-changing calls are logged beside this DLL.
+        cortex::security::SetDenialDirectory(config::GetModuleDir());
 
         if (cfg.log_console) SetupConsole();
 

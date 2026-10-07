@@ -56,6 +56,7 @@ bool ReModel::Call(const std::string& tool, json arguments,
         if (error) *error = "mutation_permission_required";
         return false;
     }
+    payload_.SetWritesAuthority(mutationAllowed);
     if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
     if (mutation) arguments["mutation_permission"] = true;
 

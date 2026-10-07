@@ -51,6 +51,9 @@ on:
       - "tests/mcp_query_schema_tests.cpp"
       - "tests/mcp_bridge_policy_tests.cpp"
       - "tests/semantic_tools_tests.cpp"
+      - "tests/mcp_authority_tests.cpp"
+      - "tests/fixtures/mcp_tool_risks.json"
+      - "core/security/**"
       - "host/unified_main.cpp"
       - "host/diagnostics/**"
       - "test_target/main_opengl.cpp"
@@ -278,6 +281,15 @@ jobs:
           -o build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
           -static -static-libgcc -static-libstdc++
           && build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
+
+      - name: Build and run MCP write-authority tests
+        shell: msys2 {0}
+        run: >-
+          c++ -std=c++17 -O2 -Icore tests/mcp_authority_tests.cpp
+          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
+          -o build/p2-${{ matrix.arch }}/mcp_authority_tests.exe
+          -static -static-libgcc -static-libstdc++
+          && build/p2-${{ matrix.arch }}/mcp_authority_tests.exe
 
       - name: Build and run native pipe contract tests
         shell: msys2 {0}

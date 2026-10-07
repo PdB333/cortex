@@ -29,7 +29,7 @@
 ## Why Cortex
 
 - **One app, not a toolbox.** Scanner, memory viewer, disassembler, debugger, patcher, tracer, RE workspace, scripting and diagnostics share one target, one address menu and one project.
-- **Safe by default.** Every session starts **Read-only**. Writes, freezes, patches, breakpoints and even loading the runtime into the target require an explicit **Writes allowed** switch, enforced by the application for every call — not just by greyed-out buttons.
+- **Safe by default.** Every session starts **Read-only**. In the desktop, writes, freezes, patches, breakpoints and even loading the runtime into the target require the **Writes allowed** switch. An AI client starts read-only too and cannot lift that itself: only the person who launches `cortex.exe mcp --allow-writes` can, and a call that changes the target must also say so (`mutation_permission`). Every refused attempt is logged to `cortex_denied_mutations.jsonl`.
 - **Built for agents too.** `cortex.exe mcp` is a native MCP server: attach processes on the fly, drive several targets at once, and let the person at the screen watch every tool call live.
 - **Light and portable.** A native Dear ImGui + Direct3D 11 desktop, no Qt or runtime installer. Unzip, run, and keep your settings per user — or beside the executable with a `cortex.portable` file.
 
@@ -128,10 +128,12 @@ MCP is built into `cortex.exe`. Configure your client once; the server starts ta
 }
 ```
 
+That server is read-only and attaches only to a process whose runtime is already loaded (`cortex.exe inject <pid>`, or the desktop). To let the agent load the runtime and change the target, add `"--allow-writes"` to `args`; that is your decision, not the agent's.
+
 - **Dynamic targets** — `cortex_processes`, `cortex_attach`, `cortex_targets`, `cortex_detach`, with `tools/list_changed` notifications.
 - **Many targets, no races** — each attached process has its own runtime connection; tools take a `_cortex_target` selector.
-- **Compact by default** — 30 evidence-oriented semantic tools; `--tools all` exposes every primitive.
-- **Guarded** — state-changing calls need `mutation_permission=true` and run inside rollback-aware transactions. Human test prompts can only be answered by the person, in the desktop.
+- **Compact by default** — 30 semantic tools that run the bounded steps the agent writes and return the raw evidence; `--tools all` exposes every primitive. Cortex does not score or interpret results for the agent.
+- **Guarded** — a state-changing call needs two things: `mutation_permission=true` in the call (the agent saying it means to) and write authority from outside the model (`--allow-writes` on the command line). Supported changes run inside rollback-aware transactions. Human test prompts can only be answered by the person, in the desktop. Known limit: the pipe token is a file the same Windows user can read, so an agent that also has a shell or file access is not held back by any of this.
 - **Visible** — the desktop's **AI Activity** panel shows each agent session and tool call as it happens.
 
 ```text

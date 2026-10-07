@@ -448,6 +448,19 @@ bool PayloadClient::EnsureReady(std::string* error) {
     if (ConnectExisting(target, nullptr, 1)) return true;
     Reset();
 
+    if (!InjectionAllowed()) {
+        // A runtime loaded a moment ago may not be listening yet.
+        for (int attempt = 0; attempt < 40; ++attempt) {
+            if (ConnectExisting(target, nullptr, 1)) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        Reset();
+        SetError(error,
+                 "write_authority_required: loading the runtime puts code in the target. Start "
+                 "cortex.exe mcp with --allow-writes, or load it yourself beforehand with "
+                 "`cortex.exe inject <pid>`");
+        return false;
+    }
     if (!InjectPayload(target, error)) return false;
 
     std::string connectError;
@@ -466,7 +479,8 @@ bool PayloadClient::RoundTrip(const json& message,
                               const std::string& toolProfile,
                               const std::string& transportProtocolVersion,
                               bool allowEmptyResponse,
-                              bool* hasResponse) const {
+                              bool* hasResponse,
+                              const char* channel) const {
     response = json();
     if (hasResponse) *hasResponse = false;
 #if !defined(_WIN32)
@@ -502,8 +516,10 @@ bool PayloadClient::RoundTrip(const json& message,
         {"token", token},
         {"tools", toolProfile},
         {"session", sessionId},
+        {"writes_allowed", WritesAuthority()},
         {"message", message}
     };
+    if (channel && *channel) envelope["channel"] = channel;
     if (!transportProtocolVersion.empty())
         envelope["protocolVersion"] = transportProtocolVersion;
 

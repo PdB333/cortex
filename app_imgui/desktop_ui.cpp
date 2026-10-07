@@ -1041,6 +1041,9 @@ void DrawApp(AppState& app) {
         // cannot answer, so the calls are refused up front instead of
         // freezing this window until they time out.
         app.payload.SetSuspended(app.ui.targetPaused);
+        // The runtime only changes the target while the person has Writes allowed
+        // on; the desktop is the authority for its own calls.
+        app.payload.SetWritesAuthority(app.ui.mutationAllowed);
         app.debuggerModel.SetTargetPaused(app.ui.targetPaused);
     }
 

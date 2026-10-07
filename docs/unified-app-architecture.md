@@ -52,9 +52,9 @@ MCP is integrated into `cortex.exe`. The normal local path is stdio -> authentic
 
 The injected runtime starts the authenticated native pipe and route registry without opening a TCP listener by default. The legacy loopback HTTP API is compatibility/debug-only and requires `http_api_enabled=true` in `cortex.ini`.
 
-Primitive and semantic execution share the same route/executor contracts used by the application. Mutating/control/native operations require explicit mutation permission. Semantic execution additionally supports bounded execution, cancellation, evidence and transactional rollback where a safe compensation contract exists.
+Primitive and semantic execution share the same route/executor contracts used by the application. Mutating/control/native operations require write authority from outside the model (the desktop switch or `cortex.exe mcp --allow-writes`) plus the call's own `mutation_permission` declaration. Semantic execution additionally supports bounded execution, cancellation, evidence and transactional rollback where a safe compensation contract exists.
 
-Human prompt answering is kept off the public MCP tool surface. The Desktop communicates with prompt state over a private local channel so an agent cannot answer its own human-verification prompt.
+Human prompt answering is kept off the public MCP tool surface. The Desktop communicates with prompt state over a private local channel (`cortex/private/route`, only accepted from the desktop's own adapter) so an agent cannot answer its own human-verification prompt through MCP. The pipe token is a readable file, so this does not stop a client that also has a shell; see the limit in `docs/mcp.md`.
 
 ## Instrumentation boundary
 

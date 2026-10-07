@@ -18,11 +18,17 @@ void RegisterMcpRoutes(httplib::Server& server) {
             const auto profile = mcp_tools::ParseProfile(
                 request.get_header_value("X-Cortex-MCP-Tools"),
                 mcp_protocol::ToolProfile::All);
+            // Same rule as the native pipe: authority is declared by whoever
+            // runs the bridge (cortex_host mcp --allow-writes), not by a tool
+            // call. Absent header means no authority.
+            mcp_tools::Authority authority;
+            authority.writesAllowed = request.get_header_value("X-Cortex-MCP-Writes") == "allowed";
             const auto result = mcp_tools::Handle(
                 json::parse(request.body),
                 profile,
                 request.get_header_value("MCP-Protocol-Version"),
-                request.get_header_value("X-Cortex-MCP-Session"));
+                request.get_header_value("X-Cortex-MCP-Session"),
+                authority);
 
             if (!result.hasResponse) {
                 response.status = 202;

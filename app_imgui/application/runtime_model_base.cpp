@@ -39,6 +39,10 @@ bool RuntimeModelBase::Call(const std::string& tool, json arguments, json& resul
         if (error) *error = "mutation_permission_required";
         return false;
     }
+    // The runtime enforces the same switch on its side: authority is the
+    // person's Writes allowed state, and `mutation_permission` below only says
+    // this call means to change something.
+    payload_.SetWritesAuthority(mutationAllowed);
     if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
     if (mutation) arguments["mutation_permission"] = true;
 

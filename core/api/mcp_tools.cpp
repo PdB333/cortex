@@ -5,6 +5,7 @@
 #include "semantic_tools.h"
 #include "mcp_contract.h"
 #include "../action/action.h"
+#include "../security/denial_log.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -236,9 +237,7 @@ bool SemanticAllowsPrimitive(const json& semanticTool, const std::string& wanted
 mcp_contract::ToolRisk EffectiveRiskForCall(const std::string& name,
                                             mcp_contract::ToolRisk risk,
                                             const json& arguments) {
-    if (name == "struct_infer" && arguments.is_object() && arguments.value("define", false))
-        return mcp_contract::ToolRisk::Control;
-    return risk;
+    return mcp_contract::EffectiveRisk(name, risk, arguments);
 }
 
 bool RequiresMutationPermissionForCall(const std::string& name,
@@ -246,6 +245,58 @@ bool RequiresMutationPermissionForCall(const std::string& name,
                                        const json& arguments) {
     return mcp_contract::RequiresMutationPermission(EffectiveRiskForCall(name, risk, arguments));
 }
+
+// The one place that decides whether a call may run. A call that changes the
+// target needs BOTH the caller's declared intent (`mutation_permission`) and
+// authority from outside the model. Anything refused is recorded.
+struct Gate {
+    bool allowed = true;
+    json error;
+};
+
+Gate CheckAuthority(const std::string& name,
+                    mcp_contract::ToolRisk risk,
+                    const json& arguments,
+                    bool declaredIntent,
+                    const Authority& authority,
+                    const std::string& semanticTool = {}) {
+    Gate gate;
+    const auto refuse = [&](const std::string& code, const mcp_contract::ToolRisk shown) {
+        gate.allowed = false;
+        gate.error = {{"ok", false},
+                      {"error", code},
+                      {"tool", name},
+                      {"risk", mcp_contract::RiskName(shown)}};
+        if (code == "write_authority_required")
+            gate.error["message"] =
+                "Writes are not authorized for this session. The person running Cortex must start "
+                "cortex.exe mcp with --allow-writes (or allow writes in the desktop); the "
+                "mutation_permission argument alone is not enough.";
+        cortex::security::RecordDenial("runtime", name, code, arguments, semanticTool);
+    };
+
+    if (name == "batch_run") {
+        const auto verdict = mcp_contract::ClassifyBatchRun(arguments);
+        if (!verdict.ok) {
+            refuse(verdict.error, mcp_contract::ToolRisk::Mutate);
+            return gate;
+        }
+    }
+    const auto effective = EffectiveRiskForCall(name, risk, arguments);
+    if (effective == mcp_contract::ToolRisk::Unclassified) {
+        refuse("tool_not_classified", effective);
+        gate.error["message"] = "This tool has no risk classification and is refused until it is classified.";
+        return gate;
+    }
+    if (!mcp_contract::RequiresMutationPermission(effective)) return gate;
+    if (!declaredIntent) {
+        refuse("mutation_permission_required", effective);
+        return gate;
+    }
+    if (!authority.writesAllowed) refuse("write_authority_required", effective);
+    return gate;
+}
+
 bool SupportsTransactionalRollback(const std::string& name,
                                    mcp_contract::ToolRisk risk,
                                    const json& arguments) {
@@ -353,7 +404,8 @@ json TerminateExecution(json plan,
 json ExecuteSemantic(const std::string& wanted,
                      const json& arguments,
                      const json& requestId,
-                     const std::string& cancellationScope) {
+                     const std::string& cancellationScope,
+                     const Authority& authority) {
     json plan = semantic::PlanFor(wanted, arguments);
     if (IsToolError(plan) || !arguments.value("execute", false)) return plan;
 
@@ -408,11 +460,13 @@ json ExecuteSemantic(const std::string& wanted,
         const json stepArguments = rawStep.value("arguments", json::object());
         const auto effectiveRisk = EffectiveRiskForCall(canonical, risk, stepArguments);
 
-        if (RequiresMutationPermissionForCall(canonical, effectiveRisk, stepArguments) && !mutationPermission) {
+        const Gate gate = CheckAuthority(canonical, risk, stepArguments, mutationPermission, authority, wanted);
+        if (!gate.allowed) {
             plan["status"] = "failed";
-            plan["error"] = "mutation_permission_required";
+            plan["error"] = gate.error.value("error", std::string("mutation_permission_required"));
             plan["rejected_tool"] = canonical;
-            plan["risk"] = mcp_contract::RiskName(effectiveRisk);
+            plan["risk"] = gate.error.value("risk", std::string(mcp_contract::RiskName(effectiveRisk)));
+            if (gate.error.contains("message")) plan["message"] = gate.error["message"];
             plan["lifecycle"]["current"] = "failed";
             return plan;
         }
@@ -457,6 +511,27 @@ json ExecuteSemantic(const std::string& wanted,
             plan["failed_step"] = index;
             return TerminateExecution(std::move(plan), "failed", referenceError,
                                       std::move(evidence), transaction);
+        }
+
+        // A reference can change an argument that the risk depends on (the ops
+        // of a batch, `define`, `pause_process`). Classify what will actually run,
+        // and refuse anything riskier than what was authorized in preparation.
+        {
+            const auto baseRisk = mcp_contract::ClassifyTool(
+                steps[index].canonicalName,
+                steps[index].manifest.value("method", std::string("GET")),
+                steps[index].manifest.value("path", std::string()));
+            const Gate resolvedGate = CheckAuthority(steps[index].canonicalName, baseRisk, resolvedArguments,
+                                                     mutationPermission, authority, wanted);
+            const auto resolvedRisk = EffectiveRiskForCall(steps[index].canonicalName, baseRisk, resolvedArguments);
+            if (!resolvedGate.allowed || static_cast<int>(resolvedRisk) > static_cast<int>(steps[index].risk)) {
+                UnregisterCancellation(cancellationScope, requestId, cancelled);
+                plan["failed_step"] = index;
+                return TerminateExecution(std::move(plan), "failed",
+                                          resolvedGate.allowed ? std::string("reference_changed_step_risk")
+                                                               : resolvedGate.error.value("error", std::string("step_not_authorized")),
+                                          std::move(evidence), transaction);
+            }
         }
 
         json output = DispatchPrimitive(steps[index].manifest, resolvedArguments);
@@ -512,10 +587,11 @@ json CallToolScoped(const std::string& wanted,
                     const json& arguments,
                     mcp_protocol::ToolProfile profile,
                     const json& requestId,
-                    const std::string& cancellationScope) {
+                    const std::string& cancellationScope,
+                    const Authority& authority) {
     json semanticTool;
     if (FindSemanticTool(wanted, semanticTool))
-        return ToolCallPayload(ExecuteSemantic(wanted, arguments, requestId, cancellationScope));
+        return ToolCallPayload(ExecuteSemantic(wanted, arguments, requestId, cancellationScope, authority));
 
     if (profile != mcp_protocol::ToolProfile::All) {
         return ToolCallPayload({
@@ -533,14 +609,9 @@ json CallToolScoped(const std::string& wanted,
         manifest.value("name", wanted),
         manifest.value("method", std::string("GET")),
         manifest.value("path", std::string()));
-    const auto effectiveRisk = EffectiveRiskForCall(manifest.value("name", wanted), risk, arguments);
-    if (RequiresMutationPermissionForCall(manifest.value("name", wanted), effectiveRisk, arguments) &&
-        !arguments.value("mutation_permission", false)) {
-        return ToolCallPayload({{"ok", false},
-                                {"error", "mutation_permission_required"},
-                                {"tool", manifest.value("name", wanted)},
-                                {"risk", mcp_contract::RiskName(effectiveRisk)}});
-    }
+    const Gate gate = CheckAuthority(manifest.value("name", wanted), risk, arguments,
+                                     arguments.is_object() && arguments.value("mutation_permission", false), authority);
+    if (!gate.allowed) return ToolCallPayload(gate.error);
     return ToolCallPayload(DispatchPrimitive(manifest, arguments), manifest.value("ok_false_is_error", true));
 }
 
@@ -569,23 +640,25 @@ json ListTools(mcp_protocol::ToolProfile profile) {
 json CallTool(const std::string& wanted,
               const json& arguments,
               mcp_protocol::ToolProfile profile,
-              const json& requestId) {
-    return CallToolScoped(wanted, arguments, profile, requestId, {});
+              const json& requestId,
+              const Authority& authority) {
+    return CallToolScoped(wanted, arguments, profile, requestId, {}, authority);
 }
 
 mcp_protocol::Result Handle(const json& input,
                             mcp_protocol::ToolProfile profile,
                             const std::string& transportProtocolVersion,
-                            const std::string& cancellationScope) {
+                            const std::string& cancellationScope,
+                            const Authority& authority) {
     mcp_protocol::Handler handler;
     handler.profile = profile;
     handler.transportProtocolVersion = transportProtocolVersion;
     handler.listTools = ListTools;
-    handler.callTool = [cancellationScope](const std::string& name,
+    handler.callTool = [cancellationScope, authority](const std::string& name,
                                            const json& arguments,
                                            mcp_protocol::ToolProfile toolProfile,
                                            const json& requestId) {
-        return CallToolScoped(name, arguments, toolProfile, requestId, cancellationScope);
+        return CallToolScoped(name, arguments, toolProfile, requestId, cancellationScope, authority);
     };
     handler.notification = [cancellationScope](const json& notification) {
         HandleNotification(notification, cancellationScope);

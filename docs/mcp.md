@@ -51,7 +51,7 @@ AI client -> cortex.exe mcp
                 +-- cortex_attach(pid=5678)
 ```
 
-Attaching a target does not grant write permission. State-changing runtime calls still require their explicit `mutation_permission=true` contract.
+Attaching a target does not grant write permission. A call that changes the target needs write authority from outside the model (`--allow-writes` on the `cortex.exe mcp` command line) **and** the call's own `mutation_permission=true`. Without `--allow-writes` the server cannot load the runtime into a process: `cortex_attach` (and `--pid` / `--process`) connect only to a runtime that is already there.
 
 ## Multiple attached targets
 
@@ -211,7 +211,7 @@ Execution rules:
 - later steps may reference evidence from an earlier step with `$from_step` plus an optional JSON pointer;
 - outputs are recorded in the returned `evidence` array;
 - a failed primitive stops the sequence;
-- control, mutation, and native-call primitives require `mutation_permission=true`;
+- control, mutation, and native-call primitives require `mutation_permission=true` and write authority (`--allow-writes`); `batch_run` is classified from the operations it contains, an operation not on its allowlist is refused, and a reference may not change what a step does after it was authorized;
 - active primitives without a known rollback contract are rejected before execution;
 - mutations with a supported contract execute inside `action::Transaction`;
 - failure, observed cancellation, or observed timeout rolls that transaction back;
@@ -238,9 +238,22 @@ Native stdio remains responsive to `notifications/cancelled` because normal requ
 
 ## Mutation permission
 
-Attaching a target does not grant permission to modify it. Control, mutation, and native-call operations continue to require explicit `mutation_permission=true` in the relevant MCP call.
+Two conditions must hold for a call that changes the target (control, mutation and native-call risk):
 
-This permission remains per operation; multi-target routing does not implicitly grant it on either target. The desktop applies the same rule: its Read-only / Writes allowed toggle decides whether it sends `mutation_permission=true`.
+1. **Write authority**, which comes from outside the model. For `cortex.exe mcp` it is the `--allow-writes` flag the person puts in the client configuration; for the legacy `cortex_host mcp` bridge it is the same flag. The desktop supplies its own: the Read-only / Writes allowed switch. The flag travels to the runtime on the authenticated pipe envelope, never inside a tool call, so an AI client cannot set it. (An authority granted by the desktop for a limited time to an MCP session is planned, not built.)
+2. **Declared intent**: `mutation_permission=true` on the call, or on the semantic request that runs the steps. On its own it grants nothing.
+
+Without authority the answer is `write_authority_required`; without the declaration it is `mutation_permission_required`. Every refused call is appended to `cortex_denied_mutations.jsonl` (tool, arguments, UTC time, who refused: `runtime` beside `cortex_core.dll`, `host` beside `cortex.exe`), so an attempt that was blocked can still be counted.
+
+Attaching a target does not grant permission to modify it, and loading the runtime counts as a modification: without `--allow-writes`, `cortex_attach` connects only to a runtime that was loaded beforehand (for example with `cortex.exe inject <pid>`). The server forwards only `initialize`, `ping`, `server/discover`, `tools/list`, `tools/call` and `notifications/*`; any other method, including the desktop's private `cortex/private/route`, is refused and logged.
+
+This remains per operation; multi-target routing does not implicitly grant it on either target.
+
+A tool with no explicit risk classification is refused (`tool_not_classified`), with or without authority. `tests/fixtures/mcp_tool_risks.json` lists the class of every primitive tool.
+
+**"Read-only" means no write to the target's memory, not no effect on the target.** `debug_threads`, `debug_registers`, `debug_breakpoint_list` and `debug_paused` need no write authority, but they use a debugger, and a debugger attached to a process suspends its threads while it handles events. Cortex does not hide this: every debugger attach and detach is published as an AI Activity event (kind `debugger`) and appended to `cortex_debugger_events.jsonl` beside `cortex.exe` and `cortex_core.dll` (phase, pid, backend, epoch `ts_ms`). A separate `--allow-debug` switch is not built.
+
+**Known limit.** The runtime's pipe token is a file (`cortex.mcp.<pid>.token`) readable by the Windows user that runs Cortex. A client that has a shell or file access as that user can read it and speak to the pipe directly, outside every rule above. These controls hold for an agent whose only access to Cortex is its MCP tool calls.
 
 ## AI activity in the desktop
 

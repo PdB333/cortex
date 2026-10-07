@@ -191,16 +191,29 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
             // It is intentionally not part of HTTP MCP/tools/list: Cortex
             // Desktop uses it for UI-side adapters such as human prompts
             // without making those controls callable by an AI client.
-            responsePayload = HandlePrivateRouteRequest(envelope["message"]).dump();
+            // It runs any native route with no further check, so only the
+            // desktop's own adapter (which marks the envelope) may use it; a
+            // message that merely arrived from an MCP client is refused.
+            if (envelope.value("channel", std::string()) != "desktop") {
+                responsePayload = RpcErrorForEnvelope(envelope, -32601, "private_route_not_available").dump();
+            } else {
+                responsePayload = HandlePrivateRouteRequest(envelope["message"]).dump();
+            }
         } else {
             const auto profile = mcp_tools::ParseProfile(
                 envelope.value("tools", std::string("compact")),
                 mcp_protocol::ToolProfile::Compact);
+            // Authority comes from the host that built this envelope (the
+            // human's launch flag or the desktop), never from the message.
+            mcp_tools::Authority authority;
+            if (envelope.contains("writes_allowed") && envelope["writes_allowed"].is_boolean())
+                authority.writesAllowed = envelope["writes_allowed"].get<bool>();
             const auto result = mcp_tools::Handle(
                 envelope["message"],
                 profile,
                 envelope.value("protocolVersion", std::string()),
-                envelope.value("session", std::string()));
+                envelope.value("session", std::string()),
+                authority);
             if (result.hasResponse) responsePayload = result.response.dump();
         }
     } catch (const json::parse_error& error) {

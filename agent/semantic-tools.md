@@ -2,26 +2,21 @@
 
 Since v0.6, Cortex includes a semantic layer for AI agents with bounded server-side execution. These tools describe goals in terms of observable runtime behaviour rather than game-specific concepts such as health, ammunition, money, or score.
 
-The semantic layer does not invent domain objects. Every conclusion must include evidence, confidence, alternatives, and a recommended next action. When evidence is insufficient, return `status: not_found` or `status: inconclusive` instead of guessing.
+The semantic layer does not invent domain objects, and it does not interpret results. Cortex runs the primitive steps you write, in order, and returns what they returned. It computes no confidence, no ranking and no hypotheses; drawing conclusions, and saying how sure you are, is your job. Prefer `status: not_found` or `inconclusive` in your own reasoning to guessing.
 
-## Common result contract
+## Result contract
 
 ```json
 {
-  "status": "candidate_found | confirmed | not_found | inconclusive | failed | cancelled | timed_out",
-  "confidence": 0.0,
-  "summary": "human-readable conclusion",
-  "evidence": [],
-  "candidates": [],
-  "alternative_hypotheses": [],
-  "tested_hypotheses": [],
-  "recommended_next_tool": "tool_name",
-  "artifacts": {},
-  "reversible_actions": []
+  "status": "plan_ready | completed | failed | cancelled | timed_out",
+  "summary": "what the tool did",
+  "evidence": [{ "step": 0, "tool": "...", "risk": "...", "arguments": {}, "output": {} }],
+  "reversible_actions": [],
+  "lifecycle": { "current": "..." }
 }
 ```
 
-Confidence is not a substitute for validation. A value scan only identifies correlation. Use `test_candidate_causality` or another controlled experiment before persisting a finding.
+`evidence` is the raw output of each step you asked for. A value scan only identifies correlation. Use `test_candidate_causality` or another controlled experiment before persisting a finding.
 
 ## Server-side execution
 
@@ -33,7 +28,8 @@ Execution rules:
 - every step must belong to that semantic tool's `_primitives` allowlist;
 - nested semantic execution is rejected;
 - `timeout_ms` is a cooperative orchestration deadline from 100 ms to 120000 ms, defaulting to 30000 ms;
-- `mutation_permission: true` is required before control, mutation, or native-call operations can run;
+- `mutation_permission: true` is required before control, mutation, or native-call operations can run, and it is not sufficient: the person must also have started `cortex.exe mcp` with `--allow-writes` (otherwise the step fails with `write_authority_required`);
+- `batch_run` is checked from the operations it contains; an operation that is not on its allowlist is refused, and a `$from_step` reference may not make a step riskier than the one that was authorized;
 - active operations without a known rollback contract are rejected before execution;
 - supported mutations run inside an action transaction and roll back on failure, observed cancellation, or observed timeout;
 - `rollback_on_success: true` can be used for reversible causal experiments;
@@ -111,7 +107,7 @@ Every pull request touching the semantic or MCP layer runs validation on Windows
 - native pipe tests lock token-derived rendezvous names and frame-size limits;
 - real DLL injection validates HTTP MCP planning and server-side read-only execution;
 - the native stdio path validates `cortex.exe mcp` -> authenticated Named Pipe -> semantic executor -> native route dispatcher;
-- mutation permission gates are checked before dangerous arguments reach a primitive;
+- mutation permission gates are checked before dangerous arguments reach a primitive, and a regression test (`tests/security_no_writes_regression.py`) calls every listed tool without `--allow-writes` and requires the target's state hash to be unchanged;
 - the action journal is compared around plan-only and read-only execution;
 - CTest, unified-host checks, and release packaging still run.
 

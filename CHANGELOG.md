@@ -2,6 +2,28 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [Unreleased]
+
+### Security
+
+The distributed v1.0.0 is affected: through `mutation_permission` (a boolean the client wrote itself), `batch_run`, `cortex_attach` and `cortex/private/route`, an AI client could change a target, or load the runtime into it, without the person having allowed writes. This was found by auditing the MCP path and reproduced against the real `cortex.exe mcp`. It is fixed as follows.
+
+- **Write authority now comes from the person, not the model.** `cortex.exe mcp` (and the `cortex_host mcp` bridge) take `--allow-writes`; without it every state-changing call is refused with `write_authority_required`. The flag reaches the runtime on the authenticated pipe envelope, never inside a tool call. `mutation_permission=true` on the call is still required, as a declaration of intent, and no longer sufficient. The desktop supplies its own authority from the Writes allowed switch. **This is a behaviour change:** an MCP client that wrote before must now be started with `--allow-writes`.
+- **`batch_run` no longer bypasses the permission.** It was classed as an analysis although its `ops` write memory, freeze values and patch code. It is now classified from its operations against an allowlist, an unknown or computed operation is refused, and the same classification is re-checked after `$from_step` references are resolved so a reference cannot make an authorized step riskier.
+- **`cortex_attach` (and `--pid` / `--process`) no longer inject without authority.** Loading the runtime puts code in the target; without `--allow-writes` the server connects only to a runtime that is already there (for example loaded with `cortex.exe inject <pid>`).
+- **The private desktop channel is closed to MCP clients.** A raw `cortex/private/route` message sent by an MCP client was forwarded to the runtime, which ran any native route with no check. The server now forwards only `initialize`, `ping`, `server/discover`, `tools/list`, `tools/call` and `notifications/*`, and the runtime accepts a private route only from the desktop's own adapter.
+- **`scan_new` / `scan_next` with `pause_process`, and all `prompt_*` tools, are now control operations** that need authority.
+- **A tool that no rule classifies is refused.** Every listed tool now needs an explicit risk class; a tool with none is `unclassified` and is refused with `tool_not_classified` whatever authority the caller holds (before, an unknown name defaulted to `analyze`). `tests/fixtures/mcp_tool_risks.json` records the class of every primitive tool and a test fails if one changes or is missing.
+- **Debugger attach and detach are journaled.** The `debug_*` read tools stay available without write authority, because they do not write memory, but a debugger attached to a process suspends its threads. Each attach/detach is shown in the AI Activity tab and appended to `cortex_debugger_events.jsonl`.
+- **Refused calls are logged** to `cortex_denied_mutations.jsonl` (tool, arguments, UTC time, `runtime` or `host`), beside `cortex_core.dll` and `cortex.exe`, so attempts can be counted.
+- **Regression test.** `tests/security_no_writes_regression.py` starts the test target, then calls every tool `tools/list` returns, with plausible arguments and `mutation_permission=true`, against a server started without `--allow-writes`, and requires the target's code and data hash to be unchanged. Controls prove the hash does change when writes are allowed.
+- **Known limit, documented:** the pipe token is a file readable by the same Windows user. A client that also has a shell or file access can read it and bypass these controls. An authority granted by the desktop for a limited time is planned.
+
+### Changed
+
+- **Semantic tool results no longer carry `confidence`, `evidence_confidence`, `candidates`, `alternative_hypotheses` or `tested_hypotheses`.** Cortex never computed them (`confidence` was a constant 1.0), and a figure that looks like a measure misleads the agent reading it. `status` is now documented as what it is: `plan_ready`, `completed`, `failed`, `cancelled` or `timed_out`.
+- The documentation and README no longer say that the application enforces writes for every call where that was only true of the desktop.
+
 ## [v1.0.0] - 2026-09-30
 
 First stable release. It is the Dear ImGui desktop that was prepared as the unpublished 0.8 candidate, validated against a real game (AssaultCube) in addition to the automated suites. Versions 0.7.0 and 0.8.0 were not published; their changes are all below.

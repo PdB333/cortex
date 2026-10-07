@@ -68,10 +68,20 @@ exposes, so everything in this guide applies to both.
 
 ## Permission to change the target
 
-Attaching grants no write permission. Control, mutation and native-call
-operations require `mutation_permission=true` on that call; every mutation is
-journaled and can be rolled back. Use it only for the specific operation that
-needs it.
+Attaching grants no write permission. Cortex starts read-only for you: a call
+that changes the target (control, mutation, native call) is refused with
+`write_authority_required` unless the person who started `cortex.exe mcp` passed
+`--allow-writes`, and you cannot turn that on. Writing `mutation_permission=true`
+on a call only declares that you mean to change something; it is required, and
+it is not sufficient. Do not retry a refused call with different arguments; tell
+the person what you needed and why. Every refused attempt is logged.
+
+Without `--allow-writes`, `cortex_attach` only connects to a runtime that is
+already loaded in the process; it will not load one. Inside `batch_run`, only
+the operations on its allowlist run.
+
+When writes are allowed, every mutation is journaled and can be rolled back.
+Use `mutation_permission` only for the specific operation that needs it.
 
 ## Core conventions
 

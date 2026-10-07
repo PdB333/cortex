@@ -239,9 +239,55 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
          << "  \"hang_event\": \"" << EscapeJson(control.hangEventName) << "\",\n"
          << "  \"stop_event\": \"" << EscapeJson(control.stopEventName) << "\",\n"
-         << "  \"hw_thread_event\": \"" << EscapeJson(control.hwThreadEventName) << "\"\n"
+         << "  \"hw_thread_event\": \"" << EscapeJson(control.hwThreadEventName) << "\",\n"
+         << "  \"hash_file\": \"" << EscapeJson(control.manifestPath + ".hash") << "\"\n"
          << "}\n";
     file.flush();
+}
+
+// State hash for tests that must show the target was not changed. It covers the
+// code of this executable and the globals that nothing in the target writes;
+// the counters and the health value change on their own and are left out. In
+// E2E mode it is rewritten to "<manifest>.hash" every 200 ms.
+void HashBytes(uint64_t& hash, const void* data, size_t size) {
+    const unsigned char* bytes = static_cast<const unsigned char*>(data);
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+}
+
+uint64_t ComputeStateHash() {
+    uint64_t hash = 1469598103934665603ull;
+    const unsigned char* base = reinterpret_cast<const unsigned char*>(GetModuleHandleA(nullptr));
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if (section->Characteristics & IMAGE_SCN_MEM_EXECUTE)
+            HashBytes(hash, base + section->VirtualAddress, section->Misc.VirtualSize);
+    }
+    HashBytes(hash, &g_cortex_u32, sizeof(g_cortex_u32));
+    HashBytes(hash, &g_cortex_u64, sizeof(g_cortex_u64));
+    HashBytes(hash, &g_cortex_float, sizeof(g_cortex_float));
+    HashBytes(hash, &g_cortex_double, sizeof(g_cortex_double));
+    HashBytes(hash, g_cortex_str, sizeof(g_cortex_str));
+    HashBytes(hash, &g_cortex_fake_object, sizeof(g_cortex_fake_object));
+    HashBytes(hash, g_cortex_fake_vtable_primary, sizeof(g_cortex_fake_vtable_primary));
+    HashBytes(hash, g_cortex_fake_vtable_secondary, sizeof(g_cortex_fake_vtable_secondary));
+    return hash;
+}
+
+void WriteStateHash(const E2EControl& control) {
+    char text[40]{};
+    std::snprintf(text, sizeof(text), "%016llx\n", static_cast<unsigned long long>(ComputeStateHash()));
+    const std::string path = control.manifestPath + ".hash";
+    const std::string temp = path + ".tmp";
+    {
+        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+        file << text;
+    }
+    MoveFileExA(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 }
 
 void CloseE2E(E2EControl& control) {
@@ -303,6 +349,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     if (!InitializeE2E(arguments, e2e)) return 3;
     WriteManifest(e2e, window);
 
+    ULONGLONG lastHashWrite = 0;
     const bool crashNull = HasArgument(arguments, "--crash-null");
     uint32_t crashCountdown = crashNull ? 60 : 0;
 
@@ -327,6 +374,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
             ResetEvent(e2e.hwThreadEvent);
             HANDLE writer = CreateThread(nullptr, 0, CortexHwWriterThread, nullptr, 0, nullptr);
             if (writer) CloseHandle(writer);
+        }
+        if (e2e.enabled && GetTickCount64() - lastHashWrite >= 200) {
+            lastHashWrite = GetTickCount64();
+            WriteStateHash(e2e);
         }
         if (e2e.enabled && WaitForSingleObject(e2e.hangEvent, 0) == WAIT_OBJECT_0) {
             while (WaitForSingleObject(e2e.stopEvent, 100) == WAIT_TIMEOUT) {}

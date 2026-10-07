@@ -35,6 +35,19 @@ public:
     void SetSuspended(bool suspended) { suspended_.store(suspended, std::memory_order_relaxed); }
     bool Suspended() const { return suspended_.load(std::memory_order_relaxed); }
 
+    // Authority to change the target, sent to the runtime with every call. It
+    // is set by whoever owns this client: the desktop (from its Writes allowed
+    // switch) or `cortex.exe mcp` (from its --allow-writes flag). It is not
+    // something a tool call can set. Default: none.
+    void SetWritesAuthority(bool allowed) override { writesAuthority_.store(allowed, std::memory_order_relaxed); }
+    bool WritesAuthority() const { return writesAuthority_.load(std::memory_order_relaxed); }
+
+    // Loading the runtime puts code in the target. When injection is not
+    // allowed, EnsureReady only connects to a runtime that is already there
+    // (for example one loaded beforehand with `cortex.exe inject <pid>`).
+    void SetInjectionAllowed(bool allowed) { injectionAllowed_.store(allowed, std::memory_order_relaxed); }
+    bool InjectionAllowed() const { return injectionAllowed_.load(std::memory_order_relaxed); }
+
     // Checks whether the currently selected target can be instrumented with
     // the runtime assets available beside the desktop application. This does
     // not inject anything and is safe to call from UI enable/disable logic.
@@ -106,7 +119,7 @@ public:
         };
 
         json response;
-        if (!RoundTrip(message, response, error, 4, "all", "2026-07-28", false)) {
+        if (!RoundTrip(message, response, error, 4, "all", "2026-07-28", false, nullptr, "desktop")) {
             Reset();
             return false;
         }
@@ -167,7 +180,8 @@ private:
                    const std::string& toolProfile,
                    const std::string& transportProtocolVersion,
                    bool allowEmptyResponse,
-                   bool* hasResponse = nullptr) const;
+                   bool* hasResponse = nullptr,
+                   const char* channel = nullptr) const;
 
     target::SessionManager& sessions_;
     mutable std::mutex mutex_;
@@ -178,6 +192,8 @@ private:
     uint64_t verifiedProcessId_ = 0;
     std::atomic<uint64_t> requestSequence_{0};
     std::atomic<bool> suspended_{false};
+    std::atomic<bool> writesAuthority_{false};
+    std::atomic<bool> injectionAllowed_{true};
 };
 
 } // namespace cortex::services

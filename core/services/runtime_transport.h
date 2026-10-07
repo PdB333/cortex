@@ -30,6 +30,11 @@ public:
                           nlohmann::json& output,
                           std::string* error = nullptr) = 0;
 
+    // Tells the runtime whether the person has allowed writes. Sent with every
+    // call; the runtime refuses state-changing calls without it, whatever the
+    // call says about itself. The default does nothing (scripted transports).
+    virtual void SetWritesAuthority(bool allowed) { (void)allowed; }
+
     // Calls a desktop-only private route on an already-connected runtime.
     virtual bool CallRouteExisting(const std::string& method,
                                    const std::string& path,

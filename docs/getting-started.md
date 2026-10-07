@@ -83,7 +83,7 @@ Project names and pointer paths resolve too. A resolved location opens in the Me
 
 ## 8. Write permission
 
-**Writes allowed** is an explicit safety permission, enforced by the application for every state-changing call.
+**Writes allowed** is an explicit safety permission. The desktop applies it to every state-changing call it makes, and the runtime refuses a state-changing call that arrives without it. An AI client connected through `cortex.exe mcp` has no such switch: only `--allow-writes` on its command line, chosen by you, lets it change the target.
 
 ### Read-only
 

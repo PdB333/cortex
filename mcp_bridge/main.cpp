@@ -156,12 +156,30 @@ HANDLE OpenPipe(const std::string& pipeName, int attempts = 100) {
     return INVALID_HANDLE_VALUE;
 }
 
+// Set once from the command line by the person who starts the bridge. An AI
+// client cannot change it.
+bool g_allowWrites = false;
+
+// `cortex/...` methods are Cortex's private desktop channel; they run any
+// native route with no further check and are never forwarded for an MCP client.
+bool RefusePrivateMethod(const json& message, std::string& response) {
+    if (!message.is_object()) return false;
+    const std::string method = message.value("method", std::string());
+    if (method.rfind("cortex/", 0) != 0) return false;
+    response = message.contains("id")
+        ? json({{"jsonrpc", "2.0"}, {"id", message["id"]},
+                {"error", {{"code", -32601}, {"message", "method_not_found"}}}}).dump()
+        : std::string();
+    return true;
+}
+
 bool NativeRoundTrip(const std::string& pipeName,
                      const std::string& token,
                      const std::string& toolProfile,
                      const std::string& session,
                      const json& message,
                      std::string& response) {
+    if (RefusePrivateMethod(message, response)) return true;
     HANDLE pipe = OpenPipe(pipeName, 100);
     if (pipe == INVALID_HANDLE_VALUE) return false;
 
@@ -169,6 +187,7 @@ bool NativeRoundTrip(const std::string& pipeName,
         {"token", token},
         {"tools", toolProfile},
         {"session", session},
+        {"writes_allowed", g_allowWrites},
         {"message", message}
     };
     const std::string payload = envelope.dump();
@@ -196,15 +215,17 @@ bool HttpRoundTrip(const std::string& host,
                    const std::string& session,
                    const json& message,
                    std::string& response) {
+    if (RefusePrivateMethod(message, response)) return true;
     httplib::Client client(host.c_str(), port);
     client.set_connection_timeout(2, 0);
     client.set_read_timeout(60, 0);
-    const httplib::Headers headers = {
+    httplib::Headers headers = {
         {"X-Cortex-Token", token},
         {"Host", host},
         {"X-Cortex-MCP-Tools", toolProfile},
         {"X-Cortex-MCP-Session", session}
     };
+    if (g_allowWrites) headers.emplace("X-Cortex-MCP-Writes", "allowed");
     const auto result = client.Post("/mcp", headers, message.dump(), "application/json");
     if (!result) return false;
     if (result->status == 202 || result->body.empty()) response.clear();
@@ -564,6 +585,7 @@ int CortexMcpMain(int argc, char** argv) {
         else if ((argument == "--process" || argument == "--pid") && i + 1 < argc)
             processTarget = argv[++i];
         else if (argument == "--dll" && i + 1 < argc) dllPath = argv[++i];
+        else if (argument == "--allow-writes") g_allowWrites = true;
         else {
             std::cerr << "cortex_host mcp: unknown or incomplete argument: " << argument << '\n';
             return 2;

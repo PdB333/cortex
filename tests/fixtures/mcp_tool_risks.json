@@ -1,0 +1,1043 @@
+{
+ "_comment": "Risk class of every primitive MCP tool, as shipped in cortex v1.0.0 plus the batch/prompt rules of the write-authority fix. Changing a line changes what an agent may do and invalidates benchmark results taken before the change.",
+ "tools": [
+  {
+   "name": "actions_clear",
+   "method": "POST",
+   "path": "/actions/clear",
+   "risk": "control"
+  },
+  {
+   "name": "actions_list",
+   "method": "GET",
+   "path": "/actions",
+   "risk": "observe"
+  },
+  {
+   "name": "actions_rollback",
+   "method": "POST",
+   "path": "/actions/rollback",
+   "risk": "mutate"
+  },
+  {
+   "name": "analysis_cfg",
+   "method": "POST",
+   "path": "/analysis/cfg",
+   "risk": "analyze"
+  },
+  {
+   "name": "analysis_functions",
+   "method": "POST",
+   "path": "/analysis/functions",
+   "risk": "analyze"
+  },
+  {
+   "name": "analysis_pe_headers",
+   "method": "GET",
+   "path": "/analysis/pe_headers",
+   "risk": "observe"
+  },
+  {
+   "name": "analysis_scan_patches",
+   "method": "POST",
+   "path": "/analysis/scan_patches",
+   "risk": "analyze"
+  },
+  {
+   "name": "analysis_structure",
+   "method": "POST",
+   "path": "/analysis/structure",
+   "risk": "analyze"
+  },
+  {
+   "name": "analysis_vtable",
+   "method": "POST",
+   "path": "/analysis/vtable",
+   "risk": "analyze"
+  },
+  {
+   "name": "analysis_xrefs",
+   "method": "POST",
+   "path": "/analysis/xrefs",
+   "risk": "analyze"
+  },
+  {
+   "name": "batch_run",
+   "method": "POST",
+   "path": "/batch/run",
+   "risk": "analyze"
+  },
+  {
+   "name": "call_function",
+   "method": "POST",
+   "path": "/call/function",
+   "risk": "native_call"
+  },
+  {
+   "name": "call_game_thread_status",
+   "method": "GET",
+   "path": "/call/game-thread/status",
+   "risk": "observe"
+  },
+  {
+   "name": "call_on_game_thread",
+   "method": "POST",
+   "path": "/call/game-thread",
+   "risk": "native_call"
+  },
+  {
+   "name": "call_on_thread",
+   "method": "POST",
+   "path": "/call/thread",
+   "risk": "native_call"
+  },
+  {
+   "name": "debug_breakpoint_add",
+   "method": "POST",
+   "path": "/debug/breakpoint",
+   "risk": "control"
+  },
+  {
+   "name": "debug_breakpoint_delete",
+   "method": "DELETE",
+   "path": "/debug/breakpoint/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "debug_breakpoint_list",
+   "method": "GET",
+   "path": "/debug/breakpoint/list",
+   "risk": "observe"
+  },
+  {
+   "name": "debug_breakpoint_log",
+   "method": "GET",
+   "path": "/debug/breakpoint/{id}/log",
+   "risk": "observe"
+  },
+  {
+   "name": "debug_breakpoint_trigger_clear",
+   "method": "DELETE",
+   "path": "/debug/breakpoint/{id}/trigger",
+   "risk": "control"
+  },
+  {
+   "name": "debug_breakpoint_trigger_set",
+   "method": "POST",
+   "path": "/debug/breakpoint/{id}/trigger",
+   "risk": "control"
+  },
+  {
+   "name": "debug_continue",
+   "method": "POST",
+   "path": "/debug/continue",
+   "risk": "control"
+  },
+  {
+   "name": "debug_pause",
+   "method": "POST",
+   "path": "/debug/pause",
+   "risk": "control"
+  },
+  {
+   "name": "debug_paused",
+   "method": "GET",
+   "path": "/debug/paused",
+   "risk": "observe"
+  },
+  {
+   "name": "debug_registers",
+   "method": "GET",
+   "path": "/debug/registers",
+   "risk": "observe"
+  },
+  {
+   "name": "debug_stack",
+   "method": "GET",
+   "path": "/debug/stack",
+   "risk": "observe"
+  },
+  {
+   "name": "debug_step",
+   "method": "POST",
+   "path": "/debug/step",
+   "risk": "control"
+  },
+  {
+   "name": "debug_step_over",
+   "method": "POST",
+   "path": "/debug/step_over",
+   "risk": "control"
+  },
+  {
+   "name": "debug_threads",
+   "method": "GET",
+   "path": "/debug/threads",
+   "risk": "observe"
+  },
+  {
+   "name": "disasm",
+   "method": "GET",
+   "path": "/disasm",
+   "risk": "observe"
+  },
+  {
+   "name": "dissect_delete",
+   "method": "DELETE",
+   "path": "/dissect/{id}",
+   "risk": "analyze"
+  },
+  {
+   "name": "dissect_diff",
+   "method": "POST",
+   "path": "/dissect/diff",
+   "risk": "analyze"
+  },
+  {
+   "name": "dissect_list",
+   "method": "GET",
+   "path": "/dissect/snapshots",
+   "risk": "observe"
+  },
+  {
+   "name": "dissect_snapshot",
+   "method": "POST",
+   "path": "/dissect/snapshot",
+   "risk": "analyze"
+  },
+  {
+   "name": "events",
+   "method": "GET",
+   "path": "/events",
+   "risk": "observe"
+  },
+  {
+   "name": "freeze_add",
+   "method": "POST",
+   "path": "/freeze",
+   "risk": "mutate"
+  },
+  {
+   "name": "freeze_delete",
+   "method": "DELETE",
+   "path": "/freeze/{id}",
+   "risk": "mutate"
+  },
+  {
+   "name": "freeze_list",
+   "method": "GET",
+   "path": "/freeze/list",
+   "risk": "observe"
+  },
+  {
+   "name": "ghidra_export",
+   "method": "POST",
+   "path": "/ghidra/export",
+   "risk": "analyze"
+  },
+  {
+   "name": "ghidra_import",
+   "method": "POST",
+   "path": "/ghidra/import",
+   "risk": "control"
+  },
+  {
+   "name": "ghidra_import_symbols",
+   "method": "POST",
+   "path": "/ghidra/import",
+   "risk": "control"
+  },
+  {
+   "name": "health",
+   "method": "GET",
+   "path": "/health",
+   "risk": "observe"
+  },
+  {
+   "name": "input_key",
+   "method": "POST",
+   "path": "/input/key",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_key_tap",
+   "method": "POST",
+   "path": "/input/key_tap",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_mouse_button",
+   "method": "POST",
+   "path": "/input/mouse_button",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_mouse_move",
+   "method": "POST",
+   "path": "/input/mouse_move",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_record_start",
+   "method": "POST",
+   "path": "/input/record/start",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_record_stop",
+   "method": "POST",
+   "path": "/input/record/stop",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_sequence",
+   "method": "POST",
+   "path": "/input/sequence",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_sequence_cancel",
+   "method": "DELETE",
+   "path": "/input/sequence/{id}",
+   "risk": "mutate"
+  },
+  {
+   "name": "input_sequence_status",
+   "method": "GET",
+   "path": "/input/sequence/{id}",
+   "risk": "observe"
+  },
+  {
+   "name": "input_text",
+   "method": "POST",
+   "path": "/input/text",
+   "risk": "mutate"
+  },
+  {
+   "name": "lua_exec",
+   "method": "POST",
+   "path": "/lua/exec",
+   "risk": "mutate"
+  },
+  {
+   "name": "lua_scripts",
+   "method": "GET",
+   "path": "/lua/scripts",
+   "risk": "observe"
+  },
+  {
+   "name": "lua_scripts_delete",
+   "method": "DELETE",
+   "path": "/lua/scripts/{name}",
+   "risk": "mutate"
+  },
+  {
+   "name": "lua_scripts_get",
+   "method": "GET",
+   "path": "/lua/scripts/{name}",
+   "risk": "observe"
+  },
+  {
+   "name": "lua_scripts_run",
+   "method": "POST",
+   "path": "/lua/scripts/{name}/run",
+   "risk": "mutate"
+  },
+  {
+   "name": "lua_scripts_save",
+   "method": "POST",
+   "path": "/lua/scripts",
+   "risk": "mutate"
+  },
+  {
+   "name": "memory_dump_typed",
+   "method": "GET",
+   "path": "/memory/dump_typed",
+   "risk": "observe"
+  },
+  {
+   "name": "memory_fill",
+   "method": "POST",
+   "path": "/memory/fill",
+   "risk": "mutate"
+  },
+  {
+   "name": "memory_ownership",
+   "method": "GET",
+   "path": "/memory/ownership",
+   "risk": "observe"
+  },
+  {
+   "name": "memory_read",
+   "method": "POST",
+   "path": "/memory/read",
+   "risk": "analyze"
+  },
+  {
+   "name": "memory_read_batch",
+   "method": "POST",
+   "path": "/memory/read_batch",
+   "risk": "analyze"
+  },
+  {
+   "name": "memory_regions",
+   "method": "GET",
+   "path": "/memory/regions",
+   "risk": "observe"
+  },
+  {
+   "name": "memory_write",
+   "method": "POST",
+   "path": "/memory/write",
+   "risk": "mutate"
+  },
+  {
+   "name": "memory_write_batch",
+   "method": "POST",
+   "path": "/memory/write_batch",
+   "risk": "mutate"
+  },
+  {
+   "name": "modules",
+   "method": "GET",
+   "path": "/modules",
+   "risk": "observe"
+  },
+  {
+   "name": "network_capture",
+   "method": "POST",
+   "path": "/network/capture",
+   "risk": "control"
+  },
+  {
+   "name": "network_events",
+   "method": "GET",
+   "path": "/network/events",
+   "risk": "observe"
+  },
+  {
+   "name": "ocr",
+   "method": "POST",
+   "path": "/ocr",
+   "risk": "analyze"
+  },
+  {
+   "name": "openapi",
+   "method": "GET",
+   "path": "/openapi.json",
+   "risk": "observe"
+  },
+  {
+   "name": "patch_alloc_cave",
+   "method": "POST",
+   "path": "/patch/alloc_cave",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_assemble",
+   "method": "POST",
+   "path": "/patch/assemble",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_detour",
+   "method": "POST",
+   "path": "/patch/detour",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_list",
+   "method": "GET",
+   "path": "/patch/list",
+   "risk": "observe"
+  },
+  {
+   "name": "patch_nop",
+   "method": "POST",
+   "path": "/patch/nop",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_revert",
+   "method": "DELETE",
+   "path": "/patch/{id}",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_trampoline",
+   "method": "POST",
+   "path": "/patch/trampoline",
+   "risk": "mutate"
+  },
+  {
+   "name": "patch_write",
+   "method": "POST",
+   "path": "/patch/write",
+   "risk": "mutate"
+  },
+  {
+   "name": "pointermap_capture",
+   "method": "POST",
+   "path": "/pointermap/capture",
+   "risk": "control"
+  },
+  {
+   "name": "pointermap_delete",
+   "method": "DELETE",
+   "path": "/pointermap/{name}",
+   "risk": "control"
+  },
+  {
+   "name": "pointermap_intersect",
+   "method": "POST",
+   "path": "/pointermap/intersect",
+   "risk": "analyze"
+  },
+  {
+   "name": "pointermap_list",
+   "method": "GET",
+   "path": "/pointermap/list",
+   "risk": "observe"
+  },
+  {
+   "name": "project_address_delete",
+   "method": "DELETE",
+   "path": "/project/address/{name}",
+   "risk": "control"
+  },
+  {
+   "name": "project_address_set",
+   "method": "POST",
+   "path": "/project/address",
+   "risk": "control"
+  },
+  {
+   "name": "project_get",
+   "method": "GET",
+   "path": "/project",
+   "risk": "observe"
+  },
+  {
+   "name": "project_note_add",
+   "method": "POST",
+   "path": "/project/note",
+   "risk": "control"
+  },
+  {
+   "name": "project_note_delete",
+   "method": "DELETE",
+   "path": "/project/note/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "project_pointer_path_delete",
+   "method": "DELETE",
+   "path": "/project/pointer_path/{name}",
+   "risk": "control"
+  },
+  {
+   "name": "project_pointer_path_resolve",
+   "method": "GET",
+   "path": "/project/resolve/{name}",
+   "risk": "observe"
+  },
+  {
+   "name": "project_pointer_path_set",
+   "method": "POST",
+   "path": "/project/pointer_path",
+   "risk": "control"
+  },
+  {
+   "name": "prompt_status",
+   "method": "GET",
+   "path": "/prompt/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "prompt_timed_test",
+   "method": "POST",
+   "path": "/prompt/timed_test",
+   "risk": "control"
+  },
+  {
+   "name": "prompt_value_change",
+   "method": "POST",
+   "path": "/prompt/value_change",
+   "risk": "control"
+  },
+  {
+   "name": "re_checkpoint_create",
+   "method": "POST",
+   "path": "/re/checkpoint",
+   "risk": "control"
+  },
+  {
+   "name": "re_checkpoint_delete",
+   "method": "DELETE",
+   "path": "/re/checkpoint/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "re_checkpoint_list",
+   "method": "GET",
+   "path": "/re/checkpoints",
+   "risk": "observe"
+  },
+  {
+   "name": "re_checkpoint_rollback",
+   "method": "POST",
+   "path": "/re/checkpoint/{id}/rollback",
+   "risk": "control"
+  },
+  {
+   "name": "re_cpp_subobjects",
+   "method": "POST",
+   "path": "/re/cpp/subobjects",
+   "risk": "analyze"
+  },
+  {
+   "name": "re_experiment_run",
+   "method": "POST",
+   "path": "/re/experiment/run",
+   "risk": "control"
+  },
+  {
+   "name": "re_find_last_writer",
+   "method": "POST",
+   "path": "/re/last-writer",
+   "risk": "control"
+  },
+  {
+   "name": "re_object_compare",
+   "method": "POST",
+   "path": "/re/object/compare",
+   "risk": "analyze"
+  },
+  {
+   "name": "re_object_delete",
+   "method": "DELETE",
+   "path": "/re/object/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "re_object_events",
+   "method": "GET",
+   "path": "/re/object/{id}/events",
+   "risk": "observe"
+  },
+  {
+   "name": "re_object_get",
+   "method": "GET",
+   "path": "/re/object/{id}",
+   "risk": "observe"
+  },
+  {
+   "name": "re_object_tracks",
+   "method": "GET",
+   "path": "/re/object/tracks",
+   "risk": "observe"
+  },
+  {
+   "name": "re_session",
+   "method": "GET",
+   "path": "/re/session",
+   "risk": "observe"
+  },
+  {
+   "name": "re_session_apply_breakpoints",
+   "method": "POST",
+   "path": "/re/session/apply-breakpoints",
+   "risk": "control"
+  },
+  {
+   "name": "re_session_breakpoints",
+   "method": "POST",
+   "path": "/re/session/breakpoints",
+   "risk": "control"
+  },
+  {
+   "name": "re_session_fact_delete",
+   "method": "DELETE",
+   "path": "/re/session/fact",
+   "risk": "control"
+  },
+  {
+   "name": "re_session_fact_set",
+   "method": "POST",
+   "path": "/re/session/fact",
+   "risk": "control"
+  },
+  {
+   "name": "re_test_run",
+   "method": "POST",
+   "path": "/re/test/run",
+   "risk": "control"
+  },
+  {
+   "name": "re_trace_transition",
+   "method": "POST",
+   "path": "/re/transition/trace",
+   "risk": "control"
+  },
+  {
+   "name": "re_track_object",
+   "method": "POST",
+   "path": "/re/object/track",
+   "risk": "control"
+  },
+  {
+   "name": "scan_aob",
+   "method": "POST",
+   "path": "/scan/aob",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_code_caves",
+   "method": "POST",
+   "path": "/scan/code_caves",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_delete",
+   "method": "DELETE",
+   "path": "/scan/{scan_id}",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_intersect",
+   "method": "POST",
+   "path": "/scan/intersect",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_list",
+   "method": "GET",
+   "path": "/scan/list",
+   "risk": "observe"
+  },
+  {
+   "name": "scan_new",
+   "method": "POST",
+   "path": "/scan/new",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_next",
+   "method": "POST",
+   "path": "/scan/next",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_pointer_path",
+   "method": "POST",
+   "path": "/scan/pointer_path",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_pointers",
+   "method": "POST",
+   "path": "/scan/pointers",
+   "risk": "analyze"
+  },
+  {
+   "name": "scan_results",
+   "method": "GET",
+   "path": "/scan/results/{scan_id}",
+   "risk": "observe"
+  },
+  {
+   "name": "scan_strings",
+   "method": "POST",
+   "path": "/scan/strings",
+   "risk": "analyze"
+  },
+  {
+   "name": "schema_validate",
+   "method": "GET",
+   "path": "/schema/validate",
+   "risk": "observe"
+  },
+  {
+   "name": "screenshot",
+   "method": "GET",
+   "path": "/screenshot",
+   "risk": "observe"
+  },
+  {
+   "name": "session_diff",
+   "method": "POST",
+   "path": "/session/diff",
+   "risk": "analyze"
+  },
+  {
+   "name": "session_export",
+   "method": "POST",
+   "path": "/session/export",
+   "risk": "analyze"
+  },
+  {
+   "name": "session_list",
+   "method": "GET",
+   "path": "/session/list",
+   "risk": "observe"
+  },
+  {
+   "name": "snapshot_create",
+   "method": "POST",
+   "path": "/snapshot/create",
+   "risk": "analyze"
+  },
+  {
+   "name": "snapshot_delete",
+   "method": "DELETE",
+   "path": "/snapshot/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "snapshot_diff",
+   "method": "POST",
+   "path": "/snapshot/diff",
+   "risk": "analyze"
+  },
+  {
+   "name": "snapshot_last_change",
+   "method": "POST",
+   "path": "/snapshot/last_change",
+   "risk": "analyze"
+  },
+  {
+   "name": "snapshot_list",
+   "method": "GET",
+   "path": "/snapshot/list",
+   "risk": "observe"
+  },
+  {
+   "name": "snapshot_rewind",
+   "method": "POST",
+   "path": "/snapshot/{id}/rewind",
+   "risk": "mutate"
+  },
+  {
+   "name": "status",
+   "method": "GET",
+   "path": "/status",
+   "risk": "observe"
+  },
+  {
+   "name": "struct_define",
+   "method": "POST",
+   "path": "/struct/define",
+   "risk": "control"
+  },
+  {
+   "name": "struct_delete",
+   "method": "DELETE",
+   "path": "/struct/{name}",
+   "risk": "control"
+  },
+  {
+   "name": "struct_infer",
+   "method": "POST",
+   "path": "/struct/infer",
+   "risk": "analyze"
+  },
+  {
+   "name": "struct_list",
+   "method": "GET",
+   "path": "/struct/list",
+   "risk": "observe"
+  },
+  {
+   "name": "struct_read",
+   "method": "POST",
+   "path": "/struct/read",
+   "risk": "analyze"
+  },
+  {
+   "name": "struct_write",
+   "method": "POST",
+   "path": "/struct/write",
+   "risk": "mutate"
+  },
+  {
+   "name": "symbols_lookup",
+   "method": "GET",
+   "path": "/symbols/lookup",
+   "risk": "observe"
+  },
+  {
+   "name": "symbols_module",
+   "method": "GET",
+   "path": "/symbols/module",
+   "risk": "observe"
+  },
+  {
+   "name": "symbols_resolve",
+   "method": "GET",
+   "path": "/symbols/resolve",
+   "risk": "observe"
+  },
+  {
+   "name": "tools",
+   "method": "GET",
+   "path": "/tools",
+   "risk": "observe"
+  },
+  {
+   "name": "trace_callgraph",
+   "method": "GET",
+   "path": "/trace/{id}/callgraph",
+   "risk": "observe"
+  },
+  {
+   "name": "trace_compare",
+   "method": "POST",
+   "path": "/trace/compare",
+   "risk": "analyze"
+  },
+  {
+   "name": "trace_coverage",
+   "method": "GET",
+   "path": "/trace/{id}/coverage",
+   "risk": "observe"
+  },
+  {
+   "name": "trace_delete",
+   "method": "DELETE",
+   "path": "/trace/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "trace_events",
+   "method": "GET",
+   "path": "/trace/{id}/events",
+   "risk": "observe"
+  },
+  {
+   "name": "trace_list",
+   "method": "GET",
+   "path": "/trace/list",
+   "risk": "observe"
+  },
+  {
+   "name": "trace_start",
+   "method": "POST",
+   "path": "/trace/start",
+   "risk": "control"
+  },
+  {
+   "name": "trace_stop",
+   "method": "POST",
+   "path": "/trace/{id}/stop",
+   "risk": "control"
+  },
+  {
+   "name": "watch_add",
+   "method": "POST",
+   "path": "/watch",
+   "risk": "control"
+  },
+  {
+   "name": "watch_allocations",
+   "method": "POST",
+   "path": "/watch/allocations",
+   "risk": "control"
+  },
+  {
+   "name": "watch_allocations_events",
+   "method": "GET",
+   "path": "/watch/allocations/events",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_allocations_events_snapshot",
+   "method": "GET",
+   "path": "/watch/allocations/events_snapshot",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_allocations_status",
+   "method": "GET",
+   "path": "/watch/allocations/status",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_delete",
+   "method": "DELETE",
+   "path": "/watch/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "watch_events",
+   "method": "GET",
+   "path": "/watch/events",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_list",
+   "method": "GET",
+   "path": "/watch/list",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_page_access",
+   "method": "POST",
+   "path": "/watch/page_access",
+   "risk": "control"
+  },
+  {
+   "name": "watch_page_access_delete",
+   "method": "DELETE",
+   "path": "/watch/page_access/{id}",
+   "risk": "control"
+  },
+  {
+   "name": "watch_page_access_events",
+   "method": "GET",
+   "path": "/watch/page_access/events",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_page_access_events_snapshot",
+   "method": "GET",
+   "path": "/watch/page_access/events_snapshot",
+   "risk": "observe"
+  },
+  {
+   "name": "watch_page_access_list",
+   "method": "GET",
+   "path": "/watch/page_access/list",
+   "risk": "observe"
+  },
+  {
+   "name": "window_focus",
+   "method": "POST",
+   "path": "/window/focus",
+   "risk": "control"
+  },
+  {
+   "name": "window_get",
+   "method": "GET",
+   "path": "/window",
+   "risk": "observe"
+  },
+  {
+   "name": "window_minimize",
+   "method": "POST",
+   "path": "/window/minimize",
+   "risk": "control"
+  },
+  {
+   "name": "window_move",
+   "method": "POST",
+   "path": "/window/move",
+   "risk": "control"
+  },
+  {
+   "name": "window_restore",
+   "method": "POST",
+   "path": "/window/restore",
+   "risk": "control"
+  }
+ ]
+}
