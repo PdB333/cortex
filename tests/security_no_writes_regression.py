@@ -268,6 +268,67 @@ def start_target(runner, target, workdir, tag):
     raise RuntimeError("target manifest never appeared")
 
 
+def isolate_each_tool(runner, cortex, target, bundle, workdir):
+    """Call every listed tool, one per fresh target, and say which ones stall or kill it.
+
+    The sweep above runs all tools against one target, so a stall is blamed on the call
+    that was running when it was noticed. Here nothing else can be the cause.
+    """
+    process, manifest, _ = start_target(runner, target, workdir, "list")
+    ctx = Context(manifest)
+    subprocess.run(runner + [cortex, "inject", str(ctx.pid)], cwd=bundle, capture_output=True, timeout=120)
+    server = Mcp(runner + [cortex, "mcp", "--pid", str(ctx.pid), "--tools", "all"], bundle)
+    server.initialize()
+    tools = server.request("tools/list", {}).get("result", {}).get("tools", [])
+    try:
+        server.close()
+    finally:
+        process.kill()
+    names = [t for t in tools if not t.get("_semantic") and t["name"] not in ("cortex_detach", "cortex_attach")]
+    offenders = []
+    for index, tool in enumerate(names):
+        process, manifest, _ = start_target(runner, target, workdir, "iso%d" % index)
+        ctx = Context(manifest)
+        hash_file = manifest["hash_file"]
+        server = None
+        verdict = "ok"
+        try:
+            subprocess.run(runner + [cortex, "inject", str(ctx.pid)], cwd=bundle, capture_output=True, timeout=120)
+            server = Mcp(runner + [cortex, "mcp", "--pid", str(ctx.pid), "--tools", "all"], bundle)
+            server.initialize()
+            read_hash(hash_file)
+            started = time.time()
+            server.call(tool["name"], build_arguments(tool, ctx), timeout=60)
+            took = time.time() - started
+            if process.poll() is not None:
+                verdict = "TARGET EXITED"
+            else:
+                last = os.path.getmtime(hash_file)
+                deadline = time.time() + 8.0
+                while time.time() < deadline and os.path.getmtime(hash_file) <= last:
+                    time.sleep(0.05)
+                if os.path.getmtime(hash_file) <= last:
+                    verdict = "TARGET STOPPED PUBLISHING (call took %.1f s)" % took
+        except Exception as error:  # a tool that wedges the server is also worth naming
+            verdict = "ERROR %s" % error
+        finally:
+            if server:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+            process.kill()
+        if verdict != "ok":
+            offenders.append((tool["name"], verdict))
+            print("FAIL  %s: %s" % (tool["name"], verdict))
+        else:
+            print("ok    %s" % tool["name"])
+    print("%d tools checked one by one, %d stall or kill the target" % (len(names), len(offenders)))
+    for name, verdict in offenders:
+        print("  - %s: %s" % (name, verdict))
+    return 1 if offenders else 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cortex", required=True)
@@ -277,6 +338,9 @@ def main():
                         help="do not call this tool (for hosts whose debugger backend is broken, e.g. Wine)")
     parser.add_argument("--expect-tools", type=int, default=0,
                         help="fail unless tools/list has exactly this many tools (0 = just report)")
+    parser.add_argument("--isolate", action="store_true",
+                        help="diagnostic: call every listed tool on its own fresh target and report which ones "
+                             "stop the target from publishing its state")
     parser.add_argument("--dump-tools", default="",
                         help="write name/method/path/risk of every listed tool to this JSON file, then continue")
     arguments = parser.parse_args()
@@ -292,6 +356,9 @@ def main():
         print(("ok    " if condition else "FAIL  ") + message)
         if not condition:
             failures.append(message)
+
+    if arguments.isolate:
+        return isolate_each_tool(runner, cortex, target, bundle, workdir)
 
     # Denial logs from earlier runs would hide a missing log.
     for root, _, files in os.walk(bundle):
@@ -350,7 +417,12 @@ def main():
         progress = {"mtime": os.path.getmtime(hash_file), "at": time.time(), "recent": []}
 
         def alive(label):
-            """Name the call during which the target stopped or froze, if one did."""
+            """Name the call after which the target stopped or froze, if one did.
+
+            The target rewrites its hash file every 200 ms. After every call we give it
+            0.45 s to publish once more, so a missing publish is blamed on that call (or
+            the one before it), not on whatever call happened to run a second later.
+            """
             if died:
                 return False
             progress["recent"] = (progress["recent"] + [label])[-4:]
@@ -358,24 +430,26 @@ def main():
             if process.poll() is not None:
                 reason = "exited"
             else:
-                modified = os.path.getmtime(hash_file)
-                if modified > progress["mtime"]:
-                    progress["mtime"], progress["at"] = modified, time.time()
-                elif time.time() - progress["at"] > 1.0:
-                    # A stall is not a change of state; only a target that does not come back is a problem.
-                    deadline = time.time() + 6.0
-                    while time.time() < deadline and os.path.getmtime(hash_file) <= progress["mtime"]:
-                        time.sleep(0.2)
+                time.sleep(0.45)
+                if os.path.getmtime(hash_file) > progress["mtime"]:
+                    progress["mtime"], progress["at"] = os.path.getmtime(hash_file), time.time()
+                else:
+                    # No publish for 0.45 s. A stall that ends is a warning; a target that
+                    # does not come back is a failure.
+                    started = time.time()
+                    while time.time() - started < 8.0 and os.path.getmtime(hash_file) <= progress["mtime"]:
+                        time.sleep(0.05)
                     if os.path.getmtime(hash_file) > progress["mtime"]:
                         progress["mtime"], progress["at"] = os.path.getmtime(hash_file), time.time()
-                        print("warn  the target stalled for over a second near: " + " / ".join(progress["recent"]))
+                        print("warn  the target stalled for %.1f s after: %s"
+                              % (time.time() - started + 0.45, " / ".join(progress["recent"])))
                     else:
-                        reason = "stopped responding"
+                        reason = "stopped responding (no state published for 8 s)"
             if reason:
                 died.append(label)
                 shown = " / ".join(progress["recent"])
-                print("FAIL  the target %s during: %s" % (reason, shown))
-                failures.append("the target %s during: %s" % (reason, shown))
+                print("FAIL  the target %s after: %s" % (reason, shown))
+                failures.append("the target %s after: %s" % (reason, shown))
             return not died
 
         semantic = [t for t in tools if t.get("_semantic")]
@@ -453,9 +527,13 @@ def main():
         # leaves the target stopped.
         check(process.poll() is None, "the target is still running")
         if process.poll() is None:
-            after = read_hash(hash_file)
-            print("state hash after: ", after)
-            check(before == after, "state hash unchanged after the sweep (%s -> %s)" % (before, after))
+            try:
+                after = read_hash(hash_file)
+            except RuntimeError as error:
+                check(False, "the target no longer publishes a state hash (it is frozen): %s" % error)
+            else:
+                print("state hash after: ", after)
+                check(before == after, "state hash unchanged after the sweep (%s -> %s)" % (before, after))
 
         server.call("cortex_detach", {"_cortex_target": str(ctx.pid)}, timeout=30)
         time.sleep(2.5)

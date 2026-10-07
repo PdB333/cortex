@@ -259,14 +259,27 @@ jobs:
           # requires the target's state hash to be unchanged. See
           # tests/security_no_writes_regression.py.
           $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
           python tests/security_no_writes_regression.py `
             --cortex "$bundle/cortex.exe" `
             --target "$bundle/e2e/cortex_test_target_x64.exe"
-          if ($LASTEXITCODE -ne 0) { throw "x64 write-authority regression failed" }
+          if ($LASTEXITCODE -ne 0) { $failed += "x64" }
           python tests/security_no_writes_regression.py `
             --cortex "$bundle/cortex.exe" `
             --target "$bundle/e2e/cortex_test_target_x86.exe"
-          if ($LASTEXITCODE -ne 0) { throw "x86 write-authority regression failed" }
+          if ($LASTEXITCODE -ne 0) { $failed += "x86" }
+          if ($failed.Count -gt 0) { throw "write-authority regression failed on: $($failed -join ', ')" }
+
+      - name: Which tool stalls the target? (diagnostic, only after a failure)
+        if: failure()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Calls each tool on its own fresh target, so a stall or exit has exactly one suspect.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/security_no_writes_regression.py --isolate `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x64.exe"
 
       - name: Inject a 32-bit target from the command line
         shell: pwsh
