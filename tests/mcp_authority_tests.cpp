@@ -134,19 +134,19 @@ void TestDenialLog() {
     CHECK(cortex::security::DenialCount() == before + 3);
 
     int lines = 0;
-    {
-    std::ifstream file(directory / cortex::security::DenialLogName());
-    std::string line;
     bool sawTool = false, sawSemantic = false, sawTruncated = false;
-    while (std::getline(file, line)) {
-        ++lines;
-        const auto entry = json::parse(line);
-        CHECK(entry.contains("ts_ms") && entry.contains("ts_utc") && entry.contains("reason"));
-        sawTool = sawTool || (entry["tool"] == "memory_write" && entry["arguments"]["address"] == 4096);
-        sawSemantic = sawSemantic || entry.value("semantic_tool", std::string()) == "test_candidate_causality";
-        sawTruncated = sawTruncated || entry.value("arguments_truncated", false);
+    {   // the file is closed before it is removed: Windows refuses to delete an open file
+        std::ifstream file(directory / cortex::security::DenialLogName());
+        std::string line;
+        while (std::getline(file, line)) {
+            ++lines;
+            const auto entry = json::parse(line);
+            CHECK(entry.contains("ts_ms") && entry.contains("ts_utc") && entry.contains("reason"));
+            sawTool = sawTool || (entry["tool"] == "memory_write" && entry["arguments"]["address"] == 4096);
+            sawSemantic = sawSemantic || entry.value("semantic_tool", std::string()) == "test_candidate_causality";
+            sawTruncated = sawTruncated || entry.value("arguments_truncated", false);
+        }
     }
-    } // close the file before removing it (Windows refuses to delete an open file)
     CHECK(lines == 3 && sawTool && sawSemantic && sawTruncated);
     cortex::security::SetDenialDirectory({});
     fs::remove_all(directory);
