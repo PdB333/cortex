@@ -1,0 +1,16 @@
+{
+ "name": "D0prime",
+ "description": "D0 plus the re_* tools and actions_rollback",
+ "server": {
+  "kind": "cortex",
+  "profile": "all"
+ },
+ "tool_filter": {
+  "mode": "allow",
+  "list": "D0prime"
+ },
+ "harness_tools": [
+  "bench_trigger",
+  "submit_answer"
+ ]
+}

@@ -1,0 +1,16 @@
+{
+ "name": "D0",
+ "description": "Cortex compact profile as shipped after the authority fix",
+ "server": {
+  "kind": "cortex",
+  "profile": "compact"
+ },
+ "tool_filter": {
+  "mode": "allow",
+  "list": "D0"
+ },
+ "harness_tools": [
+  "bench_trigger",
+  "submit_answer"
+ ]
+}

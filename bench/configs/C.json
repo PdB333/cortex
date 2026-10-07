@@ -1,0 +1,16 @@
+{
+ "name": "C",
+ "description": "Cortex primitives (exact list in cortex_tool_lists.json key C), no re_*/project/session/actions tools",
+ "server": {
+  "kind": "cortex",
+  "profile": "all"
+ },
+ "tool_filter": {
+  "mode": "allow",
+  "list": "C"
+ },
+ "harness_tools": [
+  "bench_trigger",
+  "submit_answer"
+ ]
+}

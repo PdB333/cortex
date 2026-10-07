@@ -1,0 +1,227 @@
+{
+ "id": "task09a",
+ "title": "Revalidate after update (synthetic transformation of bench_target)",
+ "version": "benchmark-v0.1",
+ "context": "The program under study is `bench_target.exe` (process id {pid}), a small simulation with one player. You can only act through your tools. `bench_trigger` makes events happen in the program (damage, healing, time passing) and returns nothing else. When you are done, call `submit_answer` once.",
+ "persistence": "Between the two stages the configuration keeps only what it offers (A: nothing; B: the notes file; Cortex: its project state). The conversation is never kept.",
+ "variants": {
+  "golden": "every phase-B run starts from the same frozen phase A",
+  "full_pairs": "each run has its own phase A"
+ },
+ "stages": [
+  {
+   "name": "establish",
+   "build": "v1",
+   "hostile": false,
+   "writes_allowed": false,
+   "verify": "establish_9a",
+   "prompt": "Establish, about the player's health: where it is, its type, which object contains it and at which offset, which instruction decreases it when damage occurs, and a way to find it again after the program is restarted. Also establish how much one hit of 10 lowers it, whether it recovers by itself when the player is left alone, and whether a hit of 25 or more stops that recovery. Do not modify the program. You will be asked about these findings again later, on a newer version of the program and possibly without this conversation, so keep what you need to recheck them in whatever persistent form your tools offer.",
+   "answer_schema": {
+    "type": "object",
+    "properties": {
+     "health_address": {
+      "type": "string"
+     },
+     "health_type": {
+      "type": "string",
+      "enum": [
+       "int8",
+       "int16",
+       "int32",
+       "int64",
+       "float",
+       "double",
+       "other"
+      ]
+     },
+     "owner_object_address": {
+      "type": "string",
+      "description": "address of the object that contains the health"
+     },
+     "health_offset": {
+      "type": "integer",
+      "description": "offset of the health inside that object, in bytes"
+     },
+     "writer_instruction": {
+      "type": "string",
+      "description": "hexadecimal address of an instruction that decreases the health when damage occurs"
+     },
+     "stable_reference": {
+      "type": "object",
+      "properties": {
+       "root_module_offset": {
+        "type": "string",
+        "description": "offset from the module base of a static address"
+       },
+       "offsets": {
+        "type": "array",
+        "items": {
+         "type": "integer"
+        },
+        "description": "pointer chain: value = [[root]+offsets[0]]+offsets[1] ... (each step but the last reads a pointer)"
+       }
+      },
+      "required": [
+       "root_module_offset",
+       "offsets"
+      ]
+     },
+     "damage_per_hit_of_10": {
+      "type": "integer",
+      "description": "how much the health drops after bench_trigger hit 10 on a fresh player"
+     },
+     "regeneration": {
+      "type": "string",
+      "enum": [
+       "yes",
+       "no"
+      ],
+      "description": "does the health recover by itself when the player has not been hit for a while and is not poisoned"
+     },
+     "heavy_hit_poisons": {
+      "type": "string",
+      "enum": [
+       "yes",
+       "no"
+      ],
+      "description": "does a hit of 25 or more stop that regeneration until the player is healed"
+     }
+    },
+    "required": [
+     "health_address",
+     "health_type",
+     "owner_object_address",
+     "health_offset",
+     "writer_instruction",
+     "stable_reference",
+     "damage_per_hit_of_10",
+     "regeneration",
+     "heavy_hit_poisons"
+    ]
+   },
+   "caps": {
+    "max_total_tokens": 1200000,
+    "max_tool_calls": 100,
+    "max_wall_s": 1500,
+    "max_turns": 60
+   }
+  },
+  {
+   "name": "revalidate",
+   "build": "v2",
+   "hostile": false,
+   "writes_allowed": false,
+   "verify": "revalidate_9a",
+   "fresh_conversation": true,
+   "prompt": "The target has been updated. Revalidate the previous findings and report what remains valid, what changed, and the new location of player health. For each earlier finding, say whether it still holds on this version (valid) or not (invalid), and give the new location of the health, its owner object, the offset, the instruction that decreases it and a stable reference. The earlier findings are: health_type, health_offset, writer_instruction, stable_reference, damage_per_hit_of_10, regeneration, heavy_hit_poisons.",
+   "answer_schema": {
+    "type": "object",
+    "properties": {
+     "new_health_address": {
+      "type": "string"
+     },
+     "new_owner_object_address": {
+      "type": "string"
+     },
+     "new_health_offset": {
+      "type": "integer"
+     },
+     "new_writer_instruction": {
+      "type": "string"
+     },
+     "new_stable_reference": {
+      "type": "object",
+      "properties": {
+       "root_module_offset": {
+        "type": "string"
+       },
+       "offsets": {
+        "type": "array",
+        "items": {
+         "type": "integer"
+        }
+       }
+      }
+     },
+     "previous_findings": {
+      "type": "object",
+      "description": "for each earlier finding: does it still hold on this version?",
+      "properties": {
+       "health_type": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "health_offset": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "writer_instruction": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "stable_reference": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "damage_per_hit_of_10": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "regeneration": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       },
+       "heavy_hit_poisons": {
+        "type": "string",
+        "enum": [
+         "valid",
+         "invalid"
+        ]
+       }
+      },
+      "required": [
+       "health_type",
+       "health_offset",
+       "writer_instruction",
+       "stable_reference",
+       "damage_per_hit_of_10",
+       "regeneration",
+       "heavy_hit_poisons"
+      ]
+     },
+     "evidence": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "new_health_address",
+     "previous_findings"
+    ]
+   },
+   "caps": {
+    "max_total_tokens": 1200000,
+    "max_tool_calls": 100,
+    "max_wall_s": 1500,
+    "max_turns": 60
+   }
+  }
+ ]
+}

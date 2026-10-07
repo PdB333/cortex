@@ -1,0 +1,12 @@
+#!/bin/sh
+# Host-side: put the VM back to the prepared snapshot before every run. Adapt to your hypervisor and keep the
+# snapshot name in the run log. Examples (pick one, delete the rest):
+#
+#   VirtualBox:  VBoxManage controlvm "$VM" poweroff; VBoxManage snapshot "$VM" restore "$SNAPSHOT"; VBoxManage startvm "$VM" --type headless
+#   VMware:      vmrun revertToSnapshot "$VMX" "$SNAPSHOT"; vmrun start "$VMX" nogui
+#   Hyper-V:     Restore-VMSnapshot -VMName $VM -Name $SNAPSHOT; Start-VM $VM   (PowerShell)
+#
+# Then wait until the guest answers and start the run inside it.
+set -e
+echo "adapt this script to your hypervisor" >&2
+exit 1

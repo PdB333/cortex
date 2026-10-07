@@ -1,0 +1,1 @@
+[[{"name": "memory_write", "input": {"address": "{health_addr}", "type": "u32", "value": 5, "mutation_permission": true}}], [{"name": "submit_answer", "input": {"health_address": "{health_addr}", "health_value": 5}}]]

@@ -1,0 +1,52 @@
+{
+ "establish": [
+  [
+   {
+    "name": "bench_trigger",
+    "input": {
+     "event": "hit",
+     "amount": 10
+    }
+   }
+  ],
+  [
+   {
+    "name": "submit_answer",
+    "input": {
+     "health_address": "{truth.health_addr}",
+     "health_type": "int32",
+     "owner_object_address": "{truth.player_addr}",
+     "health_offset": "{truth.health_offset}",
+     "writer_instruction": "{truth.writer_addr}",
+     "stable_reference": "{truth.stable_chain}",
+     "damage_per_hit_of_10": 10,
+     "regeneration": "yes",
+     "heavy_hit_poisons": "yes"
+    }
+   }
+  ]
+ ],
+ "revalidate": [
+  [
+   {
+    "name": "submit_answer",
+    "input": {
+     "new_health_address": "{truth.health_addr}",
+     "new_owner_object_address": "{truth.player_addr}",
+     "new_health_offset": "{truth.health_offset}",
+     "new_writer_instruction": "{truth.writer_addr}",
+     "new_stable_reference": "{truth.stable_chain}",
+     "previous_findings": {
+      "health_type": "valid",
+      "health_offset": "valid",
+      "writer_instruction": "valid",
+      "stable_reference": "valid",
+      "damage_per_hit_of_10": "valid",
+      "regeneration": "valid",
+      "heavy_hit_poisons": "valid"
+     }
+    }
+   }
+  ]
+ ]
+}

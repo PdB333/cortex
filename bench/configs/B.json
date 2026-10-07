@@ -1,0 +1,19 @@
+{
+ "name": "B",
+ "description": "A plus a notes file the agent can read and write",
+ "server": {
+  "kind": "ce",
+  "command_template": [
+   "{ce_mcp_command}"
+  ],
+  "pending": "CE baseline commit not pinned yet"
+ },
+ "tool_filter": {
+  "mode": "all"
+ },
+ "harness_tools": [
+  "bench_trigger",
+  "submit_answer",
+  "notes"
+ ]
+}

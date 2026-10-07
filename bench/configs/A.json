@@ -1,0 +1,18 @@
+{
+ "name": "A",
+ "description": "Cheat Engine MCP bridge (pinned), no memory beyond the conversation",
+ "server": {
+  "kind": "ce",
+  "command_template": [
+   "{ce_mcp_command}"
+  ],
+  "pending": "CE baseline commit not pinned yet"
+ },
+ "tool_filter": {
+  "mode": "all"
+ },
+ "harness_tools": [
+  "bench_trigger",
+  "submit_answer"
+ ]
+}

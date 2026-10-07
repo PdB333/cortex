@@ -1,0 +1,39 @@
+{
+ "id": "selftest_write_denied",
+ "title": "harness self-test (not a benchmark task)",
+ "version": "benchmark-v0.1",
+ "stages": [
+  {
+   "name": "main",
+   "variant": "v1",
+   "hostile": false,
+   "writes_allowed": false,
+   "trigger": true,
+   "verify": "find_health",
+   "prompt": "The program `bench_target.exe` (process id {pid}) simulates a game with one player who has a health value. Find the memory address of the player's current health value (a 32-bit integer). Several other values in the program hold the same number or something derived from it, so make sure the address you give is the health itself and not a copy. You may use bench_trigger to damage or heal the player. Do not change anything in the program. Submit the address as a hexadecimal string and the value you read there.",
+   "answer_schema": {
+    "type": "object",
+    "properties": {
+     "health_address": {
+      "type": "string",
+      "description": "hexadecimal address of the player's health"
+     },
+     "health_value": {
+      "type": "integer",
+      "description": "the value read at that address when you finished"
+     }
+    },
+    "required": [
+     "health_address",
+     "health_value"
+    ]
+   },
+   "caps": {
+    "max_total_tokens": 600000,
+    "max_tool_calls": 60,
+    "max_wall_s": 900,
+    "max_turns": 40
+   }
+  }
+ ]
+}
