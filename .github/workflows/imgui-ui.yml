@@ -220,7 +220,7 @@ jobs:
             $psi.RedirectStandardInput = $true
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
-            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath)) {
+            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath,"--allow-writes")) {
               [void]$psi.ArgumentList.Add($arg)
             }
             $mcp = [System.Diagnostics.Process]::Start($psi)
@@ -246,6 +246,7 @@ jobs:
                   label = "ImGui prompt E2E"
                   current_value = "before"
                   target_value = "after"
+                  mutation_permission = $true
                 }
               }
             } | ConvertTo-Json -Compress -Depth 8

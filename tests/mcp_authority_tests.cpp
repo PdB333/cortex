@@ -133,9 +133,10 @@ void TestDenialLog() {
                                    json(std::string(10000, 'a')));
     CHECK(cortex::security::DenialCount() == before + 3);
 
+    int lines = 0;
+    {
     std::ifstream file(directory / cortex::security::DenialLogName());
     std::string line;
-    int lines = 0;
     bool sawTool = false, sawSemantic = false, sawTruncated = false;
     while (std::getline(file, line)) {
         ++lines;
@@ -145,6 +146,7 @@ void TestDenialLog() {
         sawSemantic = sawSemantic || entry.value("semantic_tool", std::string()) == "test_candidate_causality";
         sawTruncated = sawTruncated || entry.value("arguments_truncated", false);
     }
+    } // close the file before removing it (Windows refuses to delete an open file)
     CHECK(lines == 3 && sawTool && sawSemantic && sawTruncated);
     cortex::security::SetDenialDirectory({});
     fs::remove_all(directory);

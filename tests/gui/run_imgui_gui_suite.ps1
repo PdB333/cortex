@@ -167,7 +167,9 @@ try {
     $psi.CreateNoWindow = $true
     foreach ($argument in @(
         "mcp", "--transport", "native", "--tools", "all",
-        "--token-file", $tokenPath
+        "--token-file", $tokenPath,
+        # A prompt puts a request in front of the person: a control operation.
+        "--allow-writes"
     )) {
         [void]$psi.ArgumentList.Add($argument)
     }
@@ -207,6 +209,7 @@ try {
                 label = "GUI full-suite prompt"
                 current_value = "before"
                 target_value = "after"
+                mutation_permission = $true
             }
         }
     } | ConvertTo-Json -Compress -Depth 8
