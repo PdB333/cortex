@@ -37,7 +37,7 @@ exactly what the model sees; the proxy filters the server's list to it.
 
 C excludes `input_*` (replaced by `bench_trigger`), `prompt_*` (asks a person), `re_*` (that is D0′),
 `project_*`, `session_*` and `actions_*` (persistence and rollback: memory is a separate axis from raw access).
-**This composition of C is a proposal; the user confirms it before the first run (see §12).**
+The composition of C (137 tools: 11 host tools + 126 primitives) was confirmed by the user on 2026-10-07.
 
 ### Pins
 
@@ -45,10 +45,11 @@ C excludes `input_*` (replaced by `bench_trigger`), `prompt_*` (asks a person), 
   lists in `configs/cortex_tool_lists.json` are regenerated at that commit by `tools/make_tool_lists.py`, which
   records the commit and the SHA-256 of `cortex.exe`. Any later change to the tools or their classification
   invalidates results already obtained and is announced before it is made.
-- Cheat Engine MCP baseline: `miscusi-peek/cheatengine-mcp-bridge`, commit **PENDING** (read directly, tools
-  documented in the report). Before the pilot is trusted, its failures are reviewed: if they are mostly tool
-  misuse, its skill is poor and the comparison is unfair.
-- Model: **PENDING** (frozen identifier, supplied by the user). Temperature 0. No extended thinking.
+- Cheat Engine MCP baseline: `miscusi-peek/cheatengine-mcp-bridge`, commit
+  **`6bd7ce90479250a9b4b75e7944df9c105ecb2572`** (bridge 12.0.0, 175 tools), read directly from a checkout and
+  documented tool by tool in `CE_BASELINE.md`. Before the baseline is trusted, its failures are reviewed: if they
+  are mostly tool misuse, its skill is poor and the comparison is unfair.
+- Model: **`claude-sonnet-5-5`** (frozen identifier, supplied by the user). Temperature 0. No extended thinking.
 
 ## 3. Targets
 
@@ -92,7 +93,7 @@ the harness, then the rest. D1 and the blind-game 9b only after an explicit deci
 
 Per run, from the proxy and the target, never from the agent's own statements: result
 (`success` | `partial_success` | `failure`), wall time, tool calls, tool errors, input and output tokens
-(tool definitions included; the cost of the definitions is also reported alone), memory reads/writes, code
+(tool definitions included; **the tokens spent on tool definitions are always reported as a separate metric**, never merged into the other token counts, so the fixed cost of a configuration's tool list is visible on its own), memory reads/writes, code
 mutations, **mutating attempts**, refused calls, **effective mutations**, target crashes, `debugger_attached`,
 `target_pauses` (and paused milliseconds), recoveries, correct/incorrect/unverifiable findings, human
 interventions (always 0: authority is simulated and a real human never answers).
@@ -179,7 +180,12 @@ Whether D1 gets built, the blind game, ablations of D1, and any positioning chan
 
 ## 12. Open items for the user before the first run
 
-1. The frozen model identifier.
-2. The Cheat Engine baseline commit (after the repository has been read) and confirmation of the `C` tool list.
-3. The blind solo game (supplied separately) and the Windows VM.
-4. Pricing for cost estimates, and the budget of the pilot.
+1. ~~Frozen model identifier~~ (`claude-sonnet-5-5`), ~~CE baseline commit~~ (above), ~~composition of C~~ (confirmed): done.
+2. Pricing for cost estimates, taken from the official page by the user (never guessed), and a dedicated API key with a spending cap, confirmed before the pilot.
+3. The blind solo game (supplied separately) and the Windows VM. Configurations A and B can only be measured on the
+   Windows VM (Cheat Engine needs Windows and a GUI; it could not even be downloaded from the cloud sandbox).
+4. The guidance text each configuration gets. The mission asks for guidance of comparable quality and length for
+   every tool. The Cheat Engine repository ships `CLAUDE.md`/`AGENTS.md` and `AI_Context/`; Cortex ships
+   `agent/agents.md` and `agent/semantic-tools.md`. Which of these, trimmed to what length, is given to the model
+   in each configuration is decided and registered before the pilot (the pilot's job includes checking that the
+   baseline's failures are not just poor guidance).

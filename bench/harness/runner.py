@@ -114,18 +114,23 @@ def cortex_logs(cortex):
 
 
 def server_command(config, stage, target, args):
+    """The MCP server for this configuration: (command, extra environment)."""
     kind = config["server"]["kind"]
     if kind == "cortex":
         command = shlex.split(args.runner) + [args.cortex, "mcp", "--pid", str(target.pid),
                                               "--tools", config["server"]["profile"]]
         if stage.get("writes_allowed"):
             command.append("--allow-writes")
-        return command
-    template = config["server"]["command_template"]
-    if any("{" in part for part in template) or config["server"].get("pending"):
-        raise SystemExit("configuration %s is not ready: %s" %
-                         (config["name"], config["server"].get("pending", "unresolved placeholder")))
-    return [part.format(pid=target.pid) for part in template]
+        return command, {}
+    if not args.ce_repo:
+        raise SystemExit("configuration %s needs --ce-repo (the pinned Cheat Engine bridge checkout)" % config["name"])
+    values = {"pid": target.pid, "ce_repo": args.ce_repo, "python": args.python}
+    command = [part.format(**values) for part in config["server"]["command_template"]]
+    env = dict(config["server"].get("env", {}))
+    for item in args.ce_env:
+        key, _, value = item.partition("=")
+        env[key] = value
+    return command, env
 
 
 def fill_truth(node, truth):
@@ -152,6 +157,9 @@ def stage_prompt(task, stage, target):
 
 
 def run_stage(task, stage, config, tool_lists, args, run_dir, state, model):
+    risk_table = {}
+    if config["server"]["kind"] == "ce":
+        risk_table = load_json(os.path.join(BENCH_ROOT, "configs", "ce_tool_risks.json"))["risks"]
     exe = os.path.join(args.targets, stage["build"], "bench_target.exe")
     target = Target(shlex.split(args.runner), exe, args.seed, stage.get("hostile", False))
     result = {"stage": stage["name"], "build": stage["build"], "pid": target.pid}
@@ -179,12 +187,19 @@ def run_stage(task, stage, config, tool_lists, args, run_dir, state, model):
             flt["names"] = tool_lists[flt["list"]]["tools"]
         truth_start = target.control.truth()
         before = target.control.counters()
-        proxy = Proxy(config, server_command(config, stage, target, args),
-                      os.path.join(run_dir, "%s.calls.jsonl" % stage["name"]), target=target.control,
+        command, server_env = server_command(config, stage, target, args)
+        proxy = Proxy(config, command, os.path.join(run_dir, "%s.calls.jsonl" % stage["name"]),
+                      server_env=server_env, risk_table=risk_table, target=target.control,
                       notes_path=os.path.join(run_dir, "notes.txt"),
                       task={"answer_schema": stage["answer_schema"]},
                       server_cwd=os.path.dirname(args.cortex) if config["server"]["kind"] == "cortex" else None,
                       model=args.model, api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        # Things the person would have done before handing over (attach the tool to the process).
+        result["setup_calls"] = []
+        for call in config.get("setup_calls", []):
+            arguments = json.loads(json.dumps(call["arguments"]).replace("{pid}", str(target.pid)))
+            reply = proxy.client.call_tool(call["tool"], arguments, timeout=60)
+            result["setup_calls"].append({"tool": call["tool"], "reply": json.dumps(reply)[:300]})
         result["tool_definition_tokens"] = proxy.tool_token_cost()
         result["tool_count"] = len(proxy.model_tools())
         prompt = stage_prompt(task, stage, target)
@@ -262,10 +277,14 @@ def main():
     parser.add_argument("--task", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--seed", type=int, required=True)
-    parser.add_argument("--cortex", required=True, help="path of cortex.exe of the pinned build")
+    parser.add_argument("--cortex", default="", help="path of cortex.exe of the pinned build (Cortex configurations)")
     parser.add_argument("--targets", required=True,
                         help="folder with v1/bench_target.exe and v2/bench_target.exe (bench/build.sh)")
     parser.add_argument("--runner", default="", help="command prefix, e.g. wine")
+    parser.add_argument("--ce-repo", default="", help="checkout of the pinned Cheat Engine MCP bridge (configs A, B)")
+    parser.add_argument("--python", default=sys.executable, help="python used for the Cheat Engine MCP server")
+    parser.add_argument("--ce-env", action="append", default=[], metavar="KEY=VALUE",
+                        help="extra environment for the Cheat Engine MCP server (self-tests use CE_MCP_TRANSPORT=tcp)")
     parser.add_argument("--model", default="", help="frozen model id (preregistered)")
     parser.add_argument("--mock", default="", help="replay this script instead of calling a model")
     parser.add_argument("--run-id", default="")
@@ -296,6 +315,8 @@ def main():
         "run_id": run_id, "task": task["id"], "task_version": task.get("version"),
         "config": config["name"], "seed": args.seed, "model": args.model or "mock",
         "temperature": args.temperature, "cortex_pin": tool_lists.get("cortex_commit"),
+        "ce_pin": (load_json(os.path.join(BENCH_ROOT, "configs", "ce_tool_risks.json"))["commit"]
+                   if config["server"]["kind"] == "ce" else None),
         "result": result_label(final),
         "success": result_label(final) == "success",
         "root_cause": classify(final),

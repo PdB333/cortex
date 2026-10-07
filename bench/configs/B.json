@@ -4,9 +4,11 @@
  "server": {
   "kind": "ce",
   "command_template": [
-   "{ce_mcp_command}"
+   "{python}",
+   "{ce_repo}/MCP_Server/mcp_cheatengine.py"
   ],
-  "pending": "CE baseline commit not pinned yet"
+  "env": {},
+  "note": "Needs Cheat Engine running on the VM with ce_mcp_bridge.lua loaded; CE_MCP_ALLOW_SHELL stays unset, as shipped."
  },
  "tool_filter": {
   "mode": "all"
@@ -15,5 +17,13 @@
   "bench_trigger",
   "submit_answer",
   "notes"
+ ],
+ "setup_calls": [
+  {
+   "tool": "open_process",
+   "arguments": {
+    "process_id_or_name": "{pid}"
+   }
+  }
  ]
 }

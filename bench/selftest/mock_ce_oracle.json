@@ -1,0 +1,27 @@
+[
+ [
+  {
+   "name": "ping",
+   "input": {}
+  }
+ ],
+ [
+  {
+   "name": "bench_trigger",
+   "input": {
+    "event": "hit",
+    "amount": 7
+   }
+  }
+ ],
+ [
+  {
+   "name": "submit_answer",
+   "input": {
+    "address": "{truth.health_addr}",
+    "type": "int32",
+    "evidence": "fake-bridge self-test"
+   }
+  }
+ ]
+]

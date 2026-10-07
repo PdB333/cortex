@@ -120,7 +120,7 @@ def denial_in(result):
 
 class Proxy:
     def __init__(self, config, server_command, log_path, target=None, notes_path=None,
-                 task=None, server_cwd=None, risk_table=None, model=None, api_key=None):
+                 task=None, server_cwd=None, risk_table=None, model=None, api_key=None, server_env=None):
         self.config = config
         self.log_path = log_path
         self.target = target
@@ -130,7 +130,8 @@ class Proxy:
         self.calls = []
         self.answer = None
         self.started = time.time()
-        self.client = McpClient(server_command, cwd=server_cwd) if server_command else None
+        env = dict(os.environ, **server_env) if server_env else None
+        self.client = McpClient(server_command, cwd=server_cwd, env=env) if server_command else None
         self.upstream_tools = []
         self.risks = {}
         self.token_counter = TokenCounter(model, api_key)
