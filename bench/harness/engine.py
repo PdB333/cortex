@@ -64,7 +64,17 @@ def run_agent(model, proxy, user_prompt, caps, transcript_path, system=SYSTEM_PR
             messages.append({"role": "assistant", "content": content})
             log("assistant", {"content": content, "usage": response.get("usage")})
 
+            stop = response.get("stop_reason")
             uses = [block for block in content if block.get("type") == "tool_use"]
+            if stop == "refusal":
+                # The model's safety classifiers declined. This is an outcome to report, not something
+                # to route around: no fallback model is used, so every run stays on the frozen model.
+                category = (response.get("stop_details") or {}).get("category")
+                outcome["root_cause"] = "refusal" + (":%s" % category if category else "")
+                break
+            if stop == "max_tokens":
+                outcome["root_cause"] = "output_truncated"
+                break
             if not uses:
                 outcome["root_cause"] = "no_answer"
                 break

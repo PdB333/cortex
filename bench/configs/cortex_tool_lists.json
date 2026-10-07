@@ -254,8 +254,8 @@
    "validate_pointer_stability"
   ]
  },
- "cortex_commit": "935569e959142f96b939414daa86d3bb62c681ca",
- "cortex_exe_sha256": "53fdb7940893d9dba022987090f3bb69856a62d77c11b16d6a5b269f2d072c31",
+ "cortex_commit": "8d20d2c85b82aef45d1662136cc60b4b225380e0",
+ "cortex_exe_sha256": "1a0f0a38941c07cc7760b92a05295fc8ff41bff8949932c79d43aa74fdcdbefb",
  "counts": {
   "C": 137,
   "D0": 41,

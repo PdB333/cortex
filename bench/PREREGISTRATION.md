@@ -29,7 +29,7 @@ README, documentation or code claims a result before it is measured.
 | D0′ | D0 plus the `re_*` tools and `actions_rollback` (`D0prime`). |
 | D1 | D0 plus facts with executable assertions and statuses. **Not built.** Built only after the first D0 results and on an explicit decision; it will get its own registration. |
 
-Held identical across configurations: model (frozen id), system prompt, temperature, maximum output tokens,
+Held identical across configurations: model (frozen id), system prompt, sampling (model defaults), effort, maximum output tokens,
 context limit, per-run caps, the harness tools (`bench_trigger`, `submit_answer`), and the way tool-definition
 tokens are counted. `bench_trigger` replaces any input-injection tool in every configuration; it returns only
 `ok`, never a value from the program. Config B alone adds the notes tools. Each configuration's tool list is
@@ -49,7 +49,19 @@ The composition of C (137 tools: 11 host tools + 126 primitives) was confirmed b
   **`6bd7ce90479250a9b4b75e7944df9c105ecb2572`** (bridge 12.0.0, 175 tools), read directly from a checkout and
   documented tool by tool in `CE_BASELINE.md`. Before the baseline is trusted, its failures are reviewed: if they
   are mostly tool misuse, its skill is poor and the comparison is unfair.
-- Model: **`claude-sonnet-5-5`** (frozen identifier, supplied by the user). Temperature 0. No extended thinking.
+- Model: **`claude-sonnet-5-5`** (frozen identifier, supplied by the user).
+  - **Sampling: the model's defaults.** This model rejects non-default `temperature`, `top_p` and `top_k` with a 400, so
+    "minimal temperature" cannot be requested. Run-to-run variance is therefore higher than with a low temperature,
+    which is one more reason for at least 5 runs per cell and for reporting counts with intervals.
+  - **Reasoning: adaptive and always on** (the model offers no way to switch it off). Depth is set by `effort`, sent
+    identically for every configuration and every run: **PENDING** (the model's default, `high`, unless the user
+    decides otherwise before the pilot). Thinking tokens are billed as output and count against `max_tokens`
+    (16 000 per turn here). Thinking blocks are passed back unchanged, as the API requires; the conversation is only ever appended to.
+  - **Refusals.** The model's safety classifiers can decline a request (`stop_reason: "refusal"`). It is recorded as a
+    failure with cause `refusal:<category>` and reported on its own line. No fallback model is enabled, so every run
+    stays on the frozen model.
+  - **Prompt caching** is on for the tool list and for the growing conversation, identically everywhere; it changes cost,
+    not behaviour.
 
 ## 3. Targets
 
@@ -113,7 +125,11 @@ interventions (always 0: authority is simulated and a real human never answers).
   *context saturated*, *bad skill*, *other* in `root_cause_review`. The review never changes a result.
 - Task 9: `false_retained_findings` (invalid findings kept as valid), `stale_detected`, `valid_confirmed`,
   `valid_wrongly_dropped`, and the work saved against a fresh run.
-- Caps per run (tokens processed, tool calls, turns, wall time) are fixed in each task file. Hitting a cap is a
+- Caps per run (tokens processed, tool calls, turns, wall time) are fixed in each task file. "Tokens processed" is the
+  cumulative sum over turns of input, output, cache-creation and cache-read tokens, so a configuration with a long
+  tool list consumes its cap faster, which is part of what is being measured. Caps were raised from the first draft
+  (2 M tokens and 1 800 s on tasks 1 and 10; 3 M and 2 400 s per stage on 9a) before any run, after estimating that
+  a 137-tool configuration needs about 1 M processed tokens for an ordinary task-1 run. Hitting a cap is a
   failure with cause `budget`; it is never a silent truncation.
 
 ## 6. Statistics
@@ -181,7 +197,7 @@ Whether D1 gets built, the blind game, ablations of D1, and any positioning chan
 ## 12. Open items for the user before the first run
 
 1. ~~Frozen model identifier~~ (`claude-sonnet-5-5`), ~~CE baseline commit~~ (above), ~~composition of C~~ (confirmed): done.
-2. Pricing for cost estimates, taken from the official page by the user (never guessed), and a dedicated API key with a spending cap, confirmed before the pilot.
+2. Pricing for cost estimates, taken from the official page by the user (never guessed), a dedicated API key with a spending cap, and the `effort` level, all confirmed before the pilot.
 3. The blind solo game (supplied separately) and the Windows VM. Configurations A and B can only be measured on the
    Windows VM (Cheat Engine needs Windows and a GUI; it could not even be downloaded from the cloud sandbox).
 4. The guidance text each configuration gets. The mission asks for guidance of comparable quality and length for

@@ -42,9 +42,9 @@
     ]
    },
    "caps": {
-    "max_total_tokens": 600000,
+    "max_total_tokens": 2000000,
     "max_tool_calls": 60,
-    "max_wall_s": 900,
+    "max_wall_s": 1800,
     "max_turns": 40
    }
   }

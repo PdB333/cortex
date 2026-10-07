@@ -289,7 +289,7 @@ def main():
     parser.add_argument("--mock", default="", help="replay this script instead of calling a model")
     parser.add_argument("--run-id", default="")
     parser.add_argument("--out", default=os.path.join(BENCH_ROOT, "results"))
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--effort", default="", help="output_config.effort sent for every run (default: the model's own)")
     args = parser.parse_args()
 
     task = load_json(args.task)
@@ -303,7 +303,7 @@ def main():
     if not args.mock:
         if not args.model:
             raise SystemExit("--model is required (the frozen model id), or use --mock")
-        model = AnthropicModel(args.model, temperature=args.temperature)
+        model = AnthropicModel(args.model, effort=args.effort or None)
 
     state, stages = {}, []
     for stage in task["stages"]:
@@ -314,7 +314,8 @@ def main():
     result = {
         "run_id": run_id, "task": task["id"], "task_version": task.get("version"),
         "config": config["name"], "seed": args.seed, "model": args.model or "mock",
-        "temperature": args.temperature, "cortex_pin": tool_lists.get("cortex_commit"),
+        "sampling": "model defaults (non-default sampling parameters are rejected by the model)",
+        "effort": args.effort or "model default", "cortex_pin": tool_lists.get("cortex_commit"),
         "ce_pin": (load_json(os.path.join(BENCH_ROOT, "configs", "ce_tool_risks.json"))["commit"]
                    if config["server"]["kind"] == "ce" else None),
         "result": result_label(final),
