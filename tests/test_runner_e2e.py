@@ -63,7 +63,24 @@ def main():
                     if r['status'] not in ['queued','running']:return r
                     time.sleep(.02)
                 raise AssertionError('Trial did not terminate')
-            passed=run();assert passed['outcome']=='passed',passed
+            # A previously-authorized debugger log breakpoint can be observed
+            # during an ordinary game input trial without the runner arming it.
+            breakpoint=client.data('debug_breakpoint_add',
+                address=fixture['test_value'],kind='hw_write',size=4,
+                action='log',mutation_permission=True)
+            assert breakpoint['result']['ok'],breakpoint
+            breakpoint_id=int(breakpoint['result']['id'])
+            bad_bp=client.call('cortex_test_run',**dict(base,breakpoints=[breakpoint_id+1000]))
+            assert bad_bp['isError'] and bad_bp['structuredContent']['error']['code']=='breakpoint_not_logging',bad_bp
+            checks.append('unknown_breakpoint_denied')
+            passed=run(breakpoints=[breakpoint_id]);assert passed['outcome']=='passed',passed
+            code=passed['code_evidence']
+            assert code['status']=='observed' and code['breakpoints'][0]['new_hits']>=1,code
+            assert code['breakpoints'][0]['events'] and                 code['breakpoints'][0]['truncated_or_missing'] is False,code
+            checks.append('runtime_instruction_hit_recorded')
+            removed=client.data('debug_breakpoint_delete',id=breakpoint_id,
+                                mutation_permission=True)
+            assert removed['result']['ok'],removed
             assert passed['before'][0]['value']==0 and passed['after'][0]['value']==1,passed
             saved=passed['id'];checks.append('real_input_before_after')
             # Knowledge link checks the actual completed run and the current
@@ -143,13 +160,25 @@ def main():
             fixture=json.loads(manifest.read_text())
             base.update({'_cortex_target':pid,'_cortex_generation':restarted['generation'],
                          'reads':[{'address':fixture['test_value'],'type':'u32'}]})
-            fresh_control=run(steps=[{'delay_ms':50}],expect=[{'read':0,'op':'unchanged'}])
-            fresh_action=run()
+            fresh_bp=client.data('debug_breakpoint_add',
+                address=fixture['test_value'],kind='hw_write',size=4,
+                action='log',mutation_permission=True)
+            assert fresh_bp['result']['ok'],fresh_bp
+            fresh_bp_id=int(fresh_bp['result']['id'])
+            fresh_control=run(steps=[{'delay_ms':50}],expect=[{'read':0,'op':'unchanged'}],
+                              breakpoints=[fresh_bp_id])
+            fresh_action=run(breakpoints=[fresh_bp_id])
+            removed=client.data('debug_breakpoint_delete',id=fresh_bp_id,
+                                mutation_permission=True)
+            assert removed['result']['ok'],removed
             assert fresh_control['outcome']=='passed' and fresh_action['outcome']=='passed',fresh_action
             assert fresh_control['before'][0]['value']==fresh_action['before'][0]['value']==0,(fresh_control,fresh_action)
             comparisons=client.data('cortex_test_compare',first=fresh_control['id'],second=fresh_action['id'])
             assert comparisons['comparison']=='aligned' and comparisons['reads'][0]['candidate_difference'],comparisons
             checks.append('controlled_pair_after_process_restart')
+            code_pair=comparisons['code_comparison']
+            assert code_pair['status']=='aligned' and                 code_pair['breakpoints'][0]['control_hits']==0 and                 code_pair['breakpoints'][0]['action_hits']>=1 and                 code_pair['breakpoints'][0]['candidate_more_during_action'],code_pair
+            checks.append('instruction_hits_compared_against_control')
             denied_report=client.call('cortex_test_report',
                 ids=[fresh_control['id'],fresh_action['id']],title='Damage | report',
                 mutation_permission=False)
@@ -162,6 +191,8 @@ def main():
             folder=pathlib.Path(combined['report_directory'])
             assert (folder/'investigation.md').exists() and (folder/'report.json').exists()
             assert combined['report']['comparison']['comparison']=='aligned'
+            assert combined['report']['trials'][0]['code_breakpoints'] and                 combined['report']['comparison']['code_comparison']['status']=='aligned',combined
+            checks.append('consolidated_report_contains_code_hits')
             checks.append('multi_trial_report_persisted')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit

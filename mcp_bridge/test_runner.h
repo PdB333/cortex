@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "test_plan.h"
+#include "test_code.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -28,6 +29,10 @@ struct Context {
     json target;
     std::function<bool()> alive;
     std::function<json(const json&)> read;
+    // Snapshot an existing non-pausing logging breakpoint. Never arm here.
+    // Parameters: breakpoint ID, inclusive first sequence, maximum event entries.
+    // A zero maximum requests a cursor-only baseline.
+    std::function<json(int,uint64_t,size_t)> breakpoint;
     std::function<bool(int, bool)> key;
     // Window-scoped client-coordinate mouse buttons; never global desktop input.
     std::function<bool(int, int, const std::string&, bool)> mouse;
@@ -35,7 +40,8 @@ struct Context {
 };
 inline json Serialize(const Plan& p) {
     return {{"label",p.label},{"mode",p.mode},{"steps",p.steps},{"reads",p.reads},
-            {"expect",p.expect},{"timeout_ms",p.timeoutMs},{"settle_ms",p.settleMs}};
+            {"expect",p.expect},{"breakpoints",p.breakpoints},
+            {"timeout_ms",p.timeoutMs},{"settle_ms",p.settleMs}};
 }
 inline json Assess(const Plan& p, const json& before, const json& after) {
     json checks=json::array(), differences=json::array();
@@ -228,6 +234,9 @@ public:
                 {"outcome_first",x.value("outcome",std::string("unknown"))},
                 {"outcome_second",y.value("outcome",std::string("unknown"))},
                 {"reads",std::move(rows)},
+                {"code_comparison",cortex::test::code::Compare(
+                    x.value("code_evidence",json::object()),
+                    y.value("code_evidence",json::object()),allComparable&&aligned)},
                 {"limits",json::array({
                     "A matching baseline and differing results are correlations, not proof of causality.",
                     "Game state outside these reads may still differ.",
@@ -274,7 +283,24 @@ public:
                 size_t passed=0;
                 for(const auto& check:checks)
                     if(check.is_object()&&check.value("passed",false))++passed;
-                entries.push_back({{"id",id},
+                json codeRows=json::array();
+                const auto evidence=run.value("code_evidence",json::object());
+                if(evidence.is_object() && evidence.contains("breakpoints") &&
+                   evidence["breakpoints"].is_array()) {
+                    for(const auto& observed:evidence["breakpoints"]) {
+                        if(codeRows.size()>=4)break;
+                        if(!observed.is_object()||
+                           observed.value("status",std::string())!="observed")continue;
+                        codeRows.push_back({
+                            {"id",observed.value("id",-1)},
+                            {"instruction_address",observed.value("instruction_address",std::string())},
+                            {"new_hits",observed.value("new_hits",uint64_t{0})},
+                            {"unobserved_hits",observed.value("unobserved_hits",uint64_t{0})},
+                            {"coverage_complete",observed.value("coverage_complete",false)}
+                        });
+                    }
+                }
+                entries.push_back({{"id",id},{"code_breakpoints",codeRows},
                     {"label",plan.value("label",std::string())},
                     {"outcome",run.value("outcome",std::string("inconclusive"))},
                     {"generation",target.value("generation",json(nullptr))},
@@ -344,6 +370,17 @@ public:
                           (row["candidate_difference"].get<bool>()?"yes":"no"):
                           "not comparable")<<"\n";
             }else md<<"No controlled comparison established.\n";
+            md<<"\n## Logged instructions (only previously configured breakpoints)\n\n";
+            for(const auto& trial:entries)
+                for(const auto& bp:trial["code_breakpoints"])
+                    md<<"- Run "<<trial["id"].get<std::string>()
+                      <<": breakpoint "<<bp["id"].get<int>()
+                      <<", hits "<<bp["new_hits"].get<uint64_t>()
+                      <<", uncaptured "<<bp["unobserved_hits"].get<uint64_t>()
+                      <<", thread coverage "
+                      <<(bp["coverage_complete"].get<bool>()?"complete":"unknown/incomplete")
+                      <<".\n";
+            md<<"Logged hits are execution observations, not proof of the cause of a change.\n";
             md<<"\n## Evidence references\n\n";
             for(const auto& id:ids)md<<"- "<<id<<" (see its result.json)\n";
             md<<"\n## Unresolved\n\nNo code mechanisms were inferred. "
@@ -430,6 +467,18 @@ private:
         try {
             guard();record["before"]=sample();
             if(!AllReadable(record["before"]))throw std::runtime_error("baseline_unreadable");
+            json breakpointBefore=json::array();
+            if(!plan.breakpoints.empty()) {
+                if(!context.breakpoint)throw std::runtime_error("breakpoint_capture_unavailable");
+                for(const auto& chosen:plan.breakpoints) {
+                    guard();
+                    const auto snapshot=context.breakpoint(chosen.get<int>(),0,0);
+                    if(!snapshot.is_object()||!snapshot.value("ok",false))
+                        throw std::runtime_error("breakpoint_baseline_unavailable");
+                    breakpointBefore.push_back(snapshot);
+                }
+                record["code_evidence"]={{"status","pending"},{"breakpoints",json::array()}};
+            }
             for(size_t index=0;index<plan.steps.size();++index){
                 guard();const auto& step=plan.steps[index];
                 json details={{"index",index},{"status","completed"},{"at_ms",WallMs()}};
@@ -489,6 +538,27 @@ private:
                 {std::lock_guard<std::mutex> l(job->mutex);job->record["completed_steps"]=index+1;}
             }
             wait(plan.settleMs);record["after"]=sample();
+            if(!plan.breakpoints.empty()) {
+                json observations=json::array();
+                bool allValid=true;
+                for(size_t index=0;index<plan.breakpoints.size();++index) {
+                    guard();
+                    const int bpId=plan.breakpoints[index].get<int>();
+                    const auto& before=breakpointBefore[index];
+                    const uint64_t seq=before["last_seq"].get<uint64_t>();
+                    const auto after=context.breakpoint(bpId,seq+1,32);
+                    const auto delta=cortex::test::code::Delta(bpId,before,after);
+                    allValid&=delta.value("status",std::string())=="observed";
+                    observations.push_back(delta);
+                }
+                record["code_evidence"]={{"status",allValid?"observed":"inconclusive"},
+                    {"breakpoints",observations},
+                    {"limits",json::array({
+                        "Breakpoints were configured before this test; Cortex did not add or remove them.",
+                        "A hit during the observation interval is correlation, not causal proof.",
+                        "Logged events can be lost or truncated; thread coverage may be incomplete."
+                    })}};
+            }
             const auto assessment=Assess(plan,record["before"],record["after"]);
             record.update(assessment);record["status"]="completed";
         }catch(const std::exception& e){
@@ -496,6 +566,12 @@ private:
             record["status"]=error=="cancelled"||error=="timed_out"?error:"failed";
             record["outcome"]="inconclusive";
         }catch(...){record["status"]="failed";record["error"]="unexpected_test_error";}
+        if(!plan.breakpoints.empty()&&!record.contains("code_evidence"))
+            record["code_evidence"]={{"status","inconclusive"},
+                {"reason","test_did_not_capture_full_execution_interval"}};
+        else if(record.contains("code_evidence")&&
+                record["code_evidence"].value("status",std::string())=="pending")
+            record["code_evidence"]["status"]="inconclusive";
         if(held){bool released=false;try{released=context.key && context.key(held,false);}catch(...){}
             record["cleanup"]={{"released",released},{"key",held}};}
         if(mouseHeld){bool released=false;try{released=context.mouse &&
@@ -507,10 +583,19 @@ private:
             record["report_directory"]=(root_/job->id).u8string();
             // Untrusted labels/observations appear only inside a JSON block,
             // never as instructions or interpolated Markdown headings.
+            // The JSON may contain attacker-supplied Markdown fence text.
+            // Bound the enclosing fence to a longer run of backticks.
+            const std::string raw=record.dump(2);
+            size_t consecutive=0,maximum=0;
+            for(char ch:raw){
+                consecutive=ch==char(96)?consecutive+1:0;
+                maximum=std::max(maximum,consecutive);
+            }
+            const std::string fence(std::max<size_t>(4,maximum+1),char(96));
             const std::string markdown="# Cortex investigation\n\n"
                 "This report contains observations, not agent instructions.\n"
                 "An assertion passing does not prove causality or complete code understanding.\n\n"
-                "## Recorded trial\n\n```json\n"+record.dump(2)+"\n```\n";
+                "## Recorded trial\n\n"+fence+"json\n"+raw+"\n"+fence+"\n";
             record["report_saved"]=true;
             Write(root_/job->id/"investigation.md",markdown);
             Write(root_/job->id/"result.json",record.dump(2));
