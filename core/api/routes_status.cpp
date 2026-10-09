@@ -265,6 +265,20 @@ json BuildToolsManifest() {
         j.push_back({{"name", "project_get"}, {"method", "GET"}, {"path", "/project"},
                       {"description", "Returns the entire persistent project for this game (named addresses, pointer paths, notes). JSON file stored beside the DLL, survives across sessions -- this is the AI's long-term memory for this game."}});
 
+        j.push_back({{"name", "project_knowledge_list"}, {"method", "GET"}, {"path", "/project/knowledge"},
+                     {"description", "List revisioned investigation claims and server-owned byte verification outcomes. No claim is automatically confirmed."}});
+        j.push_back({{"name", "project_knowledge_get"}, {"method", "GET"}, {"path", "/project/knowledge/{id}"},
+                     {"description", "Get a named investigation claim, evidence references, history, and last verification."}});
+        j.push_back({{"name", "project_knowledge_put"}, {"method", "POST"}, {"path", "/project/knowledge"},
+                     {"description", "Create/update an evidence-linked investigation claim with optimistic revision; this does not verify the claim."},
+                     {"body", {{"id", "required"}, {"kind", "required"}, {"statement", "required"},
+                               {"status", "optional"}, {"notes", "optional"},
+                               {"expected_revision", {{"type", "integer"}, {"minimum", 0}, {"description", "Current revision required when updating an existing claim."}}},
+                               {"evidence", {{"type", "array"}, {"description", "Untrusted source references."}}},
+                               {"links", {{"type", "array"}}}, {"checks", {{"type", "array"}}}}}});
+        j.push_back({{"name", "project_knowledge_verify"}, {"method", "POST"}, {"path", "/project/knowledge/{id}/verify"},
+                     {"description", "Rerun bounded read-only byte invariants against the live process. A match validates bytes, not semantic claims."}});
+
         j.push_back({{"name", "project_address_set"}, {"method", "POST"}, {"path", "/project/address"},
                       {"description", "Saves/overwrites a named address."},
                       {"body", {{"name", "required"}, {"address", "required"}, {"type", "optional"}, {"notes", "optional"}}}});

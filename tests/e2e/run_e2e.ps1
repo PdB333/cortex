@@ -244,6 +244,63 @@ Run-Scenario "api-memory-security" {
         Assert-That (($tools | ConvertTo-Json -Depth 8) -match "memory_read") "Tools manifest is incomplete"
         $openApi = Request-Json GET "/openapi.json"
         Assert-That (($openApi | ConvertTo-Json -Depth 12) -match "/memory/read") "OpenAPI is incomplete"
+
+        # Revisioned investigation knowledge: exercise the real injected runtime,
+        # persistence, optimistic concurrency and read-only verification.
+        $knowledgeId = "e2e_canary_" + [Guid]::NewGuid().ToString("N")
+        $claim = [ordered]@{
+            id = $knowledgeId
+            kind = "field"
+            statement = "Hypothesis: fixture stable u32 canary"
+            status = "hypothesis"
+            evidence = @([ordered]@{ source = "fixture"; reference = "fixture-u32" })
+            links = @()
+            checks = @([ordered]@{
+                address = [string]$fixture.Manifest.u32
+                expected_hex = "efbeadde"
+            })
+        }
+        $created = Request-Json POST "/project/knowledge" -Body $claim
+        Assert-That $created.ok "Knowledge creation failed"
+        Assert-That ([int]$created.record.revision -eq 1) "Knowledge revision not initialized"
+        Assert-That ($created.record.last_verification.status -eq "not_run") "Unverified claim was prematurely confirmed"
+
+        $loaded = Request-Json GET "/project/knowledge/$knowledgeId"
+        Assert-That $loaded.ok "Knowledge fetch failed"
+        Assert-That ($loaded.record.id -eq $knowledgeId) "Knowledge readback differs"
+
+        $verified = Request-Json POST "/project/knowledge/$knowledgeId/verify" -Body @{}
+        Assert-That $verified.ok "Knowledge verification request failed"
+        Assert-That ($verified.record.last_verification.status -eq "passed") "Known u32 canary bytes failed verification: $($verified.record.last_verification | ConvertTo-Json -Depth 8 -Compress)"
+        Assert-That ([int]$verified.record.revision -eq 2) "Verification did not advance revision"
+        Assert-That ($verified.record.origin -eq "client_assertion") "Verification must not turn client claims into server-certified semantics"
+
+        $claim["expected_revision"] = 1
+        $conflict = Request-Json POST "/project/knowledge" -Body $claim -ExpectedStatus @(409)
+        Assert-That ($conflict.error -eq "revision_conflict") "Stale knowledge update was accepted"
+
+        $claim["expected_revision"] = 2
+        $claim["status"] = "observed"
+        $updated = Request-Json POST "/project/knowledge" -Body $claim
+        Assert-That ([int]$updated.record.revision -eq 3) "Knowledge update was not revisioned"
+        Assert-That (@($updated.record.history).Count -ge 2) "Knowledge history was lost"
+        Assert-That ($updated.record.last_verification.status -eq "not_run") "Changed claim kept an old verification"
+
+        $claim["expected_revision"] = 3
+        $claim["status"] = "verified"
+        $forgery = Request-Json POST "/project/knowledge" -Body $claim -ExpectedStatus @(400)
+        Assert-That ($forgery.error -eq "invalid_status") "Client was allowed to forge verified status"
+
+        $claim["status"] = "hypothesis"
+        $claim["checks"] = @([ordered]@{
+            address = [string]$fixture.Manifest.u32
+            expected_hex = "00000000"
+        })
+        $changed = Request-Json POST "/project/knowledge" -Body $claim
+        Assert-That ([int]$changed.record.revision -eq 4) "Failed-invariant setup failed"
+        $rejected = Request-Json POST "/project/knowledge/$knowledgeId/verify" -Body @{}
+        Assert-That ($rejected.record.last_verification.status -eq "failed") "Incorrect u32 canary bytes passed verification"
+
         # Every manifest tool must map to a registered handler with a valid schema.
         $contracts = Request-Json GET "/schema/validate" -ExpectedStatus @(200, 500)
         Assert-That $contracts.ok "API contract validation failed: $($contracts.errors | ConvertTo-Json -Depth 6 -Compress)"
