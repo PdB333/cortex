@@ -103,6 +103,13 @@ jobs:
             }
           }
 
+      - name: Test MCP program launch
+        shell: pwsh
+        run: >-
+          ./tests/launch_mcp_e2e.ps1
+          -HostPath "build/full-${{ matrix.arch }}/cortex_host.exe"
+          -TargetPath "build/full-${{ matrix.arch }}/${{ matrix.target_name }}"
+
       - name: Inject Cortex and test HTTP + native stdio MCP
         shell: pwsh
         run: |
