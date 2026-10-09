@@ -296,3 +296,18 @@ A check only establishes whether those bytes currently match. Values change,
 so failures can also mean the observation was made at the wrong moment. More
 sophisticated behavior experiments and human approvals will build on this
 ledger rather than being claimed by the initial implementation.
+
+### Compact query and investigation resume (experimental)
+
+The project_knowledge_query primitive can search claims without returning the
+entire project or complete evidence/history to the agent. It is read-only and
+does not require MCP mutation permission.
+
+- text: case-insensitive ASCII substring of ID, statement, kind or notes.
+- kind and status: exact filters.
+- resume=true: prioritizes stale records, failed checks and open hypotheses.
+- limit: 1-20 (default 10); offset: deterministic pagination.
+
+Results contain a compact statement, status, revision, evidence/relationship
+counts and the last byte-check status. Retrieve a full record with
+project_knowledge_get before trusting or acting on its contents.

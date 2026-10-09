@@ -1,6 +1,7 @@
 #include "routes.h"
 #include "../process/address.h"
 #include "../project/project.h"
+#include "../project/knowledge_query.h"
 #include "../overlay/overlay.h"
 #include "../memory/memory.h"
 #include <algorithm>
@@ -52,6 +53,24 @@ int64_t ParseSignedOffset(const json& j) {
 } // namespace
 
 void RegisterProjectRoutes(httplib::Server& svr) {
+
+    // Read-only compact knowledge search is independent of the full project dump.
+    svr.Post("/project/knowledge/query", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json input = json::parse(req.body);
+            json result;
+            std::string error;
+            if (!project::knowledge::Query(project::GetKnowledge(), input, result, error)) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(result.dump(), "application/json");
+        } catch (const std::exception&) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", "invalid_query"}}.dump(), "application/json");
+        }
+    });
 
     // Investigation knowledge. Assertions are always client claims. Only the
     // verification route can attach a server-observed byte invariant result.
