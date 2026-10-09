@@ -50,6 +50,9 @@ int main() {
     changed["profiles"][0]["allow_input"] = "yes";
     Check(!ParseProfiles(changed, profiles, error), "input permission must be boolean");
     changed = allowed;
+    changed["profiles"][0]["allow_reset"] = "yes";
+    Check(!ParseProfiles(changed, profiles, error), "reset permission must be boolean");
+    changed = allowed;
     changed["profiles"][0]["allow_mouse"] = "yes";
     Check(!ParseProfiles(changed, profiles, error), "mouse permission must be boolean");
     changed = allowed;
@@ -60,7 +63,7 @@ int main() {
     Check(!ParseProfiles(changed, profiles, error), "test budget bounded");
     changed = allowed;
     Check(ParseProfiles(changed, profiles, error) && !profiles[0].allowInput &&
-          !profiles[0].allowAttach && !profiles[0].allowMouse &&
+          !profiles[0].allowAttach && !profiles[0].allowMouse && !profiles[0].allowReset &&
           profiles[0].testKeys.empty(), "new permissions default denied");
     if (failures) return 1;
     std::cout << "PASS: allowlisted launch profile validation\n";
