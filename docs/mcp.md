@@ -253,3 +253,45 @@ This permission remains per operation; multi-target routing does not implicitly 
 ## Compatibility
 
 The injected runtime can still expose loopback REST and HTTP `/mcp` compatibility surfaces for diagnostics and older integrations; they are off unless `http_api_enabled=true` is set in `cortex.ini`. The normal unified-product path is `cortex.exe mcp` over stdio and native IPC.
+## Investigation knowledge ledger (experimental)
+
+The new revisioned knowledge ledger is distinct from the existing unstructured `re_facts`.
+It provides a small persistent model for hypotheses, events, functions, fields,
+objects and relationships, with source references, related IDs, and byte-invariant
+checks. It does **not** infer semantics or prove that a claim about game behavior
+is correct. Agent-supplied evidence references are untrusted until independently
+corroborated. In particular an agent cannot assign a `verified` status.
+
+These primitive tools are available with `--tools all`:
+
+- `project_knowledge_list` and `project_knowledge_get`: read the stored ledger.
+- `project_knowledge_put`: save a proposed record. This changes Cortex project
+  state and uses the normal permission contract. Updating an existing record
+  requires `expected_revision` to match its current revision, preventing an
+  agent from silently overwriting a later human correction.
+- `project_knowledge_verify`: read only the declared byte invariants from the
+  currently attached process, record the actual `passed`/`failed` result,
+  and increment the revision. This does not authorize target mutation.
+
+Example record submitted via `project_knowledge_put`:
+
+```json
+{
+  "id": "Player.health",
+  "kind": "field",
+  "statement": "Candidate health field at Game.exe+0x148",
+  "status": "hypothesis",
+  "evidence": [
+    {"source": "scan", "reference": "scan-12", "detail": "Candidate during damage"}
+  ],
+  "links": ["Player"],
+  "checks": [
+    {"address": "Game.exe+0x148", "expected_hex": "0000c842"}
+  ]
+}
+```
+
+A check only establishes whether those bytes currently match. Values change,
+so failures can also mean the observation was made at the wrong moment. More
+sophisticated behavior experiments and human approvals will build on this
+ledger rather than being claimed by the initial implementation.
