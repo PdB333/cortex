@@ -437,6 +437,10 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_core_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_core_tests COMMAND cortex_core_tests)
 
+    add_executable(cortex_test_plan_tests tests/test_plan_tests.cpp)
+    target_link_libraries(cortex_test_plan_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_test_plan_tests COMMAND cortex_test_plan_tests)
+
     add_executable(cortex_launch_config_tests tests/launch_config_tests.cpp)
     target_link_libraries(cortex_launch_config_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_launch_config_tests COMMAND cortex_launch_config_tests)
