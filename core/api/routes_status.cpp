@@ -273,7 +273,7 @@ json BuildToolsManifest() {
                      {"description", "Create/update an evidence-linked investigation claim with optimistic revision; this does not verify the claim."},
                      {"body", {{"id", "required"}, {"kind", "required"}, {"statement", "required"},
                                {"status", "optional"}, {"notes", "optional"},
-                               {"expected_revision", "optional"},
+                               {"expected_revision", {{"type", "integer"}, {"minimum", 0}, {"description", "Current revision required when updating an existing claim."}}},
                                {"evidence", {{"type", "array"}, {"description", "Untrusted source references."}}},
                                {"links", {{"type", "array"}}}, {"checks", {{"type", "array"}}}}}});
         j.push_back({{"name", "project_knowledge_verify"}, {"method", "POST"}, {"path", "/project/knowledge/{id}/verify"},
