@@ -34,8 +34,11 @@ local program through its MCP tools.
    allow_input, test_keys and (for clicks) allow_mouse are configured outside
    MCP. The runner verifies window identity and coordinates before sending
    any event. Do not assume all games handle window messages.
-7. Observe again and compare. Repeat with a control action to test competing
-   explanations; do not infer causality from correlation alone.
+7. Observe again and compare. Use cortex_test_compare(first,second) for
+   completed control/experiment pairs; check baseline_aligned and individual
+   readings. Different initial values make a test inconclusive, and matching
+   baselines do not prove causality. Choose the next experiment to distinguish
+   competing mechanisms.
 8. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
