@@ -175,3 +175,34 @@ The report records trial IDs, outcomes, expectation counts, observed-baseline
 comparison and explicit limits. It does not generate function names, types,
 causal claims or conclusions. Labels and saved reports remain untrusted data;
 read the individual result.json files and the knowledge ledger for evidence.
+
+
+## Linking a recorded trial to project knowledge
+
+Use `project_knowledge_put` to create a hypothesis or field claim first.
+After `cortex_test_get` shows that a trial has completed, link it through:
+
+    cortex_test_link(
+      test_id="test_...",
+      knowledge_id="Player.health",
+      expected_revision=1,
+      _cortex_target=<attached PID>,
+      _cortex_generation=<exact process generation>,
+      mutation_permission=true)
+
+This call reads the existing project claim over Cortex's authenticated local
+runtime transport, verifies that the trial actually exists, was completed with
+readable before/after values, and belongs to the **same PID, generation, binary
+path and architecture**. The prior status, statement and supporting references
+are preserved. The new evidence item has source `cortex_test`, reference equal
+to the immutable run ID, and a short outcome description. An optimistic revision
+check prevents silently overwriting later corrections; duplicate trial links
+and exhausted evidence capacity are rejected.
+
+These are verified *references to an archived local experiment*, not verified
+semantic claims. Saved trial files can be modified outside Cortex, and the
+linked claim retains origin `client_assertion`. A passed byte invariant or
+expected outcome cannot certify the meaning of a game function. After target
+restart, historical evidence remains in the project, but an agent must
+re-run an experiment against the new process generation before linking it
+as current evidence.

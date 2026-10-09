@@ -42,6 +42,11 @@ local program through its MCP tools.
 8. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
+   After an authorized, completed experiment, use cortex_test_link with the
+   trial ID, an EXISTING knowledge ID, current revision, exact target identity
+   and mutation_permission=true. This verifies the local trial reference,
+   appends evidence without changing the claim's status, and rejects stale
+   revisions and other process lifetimes. It does NOT verify semantics.
 9. Keep experiments bounded. Respect maximum launch counts, user-approved
    mutation permissions, time limits and cancellation requests.
 10. Each trial automatically writes plan.json, result.json and investigation.md.

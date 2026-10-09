@@ -437,6 +437,10 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_core_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_core_tests COMMAND cortex_core_tests)
 
+    add_executable(cortex_test_knowledge_tests tests/test_knowledge_tests.cpp)
+    target_link_libraries(cortex_test_knowledge_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_test_knowledge_tests COMMAND cortex_test_knowledge_tests)
+
     add_executable(cortex_test_runner_tests tests/test_runner_tests.cpp)
     target_link_libraries(cortex_test_runner_tests PRIVATE nlohmann_json::nlohmann_json)
     if(MINGW)
@@ -470,7 +474,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()
