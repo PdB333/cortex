@@ -160,6 +160,12 @@ int main() {
     check(api::mcp_contract::RequiresMutationPermission(knowledgeVerifyRisk),
           "knowledge verification requires MCP permission");
 
+    const auto knowledgeQueryRisk = api::mcp_contract::ClassifyTool(
+        "project_knowledge_query", "POST", "/project/knowledge/query");
+    check(knowledgeQueryRisk == api::mcp_contract::ToolRisk::Analyze,
+          "knowledge search remains nonmutating");
+    check(!api::mcp_contract::RequiresMutationPermission(knowledgeQueryRisk),
+          "knowledge query does not require target mutation permission");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;
