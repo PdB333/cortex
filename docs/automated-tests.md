@@ -162,3 +162,16 @@ readable baselines can yield candidate differences. A different resulting
 value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
+
+## Consolidated investigation reports
+
+cortex_test_report accepts 1-8 completed trial IDs, an optional title and
+mutation_permission=true. It writes one consolidated report.json and
+investigation.md in a generated directory beneath --test-results. Tool calls
+cannot specify arbitrary output paths. After reconnect, cortex_test_report_get
+retrieves the archived report metadata and comparison.
+
+The report records trial IDs, outcomes, expectation counts, observed-baseline
+comparison and explicit limits. It does not generate function names, types,
+causal claims or conclusions. Labels and saved reports remain untrusted data;
+read the individual result.json files and the knowledge ledger for evidence.
