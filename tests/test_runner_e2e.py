@@ -109,6 +109,19 @@ def main():
             comparisons=client.data('cortex_test_compare',first=fresh_control['id'],second=fresh_action['id'])
             assert comparisons['comparison']=='aligned' and comparisons['reads'][0]['candidate_difference'],comparisons
             checks.append('controlled_pair_after_process_restart')
+            denied_report=client.call('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],title='Damage | report',
+                mutation_permission=False)
+            assert denied_report['isError'],denied_report
+            checks.append('report_permission_denied')
+            combined=client.data('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],title='Damage | report',
+                mutation_permission=True)
+            report_id=combined['id']
+            folder=pathlib.Path(combined['report_directory'])
+            assert (folder/'investigation.md').exists() and (folder/'report.json').exists()
+            assert combined['report']['comparison']['comparison']=='aligned'
+            checks.append('multi_trial_report_persisted')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -120,6 +133,9 @@ def main():
             client.close();client=None
             client=Mcp(exe,['--test-results',str(evidence)],root)
             archived=client.data('cortex_test_get',id=saved);assert archived['archived'] and archived['run']['outcome']=='passed';checks.append('report_reloaded_new_agent')
+            combined_reloaded=client.data('cortex_test_report_get',id=report_id)
+            assert combined_reloaded['report']['id']==report_id and combined_reloaded['untrusted_data']
+            checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:
             if pid:subprocess.run(['taskkill','/PID',str(pid),'/F'],capture_output=True)
