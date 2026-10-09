@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':7}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':7}]}))
         try:
             client=Mcp(exe,['--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -82,12 +82,25 @@ def main():
             slow=client.data('cortex_test_run',**dict(base,steps=[{'vk':32,'tap_ms':500},{'delay_ms':1000}]))
             time.sleep(.05)
             blocked=client.call('cortex_stop',profile='fixture',pid=pid,mutation_permission=True);assert blocked['isError'],blocked
+            blocked_reset=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation,attach=True,mutation_permission=True)
+            assert blocked_reset['isError'] and blocked_reset['structuredContent']['error']['code']=='test_in_progress',blocked_reset
+            checks.append('no_restart_during_active_test')
             client.data('cortex_test_cancel',id=slow['id']);cancelled=wait(slow['id']);assert cancelled['status']=='cancelled',cancelled
             assert cancelled['cleanup']['released'];checks.append('cancel_and_release')
             limit=client.call('cortex_test_run',**base);assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit;checks.append('operator_test_budget')
             directory=pathlib.Path(passed['report_directory']);assert (directory/'result.json').exists() and (directory/'investigation.md').exists();checks.append('json_markdown_reports')
-            client.data('cortex_stop',profile='fixture',pid=pid,mutation_permission=True);pid=0
-            restarted=client.data('cortex_launch',profile='fixture',attach=True,mutation_permission=True);pid=restarted['pid'];assert restarted['generation']!=generation;checks.append('restart_new_generation')
+            stale=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation+1,attach=True,mutation_permission=True)
+            assert stale['isError'] and stale['structuredContent']['error']['code']=='restart_process_identity_mismatch',stale
+            checks.append('restart_stale_identity_denied')
+            restarted=client.data('cortex_restart',profile='fixture',pid=pid,generation=generation,attach=True,mutation_permission=True)
+            pid=restarted['pid']
+            assert restarted['generation']!=generation and restarted['attached'] and restarted['reset_scope']=='process_only',restarted
+            assert restarted['previous_generation']==generation
+            checks.append('atomic_profile_restart_and_attach')
+            exhausted_restart=client.call('cortex_restart',profile='fixture',pid=pid,
+                                           generation=restarted['generation'],attach=True,mutation_permission=True)
+            assert exhausted_restart['isError'] and exhausted_restart['structuredContent']['error']['code']=='launch_profile_run_limit_reached',exhausted_restart
+            checks.append('restart_respects_run_budget')
             client.data('cortex_stop',profile='fixture',pid=pid,mutation_permission=True);pid=0
             client.close();client=None
             client=Mcp(exe,['--test-results',str(evidence)],root)

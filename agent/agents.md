@@ -64,8 +64,9 @@ bounded before/action/after observations and durable reports. Only compatible
 window-message consumers are supported by this first runner. Short
 client-coordinate mouse clicks (allow_mouse) and condition-based memory waits
 are supported in addition to key taps. A posted message is not proof that the
-program handled it. No universal game-playing or causal-reasoning guarantees
-are implied.
+program handled it. An operator-approved cortex_restart can repeat an experiment from a fresh
+PROCESS launch, but does not clear saves, files or other outside state. No
+universal game-playing or causal-reasoning guarantees are implied.
 
 ## First moves in a new session
 
