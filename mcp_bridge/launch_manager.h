@@ -108,14 +108,51 @@ public:
         }
         std::vector<wchar_t> mutableCommand(command.begin(), command.end());
         mutableCommand.push_back(L'\0');
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
+        // Never let a console child write into Cortex's MCP stdout (or read
+        // its stdin). Explicitly inherit only NUL; other inheritable handles
+        // belonging to the host or concurrent callers stay private.
+        SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+        HANDLE nullIo = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, nullptr);
+        if (nullIo == INVALID_HANDLE_VALUE) {
+            error = "launch_stdio_setup_failed:" + std::to_string(GetLastError());
+            return false;
+        }
+        STARTUPINFOEXW startup{};
+        startup.StartupInfo.cb = sizeof(startup);
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startup.StartupInfo.hStdInput = nullIo;
+        startup.StartupInfo.hStdOutput = nullIo;
+        startup.StartupInfo.hStdError = nullIo;
+        SIZE_T attributeBytes = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeBytes);
+        std::vector<unsigned char> attributes(attributeBytes);
+        startup.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+        if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attributeBytes)) {
+            const DWORD code = GetLastError();
+            CloseHandle(nullIo);
+            error = "launch_attributes_failed:" + std::to_string(code);
+            return false;
+        }
+        if (!UpdateProcThreadAttribute(startup.lpAttributeList, 0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &nullIo, sizeof(nullIo), nullptr, nullptr)) {
+            const DWORD code = GetLastError();
+            DeleteProcThreadAttributeList(startup.lpAttributeList);
+            CloseHandle(nullIo);
+            error = "launch_handles_failed:" + std::to_string(code);
+            return false;
+        }
         PROCESS_INFORMATION process{};
         const std::wstring exe = entry.profile.executable.wstring();
         const std::wstring cwd = entry.profile.workingDirectory.wstring();
-        if (!CreateProcessW(exe.c_str(), mutableCommand.data(), nullptr,
-                            nullptr, FALSE, 0, nullptr, cwd.c_str(), &startup, &process)) {
-            error = "launch_failed:" + std::to_string(GetLastError());
+        const BOOL childCreated = CreateProcessW(exe.c_str(), mutableCommand.data(), nullptr,
+            nullptr, TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+            nullptr, cwd.c_str(), &startup.StartupInfo, &process);
+        const DWORD createError = childCreated ? ERROR_SUCCESS : GetLastError();
+        DeleteProcThreadAttributeList(startup.lpAttributeList);
+        CloseHandle(nullIo);
+        if (!childCreated) {
+            error = "launch_failed:" + std::to_string(createError);
             return false;
         }
         CloseHandle(process.hThread);

@@ -12,7 +12,8 @@ function Invoke-Mcp($process,[int]$id,[string]$method,$parameters) {
     $task = $process.StandardOutput.ReadLineAsync()
     if (-not $task.Wait(12000)) { throw "MCP response timeout for $method" }
     if ($null -eq $task.Result) { throw "MCP stdout closed unexpectedly" }
-    $response = $task.Result | ConvertFrom-Json -Depth 30
+    try { $response = $task.Result | ConvertFrom-Json -Depth 30 }
+    catch { throw "MCP protocol stdout contaminated during request $id ($method): $($task.Result)" }
     Assert-True ([int]$response.id -eq $id) "Unexpected MCP response id"
     Assert-True ($null -ne $response.result) "MCP returned protocol error"
     return $response.result
@@ -62,6 +63,10 @@ try {
     Assert-True (-not [bool]$first.isError) "Configured launch failed"
     $lastPid = [int]$first.structuredContent.pid
     Assert-True ($lastPid -gt 0 -and [bool]$first.structuredContent.running) "Missing live launched PID"
+    # The fixture writes a banner to stdout at startup. This ping must remain
+    # valid JSON even after the child has had time to print it.
+    Start-Sleep -Milliseconds 250
+    [void](Invoke-Mcp $process 60 "ping" @{})
     $duplicate = Call-Tool $process 7 "cortex_launch" @{ profile = "fixture"; mutation_permission = $true }
     Assert-True ([bool]$duplicate.isError) "Concurrent launch accepted"
 
