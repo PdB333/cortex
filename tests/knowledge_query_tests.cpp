@@ -37,9 +37,11 @@ int main() {
           !result["records"][0].contains("notes"), "bounded preview excludes history/notes");
     Check(result["records"][0].value("evidence_count", 0) == 1, "evidence reference count");
     Check(project::knowledge::Query(records, {{"resume", true}}, result, error), "resume query");
-    Check(result.value("total", 0) == 2, "resume excludes checked observed record");
+    Check(result.value("total", 0) == 3, "resume keeps semantically unverified observations");
     Check(result["records"][0].value("id", "") == "Player.speed", "stale first");
     Check(result["records"][1].value("id", "") == "Player.health", "open hypothesis second");
+    Check(result["records"][2].value("id", "") == "Combat.hit",
+          "byte check success does not prove a semantic claim");
     Check(project::knowledge::Query(records, {{"kind", "behavior"}}, result, error), "kind");
     Check(result.value("total", 0) == 1, "kind exact");
     Check(project::knowledge::Query(records, {{"limit", 1}}, result, error), "first page");

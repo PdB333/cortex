@@ -78,8 +78,10 @@ inline bool Query(const json& knowledge, const json& request, json& result, std:
         const json verification = record.value("last_verification", json::object());
         const std::string verified = verification.is_object()
             ? StringOrEmpty(verification, "status") : std::string();
+        // Byte-invariant success cannot certify behavioral understanding.
+        // An observed client claim still needs semantic corroboration.
         const bool needsAttention = status == "stale" || status == "hypothesis" ||
-            verified == "failed" || (status == "observed" && verified != "passed");
+            status == "observed" || verified == "failed";
         if (resume && !needsAttention) continue;
 
         const std::string statement = StringOrEmpty(record, "statement");
