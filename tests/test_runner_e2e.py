@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_attach':True,'allow_input':True,'test_keys':[32],'max_runs':2,'max_tests':5}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':7}]}))
         try:
             client=Mcp(exe,['--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -69,6 +69,16 @@ def main():
             control=run(steps=[{'delay_ms':30}],expect=[{'read':0,'op':'unchanged'}]);assert control['outcome']=='passed',control;checks.append('control_trial')
             false=run(expect=[{'read':0,'op':'unchanged'}]);assert false['outcome']=='failed',false;checks.append('false_prediction_rejected')
             missing=run(reads=[{'address':'0x1','type':'u32'}]);assert missing['outcome']=='inconclusive' and missing['error']=='baseline_unreadable',missing;checks.append('unreadable_prevents_input')
+            clicked=run(reads=[{'address':fixture['test_clicks'],'type':'u32'}],
+                        steps=[{'mouse_click':{'button':'left','x':20,'y':20,'hold_ms':40}}],
+                        expect=[{'read':0,'op':'increased'}])
+            assert clicked['outcome']=='passed' and clicked['before'][0]['value']==0 and clicked['after'][0]['value']==1,clicked
+            checks.append('window_bound_mouse_click')
+            waited=run(reads=[{'address':fixture['frame'],'type':'u32'}],
+                       steps=[{'wait_for':{'read':0,'op':'increased'},'timeout_ms':1000}],
+                       expect=[{'read':0,'op':'increased'}])
+            assert waited['outcome']=='passed' and waited['steps'][0]['matched'],waited
+            checks.append('condition_wait_real_process')
             slow=client.data('cortex_test_run',**dict(base,steps=[{'vk':32,'tap_ms':500},{'delay_ms':1000}]))
             time.sleep(.05)
             blocked=client.call('cortex_stop',profile='fixture',pid=pid,mutation_permission=True);assert blocked['isError'],blocked

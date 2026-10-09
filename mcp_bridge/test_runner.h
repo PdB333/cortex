@@ -28,6 +28,8 @@ struct Context {
     std::function<bool()> alive;
     std::function<json(const json&)> read;
     std::function<bool(int, bool)> key;
+    // Window-scoped client-coordinate mouse buttons; never global desktop input.
+    std::function<bool(int, int, const std::string&, bool)> mouse;
     std::function<void()> release;
 };
 inline json Serialize(const Plan& p) {
@@ -180,6 +182,9 @@ private:
          record=job->record;}
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(plan.timeoutMs);
         int held=0;
+        bool mouseHeld=false;
+        int mouseX=0, mouseY=0;
+        std::string mouseButton;
         auto guard=[&]{
             if(job->cancel.load())throw std::runtime_error("cancelled");
             if(std::chrono::steady_clock::now()>=deadline)throw std::runtime_error("timed_out");
@@ -198,15 +203,60 @@ private:
             if(!AllReadable(record["before"]))throw std::runtime_error("baseline_unreadable");
             for(size_t index=0;index<plan.steps.size();++index){
                 guard();const auto& step=plan.steps[index];
+                json details={{"index",index},{"status","completed"},{"at_ms",WallMs()}};
                 if(step.contains("delay_ms"))wait(step["delay_ms"].get<int>());
-                else {
+                else if(step.contains("vk")) {
                     held=step["vk"].get<int>();
-                    if(!context.key(held,true))throw std::runtime_error("input_delivery_failed");
+                    if(!context.key || !context.key(held,true))throw std::runtime_error("input_delivery_failed");
                     wait(step["tap_ms"].get<int>());
                     if(!context.key(held,false))throw std::runtime_error("input_release_failed");
                     held=0;
+                } else if(step.contains("mouse_click")) {
+                    const auto& click=step["mouse_click"];
+                    mouseX=click["x"].get<int>();mouseY=click["y"].get<int>();
+                    mouseButton=click["button"].get<std::string>();
+                    mouseHeld=true;
+                    if(!context.mouse || !context.mouse(mouseX,mouseY,mouseButton,true))
+                        throw std::runtime_error("mouse_delivery_failed");
+                    wait(click["hold_ms"].get<int>());
+                    if(!context.mouse(mouseX,mouseY,mouseButton,false))
+                        throw std::runtime_error("mouse_release_failed");
+                    mouseHeld=false;
+                } else if(step.contains("wait_for")) {
+                    // Condition compares to the original baseline, not to the
+                    // previous poll, which prevents drift from changing meaning.
+                    const auto& check=step["wait_for"];
+                    const size_t read=check["read"].get<size_t>();
+                    json expectation=check;
+                    expectation["read"]=0;
+                    Plan one=plan;
+                    one.reads=json::array({plan.reads[read]});
+                    one.expect=json::array({expectation});
+                    const auto until=std::chrono::steady_clock::now()+
+                        std::chrono::milliseconds(step["timeout_ms"].get<int>());
+                    bool matched=false;
+                    int polls=0;
+                    json last;
+                    while(std::chrono::steady_clock::now()<until) {
+                        guard();
+                        last=context.read(plan.reads[read]);++polls;
+                        const json checked=Assess(one,json::array({record["before"][read]}),
+                                                     json::array({last}));
+                        if(checked.value("outcome",std::string())=="passed"){
+                            matched=true;break;
+                        }
+                        wait(25);
+                    }
+                    details["polls"]=polls;
+                    details["last_observation"]=last;
+                    details["matched"]=matched;
+                    if(!matched) {
+                        details["status"]="not_met";
+                        record["steps"].push_back(details);
+                        throw std::runtime_error("wait_condition_not_met");
+                    }
                 }
-                record["steps"].push_back({{"index",index},{"status","completed"},{"at_ms",WallMs()}});
+                record["steps"].push_back(details);
                 {std::lock_guard<std::mutex> l(job->mutex);job->record["completed_steps"]=index+1;}
             }
             wait(plan.settleMs);record["after"]=sample();
@@ -217,8 +267,12 @@ private:
             record["status"]=error=="cancelled"||error=="timed_out"?error:"failed";
             record["outcome"]="inconclusive";
         }catch(...){record["status"]="failed";record["error"]="unexpected_test_error";}
-        if(held){bool released=false;try{released=context.key(held,false);}catch(...){}
+        if(held){bool released=false;try{released=context.key && context.key(held,false);}catch(...){}
             record["cleanup"]={{"released",released},{"key",held}};}
+        if(mouseHeld){bool released=false;try{released=context.mouse &&
+                context.mouse(mouseX,mouseY,mouseButton,false);}catch(...){}
+            record["cleanup"]={{"released",released},{"mouse_button",mouseButton},
+                                 {"x",mouseX},{"y",mouseY}};}
         record["finished_ms"]=WallMs();
         try {
             record["report_directory"]=(root_/job->id).u8string();
