@@ -1,4 +1,5 @@
 #include "project.h"
+#include "knowledge.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
 
@@ -89,7 +90,8 @@ bool SaveToDisk() {
 json DefaultSkeleton() {
     return json{{"schema_version", 2}, {"addresses", json::object()}, {"pointer_paths", json::object()}, {"notes", json::array()},
                 {"freezes", json::array()}, {"struct_defs", json::array()}, {"re_facts", json::object()},
-                {"object_tracks", json::array()}, {"breakpoint_templates", json::array()}};
+                {"object_tracks", json::array()}, {"breakpoint_templates", json::array()},
+                {"knowledge", json::object()}};
 }
 
 bool LoadJsonFile(const std::string& path, json& out) {
@@ -110,7 +112,8 @@ void MigrateAndRepair(json& data) {
     if (!data.contains("re_facts") || !data["re_facts"].is_object()) data["re_facts"] = json::object();
     if (!data.contains("object_tracks") || !data["object_tracks"].is_array()) data["object_tracks"] = json::array();
     if (!data.contains("breakpoint_templates") || !data["breakpoint_templates"].is_array()) data["breakpoint_templates"] = json::array();
-    if (version < 2) data["schema_version"] = 2;
+    if (!data.contains("knowledge") || !data["knowledge"].is_object()) data["knowledge"] = json::object();
+    if (version < 3) data["schema_version"] = 3;
 }
 
 } // namespace
@@ -285,6 +288,59 @@ void SetStructDefs(const json& defs) {
     json before = g_data;
     g_data["struct_defs"] = defs;
     if (!SaveToDisk()) g_data = std::move(before);
+}
+
+json GetKnowledge() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_data.value("knowledge", json::object());
+}
+
+json FindKnowledge(const std::string& id) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto& records = g_data["knowledge"];
+    return records.contains(id) ? records.at(id) : json(nullptr);
+}
+
+bool PutKnowledge(const json& input, json& stored, std::string& error) {
+    if (!input.is_object() || !input.contains("id") || !input.at("id").is_string()) {
+        error = "invalid_id"; return false;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const std::string id = input.at("id").get<std::string>();
+    json& records = g_data["knowledge"];
+    const json* previous = records.contains(id) ? &records.at(id) : nullptr;
+    json candidate;
+    if (!knowledge::Prepare(input, previous, candidate, error)) return false;
+    json before = g_data;
+    records[id] = std::move(candidate);
+    if (!SaveToDisk()) {
+        g_data = std::move(before);
+        error = "persistence_failed";
+        return false;
+    }
+    stored = g_data["knowledge"].at(id);
+    return true;
+}
+
+bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
+                                 const json& verification, json& stored, std::string& error) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    json& records = g_data["knowledge"];
+    if (!records.contains(id)) { error = "knowledge_not_found"; return false; }
+    json& record = records[id];
+    const int revision = record.value("revision", 0);
+    if (revision != expectedRevision) { error = "revision_conflict"; return false; }
+    json before = g_data;
+    knowledge::AppendHistory(record);
+    record["last_verification"] = verification;
+    record["revision"] = revision + 1;
+    if (!SaveToDisk()) {
+        g_data = std::move(before);
+        error = "persistence_failed";
+        return false;
+    }
+    stored = g_data["knowledge"].at(id);
+    return true;
 }
 
 json GetReFacts() {
