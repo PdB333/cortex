@@ -386,6 +386,32 @@ if(name=="cortex_test_run"){
     if(!runtime||!ValidateGeneration(runtime,a,code,message)){response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;}
     const auto target=runtime->target;const auto session=runtime->sessions->Active();
     if(!session||!session->Alive()){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_exited","Target exited"),true);return true;}
+    if(!plan.breakpoints.empty()) {
+        std::lock_guard<std::mutex> guard(runtime->debuggerMutex);
+        if(!runtime->debugger || !runtime->debugger->Ready() ||
+           !runtime->debugger->Supports(DebugCapability::BreakpointLog)){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "breakpoint_debugger_unavailable","Attach the debugger and configure log-only breakpoints before starting a test"),true);
+            return true;
+        }
+        std::string debuggerError;
+        const auto available=runtime->debugger->Breakpoints(&debuggerError);
+        if(!debuggerError.empty()){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "breakpoint_list_failed",debuggerError),true);
+            return true;
+        }
+        for(const auto& spec:plan.breakpoints){
+            const int selected=spec.get<int>();
+            const auto found=std::find_if(available.begin(),available.end(),
+                [selected](const DebugBreakpointInfo& bp){return bp.id==selected;});
+            if(found==available.end() || found->pauseOnHit){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                    "breakpoint_not_logging","Only existing action=log breakpoints may be observed"),true);
+                return true;
+            }
+        }
+    }
     const HWND window=cortex::test::TestWindow(target.processId);
     if(!window){response=LocalToolResponse(MessageId(m),LocalToolFailure("test_window_unavailable","Expected exactly one visible unowned target window"),true);return true;}
     std::vector<int> keys;for(const auto& step:plan.steps)if(step.contains("vk"))keys.push_back(step["vk"].get<int>());
@@ -397,6 +423,38 @@ if(name=="cortex_test_run"){
     context.target=TargetJson(target,true);
     context.alive=[launcher,target]{return launcher->IsCurrent(target.processId,target.generation);};
     context.read=[session](const json& spec){return cortex::test::ReadSample(session,spec);};
+    if(!plan.breakpoints.empty()){
+        context.breakpoint=[runtime,launcher,target](int id,uint64_t since,size_t limit)->json{
+            if(!launcher->IsCurrent(target.processId,target.generation))
+                return {{"ok",false},{"error","test_target_changed"}};
+            std::lock_guard<std::mutex> guard(runtime->debuggerMutex);
+            auto* debug=runtime->debugger.get();
+            if(!debug||!debug->Ready()||!debug->Supports(DebugCapability::BreakpointLog))
+                return {{"ok",false},{"error","breakpoint_debugger_unavailable"}};
+            std::string error;
+            const auto bps=debug->Breakpoints(&error);
+            if(!error.empty())return {{"ok",false},{"error",error}};
+            const auto match=std::find_if(bps.begin(),bps.end(),
+                [id](const DebugBreakpointInfo& bp){return bp.id==id;});
+            if(match==bps.end()||match->pauseOnHit)
+                return {{"ok",false},{"error","breakpoint_not_logging"}};
+            const auto hits=debug->BreakpointLog(id,since,limit==0?500:limit,&error);
+            if(!error.empty())return {{"ok",false},{"error",error}};
+            json entries=json::array();
+            if(limit!=0)for(const auto& hit:hits){
+                entries.push_back({{"seq",hit.seq},{"thread_id",hit.threadId},
+                    {"timestamp_raw_ms",hit.timestampMs},
+                    {"instruction",HexRegisterValue(hit.instruction)}});
+            }
+            return {{"ok",true},{"id",id},{"kind",match->kind},
+                {"address",HexRegisterValue(match->address)},
+                {"backend",std::string(debug->Name())},{"hit_count",match->hitCount},
+                {"coverage_complete",match->totalThreads==0 ||
+                    match->appliedThreads>=match->totalThreads},
+                {"last_seq",hits.empty()?uint64_t{0}:hits.back().seq},
+                {"entries",std::move(entries)}};
+        };
+    }
     context.key=[launcher,target,window](int key,bool down){return launcher->IsCurrent(target.processId,target.generation) && cortex::test::PostKey(window,target.processId,key,down);};
     context.mouse=[launcher,target,window](int x,int y,const std::string& button,bool down){
         return launcher->IsCurrent(target.processId,target.generation) &&
