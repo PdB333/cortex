@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':7}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':9}]}))
         try:
             client=Mcp(exe,['--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -87,7 +87,9 @@ def main():
             checks.append('no_restart_during_active_test')
             client.data('cortex_test_cancel',id=slow['id']);cancelled=wait(slow['id']);assert cancelled['status']=='cancelled',cancelled
             assert cancelled['cleanup']['released'];checks.append('cancel_and_release')
-            limit=client.call('cortex_test_run',**base);assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit;checks.append('operator_test_budget')
+            used=client.data('cortex_launch_status',profile='fixture')['profile']
+            assert used['tests']==7 and used['max_tests']==9,used
+            checks.append('operator_test_count')
             directory=pathlib.Path(passed['report_directory']);assert (directory/'result.json').exists() and (directory/'investigation.md').exists();checks.append('json_markdown_reports')
             stale=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation+1,attach=True,mutation_permission=True)
             assert stale['isError'] and stale['structuredContent']['error']['code']=='restart_process_identity_mismatch',stale
@@ -97,6 +99,19 @@ def main():
             assert restarted['generation']!=generation and restarted['attached'] and restarted['reset_scope']=='process_only',restarted
             assert restarted['previous_generation']==generation
             checks.append('atomic_profile_restart_and_attach')
+            fixture=json.loads(manifest.read_text())
+            base.update({'_cortex_target':pid,'_cortex_generation':restarted['generation'],
+                         'reads':[{'address':fixture['test_value'],'type':'u32'}]})
+            fresh_control=run(steps=[{'delay_ms':50}],expect=[{'read':0,'op':'unchanged'}])
+            fresh_action=run()
+            assert fresh_control['outcome']=='passed' and fresh_action['outcome']=='passed',fresh_action
+            assert fresh_control['before'][0]['value']==fresh_action['before'][0]['value']==0,(fresh_control,fresh_action)
+            comparisons=client.data('cortex_test_compare',first=fresh_control['id'],second=fresh_action['id'])
+            assert comparisons['comparison']=='aligned' and comparisons['reads'][0]['candidate_difference'],comparisons
+            checks.append('controlled_pair_after_process_restart')
+            limit=client.call('cortex_test_run',**base)
+            assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
+            checks.append('operator_test_budget')
             exhausted_restart=client.call('cortex_restart',profile='fixture',pid=pid,
                                            generation=restarted['generation'],attach=True,mutation_permission=True)
             assert exhausted_restart['isError'] and exhausted_restart['structuredContent']['error']['code']=='launch_profile_run_limit_reached',exhausted_restart

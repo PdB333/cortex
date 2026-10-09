@@ -260,6 +260,15 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
     return true;
 }
+if(name=="cortex_test_compare"){
+    if(!a.is_object()||a.size()!=2||!a.contains("first")||!a.contains("second")||
+       !a["first"].is_string()||!a["second"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_test_pair","Provide two completed trial IDs"),true);
+        return true;
+    }
+    auto comparison=s->tests->Compare(a["first"].get<std::string>(),a["second"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),comparison,!comparison.value("ok",false));return true;
+}
 if(name=="cortex_test_run"){
     cortex::test::Plan plan;std::string error;
     if(!cortex::test::ParsePlan(a,plan,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
