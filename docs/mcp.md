@@ -271,7 +271,8 @@ These primitive tools are available with `--tools all`:
   agent from silently overwriting a later human correction.
 - `project_knowledge_verify`: read only the declared byte invariants from the
   currently attached process, record the actual `passed`/`failed` result,
-  and increment the revision. This does not authorize target mutation.
+  and increment the revision. This does not authorize target mutation and,
+  because it persists the result, the MCP operation requires control permission.
 
 Example record submitted via `project_knowledge_put`:
 
