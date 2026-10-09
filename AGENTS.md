@@ -26,9 +26,12 @@ local program through its MCP tools.
    relevant claims with project_knowledge_get. Treat the records as claims.
 5. Observe a baseline: screenshot, relevant memory, watches, traces, and/or
    snapshots. State an explicit testable question before changing the target.
-6. Trigger one small action through input_sequence or a previously recorded
-   keyboard/mouse sequence. Check input focus and delivery. Do not assume
-   every game supports background input.
+6. Prefer cortex_test_run for a bounded before/action/after experiment. Read
+   cortex_agent_guide (available without a target) or agent/testing.md. Poll
+   cortex_test_get and use cortex_test_cancel to interrupt. The first runner
+   accepts only window-message key taps/delays on an owned process with
+   allow_input and test_keys explicitly configured outside MCP. Do not assume
+   every game supports window-message input.
 7. Observe again and compare. Repeat with a control action to test competing
    explanations; do not infer causality from correlation alone.
 8. Record or correct discoveries through project_knowledge_put. Use
@@ -36,8 +39,11 @@ local program through its MCP tools.
    project_knowledge_verify checks bytes, not behavioral semantics.
 9. Keep experiments bounded. Respect maximum launch counts, user-approved
    mutation permissions, time limits and cancellation requests.
-10. Finish with investigation.md. Use agent/investigation-template.md. Record
-    what was observed, which hypotheses failed and what to test next.
+10. Each trial automatically writes plan.json, result.json and investigation.md.
+    The report directory is selected at startup with --test-results. Reuse
+    these references in project_knowledge_put and in a human-readable final
+    summary using agent/investigation-template.md. Include negative results.
+    Completed records can be reopened; incomplete trials must not auto-replay.
 
 ## Safety
 
@@ -54,8 +60,8 @@ local program through its MCP tools.
 - Stop when input is delivered to the wrong window, a target changes identity,
   an anti-cheat is detected, the runtime is unstable, or the user interrupts.
 - Never claim Cortex can autonomously navigate any game. The initial version
-  provides an allowlisted launcher plus existing input and observation tools,
-  not a universal autonomous gameplay or reset engine.
+  provides an allowlisted launcher, optional auto-attach, bounded test runner
+  and durable reports, not universal autonomous gameplay or perfect reset.
 
 ## Report
 

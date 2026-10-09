@@ -54,6 +54,16 @@ and is **off by default**; it starts only with `http_api_enabled=true` in
 legacy tool. The route names below are the same primitives the MCP catalog
 exposes, so everything in this guide applies to both.
 
+## Bounded automated trials
+
+Call `cortex_agent_guide` for built-in instructions, even before attach. The
+same guide is embedded in the MCP initialize response and documented in
+[testing.md](testing.md). Configure exact launch/attach/input permissions in
+an operator-owned launch profile. Use `cortex_test_run/get/cancel/list` for
+bounded before/action/after observations and durable reports. Only compatible
+window-message consumers are supported by this first runner. No game-playing
+or causal-reasoning guarantees are implied.
+
 ## First moves in a new session
 
 1. `health` — confirm the runtime is up.
@@ -69,8 +79,9 @@ exposes, so everything in this guide applies to both.
 ## Permission to change the target
 
 Attaching grants no write permission. Control, mutation and native-call
-operations require `mutation_permission=true` on that call; every mutation is
-journaled and can be rolled back. Use it only for the specific operation that
+operations require `mutation_permission=true` on that call. Only supported
+memory mutations have undo records; input, process termination and external
+effects cannot generally be rolled back. Use it only for the specific operation that
 needs it.
 
 ## Core conventions
@@ -112,7 +123,8 @@ needs it.
 
 ## Background capture and input
 
-Cortex works even when the game window is not focused or is minimized.
+Background support depends on the input/capture backend and target. Cached
+frames may be stale; minimized windows may not produce fresh captures.
 
 - **Screenshots** — `GET /screenshot?mode=auto` tries the render hook, then
   `PrintWindow(PW_RENDERFULLCONTENT)`, then a cached last frame. The response

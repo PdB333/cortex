@@ -110,6 +110,22 @@ jobs:
           -HostPath "build/full-${{ matrix.arch }}/cortex_host.exe"
           -TargetPath "build/full-${{ matrix.arch }}/${{ matrix.target_name }}"
 
+      - name: Test bounded input trials and reports
+        shell: pwsh
+        run: >-
+          python tests/test_runner_e2e.py
+          --build-root "build/full-${{ matrix.arch }}"
+          --arch "${{ matrix.arch }}"
+
+      - name: Upload test runner evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-runner-${{ matrix.arch }}
+          path: build/full-${{ matrix.arch }}/test-runner-evidence
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Inject Cortex and test HTTP + native stdio MCP
         shell: pwsh
         run: |

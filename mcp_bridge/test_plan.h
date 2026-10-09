@@ -13,6 +13,7 @@ struct Plan {
     std::string mode = "game";
     json steps = json::array();
     json reads = json::array();
+    json expect = json::array();
     int timeoutMs = 15000;
     int settleMs = 100;
 };
@@ -38,7 +39,7 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
         if (!IsOneOf(it.key(), {"label", "mode", "steps", "reads",
                                 "timeout_ms", "settle_ms", "mutation_permission",
                                 "_cortex_target", "_cortex_generation",
-                                "_cortex_timeout_ms"})) {
+                                "_cortex_timeout_ms", "expect"})) {
             error = "unsupported_test_field:" + it.key();
             return false;
         }
@@ -60,8 +61,8 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
         if (!request.at("mode").is_string()) { error = "invalid_input_mode"; return false; }
         plan.mode = request.at("mode").get<std::string>();
     }
-    if (!IsOneOf(plan.mode, {"os", "game", "dinput"})) {
-        error = "invalid_input_mode"; return false;
+    if (plan.mode != "game") {
+        error = "test_mode_not_supported"; return false;
     }
     if (request.contains("timeout_ms")) {
         if (!IntegerInRange(request["timeout_ms"], 1000, 20000)) {
@@ -139,6 +140,29 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
     }
     if (totalBytes > 128) { error = "test_read_budget_exceeded"; return false; }
     plan.reads = request["reads"];
+    if (request.contains("expect")) {
+        if (!request["expect"].is_array() || request["expect"].size() > 8) {
+            error = "invalid_test_expectations"; return false;
+        }
+        for (const auto& check : request["expect"]) {
+            if (!check.is_object() || !check.contains("read") ||
+                !IntegerInRange(check["read"], 0, static_cast<int>(plan.reads.size()) - 1) ||
+                !check.contains("op") || !check["op"].is_string()) {
+                error = "invalid_test_expectation"; return false;
+            }
+            const std::string op = check["op"].get<std::string>();
+            if (!IsOneOf(op, {"changed", "unchanged", "equal", "increased", "decreased"}) ||
+                check.size() != (op == "equal" ? 3u : 2u)) {
+                error = "invalid_test_expectation_operator"; return false;
+            }
+            if (op == "equal" && (!check.contains("value") ||
+                !(check["value"].is_number() || (check["value"].is_string() &&
+                  check["value"].get_ref<const std::string&>().size() <= 64)))) {
+                error = "invalid_test_expected_value"; return false;
+            }
+        }
+        plan.expect = request["expect"];
+    }
     return true;
 }
 } // namespace cortex::test
