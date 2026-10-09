@@ -29,9 +29,11 @@ local program through its MCP tools.
 6. Prefer cortex_test_run for a bounded before/action/after experiment. Read
    cortex_agent_guide (available without a target) or agent/testing.md. Poll
    cortex_test_get and use cortex_test_cancel to interrupt. The first runner
-   accepts only window-message key taps/delays on an owned process with
-   allow_input and test_keys explicitly configured outside MCP. Do not assume
-   every game supports window-message input.
+   accepts bounded window-message key taps, optional client-coordinate mouse
+   clicks and waits for specified memory observations on an owned process.
+   allow_input, test_keys and (for clicks) allow_mouse are configured outside
+   MCP. The runner verifies window identity and coordinates before sending
+   any event. Do not assume all games handle window messages.
 7. Observe again and compare. Repeat with a control action to test competing
    explanations; do not infer causality from correlation alone.
 8. Record or correct discoveries through project_knowledge_put. Use

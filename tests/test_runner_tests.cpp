@@ -24,6 +24,12 @@ int main(){
         context.alive=[&]{return alive.load();};
         context.read=[&](const json& spec){return json{{"ok",true},{"value",value.load()},{"request",spec}};};
         context.key=[&](int,bool down){if(down){++value;++keysDown;}else --keysDown;return true;};
+        std::atomic<int> mouseDown{0};
+        context.mouse=[&](int x,int y,const std::string& button,bool down){
+            if(x!=20||y!=30||button!="left")return false;
+            if(down){value+=3;++mouseDown;}else --mouseDown;
+            return true;
+        };
         context.release=[&]{++released;};
         const json request={{"label","example"},{"mode","game"},{"mutation_permission",true},
             {"steps",json::array({{{"vk",32},{"tap_ms",40}}})},
@@ -62,9 +68,32 @@ int main(){
         auto timed=plan;timed.timeoutMs=1000;
         Check(runner.Start(timed,stuck,out,error),"timeout run");
         Check(Wait(runner,out["id"])["status"]=="timed_out","deadline prevents further input");
+        auto click=plan;
+        click.steps=json::array({{{"mouse_click",
+            {{"button","left"},{"x",20},{"y",30},{"hold_ms",40}}}}});
+        Check(runner.Start(click,context,out,error),"run mouse trial");
+        auto clicked=Wait(runner,out["id"]);
+        Check(clicked["status"]=="completed"&&clicked["outcome"]=="passed"&&mouseDown==0,
+              "mouse click observed and released");
+        auto asynchronous=plan;
+        asynchronous.steps=json::array({{{"wait_for",
+            {{"read",0},{"op","increased"}}},{"timeout_ms",500}}});
+        const int previous=value.load();
+        Check(runner.Start(asynchronous,context,out,error),"run conditional wait");
+        std::thread emitter([&]{std::this_thread::sleep_for(std::chrono::milliseconds(85));++value;});
+        auto waited=Wait(runner,out["id"]);
+        emitter.join();
+        Check(waited["status"]=="completed"&&waited["outcome"]=="passed"&&
+              value==previous+1,"wait observed external value update");
+        asynchronous.steps[0]["wait_for"]={{"read",0},{"op","equal"},{"value",-12345}};
+        asynchronous.steps[0]["timeout_ms"]=100;
+        Check(runner.Start(asynchronous,context,out,error),"start unmet condition test");
+        auto notMet=Wait(runner,out["id"]);
+        Check(notMet["outcome"]=="inconclusive"&&
+              notMet["error"]=="wait_condition_not_met","unmet wait is inconclusive");
         Check(!runner.Get("../../etc").value("ok",true),"reject traversal");
-        Check(runner.List()["runs"].size()==8,"bounded run index");
-        Check(released==8,"all leases released");
+        Check(runner.List()["runs"].size()==11,"bounded run index");
+        Check(released==11,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";

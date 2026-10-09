@@ -182,7 +182,7 @@ public:
     // This permission is provided by a startup profile, never by target data
     // or a tool-call flag. A lease excludes concurrent tests/restarts/stops.
     bool BeginTest(uint64_t pid, uint64_t generation, const std::vector<int>& keys,
-                   std::string& error) {
+                   std::string& error, bool mouseRequested = false) {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& pair : entries_) {
             Entry& entry = pair.second;
@@ -192,6 +192,9 @@ public:
                 error = "test_target_generation_changed"; return false;
             }
             if (!entry.profile.allowInput) { error = "test_input_not_allowed"; return false; }
+            if (mouseRequested && !entry.profile.allowMouse) {
+                error = "test_mouse_not_allowed"; return false;
+            }
             for (int key : keys) {
                 if (std::find(entry.profile.testKeys.begin(), entry.profile.testKeys.end(), key) ==
                         entry.profile.testKeys.end()) { error = "test_key_not_allowed"; return false; }
@@ -267,6 +270,7 @@ private:
             {"allow_stop", e.profile.allowStop},
             {"allow_attach", e.profile.allowAttach},
             {"allow_input", e.profile.allowInput},
+            {"allow_mouse", e.profile.allowMouse},
             {"test_keys", e.profile.testKeys},
             {"max_tests", e.profile.maxTests},
             {"tests", e.tests},

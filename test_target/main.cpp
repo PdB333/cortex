@@ -18,6 +18,7 @@ extern "C" __declspec(dllexport) double   g_cortex_double = 2.7182818284;
 extern "C" __declspec(dllexport) char     g_cortex_str[32] = "cortex-canary";
 
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_test_value = 0;
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_test_clicks = 0;
 static bool g_cortex_e2e_input = false;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
@@ -228,6 +229,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"frame\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_frame) << "\",\n"
          << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
          << "  \"test_value\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_test_value) << "\",\n"
+         << "  \"test_clicks\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_test_clicks) << "\",\n"
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
          << "  \"native_add\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeAdd) << "\",\n"
@@ -260,6 +262,9 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam
     switch (message) {
         case WM_KEYDOWN:
             if (g_cortex_e2e_input && wparam == VK_SPACE) { ++g_cortex_test_value; return 0; }
+            break;
+        case WM_LBUTTONDOWN:
+            if (g_cortex_e2e_input) { ++g_cortex_test_clicks; return 0; }
             break;
         case WM_DESTROY:
             PostQuitMessage(0);

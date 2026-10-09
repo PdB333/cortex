@@ -70,7 +70,8 @@ inline HWND TestWindow(uint64_t pid){
     return query.windows.front();
 }
 inline bool PostKey(HWND w,uint64_t expectedPid,int key,bool down){
-    DWORD pid=0;if(!IsWindow(w)||!GetWindowThreadProcessId(w,&pid)||pid!=expectedPid)return false;
+    DWORD pid=0;if(!IsWindow(w)||!GetWindowThreadProcessId(w,&pid)||pid!=expectedPid||
+        !IsWindowVisible(w)||IsIconic(w)||TestWindow(expectedPid)!=w)return false;
     const UINT scan=MapVirtualKeyW(static_cast<UINT>(key),MAPVK_VK_TO_VSC);
     LPARAM flags=static_cast<LPARAM>(1 | (scan<<16));
     if(key==VK_LEFT||key==VK_RIGHT||key==VK_UP||key==VK_DOWN||key==VK_INSERT||key==VK_DELETE||
@@ -78,5 +79,24 @@ inline bool PostKey(HWND w,uint64_t expectedPid,int key,bool down){
         flags|=static_cast<LPARAM>(1u<<24);
     if(!down)flags|=static_cast<LPARAM>(3u<<30);
     return PostMessageW(w,down?WM_KEYDOWN:WM_KEYUP,static_cast<WPARAM>(key),flags)!=FALSE;
+}
+// Client-coordinates only. Never moves the physical mouse or steals focus.
+// WM_* support is engine dependent; success means queued, not processed.
+inline bool PostMouse(HWND w,uint64_t expectedPid,int x,int y,
+                      const std::string& button,bool down){
+    DWORD pid=0;
+    if(!IsWindow(w)||!GetWindowThreadProcessId(w,&pid)||pid!=expectedPid||
+       !IsWindowVisible(w)||IsIconic(w)||TestWindow(expectedPid)!=w)return false;
+    RECT rect{};
+    if(!GetClientRect(w,&rect)||x<0||y<0||x>=rect.right-rect.left||
+       y>=rect.bottom-rect.top||x>32767||y>32767)return false;
+    UINT message=0;
+    WPARAM flags=0;
+    if(button=="left"){message=down?WM_LBUTTONDOWN:WM_LBUTTONUP;flags=down?MK_LBUTTON:0;}
+    else if(button=="right"){message=down?WM_RBUTTONDOWN:WM_RBUTTONUP;flags=down?MK_RBUTTON:0;}
+    else return false;
+    const LPARAM point=MAKELPARAM(static_cast<WORD>(x),static_cast<WORD>(y));
+    if(down&&!PostMessageW(w,WM_MOUSEMOVE,0,point))return false;
+    return PostMessageW(w,message,flags,point)!=FALSE;
 }
 } // namespace cortex::test

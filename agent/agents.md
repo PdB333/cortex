@@ -61,8 +61,11 @@ same guide is embedded in the MCP initialize response and documented in
 [testing.md](testing.md). Configure exact launch/attach/input permissions in
 an operator-owned launch profile. Use `cortex_test_run/get/cancel/list` for
 bounded before/action/after observations and durable reports. Only compatible
-window-message consumers are supported by this first runner. No game-playing
-or causal-reasoning guarantees are implied.
+window-message consumers are supported by this first runner. Short
+client-coordinate mouse clicks (allow_mouse) and condition-based memory waits
+are supported in addition to key taps. A posted message is not proof that the
+program handled it. No universal game-playing or causal-reasoning guarantees
+are implied.
 
 ## First moves in a new session
 
