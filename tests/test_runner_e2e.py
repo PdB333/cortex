@@ -85,11 +85,18 @@ def main():
             assert first_ip['address_role']=='debugger_instruction_pointer' and                 first_ip['module'] is not None and                 first_ip['module']['name'].lower()==target.name.lower() and                 first_ip['module']['rva'].startswith('0x'),code_context
             assert first_ip['symbol']['status'] in ('resolved','unavailable'),first_ip
             assert first_ip['disassembly']['status']=='readable' and                 1<=len(first_ip['disassembly']['instructions'])<=3 and                 first_ip['disassembly']['source']=='host_external_memory',first_ip
+            if a.arch=='x64':
+                unwind=first_ip['unwind_range']
+                assert unwind['status']=='unwind_range' and                     unwind['source']=='live_pe_exception_directory' and                     int(unwind['begin_rva'],16)<=int(first_ip['module']['rva'],16) and                     int(first_ip['module']['rva'],16)<int(unwind['end_rva'],16),unwind
+                checks.append('x64_live_pe_unwind_range')
+            else:
+                assert first_ip['unwind_range']['status']=='unavailable',first_ip
+                checks.append('x86_no_unwind_range_invented')
             checks.append('module_rva_and_disassembly_from_recorded_instruction')
             disabled=client.data('cortex_test_code_context',
                 test_id=passed['id'],_cortex_target=pid,_cortex_generation=generation,
-                symbols=False,disassemble=False,max_locations=1)
-            assert disabled['locations'][0]['disassembly']['status']=='not_requested' and                 disabled['locations'][0]['symbol']['status']=='unavailable',disabled
+                symbols=False,disassemble=False,unwind=False,max_locations=1)
+            assert disabled['locations'][0]['disassembly']['status']=='not_requested' and                 disabled['locations'][0]['unwind_range']['status']=='not_requested' and                 disabled['locations'][0]['symbol']['status']=='unavailable',disabled
             checks.append('bounded_read_only_code_lookup')
             bad_ctx=client.call('cortex_test_code_context',test_id=passed['id'],
                 _cortex_target=pid,_cortex_generation=generation,max_locations=0)

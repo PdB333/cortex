@@ -4,6 +4,7 @@
 #include "test_target_io.h"
 #include "test_knowledge.h"
 #include "test_code_context.h"
+#include "pe_unwind.h"
 #include "agent_guide.h"
 
 #include "ai_activity_channel.h"
@@ -311,13 +312,14 @@ if(name=="cortex_test_code_context"){
     if(!a.is_object() || !a.contains("test_id") ||
        !a["test_id"].is_string() ||
        !a.contains("_cortex_target") || !a.contains("_cortex_generation") ||
-       a.size()>6 ||
+       a.size()>7 ||
        (a.contains("max_locations") &&
         (!a["max_locations"].is_number_integer() ||
          a["max_locations"].get<int64_t>()<1 ||
          a["max_locations"].get<int64_t>()>8)) ||
        (a.contains("symbols") && !a["symbols"].is_boolean()) ||
-       (a.contains("disassemble") && !a["disassemble"].is_boolean())) {
+       (a.contains("disassemble") && !a["disassemble"].is_boolean()) ||
+       (a.contains("unwind") && !a["unwind"].is_boolean())) {
         response=LocalToolResponse(MessageId(m),LocalToolFailure(
             "invalid_code_context_request","Supply trial ID, original target, process generation and optional bounded lookups"),true);
         return true;
@@ -325,7 +327,8 @@ if(name=="cortex_test_code_context"){
     for(auto it=a.begin();it!=a.end();++it)
         if(it.key()!="test_id" && it.key()!="_cortex_target" &&
            it.key()!="_cortex_generation" && it.key()!="max_locations" &&
-           it.key()!="symbols" && it.key()!="disassemble"){
+           it.key()!="symbols" && it.key()!="disassemble" &&
+           it.key()!="unwind"){
             response=LocalToolResponse(MessageId(m),LocalToolFailure(
                 "invalid_code_context_request","Unrecognized code context field"),true);
             return true;
@@ -423,10 +426,43 @@ if(name=="cortex_test_code_context"){
                     {"source","host_external_memory"}};
         };
     }
+    cortex::test::code_context::UnwindQuery unwindQuery;
+    if(a.value("unwind",true) && modulesError.empty()){
+        if(runtime->target.architecture!=cortex::target::Architecture::X64){
+            unwindQuery=[](const std::string&,const json&)->json{
+                return {{"status","unavailable"},{"reason","not_amd64_pe32plus"}};
+            };
+        }else{
+            // Use live PE .pdata exception metadata via bounded external
+            // session reads. This is not a function prologue heuristic.
+            unwindQuery=[session](const std::string& address,const json& module)->json{
+                uint64_t ip=0,base=0;
+                if(!cortex::test::code_context::HexAddress(address,ip) ||
+                   !module.is_object() || !module.contains("base") ||
+                   !module["base"].is_string() ||
+                   !cortex::test::code_context::HexAddress(
+                       module["base"].get<std::string>(),base) ||
+                   !module.contains("size") || !module["size"].is_number_unsigned())
+                    return {{"status","unavailable"},{"reason","invalid_module_location"}};
+                const cortex::test::pe_unwind::ReadAt reader=
+                    [session](uint64_t at,size_t size,std::vector<uint8_t>& bytes)->bool{
+                        if(!session->Alive()||size>1024)return false;
+                        bytes.resize(size);
+                        size_t got=0;
+                        if(!session->ReadMemory(at,bytes.data(),size,&got) || got!=size){
+                            bytes.clear();return false;
+                        }
+                        return true;
+                    };
+                return cortex::test::pe_unwind::Find(
+                    base,module["size"].get<uint64_t>(),ip,reader);
+            };
+        }
+    }
     json result=cortex::test::code_context::Build(
         recorded["run"],liveTarget,moduleSnapshot,
         static_cast<size_t>(a.value("max_locations",4)),
-        symbolQuery,disassemblyQuery);
+        symbolQuery,disassemblyQuery,unwindQuery);
     // A PID may disappear between module enumeration and read-only RPCs.
     // Never hand off context as current when that generation has exited.
     if(!session->Alive() ||
