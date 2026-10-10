@@ -45,7 +45,13 @@ int main() {
             {{"address","0x100114"},{"text","cmp eax,1"},{"bytes","83f801"},{"mnemonic","cmp"}}
         })}};
     };
-    json value = Build(run,target,modules,4,symbols,disasm);
+    auto unwind=[](const std::string& address,const json& module)->json{
+        if(address=="0x100112" && module["rva"]=="0x112")
+            return {{"status","unwind_range"},{"begin_rva","0x100"},
+                    {"end_rva","0x180"},{"source","live_pe_exception_directory"}};
+        return {{"status","unavailable"},{"reason","address_not_covered"}};
+    };
+    json value = Build(run,target,modules,4,symbols,disasm,unwind);
     Check(value.value("ok",false),"valid trial is enriched");
     if (value.value("ok",false)) {
         Check(value["locations"].size()==2 && value["recorded_events"]==3,
@@ -63,6 +69,10 @@ int main() {
               "resolved symbols retain displacement, no function inference");
         Check(value["locations"][0]["disassembly"]["instructions"].size()==2,
               "read-only disassembly is bounded");
+        Check(value["locations"][0]["unwind_range"]["status"]=="unwind_range" &&
+              value["locations"][0]["unwind_range"]["begin_rva"]=="0x100" &&
+              value["locations"][1]["unwind_range"]["status"]=="unavailable",
+              "real unwind metadata is passed through without function inference");
         Check(symbolsCalled==2 && disasmCalled==2,
               "only unique IPs trigger runtime lookups");
     }
