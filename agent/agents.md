@@ -196,6 +196,16 @@ prompt fails explicitly when no desktop is attached to present it.
 Use `GET /screenshot` to *see* the result of an action — close the loop
 visually rather than assuming a write had the intended effect.
 
+## Module and symbol context from trials
+
+For a completed Cortex automated trial with `code_evidence`, call
+`cortex_test_code_context` while the original PID and generation are still
+attached. The tool maps recorded instruction pointers to live modules and
+RVAs, optionally resolves genuine symbols and reads at most three disassembled
+instructions per IP. Do not confuse hardware watchpoint DATA addresses with
+instruction pointers. Do not infer functions from nearest symbols or reuse
+absolute addresses after restarting the program.
+
 ## Connecting experiments to knowledge
 
 After an operator-approved, completed run, create a hypothesis using

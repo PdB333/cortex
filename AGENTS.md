@@ -40,12 +40,19 @@ local program through its MCP tools.
    instructions without arming new breakpoints. Distinguish logged hits,
    missing/dropped entries and incomplete thread coverage; never label
    a hit as a causal explanation.
-8. Observe again and compare. Use cortex_test_compare(first,second) for
+8. For a completed trial containing debugger hits, use
+   cortex_test_code_context with its test_id and exact original process
+   generation. It maps recorded instruction pointers to loaded modules and
+   stable RVAs; optional symbols and disassembly are read-only and best
+   effort. Never mistake a watched DATA address for an instruction pointer.
+   A write trap may report the next instruction; a nearest symbol does
+   not prove function boundaries.
+9. Observe again and compare. Use cortex_test_compare(first,second) for
    completed control/experiment pairs; check baseline_aligned and individual
    readings. Different initial values make a test inconclusive, and matching
    baselines do not prove causality. Choose the next experiment to distinguish
    competing mechanisms.
-9. Record or correct discoveries through project_knowledge_put. Use
+10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
    After an authorized, completed experiment, use cortex_test_link with the
@@ -53,9 +60,9 @@ local program through its MCP tools.
    and mutation_permission=true. This verifies the local trial reference,
    appends evidence without changing the claim's status, and rejects stale
    revisions and other process lifetimes. It does NOT verify semantics.
-10. Keep experiments bounded. Respect maximum launch counts, user-approved
+11. Keep experiments bounded. Respect maximum launch counts, user-approved
    mutation permissions, time limits and cancellation requests.
-11. Each trial automatically writes plan.json, result.json and investigation.md.
+12. Each trial automatically writes plan.json, result.json and investigation.md.
     Finish with cortex_test_report(ids, title, mutation_permission=true) for
     an archived multi-run investigation.md and report.json. The consolidated
     report is an evidence index, not a proven code explanation.
