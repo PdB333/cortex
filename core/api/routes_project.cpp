@@ -105,6 +105,48 @@ void RegisterProjectRoutes(httplib::Server& svr) {
         }
     });
 
+    // Internal endpoint for the host to persist measured debugger IP -> module
+    // references. Not advertised as a generic MCP mutation tool. The public
+    // project_knowledge_put rejects code_references as a client assertion.
+    svr.Post("/project/knowledge/code_references", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json input = json::parse(req.body);
+            if (!input.is_object() || input.size() != 3 ||
+                !input.contains("id") || !input["id"].is_string() ||
+                !input.contains("expected_revision") ||
+                !input["expected_revision"].is_number_integer() ||
+                !input.contains("code_references")) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", "invalid_code_reference_request"}}.dump(),
+                                "application/json");
+                return;
+            }
+            const int64_t revision = input["expected_revision"].get<int64_t>();
+            if (revision < 1 || revision > 1000000) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", "invalid_expected_revision"}}.dump(),
+                                "application/json");
+                return;
+            }
+            json stored;
+            std::string error;
+            if (!project::AppendKnowledgeCodeReferences(input["id"].get<std::string>(),
+                    static_cast<int>(revision), input["code_references"], stored, error)) {
+                res.status = error == "revision_conflict" ? 409 :
+                             error == "knowledge_not_found" ? 404 :
+                             error == "persistence_failed" ? 500 : 400;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(json{{"ok", true}, {"record", std::move(stored)}}.dump(),
+                            "application/json");
+        } catch (const std::exception&) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", "invalid_code_reference_request"}}.dump(),
+                            "application/json");
+        }
+    });
+
     svr.Post(R"(/project/knowledge/([^/]+)/verify)", [](const httplib::Request& req, httplib::Response& res) {
         try {
             const std::string id = DecodePathSegment(req.matches[1]);

@@ -4,6 +4,8 @@
 #include "test_target_io.h"
 #include "test_knowledge.h"
 #include "test_code_context.h"
+#include "test_code_knowledge.h"
+#include "test_file_version.h"
 #include "pe_unwind.h"
 #include "agent_guide.h"
 
@@ -479,6 +481,212 @@ if(name=="cortex_test_code_context"){
         response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
         return true;
     }
+    response=LocalToolResponse(MessageId(m),result);
+    return true;
+}
+// Save only host-measured debugger IP -> module/RVA observations, tied to a
+// full SHA-256 fingerprint of the live module's on-disk binary. This does not
+// make a claim true or turn an unwind region into a source-level function.
+if(name=="cortex_test_code_link"){
+    if(!a.is_object() || a.size()<6 || a.size()>7 ||
+       !a.contains("test_id") || !a["test_id"].is_string() ||
+       !a.contains("knowledge_id") || !a["knowledge_id"].is_string() ||
+       !a.contains("expected_revision") || !a["expected_revision"].is_number_integer() ||
+       !a.contains("mutation_permission") || !a["mutation_permission"].is_boolean() ||
+       !a["mutation_permission"].get<bool>() ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation") ||
+       (a.contains("max_locations") &&
+        (!a["max_locations"].is_number_integer() ||
+         a["max_locations"].get<int64_t>()<1 ||
+         a["max_locations"].get<int64_t>()>4))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_link_request","Expected completed trial, knowledge ID, revision, original target generation and mutation permission"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="test_id" && it.key()!="knowledge_id" &&
+           it.key()!="expected_revision" && it.key()!="mutation_permission" &&
+           it.key()!="_cortex_target" && it.key()!="_cortex_generation" &&
+           it.key()!="max_locations") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_code_link_request","Unrecognized code link argument"),true);
+            return true;
+        }
+    const auto revision=a["expected_revision"].get<int64_t>();
+    const std::string testId=a["test_id"].get<std::string>();
+    const std::string knowledgeId=a["knowledge_id"].get<std::string>();
+    if(revision<1 || revision>1000000 ||
+       !cortex::test::SafeRunId(testId) ||
+       !project::knowledge::ValidId(knowledgeId)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_link_request","Invalid trial ID, knowledge ID or revision"),true);
+        return true;
+    }
+    const auto recorded=s->tests->Get(testId);
+    if(!recorded.value("ok",false) || !recorded.contains("run")) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","No archived completed trial with this ID"),true);
+        return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime || !ValidateGeneration(runtime,a,code,message)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    if(generation==0 || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the original generation of the observed trial"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","Target is no longer alive"),true);
+        return true;
+    }
+    const json target=TargetJson(runtime->target,true);
+    if(!recorded["run"].is_object() ||
+       !recorded["run"].contains("target") ||
+       !cortex::test::code_context::SameTarget(recorded["run"]["target"],target)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","Cannot link an IP from another process lifetime"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty() || modules.size()>2048) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot identify modules for the original trial"),true);
+        return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    const auto context=cortex::test::code_context::Build(
+        recorded["run"],target,snapshot,
+        static_cast<size_t>(a.value("max_locations",4)));
+    if(!context.value("ok",false)) {
+        const std::string reason=context.value("error",std::string("no_completed_code_observations"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    const auto capture=cortex::test::code_knowledge::Capture(
+        context,cortex::test::file_version::Hash);
+    if(!capture.value("ok",false)) {
+        const std::string reason=capture.value("error",std::string("code_module_version_unavailable"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    if(!session->Alive() || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during fingerprinting"),true);
+        return true;
+    }
+    json saved;
+    std::string callError;
+    if(!runtime->payload->CallRouteExisting("POST","/project/knowledge/code_references",
+            {{"id",knowledgeId},{"expected_revision",revision},
+             {"code_references",capture["references"]}},saved,&callError)) {
+        const std::string failure=callError.empty()?"knowledge_code_save_failed":callError;
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            failure=="revision_conflict"?"knowledge_revision_conflict":failure,failure),true);
+        return true;
+    }
+    const auto item=saved.value("result",json::object()).value("record",json(nullptr));
+    if(!item.is_object() || !item.contains("revision") ||
+       !item["revision"].is_number_integer() ||
+       item["revision"].get<int64_t>()!=revision+1 ||
+       !item.contains("code_references") ||
+       !item["code_references"].is_array()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_code_save_invalid","Knowledge update returned an invalid record"),true);
+        return true;
+    }
+    RecordEvent(s,"knowledge.code_linked",runtime,
+        {{"id",knowledgeId},{"test_id",testId},{"revision",item["revision"]}});
+    response=LocalToolResponse(MessageId(m),{
+        {"ok",true},{"id",knowledgeId},{"linked_test",testId},
+        {"revision",item["revision"]},{"claim_status",item.value("status",std::string())},
+        {"added",capture["references"].size()},
+        {"code_reference_count",item["code_references"].size()},
+        {"semantic_verified",false},
+        {"notice","Saved module/RVA and on-disk binary version; behavior is not verified."}
+    });
+    return true;
+}
+// Read-only check after reconnect/restart. Only the CURRENT live module list
+// supplies a base; no stale absolute instruction pointer is ever reused.
+if(name=="cortex_knowledge_code_check"){
+    if(!a.is_object() || a.size()!=3 ||
+       !a.contains("knowledge_id") || !a["knowledge_id"].is_string() ||
+       !project::knowledge::ValidId(a["knowledge_id"].get<std::string>()) ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation")) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_check_request","Select an existing claim and the current target generation"),true);
+        return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime || !ValidateGeneration(runtime,a,code,message)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    if(generation==0 || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the current process generation"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","Current process is no longer alive"),true);
+        return true;
+    }
+    const std::string id=a["knowledge_id"].get<std::string>();
+    json loaded;std::string callError;
+    if(!runtime->payload->CallRouteExisting("GET","/project/knowledge/"+id,
+            json::object(),loaded,&callError)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_read_failed",callError.empty()?"Could not fetch existing claim":callError),true);
+        return true;
+    }
+    const json claim=loaded.value("result",json::object()).value("record",json(nullptr));
+    if(!claim.is_object()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_not_found","No knowledge record with this ID"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty() || modules.size()>2048) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot list modules in the current target"),true);
+        return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    json result=cortex::test::code_knowledge::Revalidate(
+        claim.value("code_references",json::array()),snapshot,
+        cortex::test::file_version::Hash);
+    if(!session->Alive() || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during code revalidation"),true);
+        return true;
+    }
+    if(!result.value("ok",false)) {
+        const std::string failure=result.value("error",std::string("invalid_code_references"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(failure,failure),true);
+        return true;
+    }
+    result["id"]=id;
+    result["revision"]=claim.value("revision",0);
+    result["target"]=TargetJson(runtime->target,true);
     response=LocalToolResponse(MessageId(m),result);
     return true;
 }

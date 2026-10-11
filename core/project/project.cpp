@@ -322,6 +322,35 @@ bool PutKnowledge(const json& input, json& stored, std::string& error) {
     return true;
 }
 
+bool AppendKnowledgeCodeReferences(const std::string& id, int expectedRevision,
+                                   const json& references, json& stored, std::string& error) {
+    if (!knowledge::ValidId(id) || expectedRevision < 1 || expectedRevision > 1000000) {
+        error = "invalid_knowledge_request"; return false;
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    json& records = g_data["knowledge"];
+    if (!records.contains(id) || !records[id].is_object()) {
+        error = "knowledge_not_found"; return false;
+    }
+    if (records[id].value("revision", 0) != expectedRevision) {
+        error = "revision_conflict"; return false;
+    }
+    json candidate = records[id];
+    // Keep previous state intact until disk persistence succeeds.
+    knowledge::AppendHistory(candidate);
+    if (!knowledge::AppendCodeReferences(candidate, references, error)) return false;
+    candidate["revision"] = expectedRevision + 1;
+    json before = g_data;
+    records[id] = std::move(candidate);
+    if (!SaveToDisk()) {
+        g_data = std::move(before);
+        error = "persistence_failed";
+        return false;
+    }
+    stored = g_data["knowledge"].at(id);
+    return true;
+}
+
 bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
                                  const json& verification, json& stored, std::string& error) {
     std::lock_guard<std::mutex> lock(g_mutex);

@@ -51,6 +51,10 @@ void SetStructDefs(const json& defs);
 json GetKnowledge();
 json FindKnowledge(const std::string& id);
 bool PutKnowledge(const json& input, json& stored, std::string& error);
+// Host-collected code observations are append-only, revisioned and stored in
+// the same durable project file as the human/agent claim.
+bool AppendKnowledgeCodeReferences(const std::string& id, int expectedRevision,
+                                   const json& references, json& stored, std::string& error);
 bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
                                  const json& verification, json& stored, std::string& error);
 
