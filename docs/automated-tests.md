@@ -252,6 +252,49 @@ select again only if the evidence supports another test.
 This is one bounded decision step, not a universal game player, source-code
 reasoner, or permission to run arbitrary actions from an AI suggestion.
 
+## Supervised follow-up and durable decisions
+
+The next-experiment chooser introduced an explicit proposed control/action
+test. A supervised step now persists that selection and tracks its two
+actually completed arms, including after an agent disconnects.
+
+First call cortex_test_step_prepare(report_id, candidates,
+mutation_permission=true). It uses the same scoring and validation as
+cortex_test_choose. If no safe discriminating experiment is available, it
+returns an explicit stop status without creating a step. Otherwise it returns
+a generated step ID, the selected control/action plans and status
+awaiting_control. Only writing the journal is authorized by this call.
+
+An independent operator must authorize the actual input. Execute the control
+through the ordinary cortex_test_run on the exact permitted target and wait
+for a completed result. Then call:
+
+    cortex_test_step_record(
+      id="step_...", arm="control", test_id="test_...",
+      expected_revision=1, mutation_permission=true)
+
+The step status becomes awaiting_action (revision 2). With separate operator
+authorization, execute the selected action via cortex_test_run and record it
+with arm="action", expected_revision=2. Cortex verifies that BOTH trials
+match the selected steps/typed reads, deadlines and settle periods; it checks
+the executable, architecture, PID and process generation. It rejects
+uncompleted trials, pre-proposal trial reuse, changed plans, wrong arm,
+duplicate records and concurrent revision conflicts.
+
+On the second successful record, Cortex generates the standard consolidated
+report with both trial IDs and client-authored predictions. A non-aligned
+baseline remains inconclusive, not a successful causal claim. The journal
+stores the new report ID, measurement summary and status completed, with
+semantic_verified=false. Call cortex_test_step_get(id) to read the journal
+and archived comparison after reconnecting.
+
+All step files live in generated directories under --test-results/steps.
+The caller cannot choose output paths. Archives are data, not instructions
+or an authorization token. A prepared step NEVER sends input, automatically
+retries a missing or cancelled trial, mutates the Knowledge Engine, or
+overrides launch-profile permissions and test budgets. Human authorization
+is separate from the mutation_permission argument.
+
 ## Consolidated investigation reports
 
 cortex_test_report accepts 1-8 completed trial IDs, an optional title and

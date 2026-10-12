@@ -21,7 +21,8 @@ int main(){
         Runner runner(root,"unit");std::atomic<int> value{10},keysDown{0},released{0};std::atomic<bool> alive{true};
         std::atomic<uint64_t> bpHits{0};
         Context context;
-        context.target={{"pid",123},{"generation","123456"}};
+        context.target={{"pid",123},{"generation","123456"},
+                        {"executable_path","fixture.exe"},{"architecture","x64"}};
         context.alive=[&]{return alive.load();};
         context.read=[&](const json& spec){return json{{"ok",true},{"value",value.load()},{"request",spec}};};
         context.key=[&](int,bool down){if(down){++value;++keysDown;++bpHits;}else --keysDown;return true;};
@@ -238,6 +239,99 @@ int main(){
                 json::array({"test_unknown_fake"}));
             Check(!stale.value("ok",true),"unknown trial history rejected");
         }
+        // A durable supervised step records only separately completed trials.
+        if(nextReport.value("ok",false)){
+            const std::string originalReport=nextReport["id"];
+            const auto stepPrepared=runner.StepPrepare(originalReport,options);
+            Check(stepPrepared.value("ok",false) &&
+                  stepPrepared["step"]["status"]=="awaiting_control" &&
+                  stepPrepared["step"]["revision"]==1 &&
+                  stepPrepared["step"]["choice"]["id"]=="fresh" &&
+                  stepPrepared["step"]["executed_by_step"]==false,
+                  "persist supervised choice without sending input");
+            if(stepPrepared.value("ok",false)){
+                const std::string stepId=stepPrepared["step"]["id"];
+                Check(!runner.StepRecord(stepId,"action",experimentId,1)
+                           .value("ok",true),
+                      "do not bind action before control");
+                Check(!runner.StepRecord(stepId,"control",controlId,1)
+                           .value("ok",true),
+                      "old source control cannot be reused");
+                Plan approvedControl,approvedAction;
+                std::string stepError;
+                Check(choose::PlanInput(options[1]["control"],
+                                       approvedControl,stepError) &&
+                      choose::PlanInput(options[1]["action"],
+                                       approvedAction,stepError),
+                      "chosen plans validate for separately approved input");
+                // Start is called here by the test (simulating an approved
+                // operator), never by StepPrepare or StepRecord.
+                Check(runner.Start(approvedControl,context,out,error),
+                      "operator runs selected control");
+                const std::string controlTrial=out["id"].get<std::string>();
+                Check(Wait(runner,controlTrial)["status"]=="completed",
+                      "selected control completed");
+                const auto savedControl=runner.StepRecord(
+                    stepId,"control",controlTrial,1);
+                Check(savedControl.value("ok",false) &&
+                      savedControl["step"]["status"]=="awaiting_action" &&
+                      savedControl["step"]["revision"]==2 &&
+                      savedControl["step"]["control_id"]==controlTrial,
+                      "record matching control with optimistic revision");
+                Check(!runner.StepRecord(stepId,"control",controlTrial,1)
+                           .value("ok",true),
+                      "stale revision cannot overwrite control");
+                auto mismatch=approvedAction;
+                mismatch.steps=json::array({{{"delay_ms",50}}});
+                Check(runner.Start(mismatch,context,out,error),
+                      "operator runs unrelated completed trial");
+                const auto unrelated=out["id"].get<std::string>();
+                Wait(runner,unrelated);
+                Check(runner.StepRecord(stepId,"action",unrelated,2)
+                          .value("error",std::string())=="step_trial_plan_mismatch",
+                      "reject unrelated trial even when completed");
+                auto wrongGeneration=context;
+                wrongGeneration.target["generation"]="other_generation";
+                Check(runner.Start(approvedAction,wrongGeneration,out,error),
+                      "operator tests alternate target generation");
+                const auto wrongId=out["id"].get<std::string>();
+                Wait(runner,wrongId);
+                Check(runner.StepRecord(stepId,"action",wrongId,2)
+                          .value("error",std::string())=="step_target_generation_mismatch",
+                      "reject mismatched process generation");
+                value=51; // align the controlled initial state
+                Check(runner.Start(approvedAction,context,out,error),
+                      "operator separately runs selected action");
+                const auto actionTrial=out["id"].get<std::string>();
+                Wait(runner,actionTrial);
+                const auto completed=runner.StepRecord(stepId,"action",actionTrial,2);
+                Check(completed.value("ok",false) &&
+                      completed["step"]["status"]=="completed" &&
+                      completed["step"]["revision"]==3 &&
+                      completed["step"]["hypothesis_summary"]["contradicted"]==1 &&
+                      completed["step"]["hypothesis_summary"]["consistent"]==1 &&
+                      completed["step"]["semantic_verified"]==false,
+                      "archive signed-off pair with evidence but no semantic proof");
+                Check(!runner.StepRecord(stepId,"action",wrongId,3)
+                          .value("ok",true),
+                      "cannot silently replace an archived action");
+                const auto live=runner.StepGet(stepId);
+                Check(live.value("ok",false) &&
+                      live.contains("hypothesis_tests") &&
+                      live["hypothesis_tests"]["summary"]["contradicted"]==1,
+                      "step getter presents archived comparison");
+                {
+                    Runner reopened(root,"reconnected");
+                    const auto resumed=reopened.StepGet(stepId);
+                    Check(resumed.value("ok",false) &&
+                          resumed["step"]["status"]=="completed" &&
+                          resumed["step"]["action_id"]==actionTrial,
+                          "completed supervised step resumes after reconnect");
+                }
+                Check(!runner.StepGet("../../escape").value("ok",true),
+                      "step traversal cannot read arbitrary files");
+            }
+        }
         if(assessed.value("ok",false))
             Check(runner.Choose(assessed["id"].get<std::string>(),options)
                           .value("status",std::string())==
@@ -394,8 +488,9 @@ int main(){
         auto changedBackend=oldCount;changedBackend["backend"]="other";
         Check(code::Delta(4,beforeBp,changedBackend)["status"]=="inconclusive",
               "debugger identity change invalidates code evidence");
-        Check(runner.List()["runs"].size()==17,"bounded run index");
-        Check(released==17,"all leases released");
+        Check(runner.List()["total"]==21 && runner.List()["runs"].size()==20,
+              "bounded run index");
+        Check(released==21,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";

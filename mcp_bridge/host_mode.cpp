@@ -290,6 +290,61 @@ if(name=="cortex_test_choose"){
     response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
     return true;
 }
+if(name=="cortex_test_step_prepare"){
+    if(!a.is_object() || a.size()<3 || a.size()>4 ||
+       !a.contains("report_id") || !a["report_id"].is_string() ||
+       !a.contains("candidates") || !a["candidates"].is_array() ||
+       a["candidates"].empty() || a["candidates"].size()>8 ||
+       (a.contains("previous_ids") &&
+        (!a["previous_ids"].is_array()||a["previous_ids"].size()>16))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_request","Prepare a report and bounded candidate plans"),true);return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="report_id" && it.key()!="candidates" &&
+           it.key()!="previous_ids" && it.key()!="mutation_permission") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_step_request","Unsupported step field"),true);return true;
+        }
+    if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "mutation_permission_required","Writing an investigation step requires permission"),true);
+        return true;
+    }
+    const auto result=s->tests->StepPrepare(a["report_id"].get<std::string>(),
+        a["candidates"],a.value("previous_ids",json::array()));
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_step_get"){
+    if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_id","Provide a step ID"),true);return true;
+    }
+    const auto result=s->tests->StepGet(a["id"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_step_record"){
+    if(!a.is_object()||a.size()!=5||!a.contains("id")||!a["id"].is_string()||
+       !a.contains("test_id")||!a["test_id"].is_string()||
+       !a.contains("arm")||!a["arm"].is_string()||
+       !a.contains("expected_revision")||
+       !a["expected_revision"].is_number_integer()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_record_request","Supply ID, arm, trial ID and revision"),true);
+        return true;
+    }
+    if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "mutation_permission_required","Saving step evidence requires permission"),true);
+        return true;
+    }
+    const auto result=s->tests->StepRecord(a["id"].get<std::string>(),
+        a["arm"].get<std::string>(),a["test_id"].get<std::string>(),
+        a["expected_revision"].get<int64_t>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
 if(name=="cortex_test_report_get"){
     if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_id","Provide report ID"),true);return true;

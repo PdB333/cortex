@@ -80,6 +80,19 @@ local program through its MCP tools.
     PROPOSAL: it grants no permission and performs no input or memory changes.
     The operator must approve each new cortex_test_run separately. Stop when
     no safe discriminating plan exists; never invent actions from target data.
+9d. To track the selected follow-up across sessions, call
+    cortex_test_step_prepare(report_id, candidates, mutation_permission=true)
+    to persist an awaiting_control journal. The tool DOES NOT execute input
+    or approve an experiment. Ask for independent human authorization and
+    run its selected control via cortex_test_run; then call
+    cortex_test_step_record(id, arm="control", test_id, expected_revision=1,
+    mutation_permission=true). Approve and run the action separately, then
+    record it with arm="action" and expected_revision=2. Cortex requires
+    completed trials matching the proposed inputs, the same process identity
+    and the expected journal revision; it archives a paired report and
+    competing predictions, including inconclusive results. The journal may
+    be reopened using cortex_test_step_get. A stored step never silently
+    replays input or upgrades Knowledge Engine statuses.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.

@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':9}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':11}]}))
         try:
             client=Mcp(exe,['--tools','all','--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -202,7 +202,7 @@ def main():
             client.data('cortex_test_cancel',id=slow['id']);cancelled=wait(slow['id']);assert cancelled['status']=='cancelled',cancelled
             assert cancelled['cleanup']['released'];checks.append('cancel_and_release')
             used=client.data('cortex_launch_status',profile='fixture')['profile']
-            assert used['tests']==7 and used['max_tests']==9,used
+            assert used['tests']==7 and used['max_tests']==11,used
             checks.append('operator_test_count')
             directory=pathlib.Path(passed['report_directory']);assert (directory/'result.json').exists() and (directory/'investigation.md').exists();checks.append('json_markdown_reports')
             stale=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation+1,attach=True,mutation_permission=True)
@@ -363,6 +363,74 @@ def main():
                           'reads':[{'address':fixture['test_clicks'],'type':'u32'}]})])
             assert malformed_choice['isError'],malformed_choice
             checks.append('chooser_enforces_existing_test_budgets')
+            # A read-only choice becomes a durable, supervised step: the
+            # operator still calls the regular bounded runner for each arm.
+            followup={
+                'id':'key_then_settle',
+                'control':{'steps':[{'delay_ms':30}],
+                           'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'action':{'steps':[{'vk':32,'tap_ms':40},{'delay_ms':50}],
+                          'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'hypotheses':split_predictions}
+            old_input={
+                'id':'already_observed',
+                'control':{'steps':[{'delay_ms':30}],
+                           'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'action':{'steps':[{'vk':32,'tap_ms':40}],
+                          'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'hypotheses':split_predictions}
+            denied_preparation=client.call('cortex_test_step_prepare',
+                report_id=unresolved_id,candidates=[old_input,followup],
+                mutation_permission=False)
+            assert denied_preparation['isError'],denied_preparation
+            checks.append('step_persistence_permission_required')
+            prepared=client.data('cortex_test_step_prepare',
+                report_id=unresolved_id,candidates=[old_input,followup],
+                mutation_permission=True)
+            step_id=prepared['step']['id']
+            assert prepared['step']['choice']['id']=='key_then_settle' and \
+                prepared['step']['status']=='awaiting_control' and \
+                prepared['step']['executed_by_step'] is False,prepared
+            checks.append('persist_supervised_selected_step')
+            prebind=client.call('cortex_test_step_record',id=step_id,
+                arm='control',test_id=fresh_control['id'],
+                expected_revision=1,mutation_permission=True)
+            assert prebind['isError'],prebind
+            checks.append('cannot_reuse_source_trial_for_followup')
+            step_control=run(
+                steps=[{'delay_ms':30}],expect=[{'read':0,'op':'unchanged'}])
+            denied_bind=client.call('cortex_test_step_record',id=step_id,
+                arm='control',test_id=step_control['id'],
+                expected_revision=1,mutation_permission=False)
+            assert denied_bind['isError'],denied_bind
+            control_bind=client.data('cortex_test_step_record',id=step_id,
+                arm='control',test_id=step_control['id'],
+                expected_revision=1,mutation_permission=True)
+            assert control_bind['step']['status']=='awaiting_action' and \
+                control_bind['step']['revision']==2,control_bind
+            checks.append('supervised_control_bound_with_revision')
+            in_progress=client.data('cortex_test_step_get',id=step_id)
+            assert in_progress['step']['status']=='awaiting_action' and \
+                in_progress['step']['revision']==2 and \
+                in_progress['step']['action_id'] is None,in_progress
+            checks.append('supervised_partial_step_observable')
+            step_action=run(
+                steps=[{'vk':32,'tap_ms':40},{'delay_ms':50}],
+                expect=[{'read':0,'op':'increased'}])
+            completed=client.data('cortex_test_step_record',id=step_id,
+                arm='action',test_id=step_action['id'],
+                expected_revision=2,mutation_permission=True)
+            assert completed['step']['status']=='completed' and \
+                completed['step']['revision']==3 and \
+                completed['step']['hypothesis_summary']=={
+                    'consistent':1,'contradicted':1,'inconclusive':0},completed
+            assert completed['step']['semantic_verified'] is False
+            checks.append('supervised_pair_archived_without_semantic_upgrade')
+            stale_bind=client.call('cortex_test_step_record',id=step_id,
+                arm='action',test_id=step_action['id'],
+                expected_revision=2,mutation_permission=True)
+            assert stale_bind['isError'],stale_bind
+            checks.append('step_revision_conflict_prevents_replay')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -382,6 +450,11 @@ def main():
                                      candidates=[repeat,click_probe])
             assert chosen_again['choice']['id']=='click_probe',chosen_again
             checks.append('next_experiment_recovered_after_reconnect')
+            resumed_step=client.data('cortex_test_step_get',id=step_id)
+            assert resumed_step['step']['status']=='completed' and \
+                resumed_step['step']['action_id']==step_action['id'] and \
+                resumed_step['hypothesis_tests']['summary']['contradicted']==1,resumed_step
+            checks.append('supervised_step_recovered_after_reconnect')
             checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:
