@@ -4,6 +4,7 @@
 #include "test_predictions.h"
 #include "test_choose.h"
 #include "test_step.h"
+#include "test_investigation.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -859,6 +860,253 @@ public:
             return {{"ok",true},{"untrusted_data",true},{"step",record}};
         }catch(const std::exception&){
             return {{"ok",false},{"error","step_record_invalid_data"}};
+        }
+    }
+
+    // Reopen and independently remeasure the original trials in every
+    // finished step. Never trust an archived "consistent" label as authority.
+    json InvestigationSummary(const std::string& latestId) const {
+        if(!step::SafeId(latestId))
+            return {{"ok",false},{"error","invalid_step_id"}};
+        try {
+            std::vector<json> chain;
+            std::set<std::string> seen;
+            std::string id=latestId;
+            for(int depth=0;!id.empty() && depth<4;++depth) {
+                if(!seen.insert(id).second)
+                    return {{"ok",false},{"error","investigation_cycle"}};
+                auto record=StepGet(id);
+                if(!record.value("ok",false))
+                    return {{"ok",false},{"error","investigation_step_missing"}};
+                auto& stepRecord=record["step"];
+                if(stepRecord.value("status",std::string())!="completed" ||
+                   !stepRecord.contains("report_id") ||
+                   !stepRecord["report_id"].is_string())
+                    return {{"ok",false},{"error","investigation_step_incomplete"}};
+                chain.push_back(stepRecord);
+                id=stepRecord.value("parent_step_id",std::string());
+                if(!id.empty() && !step::SafeId(id))
+                    return {{"ok",false},{"error","investigation_parent_invalid"}};
+            }
+            if(!id.empty())
+                return {{"ok",false},{"error","investigation_depth_exceeded"}};
+            std::reverse(chain.begin(),chain.end());
+            if(chain.empty())
+                return {{"ok",false},{"error","investigation_empty"}};
+            const auto& root=chain.front();
+            json rounds=json::array(), lastResults=json::array();
+            const std::string program=root.at("program").get<std::string>();
+            const std::string arch=root.at("architecture").get<std::string>();
+            json target=nullptr;
+            for(size_t i=0;i<chain.size();++i) {
+                const auto& st=chain[i];
+                if(st.at("program")!=program || st.at("architecture")!=arch ||
+                   !st.contains("target") || !step::TargetValid(st["target"]) ||
+                   (i>0 && (!step::SameTarget(target,st["target"]) ||
+                     st.value("parent_step_id",std::string())!=
+                        chain[i-1].at("id").get<std::string>() ||
+                     st.value("source_report",std::string())!=
+                        chain[i-1].at("report_id").get<std::string>() ||
+                     chain[i-1].value("next_step_id",std::string())!=
+                        st.at("id").get<std::string>() ||
+                     st.value("root_step_id",std::string())!=
+                        root.at("id").get<std::string>() ||
+                     st.value("iteration",0)!=static_cast<int>(i+1))))
+                    return {{"ok",false},{"error","investigation_lineage_mismatch"}};
+                target=st["target"];
+                const auto controlId=st.at("control_id").get<std::string>();
+                const auto actionId=st.at("action_id").get<std::string>();
+                if(!SafeRunId(controlId)||!SafeRunId(actionId)||
+                   controlId==actionId)
+                    return {{"ok",false},{"error","investigation_trial_id_invalid"}};
+                const auto reportId=st.at("report_id").get<std::string>();
+                const auto archived=GetReport(reportId);
+                const auto control=Get(controlId),action=Get(actionId);
+                if(!archived.value("ok",false) ||
+                   !control.value("ok",false)||!action.value("ok",false))
+                    return {{"ok",false},{"error","investigation_evidence_missing"}};
+                const auto& document=archived.at("report");
+                if(!document.contains("trials") ||
+                   !document["trials"].is_array() ||
+                   document["trials"].size()!=2 ||
+                   document["trials"][0].value("id",std::string())!=controlId ||
+                   document["trials"][1].value("id",std::string())!=actionId ||
+                   !document.contains("hypothesis_tests") ||
+                   !document["hypothesis_tests"].is_object() ||
+                   !document["hypothesis_tests"].contains("results") ||
+                   !document["hypothesis_tests"]["results"].is_array())
+                    return {{"ok",false},{"error","investigation_report_mismatch"}};
+                const auto& first=control.at("run");
+                const auto& second=action.at("run");
+                if(first.value("status",std::string())!="completed" ||
+                   second.value("status",std::string())!="completed" ||
+                   !first.contains("plan") || !second.contains("plan") ||
+                   !step::PlanMatches(st["choice"]["control"],first["plan"]) ||
+                   !step::PlanMatches(st["choice"]["action"],second["plan"]) ||
+                   !first.contains("target") || !second.contains("target") ||
+                   !step::SameTarget(first["target"],st["target"]) ||
+                   !step::SameTarget(second["target"],st["target"]))
+                    return {{"ok",false},{"error","investigation_trial_mismatch"}};
+                json hypothesisInput=json::array();
+                for(const auto& observation:document["hypothesis_tests"]["results"]) {
+                    hypothesisInput.push_back({
+                        {"id",observation.at("id")},
+                        {"read",observation.at("read")},
+                        {"control",observation.at("control")},
+                        {"action",observation.at("action")}});
+                }
+                std::string predictionError;
+                if(!first["plan"].contains("reads") ||
+                   !predictions::Validate(hypothesisInput,
+                      first["plan"]["reads"].size(),predictionError))
+                    return {{"ok",false},{"error","investigation_predictions_invalid"}};
+                const auto comparison=Compare(controlId,actionId);
+                const auto measured=predictions::Evaluate(
+                    hypothesisInput,first,second,comparison);
+                rounds.push_back({
+                    {"iteration",static_cast<int>(i+1)},
+                    {"step_id",st["id"]},{"source_report",st["source_report"]},
+                    {"report_id",reportId},{"control_id",controlId},
+                    {"action_id",actionId},
+                    {"pair_comparable",measured["pair_comparable"]},
+                    {"summary",measured["summary"]},
+                    {"next_step_id",st.value("next_step_id",json(nullptr))}
+                });
+                lastResults=measured["results"];
+            }
+            json summary={{"schema","cortex.investigation.chain.v1"},
+                {"ok",true},{"root_step_id",root["id"]},{"latest_step_id",latestId},
+                {"program",program},{"architecture",arch},
+                {"target",target},{"rounds",rounds},
+                {"round_count",chain.size()},{"latest_results",lastResults},
+                {"verified_semantics",false},{"untrusted_data",true},
+                {"conclusion","measurements_only"},
+                {"limitations",json::array({
+                    "All candidates and predictions originate from clients.",
+                    "Measurements do not establish causality or code semantics.",
+                    "A binary update requires independent version revalidation.",
+                    "No experiment is executed or permitted by this report."})}};
+            summary["markdown"]=investigation::Markdown(summary);
+            return summary;
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","investigation_invalid_archive"}};
+        }
+    }
+
+    json InvestigationSave(const std::string& latestId) {
+        auto summary=InvestigationSummary(latestId);
+        if(!summary.value("ok",false))return summary;
+        try {
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            const auto base=root_/"investigations";
+            if(std::filesystem::is_symlink(base))
+                return {{"ok",false},{"error","investigation_storage_untrusted"}};
+            std::filesystem::create_directories(base);
+            const auto folder=base/latestId;
+            if(std::filesystem::exists(folder)) {
+                if(std::filesystem::is_symlink(folder))
+                    return {{"ok",false},{"error","investigation_storage_untrusted"}};
+                return {{"ok",true},{"status","already_saved"},
+                        {"path",folder.u8string()},{"summary",summary}};
+            }
+            if(!std::filesystem::create_directory(folder))
+                return {{"ok",false},{"error","investigation_storage_collision"}};
+            try {
+                Write(folder/"report.json",summary.dump(2));
+                Write(folder/"investigation.md",summary["markdown"].get<std::string>());
+            }catch(...){std::error_code ec;std::filesystem::remove_all(folder,ec);throw;}
+            return {{"ok",true},{"status","saved"},{"path",folder.u8string()},
+                    {"summary",summary}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","investigation_save_failed"}};
+        }
+    }
+
+    // Catalogue only records plans tied to separately executed, completed
+    // steps. Their historic use does not grant consent for future input.
+    json CatalogSave(const std::string& stepId) {
+        const auto stepInfo=StepGet(stepId);
+        if(!stepInfo.value("ok",false))return stepInfo;
+        const auto& st=stepInfo["step"];
+        if(st.value("status",std::string())!="completed")
+            return {{"ok",false},{"error","catalog_requires_completed_step"}};
+        const auto summary=InvestigationSummary(stepId);
+        if(!summary.value("ok",false))return summary;
+        try {
+            const auto controlId=st.at("control_id").get<std::string>();
+            const auto actionId=st.at("action_id").get<std::string>();
+            const auto first=Get(controlId),second=Get(actionId);
+            if(!first.value("ok",false)||!second.value("ok",false))
+                return {{"ok",false},{"error","catalog_trials_unavailable"}};
+            json item={{"schema","cortex.experiment.catalog.v1"},
+                {"id",stepId},{"source_report",st.at("report_id")},
+                {"control_trial_id",controlId},{"action_trial_id",actionId},
+                {"program",st.at("program")},{"architecture",st.at("architecture")},
+                {"source_target",st.at("target")},{"candidate",st.at("choice")},
+                {"status","previously_executed"},
+                {"operator_approved_for_future_use",false},
+                {"requires_separate_permission",true},
+                {"binary_version_revalidated",false},
+                {"semantic_verified",false},
+                {"limitations",json::array({
+                    "This catalog is evidence of a previous controlled experiment.",
+                    "It is not an operator-approved automation profile.",
+                    "Confirm version, target and each future input independently.",
+                    "Predictions refer only to the archived tested observation."})}};
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            const auto base=root_/"catalog";
+            if(std::filesystem::is_symlink(base))
+                return {{"ok",false},{"error","catalog_storage_untrusted"}};
+            std::filesystem::create_directories(base);
+            const auto folder=base/stepId;
+            if(std::filesystem::exists(folder))
+                return {{"ok",false},{"error","catalog_entry_exists"}};
+            if(!std::filesystem::create_directory(folder))
+                return {{"ok",false},{"error","catalog_directory_collision"}};
+            try{Write(folder/"entry.json",item.dump(2));}
+            catch(...){std::error_code ec;std::filesystem::remove_all(folder,ec);throw;}
+            return {{"ok",true},{"entry",item}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","catalog_save_failed"}};
+        }
+    }
+
+    json CatalogList(const std::string& program=std::string()) const {
+        json items=json::array();
+        try {
+            const auto base=root_/"catalog";
+            if(std::filesystem::is_symlink(base))
+                return {{"ok",false},{"error","catalog_storage_untrusted"}};
+            if(!std::filesystem::exists(base))
+                return {{"ok",true},{"entries",items},{"untrusted_data",true}};
+            std::vector<std::filesystem::path> entries;
+            for(const auto& e:std::filesystem::directory_iterator(base)) {
+                if(entries.size()>=64)break;
+                if(e.is_directory() && !e.is_symlink() &&
+                   step::SafeId(e.path().filename().string()))
+                    entries.push_back(e.path());
+            }
+            std::sort(entries.begin(),entries.end());
+            for(const auto& folder:entries) {
+                if(items.size()>=16)break;
+                const auto file=folder/"entry.json";
+                if(std::filesystem::is_symlink(file) ||
+                   !std::filesystem::is_regular_file(file) ||
+                   std::filesystem::file_size(file)>65536)continue;
+                std::ifstream in(file); const json entry=json::parse(in);
+                if(!entry.is_object() ||
+                   entry.value("schema",std::string())!="cortex.experiment.catalog.v1" ||
+                   entry.value("id",std::string())!=folder.filename().string() ||
+                   !entry.contains("candidate") || !entry["candidate"].is_object() ||
+                   !entry.contains("program") || !entry["program"].is_string() ||
+                   (!program.empty() && entry["program"]!=program))
+                    continue;
+                items.push_back(entry);
+            }
+            return {{"ok",true},{"entries",items},{"untrusted_data",true},
+                {"requires_separate_permission",true}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","catalog_read_failed"}};
         }
     }
 

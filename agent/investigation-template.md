@@ -62,6 +62,15 @@ Record the latest revision and previous trial IDs. A proposed experiment
 is not an executed test or an independent permission to send input.
 Retain negative/inconclusive results and the reason the loop stopped.
 
+## Final multi-round evidence
+- Latest supervised step and investigation summary/report path:
+- Ordered steps, control/action trial IDs and original reports:
+- Hypotheses still compatible with recorded measurements:
+- Contradicted or inconclusive predictions (not semantic refutations):
+- Evidence of process/binary version and any stale references:
+- Reason for stopping and additional tests that would reduce uncertainty:
+- Catalogued observed scenarios (not future execution permissions):
+
 ## Code and objects
 Observed functions, instructions, data fields, structures and relationships.
 Keep unknown, inferred and observed information separate.
