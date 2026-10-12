@@ -290,6 +290,38 @@ if(name=="cortex_test_choose"){
     response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
     return true;
 }
+if(name=="cortex_test_step_next"||name=="cortex_test_step_continue"){
+    const bool persist=name=="cortex_test_step_continue";
+    if(!a.is_object() ||
+       a.size()!=(persist?4:3) ||
+       !a.contains("id")||!a["id"].is_string() ||
+       !a.contains("expected_revision")||
+       !a["expected_revision"].is_number_integer() ||
+       !a.contains("candidates")||!a["candidates"].is_array() ||
+       a["candidates"].empty()||a["candidates"].size()>8 ||
+       (persist && (!a.contains("mutation_permission") ||
+        !a["mutation_permission"].is_boolean() ||
+        !a["mutation_permission"].get<bool>()))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_next_request",
+            "Completed step ID, revision and bounded candidates required"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="id" && it.key()!="expected_revision" &&
+           it.key()!="candidates" &&
+           !(persist&&it.key()=="mutation_permission")) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_step_next_request","Unsupported continuation field"),true);
+            return true;
+        }
+    const auto id=a["id"].get<std::string>();
+    const auto revision=a["expected_revision"].get<int64_t>();
+    const auto out=persist?s->tests->StepContinue(id,a["candidates"],revision)
+                          :s->tests->StepNext(id,a["candidates"],revision);
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_step_prepare"){
     if(!a.is_object() || a.size()<3 || a.size()>4 ||
        !a.contains("report_id") || !a["report_id"].is_string() ||

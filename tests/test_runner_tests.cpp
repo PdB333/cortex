@@ -332,6 +332,136 @@ int main(){
                       "step traversal cannot read arbitrary files");
             }
         }
+        // Iterate across two supervised steps: the first leaves two
+        // explanations plausible; the second discriminates between them.
+        // The engine never invokes Start here; tests simulate separately
+        // authorized operator-run control/action trials.
+        const json threePlausible=json::array({
+            {{"id","fixture.counter_rises"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_stays"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_other"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}}
+        });
+        json triReport;std::string triError;
+        Check(runner.Report({controlId,experimentId},"Three candidates",
+                            triReport,triError,threePlausible),
+              "archive three competing candidates");
+        const json triRows=json::array({
+            {{"id","fixture.counter_rises"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_stays"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_other"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","unchanged"}}}}
+        });
+        if(triReport.value("ok",false)) {
+            const json firstCandidate={{"id","tri_first"},{"control",controlPlan},
+                                       {"action",newPlan},{"hypotheses",triRows}};
+            const auto prepared=runner.StepPrepare(
+                triReport["id"].get<std::string>(),json::array({firstCandidate}));
+            Check(prepared.value("ok",false),"prepare first step of bounded chain");
+            if(prepared.value("ok",false)) {
+                const std::string firstId=prepared["step"]["id"];
+                Plan c,a;std::string parseError;
+                Check(choose::PlanInput(controlPlan,c,parseError)&&
+                      choose::PlanInput(newPlan,a,parseError),
+                      "first iteration plans are bounded");
+                value=100;
+                Check(runner.Start(c,context,out,error),
+                      "operator runs first-iteration control");
+                const auto cId=out["id"].get<std::string>();
+                Wait(runner,cId);
+                Check(runner.StepRecord(firstId,"control",cId,1).value("ok",false),
+                      "first iteration accepts approved control");
+                value=100;
+                Check(runner.Start(a,context,out,error),
+                      "operator runs first-iteration action");
+                const auto aId=out["id"].get<std::string>();
+                Wait(runner,aId);
+                const auto firstDone=runner.StepRecord(firstId,"action",aId,2);
+                Check(firstDone.value("ok",false) &&
+                      firstDone["step"]["hypothesis_summary"]["consistent"]==2 &&
+                      firstDone["step"]["hypothesis_summary"]["contradicted"]==1,
+                      "first step preserves two plausible explanations");
+                const json secondRows=json::array({
+                    {{"id","fixture.counter_rises"},{"read",0},
+                     {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+                    {{"id","fixture.counter_stays"},{"read",0},
+                     {"control",{{"op","unchanged"}}},{"action",{{"op","unchanged"}}}}
+                });
+                json newAction=newPlan;
+                newAction["steps"].push_back({{"delay_ms",90}});
+                const json duplicate={{"id","again"},{"control",controlPlan},
+                                      {"action",newPlan},{"hypotheses",secondRows}};
+                const json novel={{"id","new_2"},{"control",controlPlan},
+                                  {"action",newAction},{"hypotheses",secondRows}};
+                const json choices=json::array({duplicate,novel});
+                const auto suggested=runner.StepNext(firstId,choices,3);
+                Check(suggested.value("ok",false) &&
+                      suggested.value("status",std::string())=="proposed" &&
+                      suggested["choice"]["id"]=="new_2" &&
+                      suggested["iteration"]==2 &&
+                      suggested["history_ids"].size()>=4 &&
+                      suggested["candidates"][0]["already_tested"]==true &&
+                      suggested["executed"]==false,
+                      "next round uses full evidence and avoids repeats");
+                Check(!runner.StepNext(firstId,choices,2).value("ok",true),
+                      "stale revision cannot choose next step");
+                const auto continued=runner.StepContinue(firstId,choices,3);
+                Check(continued.value("ok",false) &&
+                      continued.value("status",std::string())=="prepared" &&
+                      continued["step"]["iteration"]==2 &&
+                      continued["step"]["parent_step_id"]==firstId &&
+                      continued["step"]["root_step_id"]==firstId &&
+                      continued["step"]["status"]=="awaiting_control" &&
+                      continued["parent_step"]["revision"]==4 &&
+                      continued["executed"]==false,
+                      "persist a linked child with independent authorization");
+                if(continued.value("ok",false)) {
+                    const std::string childId=continued["step"]["id"];
+                    Check(runner.StepNext(firstId,choices,4)
+                              .value("status",std::string())==
+                              "continuation_already_prepared",
+                          "cannot start a second competing child");
+                    const auto childHistory=runner.StepGet(childId);
+                    Check(childHistory.value("ok",false) &&
+                          childHistory["step"]["history_ids"].size()>=4,
+                          "previous trial history survives journal persistence");
+                    Plan childAction;
+                    Check(choose::PlanInput(newAction,childAction,parseError),
+                          "second-iteration action remains bounded");
+                    value=200;
+                    Check(runner.Start(c,context,out,error),
+                          "operator runs second-iteration control");
+                    const auto c2=out["id"].get<std::string>();Wait(runner,c2);
+                    Check(runner.StepRecord(childId,"control",c2,1)
+                              .value("ok",false),
+                          "child accepts matching controlled trial");
+                    value=200;
+                    Check(runner.Start(childAction,context,out,error),
+                          "operator runs second-iteration action");
+                    const auto a2=out["id"].get<std::string>();Wait(runner,a2);
+                    const auto finished=runner.StepRecord(childId,"action",a2,2);
+                    Check(finished.value("ok",false) &&
+                          finished["step"]["hypothesis_summary"]["consistent"]==1 &&
+                          finished["step"]["hypothesis_summary"]["contradicted"]==1,
+                          "second iteration separates remaining hypotheses");
+                    Check(runner.StepNext(childId,choices,3)
+                              .value("status",std::string())==
+                              "need_competing_hypotheses",
+                          "stop the loop after decisive measured comparison");
+                    Runner afterReconnect(root,"another_agent");
+                    const auto restored=afterReconnect.StepGet(childId);
+                    Check(restored.value("ok",false) &&
+                          restored["step"]["status"]=="completed" &&
+                          restored["step"]["parent_step_id"]==firstId &&
+                          restored["hypothesis_tests"]["summary"]["contradicted"]==1,
+                          "completed multi-step investigation reopens");
+                }
+            }
+        }
         if(assessed.value("ok",false))
             Check(runner.Choose(assessed["id"].get<std::string>(),options)
                           .value("status",std::string())==
@@ -488,9 +618,9 @@ int main(){
         auto changedBackend=oldCount;changedBackend["backend"]="other";
         Check(code::Delta(4,beforeBp,changedBackend)["status"]=="inconclusive",
               "debugger identity change invalidates code evidence");
-        Check(runner.List()["total"]==21 && runner.List()["runs"].size()==20,
+        Check(runner.List()["total"]==25 && runner.List()["runs"].size()==20,
               "bounded run index");
-        Check(released==21,"all leases released");
+        Check(released==25,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";

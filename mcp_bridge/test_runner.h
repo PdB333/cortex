@@ -597,6 +597,172 @@ public:
         }
     }
 
+    // Read-only continuation of an existing supervised investigation.
+    // The full bounded ancestry is reconstructed, so no earlier action is
+    // silently repeated when the agent reconnects.
+    json StepNext(const std::string& completedId,const json& candidates,
+                  int64_t expectedRevision) const {
+        if(!step::SafeId(completedId) || expectedRevision<1)
+            return {{"ok",false},{"error","invalid_step_next_request"}};
+        json parent;
+        json history=json::array();
+        std::set<std::string> allIds;
+        std::set<std::string> seen;
+        std::string id=completedId;
+        std::string expectedReport;
+        int depth=0;
+        try {
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            for(;!id.empty() && depth<4;++depth) {
+                if(!seen.insert(id).second)
+                    return {{"ok",false},{"error","step_lineage_cycle"}};
+                const auto found=ReadStep(id);
+                if(!found.value("ok",false))
+                    return {{"ok",false},{"error","step_lineage_unavailable"}};
+                const auto& row=found["step"];
+                if(row.value("status",std::string())!="completed" ||
+                   !row.contains("report_id") || !row["report_id"].is_string() ||
+                   !row.contains("control_id") || !row["control_id"].is_string() ||
+                   !row.contains("action_id") || !row["action_id"].is_string())
+                    return {{"ok",false},{"error","step_requires_completed_pair"}};
+                if(depth==0) {
+                    parent=row;
+                    if(row["revision"].get<int64_t>()!=expectedRevision)
+                        return {{"ok",false},{"error","step_revision_conflict"}};
+                    if(row.contains("next_step_id") &&
+                       row["next_step_id"].is_string())
+                        return {{"ok",true},{"status","continuation_already_prepared"},
+                                {"next_step_id",row["next_step_id"]},
+                                {"executed",false}};
+                } else {
+                    if(row["report_id"]!=expectedReport)
+                        return {{"ok",false},{"error","step_lineage_report_mismatch"}};
+                    if(!row.contains("program") ||
+                       row["program"]!=parent["program"] ||
+                       row["architecture"]!=parent["architecture"])
+                        return {{"ok",false},{"error","step_lineage_program_mismatch"}};
+                }
+                for(const char* field:{"control_id","action_id"}) {
+                    const auto& candidate=row[field];
+                    if(!candidate.is_string() ||
+                       !SafeRunId(candidate.get<std::string>()))
+                        return {{"ok",false},{"error","step_lineage_invalid_trial"}};
+                    allIds.insert(candidate.get<std::string>());
+                }
+                if(row.contains("source_trials") &&
+                   row["source_trials"].is_array())
+                    for(const auto& trial:row["source_trials"])
+                        if(trial.is_string() &&
+                           SafeRunId(trial.get<std::string>()))
+                            allIds.insert(trial.get<std::string>());
+                        else
+                            return {{"ok",false},{"error","step_lineage_invalid_trial"}};
+                expectedReport=row.value("source_report",std::string());
+                if(row.contains("parent_step_id") &&
+                   row["parent_step_id"].is_string())
+                    id=row["parent_step_id"].get<std::string>();
+                else id.clear();
+            }
+            if(depth>=4)
+                return {{"ok",true},{"status","iteration_budget_exhausted"},
+                        {"max_iterations",4},{"executed",false}};
+            for(const auto& trial:allIds)
+                history.push_back(trial);
+        } catch(const std::exception&) {
+            return {{"ok",false},{"error","invalid_step_lineage"}};
+        }
+        // Choose() still independently reopens the last report and verifies
+        // all completed trial plans; the lineage supplies past IDs only.
+        if(history.size()>16)
+            return {{"ok",true},{"status","history_budget_exhausted"},
+                    {"executed",false}};
+        json proposal=Choose(parent["report_id"].get<std::string>(),
+                             candidates,history);
+        proposal["parent_step_id"]=completedId;
+        proposal["root_step_id"]=parent.value("root_step_id",completedId);
+        proposal["iteration"]=depth+1;
+        proposal["max_iterations"]=4;
+        proposal["history_ids"]=history;
+        proposal["executed"]=false;
+        proposal["requires_separate_permission"]=true;
+        return proposal;
+    }
+
+    // Persist the next proposal as a linked child, with optimistic parent
+    // revision checks. This still does not run, authorize, or replay input.
+    json StepContinue(const std::string& completedId,const json& candidates,
+                      int64_t expectedRevision) {
+        const auto next=StepNext(completedId,candidates,expectedRevision);
+        if(!next.value("ok",false) ||
+           next.value("status",std::string())!="proposed")
+            return next;
+        try {
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            const auto found=ReadStep(completedId);
+            if(!found.value("ok",false))return found;
+            json parent=found["step"];
+            if(parent["revision"].get<int64_t>()!=expectedRevision)
+                return {{"ok",false},{"error","step_revision_conflict"}};
+            if(parent.value("status",std::string())!="completed")
+                return {{"ok",false},{"error","step_requires_completed_pair"}};
+            if(parent.contains("next_step_id"))
+                return {{"ok",false},{"error","continuation_already_prepared"}};
+            const auto stepsDir=root_/"steps";
+            if(std::filesystem::is_symlink(stepsDir) ||
+               !std::filesystem::is_directory(stepsDir))
+                return {{"ok",false},{"error","step_storage_untrusted"}};
+            std::filesystem::path folder;
+            bool created=false;
+            for(int i=0;i<8&&!created;++i){
+                const auto child="step_"+std::to_string(WallMs())+"_"+tag_+"_"+
+                                 std::to_string(++stepSequence_);
+                if(!step::SafeId(child))
+                    return {{"ok",false},{"error","invalid_step_id"}};
+                folder=stepsDir/child;
+                created=std::filesystem::create_directory(folder);
+            }
+            if(!created)
+                return {{"ok",false},{"error","step_directory_collision"}};
+            json child={{"schema","cortex.step.v1"},
+                {"id",folder.filename().string()},{"revision",1},
+                {"parent_step_id",completedId},
+                {"root_step_id",next["root_step_id"]},
+                {"iteration",next["iteration"]},
+                {"source_report",next["report_id"]},
+                {"source_trials",next["trials"]},
+                {"history_ids",next["history_ids"]},
+                {"program",parent["program"]},
+                {"architecture",parent["architecture"]},
+                {"expected_target",parent["target"]},
+                {"choice",next["choice"]},{"status","awaiting_control"},
+                {"control_id",nullptr},{"action_id",nullptr},
+                {"created_ms",WallMs()},{"updated_ms",WallMs()},
+                {"executed_by_step",false},{"semantic_verified",false},
+                {"required_action","run_control_separately_with_operator_approval"},
+                {"limitations",json::array({
+                    "An archived step proposal is never independent operator approval.",
+                    "Each control and action must be separately authorized.",
+                    "No trials, input, process launches or mutations are initiated.",
+                    "Stop on incompatible baseline, missing evidence or budget exhaustion."
+                })}};
+            try{
+                Write(folder/"step.json",child.dump(2));
+                parent["next_step_id"]=child["id"];
+                parent["revision"]=expectedRevision+1;
+                parent["updated_ms"]=WallMs();
+                Write(stepsDir/completedId/"step.json",parent.dump(2));
+            }catch(const std::exception&){
+                std::error_code error;std::filesystem::remove_all(folder,error);
+                throw;
+            }
+            return {{"ok",true},{"status","prepared"},
+                    {"step",child},{"parent_step",parent},
+                    {"executed",false},{"untrusted_data",true}};
+        } catch(const std::exception&) {
+            return {{"ok",false},{"error","step_continue_failed"}};
+        }
+    }
+
     json StepGet(const std::string& id) const {
         std::lock_guard<std::mutex> lock(stepMutex_);
         const auto record=ReadStep(id);
@@ -656,6 +822,9 @@ public:
             if(target["executable_path"]!=record["program"] ||
                target["architecture"]!=record["architecture"])
                 return {{"ok",false},{"error","step_program_mismatch"}};
+            if(arm=="control" && record.contains("expected_target") &&
+               !step::SameTarget(record["expected_target"],target))
+                return {{"ok",false},{"error","step_target_generation_mismatch"}};
             if(arm=="action" && (!record.contains("target") ||
                !step::SameTarget(record["target"],target)))
                 return {{"ok",false},{"error","step_target_generation_mismatch"}};
