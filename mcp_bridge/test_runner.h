@@ -2,6 +2,7 @@
 #include "test_plan.h"
 #include "test_code.h"
 #include "test_predictions.h"
+#include "test_choose.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -457,6 +458,86 @@ public:
             return {{"ok",true},{"untrusted_data",true},{"report",report}};
         }catch(const std::exception&){
             return {{"ok",false},{"error","report_not_found_or_invalid"}};
+        }
+    }
+
+    // Read-only next-experiment selection from a durable pair report.
+    // Recompute the report's client-authored predictions against the original
+    // archived trial values: cached assessments themselves are not authority.
+    json Choose(const std::string& reportId,const json& candidates,
+                const json& previousIds=json::array()) const {
+        const auto stored=GetReport(reportId);
+        if (!stored.value("ok",false))
+            return {{"ok",false},{"error","investigation_report_not_found"}};
+        if (!previousIds.is_array() || previousIds.size()>16 ||
+            !candidates.is_array() || candidates.dump().size()>65536)
+            return {{"ok",false},{"error","invalid_experiment_request"}};
+        try {
+            const auto& report=stored.at("report");
+            const auto& trials=report.at("trials");
+            const auto& assessed=report.at("hypothesis_tests");
+            if (!trials.is_array() || trials.size()!=2 || !assessed.is_object() ||
+                !assessed.contains("results") || !assessed["results"].is_array())
+                return {{"ok",false},{"error","report_missing_prediction_pair"}};
+            const auto controlId=trials[0].at("id").get<std::string>();
+            const auto actionId=trials[1].at("id").get<std::string>();
+            if (!SafeRunId(controlId) || !SafeRunId(actionId) ||
+                controlId==actionId)
+                return {{"ok",false},{"error","invalid_report_trials"}};
+            const auto first=Get(controlId),second=Get(actionId);
+            if (!first.value("ok",false) || !second.value("ok",false) ||
+                !first.contains("run") || !second.contains("run"))
+                return {{"ok",false},{"error","report_trials_unavailable"}};
+            if (!first["run"].contains("plan") ||
+                !first["run"]["plan"].contains("reads") ||
+                !first["run"]["plan"]["reads"].is_array())
+                return {{"ok",false},{"error","invalid_report_trials"}};
+            json predictionsList=json::array();
+            for (const auto& row:assessed["results"]) {
+                if (!row.is_object() || !row.contains("id") ||
+                    !row.contains("read") || !row.contains("control") ||
+                    !row.contains("action"))
+                    return {{"ok",false},{"error","invalid_report_predictions"}};
+                predictionsList.push_back({{"id",row["id"]},
+                    {"read",row["read"]},{"control",row["control"]},
+                    {"action",row["action"]}});
+            }
+            std::string error;
+            if (!predictions::Validate(predictionsList,
+                  first["run"]["plan"]["reads"].size(),error))
+                return {{"ok",false},{"error","invalid_report_predictions"}};
+            const auto cmp=Compare(controlId,actionId);
+            if (!cmp.value("ok",false))
+                return {{"ok",false},{"error","report_pair_not_comparable"}};
+            const auto current=predictions::Evaluate(predictionsList,
+                first["run"],second["run"],cmp);
+            json history=json::array();
+            std::set<std::string> ids={controlId,actionId};
+            for (const auto& id:previousIds) {
+                if (!id.is_string() || !SafeRunId(id.get<std::string>()))
+                    return {{"ok",false},{"error","invalid_history_test_id"}};
+                ids.insert(id.get<std::string>());
+            }
+            for (const auto& id:ids) {
+                const auto old=Get(id);
+                if (!old.value("ok",false) || !old.contains("run") ||
+                    !old["run"].is_object() ||
+                    !old["run"].contains("plan") ||
+                    old["run"].value("status",std::string())!="completed")
+                    return {{"ok",false},{"error","history_test_unavailable"}};
+                const auto& plan=old["run"]["plan"];
+                if (plan.is_object() && plan.contains("steps") &&
+                    plan.contains("reads"))
+                    history.push_back({{"steps",plan["steps"]},
+                                       {"reads",plan["reads"]}});
+            }
+            json answer=choose::Select(current,candidates,history);
+            answer["report_id"]=reportId;
+            answer["trials"]=json::array({controlId,actionId});
+            answer["source"]="archived_trial_observations_untrusted";
+            return answer;
+        } catch(const std::exception&) {
+            return {{"ok",false},{"error","invalid_investigation_report"}};
         }
     }
 

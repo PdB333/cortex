@@ -308,6 +308,61 @@ def main():
             assert ledger[knowledge_id]['status']=='hypothesis' and \
                 ledger[rival_id]['status']=='hypothesis',ledger
             checks.append('competing_predictions_evaluated_without_status_upgrade')
+            # Two explanations can both fit the *first* comparison while
+            # predicting opposite outcomes on a proposed next experiment.
+            unresolved=[
+                {'id':knowledge_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'increased'}},
+                {'id':rival_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'increased'}}
+            ]
+            unresolved_report=client.data('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],
+                title='Choose next bounded experiment',
+                hypotheses=unresolved,mutation_permission=True)
+            unresolved_id=unresolved_report['id']
+            split_predictions=[
+                {'id':knowledge_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'increased'}},
+                {'id':rival_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'unchanged'}}
+            ]
+            repeat={'id':'space_again',
+                'control':{'steps':[{'delay_ms':50}],
+                           'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'action':{'steps':[{'vk':32,'tap_ms':40}],
+                          'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'hypotheses':split_predictions}
+            click_probe={'id':'click_probe',
+                'control':{'steps':[{'delay_ms':30}],
+                           'reads':[{'address':fixture['test_clicks'],'type':'u32'}]},
+                'action':{'steps':[{'mouse_click':
+                           {'button':'left','x':20,'y':20,'hold_ms':40}}],
+                          'reads':[{'address':fixture['test_clicks'],'type':'u32'}]},
+                'hypotheses':split_predictions}
+            chosen=client.data('cortex_test_choose',report_id=unresolved_id,
+                               candidates=[repeat,click_probe])
+            assert chosen['status']=='proposed' and \
+                chosen['choice']['id']=='click_probe' and \
+                chosen['choice']['discriminating_pairs']==1 and \
+                chosen['candidates'][0]['already_tested'] is True and \
+                chosen['executed'] is False and \
+                chosen['requires_separate_permission'] is True,chosen
+            checks.append('chooses_novel_discriminating_experiment_without_input')
+            all_used=client.data('cortex_test_choose',report_id=unresolved_id,
+                candidates=[repeat,click_probe],previous_ids=[clicked['id']])
+            assert all_used['status']=='no_new_discriminating_experiment',all_used
+            checks.append('chooser_rejects_previously_completed_actions')
+            stop=client.data('cortex_test_choose',report_id=report_id,
+                             candidates=[repeat,click_probe])
+            assert stop['status']=='need_competing_hypotheses',stop
+            checks.append('chooser_stops_when_no_competing_hypotheses')
+            malformed_choice=client.call('cortex_test_choose',report_id=unresolved_id,
+                candidates=[dict(click_probe,action={'steps':
+                          [{'vk':32,'tap_ms':9999}],
+                          'reads':[{'address':fixture['test_clicks'],'type':'u32'}]})])
+            assert malformed_choice['isError'],malformed_choice
+            checks.append('chooser_enforces_existing_test_budgets')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -323,6 +378,10 @@ def main():
             assert combined_reloaded['report']['id']==report_id and combined_reloaded['untrusted_data']
             assert combined_reloaded['report']['hypothesis_tests']['summary']['contradicted']==1
             checks.append('prediction_evidence_survives_reconnect')
+            chosen_again=client.data('cortex_test_choose',report_id=unresolved_id,
+                                     candidates=[repeat,click_probe])
+            assert chosen_again['choice']['id']=='click_probe',chosen_again
+            checks.append('next_experiment_recovered_after_reconnect')
             checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:

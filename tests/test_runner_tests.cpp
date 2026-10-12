@@ -167,6 +167,85 @@ int main(){
                   archived["report"]["hypothesis_tests"]["summary"]["contradicted"]==1,
                   "evaluated predictions survive reopening report");
         }
+        // A read-only chooser connects durable results to a concrete next
+        // control/action proposal without granting input permission.
+        const json stillPlausible=json::array({
+            {{"id","fixture.counter_rises"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_stays"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}}
+        });
+        json nextReport;std::string nextError;
+        Check(runner.Report({controlId,experimentId},"Unresolved pair",
+                            nextReport,nextError,stillPlausible),
+              "archive two still-plausible hypotheses");
+        const json reads=json::array({{{"address","0x1000"},{"type","i32"}}});
+        const json controlPlan={{"label","control"},{"steps",json::array({{{"delay_ms",30}}})},
+                                {"reads",reads},{"timeout_ms",1200}};
+        const json repeatedPlan={{"label","old test"},{"steps",
+                                 json::array({{{"vk",32},{"tap_ms",40}}})},
+                                 {"reads",reads},{"timeout_ms",1200}};
+        const json newPlan={{"label","new probe"},{"steps",
+            json::array({{{"vk",32},{"tap_ms",40}},{{"delay_ms",50}}})},
+            {"reads",reads},{"timeout_ms",1300}};
+        const json divergent=json::array({
+            {{"id","fixture.counter_rises"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_stays"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","unchanged"}}}}
+        });
+        const json options=json::array({
+            {{"id","repeat"},{"control",controlPlan},{"action",repeatedPlan},
+             {"hypotheses",divergent}},
+            {{"id","fresh"},{"control",controlPlan},{"action",newPlan},
+             {"hypotheses",divergent}}
+        });
+        if(nextReport.value("ok",false)) {
+            const auto chosen=runner.Choose(
+                nextReport["id"].get<std::string>(),options);
+            Check(chosen.value("ok",false) &&
+                  chosen.value("status",std::string())=="proposed" &&
+                  chosen["choice"]["id"]=="fresh" &&
+                  chosen["choice"]["discriminating_pairs"]==1 &&
+                  chosen["candidates"][0]["already_tested"]==true &&
+                  chosen["requires_separate_permission"]==true &&
+                  chosen["executed"]==false &&
+                  chosen["semantic_verified"]==false,
+                  "selects novel discriminating experiment without executing");
+            const auto chosenAgain=runner.Choose(
+                nextReport["id"].get<std::string>(),
+                json::array({options[1],options[0]}));
+            Check(chosenAgain["choice"]["id"]=="fresh",
+                  "selection independent of candidate order");
+            auto onlyRepeated=runner.Choose(
+                nextReport["id"].get<std::string>(),
+                json::array({options[0]}));
+            Check(onlyRepeated["status"]=="no_new_discriminating_experiment",
+                  "already attempted action cannot be silently replayed");
+            auto nondiscriminating=options[1];
+            nondiscriminating["hypotheses"][1]["action"]["op"]="changed";
+            Check(runner.Choose(nextReport["id"].get<std::string>(),
+                json::array({nondiscriminating}))["status"]==
+                    "no_new_discriminating_experiment",
+                  "overlapping predictions provide no discrimination");
+            auto unbounded=options[1];
+            unbounded["action"]["steps"]=json::array({{{"vk",65},{"tap_ms",100000}}});
+            Check(!runner.Choose(nextReport["id"].get<std::string>(),
+                               json::array({unbounded})).value("ok",true),
+                  "chooser rejects unsafe oversized action");
+            const auto stale=runner.Choose(
+                nextReport["id"].get<std::string>(),options,
+                json::array({"test_unknown_fake"}));
+            Check(!stale.value("ok",true),"unknown trial history rejected");
+        }
+        if(assessed.value("ok",false))
+            Check(runner.Choose(assessed["id"].get<std::string>(),options)
+                          .value("status",std::string())==
+                      "need_competing_hypotheses",
+                  "stop when only one hypothesis survives the last test");
+        Check(choose::Exclusive({{"op","increased"}},{{"op","decreased"}}) &&
+              !choose::Exclusive({{"op","changed"}},{{"op","increased"}}),
+              "only mutually exclusive predictions are discriminating");
         auto crossGeneration=aligned;
         crossGeneration["different_generation"]=true;
         const auto originalControl=runner.Get(controlId)["run"];

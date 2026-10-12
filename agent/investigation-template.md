@@ -25,6 +25,19 @@ measurements, those contradicted by measurements and inconclusive cases.
 A matching prediction is not a causal or semantic proof. Do not automatically
 change a knowledge record's status based on trial measurements.
 
+## Next controlled experiment
+- Prior report ID:
+- Remaining hypotheses:
+- Candidate plans and predicted differences:
+- Proposed plan ID (or stop reason):
+- Previously tested actions and novelty check:
+- Operator authorization and target scope required:
+- Completed control/action IDs after separately authorized execution:
+- New comparison and remaining uncertainty:
+
+A Cortex test-choice proposal is not authorization or an executed action.
+Stop on incompatible baselines, exhausted budgets or missing approved plans.
+
 ## Code and objects
 Observed functions, instructions, data fields, structures and relationships.
 Keep unknown, inferred and observed information separate.
