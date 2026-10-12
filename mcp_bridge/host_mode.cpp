@@ -282,17 +282,31 @@ if(name=="cortex_test_report"){
     if(!a.contains("ids")||!a["ids"].is_array()||a["ids"].empty()||a["ids"].size()>8){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Select 1 to 8 completed trials"),true);return true;
     }
-    if(a.size()>3||(a.contains("title")&&
+    if(a.size()>4||(a.contains("title")&&
        (!a["title"].is_string()||a["title"].get_ref<const std::string&>().size()>100))){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_title","Title must be at most 100 characters"),true);return true;
     }
+    if(a.contains("hypotheses") &&
+       (!a["hypotheses"].is_array() || a["hypotheses"].empty())){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_hypotheses","Supply 1 to 8 predictions or omit hypotheses"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="ids" && it.key()!="title" &&
+           it.key()!="mutation_permission" && it.key()!="hypotheses"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_report_request","Unsupported investigation field"),true);
+            return true;
+        }
     std::vector<std::string> ids;
     for(const auto& id:a["ids"]){
         if(!id.is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Trial ids must be strings"),true);return true;}
         ids.push_back(id.get<std::string>());
     }
     json output;std::string error;
-    if(!s->tests->Report(ids,a.value("title",std::string("Cortex investigation")),output,error)){
+    if(!s->tests->Report(ids,a.value("title",std::string("Cortex investigation")),
+                         output,error,a.value("hypotheses",json::array()))){
         response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;
     }
     response=LocalToolResponse(MessageId(m),output);return true;
