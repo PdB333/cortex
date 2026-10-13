@@ -201,9 +201,11 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
             continue;
         }
         std::map<std::string, int> controlIps, actionIps;
+        std::map<std::string, bool> actionWriteWatch;
         bool validEvents = true;
         const auto parse = [&](const json& evidence,
-                               std::map<std::string, int>& ips) {
+                               std::map<std::string, int>& ips,
+                               bool isAction) {
             for (const auto& bp : evidence["breakpoints"]) {
                 if (!bp.is_object() ||
                     bp.value("status", std::string()) != "observed" ||
@@ -214,6 +216,14 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
                     validEvents = false;
                     return;
                 }
+                const bool watchedRead =
+                    bp.value("kind", std::string()) == "hw_write" &&
+                    bp.contains("instruction_address") &&
+                    bp["instruction_address"].is_string() &&
+                    readSpec.is_object() &&
+                    readSpec.contains("address") &&
+                    readSpec["address"].is_string() &&
+                    bp["instruction_address"] == readSpec["address"];
                 for (const auto& event : bp["events"]) {
                     if (!event.is_object() || !event.contains("instruction") ||
                         !event["instruction"].is_string()) {
@@ -232,11 +242,13 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
                     std::transform(ip.begin(), ip.end(), ip.begin(),
                         [](unsigned char h) { return static_cast<char>(std::tolower(h)); });
                     ++ips[ip];
+                    if (isAction && watchedRead)
+                        actionWriteWatch[ip] = true;
                 }
             }
         };
-        parse(rawControl, controlIps);
-        parse(rawAction, actionIps);
+        parse(rawControl, controlIps, false);
+        parse(rawAction, actionIps, true);
         if (!validEvents || actionIps.size() > 32 || controlIps.size() > 32) {
             codeComplete = false;
             continue;
@@ -248,11 +260,14 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
                     {"replicated_more_during_action", true},
                     {"observations", 0},
                     {"source", "debugger_event_instruction_pointer"},
+                    {"observed_write_watch_on_selected_read", true},
                     {"semantic_verified", false},
                     {"causal_verified", false}};
             }
             auto& item = codeHits[ip];
             item["observations"] = item["observations"].get<int>() + 1;
+            if (!actionWriteWatch[ip])
+                item["observed_write_watch_on_selected_read"] = false;
             if (kv.second <= controlIps[ip])
                 item["replicated_more_during_action"] = false;
         }
