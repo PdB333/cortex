@@ -173,6 +173,13 @@ reads per arm, together with bounded debugger-observed instruction pointers
 from existing logging breakpoints. Threads are surfaced only when the debugger
 captured their IDs.
 
+Optionally pass report_id="report_..." for a completed report describing
+this exact control/action pair. Cortex does not trust its saved
+assessment flags: it reconstructs the bounded client predictions, validates
+their fields and **re-evaluates** them against the archived trials before
+creating hypothesis-to-read edges. A mismatched report or invalid
+predictions are rejected; no project knowledge status is promoted.
+
 The graph's edges are `contains`, `planned_step`, `observed_in`,
 and `logged_during`. Each edge explicitly declares
 `causal_verified=false`: a temporal hit never proves that a function
