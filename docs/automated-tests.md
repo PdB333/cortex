@@ -181,6 +181,50 @@ does not arm breakpoints, modify a target or automatically promote statuses.
 It does not yet render a temporal causal timeline or automatically
 cross-link every claim to a disassembler location.
 
+## Replicated mechanism checks (experimental)
+
+After at least two *independently executed* control/action pairs, call:
+
+    cortex_test_mechanism_check(
+      pairs=[
+        {"control":"test_FIRST_CONTROL","action":"test_FIRST_ACTION"},
+        {"control":"test_SECOND_CONTROL","action":"test_SECOND_ACTION"}
+      ],
+      read=0,
+      question="Does this approved input affect the observed field?")
+
+The tool is **read-only** and never generates permission, sends input,
+replays a scenario or changes a Knowledge Engine status. It loads actual
+completed trial results, recomputes both trial comparisons and tests whether
+all pairs used the same input-free control steps, the same input actions,
+identical typed read specifications and one process generation. The initial
+value may differ between pairs, but **within each pair** it must match.
+Controls that change, unreadable observations, failed trials, stale process
+generations and malformed archived plans produce inconclusive findings.
+
+With two to six comparable and successfully measured pairs the result records
+signed intervention_minus_control differences and automatically evaluates
+three rival, falsifiable models: increase, decrease and no detectable change.
+The strongest classification is **replicated_intervention_association**.
+Contradictory results explicitly produce contradictory_observations and
+cannot be described as verified behavior. Exact sample IDs, counterexamples,
+limits, and untrusted provenance remain available after reconnection.
+If authorized debugger log breakpoints were present with complete coverage
+in *every* pair, the tool also surfaces repeatedly co-occurring instruction
+addresses as **code candidates**, not verified functions. Use
+cortex_test_code_candidates for live module+RVA/unwind-range resolution,
+cortex_knowledge_code_check for binary-version revalidation and independent
+target-specific experiments before writing strong semantic explanations.
+
+Cortex cannot infer a unique causal mechanism from these observations:
+unmeasured objects, input processing, external files/saves, interrupts or
+background threads may explain the same memory change. The output therefore
+keeps semantic_verified=false, causal_verified=false,
+external_state_reset_verified=false, and
+version_independently_attested=false. This is meaningful automated
+**falsification and replicated evidence assessment**, not universal
+function semantics or proof of all hidden causes.
+
 ## Persistent typed knowledge graph
 
 Each Knowledge Engine record may now have up to 16 `relations` in addition
