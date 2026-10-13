@@ -67,6 +67,34 @@ inline json Build(const json& control,const json& action,const json& comparison,
             edge(prefix,id,"observed_in");
         }
     }
+    // Read-only instruction hits that the debugger already recorded. Do not
+    // confuse hardware watched-data addresses with code pointers.
+    if(action.contains("code_evidence") && action["code_evidence"].is_object()) {
+        const auto& evidence=action["code_evidence"];
+        if(evidence.contains("breakpoints") && evidence["breakpoints"].is_array()) {
+            if(evidence["breakpoints"].size()>4)
+                return {{"ok",false},{"error","graph_code_budget"}};
+            std::set<std::string> observed;
+            for(const auto& bp:evidence["breakpoints"]) {
+                if(!bp.is_object()||!bp.contains("events")||!bp["events"].is_array()||
+                   bp["events"].size()>32)continue;
+                for(const auto& event:bp["events"]) {
+                    if(!event.is_object()||!event.contains("instruction")||
+                       !event["instruction"].is_string())continue;
+                    const std::string ip=event["instruction"].get<std::string>();
+                    if(ip.size()<3||ip.size()>18||ip.substr(0,2)!="0x")continue;
+                    if(!observed.insert(ip).second||observed.size()>8)continue;
+                    const std::string id="observed_ip_"+std::to_string(observed.size());
+                    json detail={{"address",ip},{"role","debugger_observed_instruction_pointer"},
+                                 {"semantic_verified",false}};
+                    if(event.contains("thread_id")&&event["thread_id"].is_number_unsigned())
+                        detail["thread_id"]=event["thread_id"];
+                    node(id,"observed_instruction",detail);
+                    edge("action",id,"logged_during");
+                }
+            }
+        }
+    }
     std::set<std::string> seen;
     for(const auto& row:codeLocations) {
         if(!row.is_object()||!row.contains("address")||!row["address"].is_string()||
