@@ -123,6 +123,14 @@ local program through its MCP tools.
     the operator must validate the starting-state assumptions and authorize
     each future trial independently. Never automatically replay an archived
     or generated plan.
+9f. Knowledge records may describe relationships with typed relations arrays.
+    Every relation requires a target knowledge ID and an allowed relation
+    type; an optional test/report reference remains a client assertion until
+    the real evidence is verified separately. Use project_knowledge_graph or
+    cortex_knowledge_graph for bounded neighborhoods. Do not infer that a
+    function called another, changed a field or caused behavior merely
+    because a relation appears in the graph. Preserve contradiction and
+    obsolescence statuses and check revisions before correcting a record.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
