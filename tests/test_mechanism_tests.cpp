@@ -19,7 +19,8 @@ static json Trial(const json& target,bool input,int before,int after) {
         {"after",json::array({Observation(after)})}};
     const json events=input ?
         json::array({json{{"instruction","0x401020"}}}) : json::array();
-    const json bp={{"status","observed"},{"coverage_complete",true},
+    const json bp={{"status","observed"},{"kind","hw_write"},
+                   {"instruction_address","0x1000"},{"coverage_complete",true},
                    {"truncated_or_missing",false},{"events",events}};
     run["code_evidence"]={{"status","observed"},
                           {"breakpoints",json::array({bp})}};
@@ -29,7 +30,7 @@ static json Bundle(int index,int baseline,int effect) {
     const json target={{"pid",123},{"generation","111"},
         {"architecture","x64"},{"executable_path","fixture.exe"}};
     const json codePair={{"status","aligned"},{"breakpoints",json::array({
-        {{"id",4},{"instruction_address","0x401020"},
+        {{"id",4},{"instruction_address","0x1000"},
          {"trace_complete",true},{"control_hits",uint64_t{0}},
          {"action_hits",uint64_t{1}}}})}};
     const json comparison={{"ok",true},{"comparison","aligned"},
@@ -66,6 +67,7 @@ int main(){
           result["instruction_candidates"][0]["observed_instruction"]=="0x401020" &&
           result["instruction_candidates"][0]["source"]==
               "debugger_event_instruction_pointer" &&
+          result["instruction_candidates"][0]["observed_write_watch_on_selected_read"]==true &&
           result["code_coverage_sufficient"]==true,
           "only actual debugger instruction IPs yield a candidate, not watch addresses");
     Check(!result["causal_verified"].get<bool>() &&
