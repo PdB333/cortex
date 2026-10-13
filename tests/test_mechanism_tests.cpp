@@ -10,21 +10,20 @@ static json Trial(const json& target,bool input,int before,int after) {
     const json control=json::array({{{"delay_ms",50}}});
     const json action=json::array({{{"vk",32},{"tap_ms",40}}});
     const json reads=json::array({{{"address","0x1000"},{"type","u32"}}});
-    return {{"status","completed"},{"outcome","passed"},{"target",target},
+    json run={{"status","completed"},{"outcome","passed"},{"target",target},
         {"plan",{{"label","fixture"},{"mode","game"},{"steps",input?action:control},
                  {"reads",reads},{"expect",json::array()},
                  {"breakpoints",json::array()},{"timeout_ms",15000},
                  {"settle_ms",100}}},
         {"before",json::array({Observation(before)})},
-        {"after",json::array({Observation(after)})},
-        {"code_evidence",{{"status","observed"},
-          {"breakpoints",json::array({
-            {{"status","observed"},{"coverage_complete",true},
-             {"truncated_or_missing",false},
-             {"events",input?json::array({
-                 {{"instruction","0x401020"},{"seq",uint64_t{1}},
-                  {"thread_id",uint64_t{1}},{"timestamp_raw_ms",uint64_t{10}}}})
-                  :json::array()}}})}}}};
+        {"after",json::array({Observation(after)})}};
+    const json events=input ?
+        json::array({json{{"instruction","0x401020"}}}) : json::array();
+    const json bp={{"status","observed"},{"coverage_complete",true},
+                   {"truncated_or_missing",false},{"events",events}};
+    run["code_evidence"]={{"status","observed"},
+                          {"breakpoints",json::array({bp})}};
+    return run;
 }
 static json Bundle(int index,int baseline,int effect) {
     const json target={{"pid",123},{"generation","111"},
