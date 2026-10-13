@@ -16,7 +16,15 @@ static json Trial(const json& target,bool input,int before,int after) {
                  {"breakpoints",json::array()},{"timeout_ms",15000},
                  {"settle_ms",100}}},
         {"before",json::array({Observation(before)})},
-        {"after",json::array({Observation(after)})}};
+        {"after",json::array({Observation(after)})},
+        {"code_evidence",{{"status","observed"},
+          {"breakpoints",json::array({
+            {{"status","observed"},{"coverage_complete",true},
+             {"truncated_or_missing",false},
+             {"events",input?json::array({
+                 {{"instruction","0x401020"},{"seq",uint64_t{1}},
+                  {"thread_id",uint64_t{1}},{"timestamp_raw_ms",uint64_t{10}}}})
+                  :json::array()}}})}}}};
 }
 static json Bundle(int index,int baseline,int effect) {
     const json target={{"pid",123},{"generation","111"},
@@ -56,8 +64,11 @@ int main(){
           "automatic contradictory and supporting directional models");
     Check(result["instruction_candidates"].size()==1 &&
           result["instruction_candidates"][0]["replicated_more_during_action"]==true &&
+          result["instruction_candidates"][0]["observed_instruction"]=="0x401020" &&
+          result["instruction_candidates"][0]["source"]==
+              "debugger_event_instruction_pointer" &&
           result["code_coverage_sufficient"]==true,
-          "only complete repeated breakpoint evidence yields code lead");
+          "only actual debugger instruction IPs yield a candidate, not watch addresses");
     Check(!result["causal_verified"].get<bool>() &&
           !result["semantic_verified"].get<bool>() &&
           !result["performed_actions"].get<bool>() &&
