@@ -269,6 +269,8 @@ def main():
             assert any(n['kind']=='measured_read' and n['id']=='action_read_0' and
                        n['detail']['changed'] for n in graph['nodes']),graph
             assert all(edge['causal_verified'] is False for edge in graph['edges']),graph
+            assert any(node['kind']=='observed_instruction' for node in graph['nodes']),graph
+            assert any(edge['relation']=='logged_during' for edge in graph['edges']),graph
             checks.append('bounded_evidence_graph_is_not_causal_proof')
             denied_graph=client.call('cortex_test_evidence_graph',
                 control='test_missing',action=fresh_action['id'])
