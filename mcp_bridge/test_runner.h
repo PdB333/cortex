@@ -284,7 +284,10 @@ public:
                              {"action", second["run"]},
                              {"comparison", comparison}});
         }
-        return mechanism::Evaluate(pairs, read, question);
+        try { return mechanism::Evaluate(pairs, read, question); }
+        catch (const std::exception&) {
+            return {{"ok",false},{"error","invalid_archived_mechanism_evidence"}};
+        }
     }
 
     // Record a bounded multi-trial investigation without inferring semantic facts.
