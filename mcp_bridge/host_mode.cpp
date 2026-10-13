@@ -381,6 +381,26 @@ if(name=="cortex_test_evidence_graph"){
     response=LocalToolResponse(MessageId(m),graph,!graph.value("ok",false));
     return true;
 }
+if(name=="cortex_test_generate_prepare"){
+    if(!a.is_object()||a.size()!=3||
+       !a.contains("report_id")||!a["report_id"].is_string()||
+       !a.contains("objective")||!a["objective"].is_string()||
+       a["objective"].get_ref<const std::string&>().empty()||
+       a["objective"].get_ref<const std::string&>().size()>160||
+       !a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_generate_prepare_request",
+            "Persistent journal write needs a report, question and explicit permission"),true);
+        return true;
+    }
+    const auto result=s->tests->GeneratePrepare(
+        a["report_id"].get<std::string>(),
+        a["objective"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_generate"){
     if(!a.is_object()||a.size()!=2||
        !a.contains("report_id")||!a["report_id"].is_string()||
