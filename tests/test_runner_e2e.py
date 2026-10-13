@@ -611,6 +611,35 @@ def main():
                 e['candidate']['action']['steps']==second_proposal['action']['steps']
                 for e in entries),entries
             checks.append('catalog_records_completed_scenario_without_approval')
+            graph_field='Fixture.graph.counter'
+            graph_event='Fixture.graph.input'
+            field_record=client.data('project_knowledge_put',
+                id=graph_field,kind='field',statement='Candidate numeric field',
+                mutation_permission=True)
+            assert field_record['result']['record']['status']=='hypothesis',field_record
+            event_record=client.data('project_knowledge_put',
+                id=graph_event,kind='event',statement='Candidate key event',
+                relations=[{'target':graph_field,'type':'correlates',
+                            'reference':fresh_action['id']}],
+                mutation_permission=True)
+            assert event_record['result']['record']['relations'][0]['target']==graph_field
+            assert event_record['result']['record']['status']=='hypothesis'
+            persisted_graph=client.data('project_knowledge_graph',
+                focus=graph_event,depth=1,limit=4)
+            persisted_nodes=persisted_graph['result']['nodes']
+            persisted_edges=persisted_graph['result']['edges']
+            assert {item['id'] for item in persisted_nodes}=={graph_event,graph_field}
+            assert len(persisted_edges)==1 and \
+                persisted_edges[0]['type']=='correlates' and \
+                persisted_edges[0]['origin']=='client_assertion' and \
+                persisted_edges[0]['causal_verified'] is False,persisted_graph
+            checks.append('persisted_typed_knowledge_graph_not_causal_proof')
+            host_graph=client.data('cortex_knowledge_graph',
+                _cortex_target=pid,_cortex_generation=restarted['generation'],
+                focus=graph_event,depth=1,limit=4)
+            assert host_graph['schema']=='cortex.knowledge.graph.v1' and \
+                len(host_graph['nodes'])==2 and len(host_graph['edges'])==1,host_graph
+            checks.append('mcp_host_can_query_same_persistent_graph')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
