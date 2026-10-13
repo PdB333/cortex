@@ -322,6 +322,9 @@ if(name=="cortex_test_mechanism_check"){
        !a.contains("pairs") || !a["pairs"].is_array() ||
        a["pairs"].size()<2 || a["pairs"].size()>6 ||
        !a.contains("read") || !a["read"].is_number_integer() ||
+       (a["read"].is_number_unsigned() ?
+          a["read"].get<uint64_t>()>7 :
+          (a["read"].get<int64_t>()<0 || a["read"].get<int64_t>()>7)) ||
        (a.contains("question") &&
         (!a["question"].is_string() ||
          a["question"].get_ref<const std::string&>().size()>160))){
