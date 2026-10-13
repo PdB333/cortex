@@ -39,7 +39,7 @@ inline json Build(const json& control,const json& action,const json& comparison)
                !loc["module"].contains("rva")||
                !loc["module"]["rva"].is_string()||
                !loc.contains("sampled_events")||
-               !loc["sampled_events"].is_number_unsigned())continue;
+               !loc["sampled_events"].is_number_integer())continue;
             const std::string name=loc["module"]["name"].get<std::string>();
             const std::string rva=loc["module"]["rva"].get<std::string>();
             if(name.empty()||name.size()>260||rva.empty()||rva.size()>18)continue;
@@ -71,8 +71,10 @@ inline json Build(const json& control,const json& action,const json& comparison)
                     {"causal_verified",false}};
                 it=groups.emplace(key,item).first;
             }
-            const uint64_t hits=loc["sampled_events"].get<uint64_t>();
-            if(hits>128)return {{"ok",false},{"error","invalid_sampled_event_count"}};
+            const int64_t signedHits=loc["sampled_events"].get<int64_t>();
+            if(signedHits<0||signedHits>128)
+                return {{"ok",false},{"error","invalid_sampled_event_count"}};
+            const uint64_t hits=static_cast<uint64_t>(signedHits);
             const char* field=arm?"action_sampled_events":"control_sampled_events";
             it->second[field]=it->second[field].get<uint64_t>()+hits;
             auto& ips=it->second["instruction_rvas"];
