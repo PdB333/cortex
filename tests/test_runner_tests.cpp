@@ -522,7 +522,10 @@ int main(){
             Check(ParsePlan(generatedControl,generatedControlPlan,generateError)&&
                   ParsePlan(generatedAction,generatedActionPlan,generateError),
                   "generated plans still pass the original execution validator");
-            value=0;
+            // Generated numeric predictions were derived from the original
+            // trial pair's baseline (50). Resetting to 0 makes even the
+            // fixed-effect model inapplicable and contradicts both models.
+            value=50;
             Check(runner.Start(generatedControlPlan,context,out,error),
                   "separately execute generated control");
             const auto freshControlId=out["id"].get<std::string>();
@@ -532,7 +535,7 @@ int main(){
             Check(savedControl.value("ok",false)&&
                   savedControl["step"]["status"]=="awaiting_action",
                   "record real control with revision guard");
-            value=0;
+            value=50;
             Check(runner.Start(generatedActionPlan,context,out,error),
                   "separately execute generated action");
             const auto freshActionId=out["id"].get<std::string>();
@@ -664,9 +667,9 @@ int main(){
         auto changedBackend=oldCount;changedBackend["backend"]="other";
         Check(code::Delta(4,beforeBp,changedBackend)["status"]=="inconclusive",
               "debugger identity change invalidates code evidence");
-        Check(runner.List()["total"]==25 && runner.List()["runs"].size()==20,
+        Check(runner.List()["total"]==27 && runner.List()["runs"].size()==20,
               "bounded run index");
-        Check(released==25,"all leases released");
+        Check(released==27,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";

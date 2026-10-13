@@ -380,7 +380,7 @@ jobs:
         run: >-
           cmake --build build/p3-probe-${{ matrix.arch }}
           --target cortex_host
-          --parallel 2
+          --parallel ${{ matrix.arch == 'x86' && '1' || '2' }}
 
   # ---- P3 Runtime Validation (was .github/workflows/p3-runtime-validation.yml)
   p3-runtime-validation:
