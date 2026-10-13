@@ -3,6 +3,7 @@
 #include "test_code.h"
 #include "test_predictions.h"
 #include "test_choose.h"
+#include "test_generate.h"
 #include "test_step.h"
 #include "test_investigation.h"
 #include <atomic>
@@ -460,6 +461,40 @@ public:
             return {{"ok",true},{"untrusted_data",true},{"report",report}};
         }catch(const std::exception&){
             return {{"ok",false},{"error","report_not_found_or_invalid"}};
+        }
+    }
+
+    // Synthesize new bounded diagnostic plans from a measured trial pair.
+    // Never starts the target or treats the free-form objective as a command.
+    json Generate(const std::string& reportId,const std::string& objective) const {
+        if(objective.empty()||objective.size()>160)
+            return {{"ok",false},{"error","invalid_goal"}};
+        const auto stored=GetReport(reportId);
+        if(!stored.value("ok",false)||!stored.contains("report")||
+           !stored["report"].is_object())
+            return {{"ok",false},{"error","investigation_report_not_found"}};
+        try {
+            const auto& report=stored["report"];
+            if(!report.contains("trials")||!report["trials"].is_array()||
+               report["trials"].size()!=2)
+                return {{"ok",false},{"error","generator_requires_pair"}};
+            const auto controlId=report["trials"][0].at("id").get<std::string>();
+            const auto actionId=report["trials"][1].at("id").get<std::string>();
+            if(!SafeRunId(controlId)||!SafeRunId(actionId)||
+               controlId==actionId)
+                return {{"ok",false},{"error","invalid_source_trials"}};
+            const auto c=Get(controlId),a=Get(actionId);
+            if(!c.value("ok",false)||!a.value("ok",false)||
+               !c.contains("run")||!a.contains("run"))
+                return {{"ok",false},{"error","source_trials_missing"}};
+            const auto comparison=Compare(controlId,actionId);
+            const auto result=generate::Build(objective,c["run"],a["run"],comparison);
+            json output=result;
+            output["source_report"]=reportId;
+            output["source_trial_ids"]=json::array({controlId,actionId});
+            return output;
+        }catch(const std::exception&) {
+            return {{"ok",false},{"error","invalid_source_report"}};
         }
     }
 
