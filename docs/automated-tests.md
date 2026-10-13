@@ -163,6 +163,24 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Reviewing knowledge in the native desktop UI
+
+The Dear ImGui **Project > Knowledge graph** tab reads the existing
+`project_knowledge_graph` native API, retaining the classic Project tabs for
+addresses, pointer paths and notes. Select an optional focus knowledge ID
+and a neighborhood depth (0–2). The view lists up to 32 claim nodes and
+their outgoing/incoming typed assertions in a second table. Double-click
+a node to put its ID into the focus filter, then reload to inspect the
+surrounding claims. The **All records** action returns a bounded overview.
+Switching target clears cached graph data; loading is read-only.
+
+All labels deliberately say **saved claim / asserted relation**, not
+independently verified causal truth. Graph source data is parsed and bounded
+in the application model and never executed as UI instructions. The UI
+does not arm breakpoints, modify a target or automatically promote statuses.
+It does not yet render a temporal causal timeline or automatically
+cross-link every claim to a disassembler location.
+
 ## Persistent typed knowledge graph
 
 Each Knowledge Engine record may now have up to 16 `relations` in addition
