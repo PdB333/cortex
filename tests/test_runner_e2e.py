@@ -342,6 +342,21 @@ def main():
             assert probe['hypotheses'][0]['action']['value']==1 and \
                 probe['hypotheses'][1]['action']['value']==2,probe
             checks.append('generated_duration_experiment_from_real_measurements')
+            denied_generated=client.call('cortex_test_generate_prepare',
+                report_id=report_id,objective='Probe input duration',
+                mutation_permission=False)
+            assert denied_generated['isError'],denied_generated
+            generated_step=client.data('cortex_test_generate_prepare',
+                report_id=report_id,objective='Probe input duration',
+                mutation_permission=True)['step']
+            generated_step_id=generated_step['id']
+            assert generated_step['status']=='awaiting_control' and \
+                generated_step['expected_target']['generation']==restarted['generation']
+            assert generated_step['choice']['action']['steps'][0]['tap_ms']==80
+            reopened_generated=client.data('cortex_test_step_get',id=generated_step_id)
+            assert reopened_generated['step']['revision']==1 and \
+                reopened_generated['step']['executed_by_step'] is False
+            checks.append('generated_candidate_persisted_as_supervised_unexecuted_step')
             invalid_goal=client.call('cortex_test_generate',
                 report_id=report_id,objective='X'*161)
             assert invalid_goal['isError'],invalid_goal
@@ -651,6 +666,10 @@ def main():
             client.close();client=None
             client=Mcp(exe,['--test-results',str(evidence)],root)
             archived=client.data('cortex_test_get',id=saved);assert archived['archived'] and archived['run']['outcome']=='passed';checks.append('report_reloaded_new_agent')
+            generated_reopened=client.data('cortex_test_step_get',id=generated_step_id)
+            assert generated_reopened['step']['status']=='awaiting_control' and \
+                generated_reopened['step']['choice']['action']['steps'][0]['tap_ms']==80
+            checks.append('generated_step_survives_agent_reconnect_without_replay')
             combined_reloaded=client.data('cortex_test_report_get',id=report_id)
             assert combined_reloaded['report']['id']==report_id and combined_reloaded['untrusted_data']
             assert combined_reloaded['report']['hypothesis_tests']['summary']['contradicted']==1
