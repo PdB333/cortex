@@ -322,6 +322,24 @@ def main():
             assert ledger[knowledge_id]['status']=='hypothesis' and \
                 ledger[rival_id]['status']=='hypothesis',ledger
             checks.append('competing_predictions_evaluated_without_status_upgrade')
+            graph_with_report=client.data('cortex_test_evidence_graph',
+                control=fresh_control['id'],action=fresh_action['id'],
+                report_id=report_id)
+            hypothesis_nodes=[node for node in graph_with_report['nodes']
+                              if node['kind']=='measured_hypothesis']
+            assert len(hypothesis_nodes)==2,hypothesis_nodes
+            assert {node['detail']['assessment'] for node in hypothesis_nodes}=={
+                'consistent_with_measurements','contradicted_by_measurements'}
+            assert all(node['detail']['semantic_verified'] is False
+                       for node in hypothesis_nodes)
+            assert sum(edge['relation']=='predicts_observation'
+                       for edge in graph_with_report['edges'])==4,graph_with_report
+            checks.append('hypothesis_graph_recomputed_from_measured_trial_pair')
+            mismatch=client.call('cortex_test_evidence_graph',
+                control=fresh_action['id'],action=fresh_control['id'],
+                report_id=report_id)
+            assert mismatch['isError'],mismatch
+            checks.append('graph_report_pair_mismatch_rejected')
             # Two explanations can both fit the *first* comparison while
             # predicting opposite outcomes on a proposed next experiment.
             unresolved=[
