@@ -276,13 +276,19 @@ json BuildToolsManifest() {
                                {"resume", "optional bool, default false"},
                                {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 20}}},
                                {"offset", {{"type", "integer"}, {"minimum", 0}, {"maximum", 1000000}}}}}});
+        j.push_back({{"name", "project_knowledge_graph"}, {"method", "POST"},
+                     {"path", "/project/knowledge/graph"},
+                     {"description", "Read-only bounded graph of persisted typed knowledge assertions. Neither status nor relation implies semantic or causal proof."},
+                     {"body", {{"focus", "optional exact knowledge ID"},
+                               {"depth", {{"type", "integer"}, {"minimum", 0}, {"maximum", 2}}},
+                               {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 32}}}}}});
         j.push_back({{"name", "project_knowledge_put"}, {"method", "POST"}, {"path", "/project/knowledge"},
                      {"description", "Create/update an evidence-linked investigation claim with optimistic revision; this does not verify the claim."},
                      {"body", {{"id", "required"}, {"kind", "required"}, {"statement", "required"},
                                {"status", "optional"}, {"notes", "optional"},
                                {"expected_revision", {{"type", "integer"}, {"minimum", 0}, {"description", "Current revision required when updating an existing claim."}}},
                                {"evidence", {{"type", "array"}, {"description", "Untrusted source references."}}},
-                               {"links", {{"type", "array"}}}, {"checks", {{"type", "array"}}}}}});
+                               {"links", {{"type", "array"}}}, {"relations", {{"type", "array"}, {"description", "Up to 16 asserted typed relationships, never automatically verified."}}}, {"checks", {{"type", "array"}}}}}});
         j.push_back({{"name", "project_knowledge_verify"}, {"method", "POST"}, {"path", "/project/knowledge/{id}/verify"},
                      {"description", "Rerun bounded read-only byte invariants against the live process. A match validates bytes, not semantic claims."}});
 
