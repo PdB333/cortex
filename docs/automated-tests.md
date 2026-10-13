@@ -211,6 +211,29 @@ After a binary update or restart, revalidate versioned module references
 with `cortex_knowledge_code_check` rather than reusing old addresses.
 The tool never arms breakpoints, injects code or grants agent permissions.
 
+## Supervised execution of an automatically generated experiment
+
+`cortex_test_generate_prepare(report_id, objective,
+mutation_permission=true)` takes a proposal synthesized by the read-only
+generator and saves it as a standard `cortex.step.v1` record under
+`--test-results/steps`. It does **not** run the proposal. The stored
+choice preserves the original report and source trials, program/architecture,
+original PID/generation and generated candidate prediction pair.
+
+Use `cortex_test_step_get` to read `awaiting_control`, then execute its
+control plan through **separately authorized** `cortex_test_run`.
+Attach its completed test ID with `cortex_test_step_record` revision 1;
+repeat with an independently authorized action and revision 2. Only after
+both plans and target identity are verified does Cortex produce a durable
+comparison report. Reusing source trials, mismatching steps or process
+generations, stale revisions, or an incomplete test is refused. An agent
+reconnecting during an incomplete step must NOT silently replay it.
+
+This is the first reproducible generated-experiment cycle; the generated
+question does not constitute general language comprehension or independent
+human consent. Provenance, tested alternatives and contradictions remain
+part of the report, not an automatic update to the Knowledge Engine.
+
 ## Automatic bounded experiment proposals (experimental)
 
 `cortex_test_generate(report_id="report_...", objective="Why does this field change?")`
