@@ -317,6 +317,31 @@ if(name=="cortex_knowledge_graph"){
     response=LocalToolResponse(MessageId(m),graph);
     return true;
 }
+if(name=="cortex_test_mechanism_check"){
+    if(!a.is_object() || a.size()<2 || a.size()>3 ||
+       !a.contains("pairs") || !a["pairs"].is_array() ||
+       a["pairs"].size()<2 || a["pairs"].size()>6 ||
+       !a.contains("read") || !a["read"].is_number_integer() ||
+       (a.contains("question") &&
+        (!a["question"].is_string() ||
+         a["question"].get_ref<const std::string&>().size()>160))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_mechanism_request",
+            "Supply 2-6 distinct completed control/action pairs and a read index"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="pairs" && it.key()!="read" && it.key()!="question"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_mechanism_request","Unsupported input field"),true);
+            return true;
+        }
+    const auto result=s->tests->MechanismCheck(
+        a["pairs"],a["read"].get<int>(),
+        a.value("question",std::string()));
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_evidence_graph"){
     if(!a.is_object()||a.size()<2||a.size()>3||!a.contains("control")||
        !a["control"].is_string()||!a.contains("action")||
