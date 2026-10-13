@@ -4,6 +4,7 @@
 #include "test_target_io.h"
 #include "test_knowledge.h"
 #include "test_code_context.h"
+#include "test_code_candidates.h"
 #include "test_code_knowledge.h"
 #include "test_file_version.h"
 #include "pe_unwind.h"
@@ -556,6 +557,108 @@ if(name=="cortex_test_compare"){
 // bounded experiment. A hardware data watchpoint's address is NOT code.
 // The caller must select the original live PID and process generation: never
 // silently reinterpret archived IPs in a restarted process.
+if(name=="cortex_test_code_candidates"){
+    if(!a.is_object()||a.size()!=4||!a.contains("control")||
+       !a["control"].is_string()||!a.contains("action")||
+       !a["action"].is_string()||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_candidate_request","Specify two trial IDs and the exact live target generation"),true);
+        return true;
+    }
+    const std::string firstId=a["control"].get<std::string>();
+    const std::string secondId=a["action"].get<std::string>();
+    if(!cortex::test::SafeRunId(firstId)||!cortex::test::SafeRunId(secondId)||
+       firstId==secondId){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_trial_pair","Distinct archived trial IDs required"),true);return true;
+    }
+    const auto c=s->tests->Get(firstId),b=s->tests->Get(secondId);
+    if(!c.value("ok",false)||!b.value("ok",false)||
+       !c.contains("run")||!b.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "trial_not_found","Both archived trials must exist"),true);return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    const auto session=runtime->sessions->Active();
+    if(generation==0||generation!=runtime->target.generation||
+       !session||!session->Alive()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_or_exited_target","Original process generation required"),true);return true;
+    }
+    const json target=TargetJson(runtime->target,true);
+    if(!c["run"].is_object()||!b["run"].is_object()||
+       !c["run"].contains("target")||!b["run"].contains("target")||
+       !cortex::test::code_context::SameTarget(c["run"]["target"],target)||
+       !cortex::test::code_context::SameTarget(b["run"]["target"],target)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","IP observations are from another process lifetime"),true);return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty()||modules.size()>2048){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot resolve live module offsets"),true);return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    cortex::test::code_context::UnwindQuery unwind;
+    if(runtime->target.architecture==cortex::target::Architecture::X64) {
+        unwind=[session](const std::string& ipText,const json& module)->json {
+            uint64_t ip=0,base=0;
+            if(!cortex::test::code_context::HexAddress(ipText,ip)||
+               !module.is_object()||!module.contains("base")||
+               !module["base"].is_string()||
+               !cortex::test::code_context::HexAddress(
+                   module["base"].get<std::string>(),base)||
+               !module.contains("size")||!module["size"].is_number_unsigned())
+                return {{"status","unavailable"}};
+            const cortex::test::pe_unwind::ReadAt reader=
+                [session](uint64_t at,size_t bytes,std::vector<uint8_t>& out)->bool {
+                    if(!session->Alive()||bytes>1024)return false;
+                    out.resize(bytes);
+                    size_t received=0;
+                    if(!session->ReadMemory(at,out.data(),bytes,&received)||
+                       received!=bytes){out.clear();return false;}
+                    return true;
+                };
+            return cortex::test::pe_unwind::Find(
+                base,module["size"].get<uint64_t>(),ip,reader);
+        };
+    }
+    auto first=cortex::test::code_context::Build(
+        c["run"],target,snapshot,8,{}, {},unwind);
+    auto second=cortex::test::code_context::Build(
+        b["run"],target,snapshot,8,{}, {},unwind);
+    auto emptyIfNoEvents=[&](json& value,const json& run) {
+        if(!value.value("ok",false) &&
+           value.value("error",std::string())=="no_recorded_instruction_events" &&
+           run.contains("code_evidence")&&run["code_evidence"].is_object()&&
+           run["code_evidence"].value("status",std::string())=="observed")
+            value={{"ok",true},{"target",target},{"locations",json::array()}};
+    };
+    emptyIfNoEvents(first,c["run"]);
+    emptyIfNoEvents(second,b["run"]);
+    if(!first.value("ok",false)||!second.value("ok",false)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "code_evidence_unavailable","Both trials require valid debugger logging snapshots"),true);return true;
+    }
+    if(!session->Alive()||runtime->target.generation!=generation){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Live process changed during resolution"),true);return true;
+    }
+    const auto pair=s->tests->Compare(firstId,secondId);
+    const auto result=cortex::test::code_candidates::Build(first,second,pair);
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_code_context"){
     if(!a.is_object() || !a.contains("test_id") ||
        !a["test_id"].is_string() ||
