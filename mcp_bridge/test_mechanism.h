@@ -4,6 +4,7 @@
 #include "test_code.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -70,7 +71,7 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
     json observations = json::array();
     json readSpec, referenceTarget, refControlSteps, refActionSteps;
     std::map<std::string, json> codeHits;
-    bool codeComplete = true, allNumeric = true;
+    bool codeComplete = true;
     int positives = 0, negatives = 0, zeros = 0;
     for (size_t i = 0; i < pairs.size(); ++i) {
         const auto& entry = pairs[i];
@@ -178,52 +179,81 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
         refActionSteps = ap["steps"];
         readSpec = cp["reads"][read];
 
-        // Log differences are evidence of co-occurrence only when each
-        // pair's breakpoint snapshots report complete coverage.
+        // A hardware watchpoint's "instruction_address" in the breakpoint
+        // comparison is the WATCHED DATA address, never a code IP. Only the
+        // instruction field of actual debugger events can identify code.
         const auto code = comparison.value("code_comparison", json::object());
+        const auto rawControl = c.value("code_evidence", json::object());
+        const auto rawAction = a.value("code_evidence", json::object());
         if (!code.is_object() ||
             code.value("status", std::string()) != "aligned" ||
-            !code.contains("breakpoints") || !code["breakpoints"].is_array() ||
-            code["breakpoints"].empty() || code["breakpoints"].size() > 4) {
+            !rawControl.is_object() || !rawAction.is_object() ||
+            rawControl.value("status", std::string()) != "observed" ||
+            rawAction.value("status", std::string()) != "observed" ||
+            !rawControl.contains("breakpoints") ||
+            !rawAction.contains("breakpoints") ||
+            !rawControl["breakpoints"].is_array() ||
+            !rawAction["breakpoints"].is_array() ||
+            rawControl["breakpoints"].empty() ||
+            rawControl["breakpoints"].size() > 4 ||
+            rawControl["breakpoints"].size() != rawAction["breakpoints"].size()) {
             codeComplete = false;
             continue;
         }
-        for (const auto& bp : code["breakpoints"]) {
-            if (!bp.is_object() || !bp.contains("id") ||
-                !bp["id"].is_number_integer() ||
-                !bp.contains("instruction_address") ||
-                !bp["instruction_address"].is_string() ||
-                !bp.contains("trace_complete") ||
-                !bp["trace_complete"].is_boolean() ||
-                !bp["trace_complete"].get<bool>() ||
-                !bp.contains("control_hits") ||
-                !bp["control_hits"].is_number_unsigned() ||
-                !bp.contains("action_hits") ||
-                !bp["action_hits"].is_number_unsigned()) {
-                codeComplete = false;
-                break;
+        std::map<std::string, int> controlIps, actionIps;
+        bool validEvents = true;
+        const auto parse = [&](const json& evidence,
+                               std::map<std::string, int>& ips) {
+            for (const auto& bp : evidence["breakpoints"]) {
+                if (!bp.is_object() ||
+                    bp.value("status", std::string()) != "observed" ||
+                    !bp.value("coverage_complete", false) ||
+                    bp.value("truncated_or_missing", true) ||
+                    !bp.contains("events") || !bp["events"].is_array() ||
+                    bp["events"].size() > 32) {
+                    validEvents = false;
+                    return;
+                }
+                for (const auto& event : bp["events"]) {
+                    if (!event.is_object() || !event.contains("instruction") ||
+                        !event["instruction"].is_string()) {
+                        validEvents = false;
+                        return;
+                    }
+                    std::string ip = event["instruction"].get<std::string>();
+                    if (ip.size() < 3 || ip.size() > 18 ||
+                        ip.compare(0, 2, "0x") != 0 ||
+                        !std::all_of(ip.begin()+2, ip.end(), [](unsigned char h) {
+                            return std::isxdigit(h) != 0;
+                        })) {
+                        validEvents = false;
+                        return;
+                    }
+                    std::transform(ip.begin(), ip.end(), ip.begin(),
+                        [](unsigned char h) { return static_cast<char>(std::tolower(h)); });
+                    ++ips[ip];
+                }
             }
-            const auto address = bp["instruction_address"].get<std::string>();
-            if (address.size() < 3 || address.size() > 18 ||
-                address.compare(0, 2, "0x") != 0) {
-                codeComplete = false;
-                break;
-            }
-            const std::string key =
-                std::to_string(bp["id"].get<int>()) + ":" + address;
-            if (!codeHits.count(key)) {
-                codeHits[key] = {{"breakpoint_id", bp["id"]},
-                    {"observed_instruction", address},
+        };
+        parse(rawControl, controlIps);
+        parse(rawAction, actionIps);
+        if (!validEvents || actionIps.size() > 32 || controlIps.size() > 32) {
+            codeComplete = false;
+            continue;
+        }
+        for (const auto& kv : actionIps) {
+            const auto& ip = kv.first;
+            if (!codeHits.count(ip)) {
+                codeHits[ip] = {{"observed_instruction", ip},
                     {"replicated_more_during_action", true},
                     {"observations", 0},
-                    {"source", "bounded_debugger_log"},
+                    {"source", "debugger_event_instruction_pointer"},
                     {"semantic_verified", false},
                     {"causal_verified", false}};
             }
-            auto& item = codeHits[key];
+            auto& item = codeHits[ip];
             item["observations"] = item["observations"].get<int>() + 1;
-            if (bp["action_hits"].get<uint64_t>() <=
-                bp["control_hits"].get<uint64_t>())
+            if (kv.second <= controlIps[ip])
                 item["replicated_more_during_action"] = false;
         }
     }
