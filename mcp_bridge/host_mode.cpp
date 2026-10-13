@@ -9,6 +9,7 @@
 #include "test_file_version.h"
 #include "pe_unwind.h"
 #include "agent_guide.h"
+#include "../core/project/knowledge_graph.h"
 #include "test_evidence_graph.h"
 
 #include "ai_activity_channel.h"
@@ -267,6 +268,53 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     const std::string id=a["id"].get<std::string>();
     if(name=="cortex_test_get"){auto out=s->tests->Get(id);response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));}
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
+    return true;
+}
+if(name=="cortex_knowledge_graph"){
+    if(!a.is_object()||a.size()<2||a.size()>5||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_graph_request","Exact target and generation required"),true);
+        return true;
+    }
+    json query=json::object();
+    for(auto it=a.begin();it!=a.end();++it){
+        if(it.key()=="focus"||it.key()=="depth"||it.key()=="limit")
+            query[it.key()]=it.value();
+        else if(it.key()!="_cortex_target"&&it.key()!="_cortex_generation"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_graph_request","Unrecognized graph field"),true);return true;
+        }
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;
+    }
+    // Never inject a runtime only to read project knowledge.
+    std::string err;
+    if(!runtime->payload ||
+       (!runtime->payload->Ready()&&!runtime->payload->TryConnectExisting(&err))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_runtime_unavailable","No existing project runtime is connected"),true);
+        return true;
+    }
+    json raw;
+    if(!runtime->payload->CallTool("project_knowledge_list",json::object(),raw,&err)||
+       !raw.is_object()||!raw.contains("result")||
+       !raw["result"].is_object()||!raw["result"].value("ok",false)||
+       !raw["result"].contains("records")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_list_unavailable","Cannot read persistent project knowledge"),true);
+        return true;
+    }
+    json graph;std::string graphError;
+    if(!project::knowledge::graph::Build(
+           raw["result"]["records"],query,graph,graphError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_graph_query",graphError),true);return true;
+    }
+    response=LocalToolResponse(MessageId(m),graph);
     return true;
 }
 if(name=="cortex_test_evidence_graph"){
