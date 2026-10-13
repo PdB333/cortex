@@ -8,6 +8,7 @@
 #include "test_file_version.h"
 #include "pe_unwind.h"
 #include "agent_guide.h"
+#include "test_evidence_graph.h"
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
@@ -265,6 +266,28 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     const std::string id=a["id"].get<std::string>();
     if(name=="cortex_test_get"){auto out=s->tests->Get(id);response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));}
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
+    return true;
+}
+if(name=="cortex_test_evidence_graph"){
+    if(!a.is_object()||a.size()!=2||!a.contains("control")||
+       !a["control"].is_string()||!a.contains("action")||
+       !a["action"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_graph_request","Provide control and action trial IDs"),true);
+        return true;
+    }
+    const auto first=s->tests->Get(a["control"].get<std::string>());
+    const auto second=s->tests->Get(a["action"].get<std::string>());
+    if(!first.value("ok",false)||!second.value("ok",false)||
+       !first.contains("run")||!second.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "trial_not_found","Both trials must already exist"),true);
+        return true;
+    }
+    const auto pair=s->tests->Compare(a["control"].get<std::string>(),
+                                     a["action"].get<std::string>());
+    const auto graph=cortex::test::graph::Build(first["run"],second["run"],pair);
+    response=LocalToolResponse(MessageId(m),graph,!graph.value("ok",false));
     return true;
 }
 if(name=="cortex_test_choose"){
