@@ -163,6 +163,34 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Automatic bounded experiment proposals (experimental)
+
+`cortex_test_generate(report_id="report_...", objective="Why does this field change?")`
+requires an **existing** comparison of two completed trials with aligned
+baselines. The generator does not accept candidate actions or new executable
+paths. It takes a previously executed key tap or window-scoped mouse click,
+produces one variation of its **duration only**, and proposes two competing
+numeric predictions for each previously observed changed integer read:
+**fixed effect** versus **duration-scaled effect**.
+
+The source data must include readable integer before/after measurements,
+a control with no change and an action with a change. For safety, integer
+magnitudes are bounded, a duration is changed only by exactly doubling or
+halving inside the existing test-plan validator, and changes to key codes,
+window coordinates, binaries, process identities or hooks are forbidden.
+Unsupported, unaligned or nonnumeric trials return an explicit stop reason.
+
+This is an initial mechanism to *construct* test candidates, rather than
+merely rank candidates supplied by the client. It is NOT general natural-
+language understanding: the objective is stored as an **untrusted question**,
+not parsed to infer game state or permission. The generated hypotheses are
+exploratory models, **not verified knowledge**. The proposed test assumes the
+same starting state can be restored; humans must verify that assumption and
+authorize the new control and action runs independently via `cortex_test_run`.
+No new target action or Knowledge Engine update is performed by generation.
+The resulting trials must be measured, compared, reported and considered for
+another iteration. Failed/rejected models are retained as negative evidence.
+
 ## Evidence graph (experimental)
 
 `cortex_test_evidence_graph(control="test_...", action="test_...")`
