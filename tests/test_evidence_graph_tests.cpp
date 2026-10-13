@@ -18,6 +18,13 @@ int main() {
     std::cerr<<graph.dump(2);return 1;
  }
  for(const auto& e:graph["edges"])if(e["causal_verified"]!=false)return 2;
+ const json hypotheses={{"results",json::array({{{"id","candidate.field"},
+    {"read",size_t{0}},{"assessment","consistent_with_measurements"}}})}};
+ const auto withHypotheses=Build(base,action,comparison,locs,hypotheses);
+ if(!withHypotheses.value("ok",false) ||
+    withHypotheses["nodes"].size()!=9 ||
+    withHypotheses["edges"].size()!=10 ||
+    withHypotheses["semantic_verified"]!=false)return 5;
  if(Build(json::object(),action,comparison).value("ok",false))return 3;
  const auto missing=Build(base,action,comparison,json::array({{{"address","0x99"}}}));
  if(!missing.value("ok",false)||missing["nodes"].size()!=7)return 4;
