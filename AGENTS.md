@@ -138,6 +138,15 @@ local program through its MCP tools.
     and use cortex_test_run before cortex_test_step_record. The generated
     plan is pinned to the source target generation and has not been run.
     On reconnect resume the recorded step; never silently replay it.
+9g. To test a proposed behavior across repetitions, gather at least two
+    independently executed, separately permitted control/action pairs. Call
+    cortex_test_mechanism_check with exact pairs and a read index; compare
+    automatically supported, contradicted and inconclusive directional
+    models. The controls must be input-free, baselines within pairs must
+    match and all runs must come from one recorded process lifetime.
+    Cortex may identify code IPs observed alongside the effect, but NEVER
+    interprets them as a proven function or causal chain. Record external
+    state/reset limitations and retain negative outcomes.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.

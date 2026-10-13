@@ -6,6 +6,7 @@
 #include "test_generate.h"
 #include "test_step.h"
 #include "test_investigation.h"
+#include "test_mechanism.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -251,6 +252,43 @@ public:
         }
     }
 
+
+    // Re-evaluate independent approved control/action trials. This is
+    // read-only: no launch, input, breakpoint arming or knowledge promotion.
+    json MechanismCheck(const json& ids, int read,
+                        const std::string& question) const {
+        if (!ids.is_array() || ids.size() < 2 || ids.size() > 6 ||
+            read < 0 || read > 7 || question.size() > 160)
+            return {{"ok", false}, {"error", "invalid_mechanism_request"}};
+        json pairs = json::array();
+        std::set<std::string> seen;
+        for (const auto& pair : ids) {
+            if (!pair.is_object() || pair.size() != 2 ||
+                !pair.contains("control") || !pair["control"].is_string() ||
+                !pair.contains("action") || !pair["action"].is_string())
+                return {{"ok", false}, {"error", "invalid_mechanism_pair"}};
+            const auto c = pair["control"].get<std::string>();
+            const auto a = pair["action"].get<std::string>();
+            if (!SafeRunId(c) || !SafeRunId(a) ||
+                !seen.insert(c).second || !seen.insert(a).second)
+                return {{"ok", false}, {"error", "reused_or_invalid_trial"}};
+            const auto first = Get(c), second = Get(a);
+            if (!first.value("ok", false) || !second.value("ok", false) ||
+                !first.contains("run") || !second.contains("run"))
+                return {{"ok", false}, {"error", "missing_mechanism_trial"}};
+            const auto comparison = Compare(c, a);
+            if (!comparison.value("ok", false))
+                return {{"ok", false}, {"error", "invalid_mechanism_comparison"}};
+            pairs.push_back({{"control_id", c}, {"action_id", a},
+                             {"control", first["run"]},
+                             {"action", second["run"]},
+                             {"comparison", comparison}});
+        }
+        try { return mechanism::Evaluate(pairs, read, question); }
+        catch (const std::exception&) {
+            return {{"ok",false},{"error","invalid_archived_mechanism_evidence"}};
+        }
+    }
 
     // Record a bounded multi-trial investigation without inferring semantic facts.
     bool Report(const std::vector<std::string>& ids,const std::string& title,
