@@ -293,18 +293,30 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
             {"semantic_verified", false}});
     }
     json candidates = json::array();
-    if (codeComplete && !codeHits.empty()) {
+    if (codeComplete) {
         for (const auto& kv : codeHits) {
-            const auto& bp = kv.second;
-            if (bp["observations"] != static_cast<int>(pairs.size())) {
-                codeComplete = false;
-                break;
-            }
-        }
-        if (codeComplete) {
-            for (const auto& kv : codeHits) candidates.push_back(kv.second);
+            json candidate = kv.second;
+            const bool repeated =
+                candidate["observations"] == static_cast<int>(pairs.size());
+            candidate["replicated_across_pairs"] = repeated;
+            candidate["replicated_more_during_action"] =
+                repeated && candidate["replicated_more_during_action"].get<bool>();
+            candidate["observed_write_watch_on_selected_read"] =
+                repeated && candidate["observed_write_watch_on_selected_read"].get<bool>();
+            if (candidates.size() < 32)
+                candidates.push_back(std::move(candidate));
         }
     }
+    const json nextExperiments = status == "replicated_intervention_association" ?
+        json::array({
+            {{"kind","vary_approved_input_condition"},{"requires_separate_permission",true}},
+            {{"kind","challenge_code_candidate_with_negative_control"},{"requires_separate_permission",true}}
+        }) : status == "contradictory_observations" ?
+        json::array({
+            {{"kind","verify_starting_state_and_repeat_both_arms"},{"requires_separate_permission",true}}
+        }) : json::array({
+            {{"kind","select_more_discriminating_read_or_action"},{"requires_separate_permission",true}}
+        });
     return {{"ok", true}, {"schema", "cortex.mechanism.check.v1"},
         {"status", status}, {"reason", "recomputed_from_trial_pairs"},
         {"question", question}, {"read", read},
@@ -312,6 +324,7 @@ inline json Evaluate(const json& pairs, int read, const std::string& question) {
         {"direction", direction}, {"pairs_evaluated", pairs.size()},
         {"observations", observations}, {"competing_models", models},
         {"instruction_candidates", candidates},
+        {"suggested_falsification_experiments", nextExperiments},
         {"code_coverage_sufficient", codeComplete && !codeHits.empty()},
         {"candidate_semantic_role", direction == "mixed" ?
             "unresolved_input_read_relationship" : "input_associated_observable"},
