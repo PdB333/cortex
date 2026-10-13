@@ -332,6 +332,23 @@ if(name=="cortex_test_evidence_graph"){
     response=LocalToolResponse(MessageId(m),graph,!graph.value("ok",false));
     return true;
 }
+if(name=="cortex_test_generate"){
+    if(!a.is_object()||a.size()!=2||
+       !a.contains("report_id")||!a["report_id"].is_string()||
+       !a.contains("objective")||!a["objective"].is_string()||
+       a["objective"].get_ref<const std::string&>().empty()||
+       a["objective"].get_ref<const std::string&>().size()>160){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_generate_request",
+            "Provide a report_id and a bounded question (maximum 160 bytes)"),true);
+        return true;
+    }
+    const auto result=s->tests->Generate(
+        a["report_id"].get<std::string>(),
+        a["objective"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_choose"){
     if(!a.is_object() || !a.contains("report_id") ||
        !a["report_id"].is_string() || !a.contains("candidates") ||
