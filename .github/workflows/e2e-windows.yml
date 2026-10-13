@@ -64,7 +64,7 @@ jobs:
 
       - name: Build complete Cortex tree
         shell: msys2 {0}
-        run: cmake --build build/e2e-${{ matrix.arch }} --parallel 2
+        run: cmake --build build/e2e-${{ matrix.arch }} --parallel ${{ matrix.arch == 'x86' && '1' || '2' }}
 
       - name: Build instrumented fake mod
         shell: msys2 {0}
