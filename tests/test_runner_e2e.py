@@ -311,6 +311,23 @@ def main():
             assert combined['report']['trials'][0]['code_breakpoints'] and                 combined['report']['comparison']['code_comparison']['status']=='aligned',combined
             checks.append('consolidated_report_contains_code_hits')
             checks.append('multi_trial_report_persisted')
+            generated=client.data('cortex_test_generate',
+                report_id=report_id,
+                objective='Find why input changes the fixture counter')
+            assert generated['status']=='proposed' and generated['executed'] is False
+            assert generated['requires_separate_permission'] and \
+                generated['semantic_verified'] is False and \
+                generated['generated_hypotheses_are_exploratory']
+            probe=generated['candidates'][0]
+            assert probe['action']['steps'][0]['vk']==32 and \
+                probe['action']['steps'][0]['tap_ms']==80,probe
+            assert probe['hypotheses'][0]['action']['value']==1 and \
+                probe['hypotheses'][1]['action']['value']==2,probe
+            checks.append('generated_duration_experiment_from_real_measurements')
+            invalid_goal=client.call('cortex_test_generate',
+                report_id=report_id,objective='X'*161)
+            assert invalid_goal['isError'],invalid_goal
+            checks.append('generation_rejects_unbounded_goal')
             evaluated=combined['report']['hypothesis_tests']
             assert evaluated['pair_comparable'] and evaluated['summary']=={
                 'consistent':1,'contradicted':1,'inconclusive':0},evaluated
