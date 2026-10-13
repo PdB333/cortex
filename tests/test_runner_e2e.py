@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':13}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':15}]}))
         try:
             client=Mcp(exe,['--tools','all','--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -202,7 +202,7 @@ def main():
             client.data('cortex_test_cancel',id=slow['id']);cancelled=wait(slow['id']);assert cancelled['status']=='cancelled',cancelled
             assert cancelled['cleanup']['released'];checks.append('cancel_and_release')
             used=client.data('cortex_launch_status',profile='fixture')['profile']
-            assert used['tests']==7 and used['max_tests']==13,used
+            assert used['tests']==7 and used['max_tests']==15,used
             checks.append('operator_test_count')
             directory=pathlib.Path(passed['report_directory']);assert (directory/'result.json').exists() and (directory/'investigation.md').exists();checks.append('json_markdown_reports')
             stale=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation+1,attach=True,mutation_permission=True)
@@ -254,6 +254,14 @@ def main():
             fresh_control=run(steps=[{'delay_ms':50}],expect=[{'read':0,'op':'unchanged'}],
                               breakpoints=[fresh_bp_id])
             fresh_action=run(breakpoints=[fresh_bp_id])
+            # Repeat under a different numerical baseline, using the same
+            # allowed key and debugger watch; no reset is assumed.
+            replicated_control=run(
+                steps=[{'delay_ms':50}],expect=[{'read':0,'op':'unchanged'}],
+                breakpoints=[fresh_bp_id])
+            replicated_action=run(breakpoints=[fresh_bp_id])
+            assert replicated_control['outcome']=='passed' and \
+                replicated_action['outcome']=='passed',(replicated_control,replicated_action)
             removed=client.data('debug_breakpoint_delete',id=fresh_bp_id,
                                 mutation_permission=True)
             assert removed['result']['ok'],removed
@@ -262,6 +270,31 @@ def main():
             comparisons=client.data('cortex_test_compare',first=fresh_control['id'],second=fresh_action['id'])
             assert comparisons['comparison']=='aligned' and comparisons['reads'][0]['candidate_difference'],comparisons
             checks.append('controlled_pair_after_process_restart')
+            verification_pairs=[
+                {'control':fresh_control['id'],'action':fresh_action['id']},
+                {'control':replicated_control['id'],'action':replicated_action['id']}
+            ]
+            mechanism=client.data('cortex_test_mechanism_check',
+                pairs=verification_pairs,read=0,
+                question='Does a permitted key press raise the observed value?')
+            assert mechanism['status']=='replicated_intervention_association',mechanism
+            assert mechanism['direction']=='increased' and mechanism['pairs_evaluated']==2
+            assert mechanism['observations'][0]['baseline']==0 and \
+                mechanism['observations'][1]['baseline']==1
+            assert mechanism['competing_models'][0]['assessment']=='consistent_with_measurements'
+            assert mechanism['competing_models'][2]['assessment']=='contradicted_by_measurements'
+            assert mechanism['semantic_verified'] is False and \
+                mechanism['causal_verified'] is False and \
+                mechanism['performed_actions'] is False
+            checks.append('replicated_intervention_with_rival_models')
+            assert mechanism['code_coverage_sufficient'] and \
+                mechanism['instruction_candidates'] and \
+                mechanism['instruction_candidates'][0]['semantic_verified'] is False
+            checks.append('replicated_debugger_leads_are_not_function_proof')
+            reuse=client.call('cortex_test_mechanism_check',
+                pairs=[verification_pairs[0],verification_pairs[0]],read=0)
+            assert reuse['isError'],reuse
+            checks.append('reused_trial_does_not_count_as_replication')
             graph=client.data('cortex_test_evidence_graph',
                 control=fresh_control['id'],action=fresh_action['id'])
             assert graph['schema']=='cortex.evidence.graph.v1' and graph['pair_comparable']
@@ -666,6 +699,11 @@ def main():
             client.close();client=None
             client=Mcp(exe,['--test-results',str(evidence)],root)
             archived=client.data('cortex_test_get',id=saved);assert archived['archived'] and archived['run']['outcome']=='passed';checks.append('report_reloaded_new_agent')
+            archived_mechanism=client.data('cortex_test_mechanism_check',
+                pairs=verification_pairs,read=0)
+            assert archived_mechanism['status']=='replicated_intervention_association'
+            assert archived_mechanism['performed_actions'] is False
+            checks.append('archived_mechanism_recomputed_without_replay')
             generated_reopened=client.data('cortex_test_step_get',id=generated_step_id)
             assert generated_reopened['step']['status']=='awaiting_control' and \
                 generated_reopened['step']['choice']['action']['steps'][0]['tap_ms']==80
