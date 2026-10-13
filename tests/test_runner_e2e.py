@@ -262,6 +262,18 @@ def main():
             comparisons=client.data('cortex_test_compare',first=fresh_control['id'],second=fresh_action['id'])
             assert comparisons['comparison']=='aligned' and comparisons['reads'][0]['candidate_difference'],comparisons
             checks.append('controlled_pair_after_process_restart')
+            graph=client.data('cortex_test_evidence_graph',
+                control=fresh_control['id'],action=fresh_action['id'])
+            assert graph['schema']=='cortex.evidence.graph.v1' and graph['pair_comparable']
+            assert graph['semantic_verified'] is False
+            assert any(n['kind']=='measured_read' and n['id']=='action_read_0' and
+                       n['detail']['changed'] for n in graph['nodes']),graph
+            assert all(edge['causal_verified'] is False for edge in graph['edges']),graph
+            checks.append('bounded_evidence_graph_is_not_causal_proof')
+            denied_graph=client.call('cortex_test_evidence_graph',
+                control='test_missing',action=fresh_action['id'])
+            assert denied_graph['isError'],denied_graph
+            checks.append('unknown_graph_evidence_rejected')
             code_pair=comparisons['code_comparison']
             assert code_pair['status']=='aligned' and                 code_pair['breakpoints'][0]['control_hits']==0 and                 code_pair['breakpoints'][0]['action_hits']>=1 and                 code_pair['breakpoints'][0]['candidate_more_during_action'],code_pair
             checks.append('instruction_hits_compared_against_control')
