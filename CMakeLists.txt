@@ -453,6 +453,10 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_test_knowledge_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_test_knowledge_tests COMMAND cortex_test_knowledge_tests)
 
+    add_executable(cortex_knowledge_graph_tests tests/knowledge_graph_tests.cpp)
+    target_link_libraries(cortex_knowledge_graph_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_knowledge_graph_tests COMMAND cortex_knowledge_graph_tests)
+
     add_executable(cortex_test_code_candidates_tests tests/test_code_candidates_tests.cpp)
     target_link_libraries(cortex_test_code_candidates_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_test_code_candidates_tests COMMAND cortex_test_code_candidates_tests)
@@ -498,7 +502,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()
