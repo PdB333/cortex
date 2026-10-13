@@ -279,6 +279,24 @@ def main():
             code_pair=comparisons['code_comparison']
             assert code_pair['status']=='aligned' and                 code_pair['breakpoints'][0]['control_hits']==0 and                 code_pair['breakpoints'][0]['action_hits']>=1 and                 code_pair['breakpoints'][0]['candidate_more_during_action'],code_pair
             checks.append('instruction_hits_compared_against_control')
+            code_candidates=client.data('cortex_test_code_candidates',
+                control=fresh_control['id'],action=fresh_action['id'],
+                _cortex_target=pid,_cortex_generation=restarted['generation'])
+            assert code_candidates['ok'] and code_candidates['candidates'],code_candidates
+            assert code_candidates['semantic_verified'] is False and \
+                code_candidates['causal_verified'] is False,code_candidates
+            assert any(row['module'].lower()==target.name.lower() and
+                       row['action_sampled_events']>row['control_sampled_events']
+                       for row in code_candidates['candidates']),code_candidates
+            assert all(row['classification']=='unverified_code_candidate'
+                       and row['call_relationship_verified'] is False
+                       for row in code_candidates['candidates'])
+            checks.append('live_code_region_candidates_from_real_instruction_hits')
+            stale_candidates=client.call('cortex_test_code_candidates',
+                control=fresh_control['id'],action=fresh_action['id'],
+                _cortex_target=pid,_cortex_generation=generation)
+            assert stale_candidates['isError'],stale_candidates
+            checks.append('code_region_candidates_reject_stale_process')
             hypotheses=[
                 {'id':knowledge_id,'read':0,
                  'control':{'op':'unchanged'},'action':{'op':'increased'}},
