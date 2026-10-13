@@ -36,6 +36,10 @@ private:
 
     std::array<char, 512> noteText_ = {};
     std::array<char, 256> noteTags_ = {};
+
+    std::array<char, 129> knowledgeFocus_ = {};
+    int knowledgeDepth_ = 1;
+    std::string selectedKnowledgeId_;
 };
 
 } // namespace cortex::ui
