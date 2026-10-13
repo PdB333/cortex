@@ -501,6 +501,52 @@ int main(){
                                     {{"ok",true},{"value","18446744073709551614"}},
                                     {{"op","increased"}}).has_value(),
               "64-bit integer strings are not coerced for ordering");
+        // A generated probe may enter the supervised step journal, but it
+        // must still execute each arm separately and cannot reuse source IDs.
+        const auto prepared=runner.GeneratePrepare(
+            assessed["id"].get<std::string>(),"Probe fixture counter duration");
+        Check(prepared.value("ok",false) &&
+              prepared["step"]["status"]=="awaiting_control" &&
+              prepared["step"]["executed_by_step"]==false,
+              "generated experiment persists as an unexecuted supervised step");
+        if(prepared.value("ok",false)) {
+            const auto stepId=prepared["step"]["id"].get<std::string>();
+            Check(!runner.StepRecord(stepId,"control",controlId,1).value("ok",true),
+                  "cannot silently reuse an archived control as a new trial");
+            auto generatedControl=prepared["step"]["choice"]["control"];
+            auto generatedAction=prepared["step"]["choice"]["action"];
+            generatedControl["mutation_permission"]=true;
+            generatedAction["mutation_permission"]=true;
+            Plan generatedControlPlan,generatedActionPlan;
+            std::string generateError;
+            Check(ParsePlan(generatedControl,generatedControlPlan,generateError)&&
+                  ParsePlan(generatedAction,generatedActionPlan,generateError),
+                  "generated plans still pass the original execution validator");
+            value=0;
+            Check(runner.Start(generatedControlPlan,context,out,error),
+                  "separately execute generated control");
+            const auto freshControlId=out["id"].get<std::string>();
+            Check(Wait(runner,freshControlId)["status"]=="completed",
+                  "generated control completed");
+            auto savedControl=runner.StepRecord(stepId,"control",freshControlId,1);
+            Check(savedControl.value("ok",false)&&
+                  savedControl["step"]["status"]=="awaiting_action",
+                  "record real control with revision guard");
+            value=0;
+            Check(runner.Start(generatedActionPlan,context,out,error),
+                  "separately execute generated action");
+            const auto freshActionId=out["id"].get<std::string>();
+            Check(Wait(runner,freshActionId)["status"]=="completed",
+                  "generated action completed");
+            const auto finished=runner.StepRecord(stepId,"action",freshActionId,2);
+            Check(finished.value("ok",false)&&
+                  finished["step"]["status"]=="completed"&&
+                  finished["step"]["hypothesis_summary"]["consistent"]==1 &&
+                  finished["step"]["hypothesis_summary"]["contradicted"]==1,
+                  "generated experiment preserves negative and positive measurements");
+            Check(runner.StepGet(stepId).value("ok",false),
+                  "generated step can be reopened after completion");
+        }
         json invalidPredictions=hypotheses;
         invalidPredictions[0]["action"]["op"]="execute";
         Check(!runner.Report({controlId,experimentId},"Invalid",assessed,
