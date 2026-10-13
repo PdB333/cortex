@@ -10,7 +10,8 @@ using json=nlohmann::json;
 // Bounded, read-only evidence graph. Edges indicate provenance or temporal
 // correlation, NEVER verified causal dependency.
 inline json Build(const json& control,const json& action,const json& comparison,
-                  const json& codeLocations=json::array()) {
+                  const json& codeLocations=json::array(),
+                  const json& hypothesisEvaluation=nullptr) {
     if(!control.is_object()||!action.is_object()||!comparison.is_object()||
        !codeLocations.is_array()||codeLocations.size()>8||
        !comparison.value("ok",false))
@@ -93,6 +94,33 @@ inline json Build(const json& control,const json& action,const json& comparison,
                     edge("action",id,"logged_during");
                 }
             }
+        }
+    }
+    // Recomputed predictions may be drawn into the graph, but are still
+    // measurements supplied by a caller, not server-attested semantic facts.
+    if(!hypothesisEvaluation.is_null()) {
+        if(!hypothesisEvaluation.is_object() ||
+           !hypothesisEvaluation.contains("results") ||
+           !hypothesisEvaluation["results"].is_array() ||
+           hypothesisEvaluation["results"].size()>8)
+            return {{"ok",false},{"error","invalid_graph_hypotheses"}};
+        size_t n=0;
+        for(const auto& row:hypothesisEvaluation["results"]) {
+            if(!row.is_object()||!row.contains("id")||!row["id"].is_string()||
+               !row.contains("read")||!row["read"].is_number_unsigned()||
+               !row.contains("assessment")||!row["assessment"].is_string())
+                return {{"ok",false},{"error","invalid_graph_hypothesis"}};
+            const size_t index=row["read"].get<size_t>();
+            const auto idText=row["id"].get<std::string>();
+            if(index>=control["before"].size()||idText.empty()||idText.size()>128)
+                return {{"ok",false},{"error","invalid_graph_hypothesis"}};
+            const std::string id="hypothesis_"+std::to_string(n++);
+            node(id,"measured_hypothesis",{{"knowledge_or_candidate_id",idText},
+                {"assessment",row["assessment"]},{"semantic_verified",false},
+                {"evidence_source","recomputed_trial_predictions"}});
+            edge("pair",id,"assessed_in");
+            edge(id,"control_read_"+std::to_string(index),"predicts_observation");
+            edge(id,"action_read_"+std::to_string(index),"predicts_observation");
         }
     }
     std::set<std::string> seen;
