@@ -42,7 +42,7 @@ def main():
     checks=[];pid=0;client=None
     with tempfile.TemporaryDirectory(prefix='cortex-e2e-') as temp:
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
-        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':11}]}))
+        config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':13}]}))
         try:
             client=Mcp(exe,['--tools','all','--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
@@ -202,7 +202,7 @@ def main():
             client.data('cortex_test_cancel',id=slow['id']);cancelled=wait(slow['id']);assert cancelled['status']=='cancelled',cancelled
             assert cancelled['cleanup']['released'];checks.append('cancel_and_release')
             used=client.data('cortex_launch_status',profile='fixture')['profile']
-            assert used['tests']==7 and used['max_tests']==11,used
+            assert used['tests']==7 and used['max_tests']==13,used
             checks.append('operator_test_count')
             directory=pathlib.Path(passed['report_directory']);assert (directory/'result.json').exists() and (directory/'investigation.md').exists();checks.append('json_markdown_reports')
             stale=client.call('cortex_restart',profile='fixture',pid=pid,generation=generation+1,attach=True,mutation_permission=True)
@@ -379,13 +379,26 @@ def main():
                 'action':{'steps':[{'vk':32,'tap_ms':40}],
                           'reads':[{'address':fixture['test_value'],'type':'u32'}]},
                 'hypotheses':split_predictions}
+            third_id='fixture.third_mechanism'
+            three_initial=unresolved+[{
+                'id':third_id,'read':0,
+                'control':{'op':'unchanged'},'action':{'op':'increased'}}]
+            three_report=client.data('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],
+                title='Three surviving explanations',
+                hypotheses=three_initial,mutation_permission=True)
+            three_predictions=split_predictions+[{
+                'id':third_id,'read':0,
+                'control':{'op':'unchanged'},'action':{'op':'increased'}}]
+            triple_old=dict(old_input,hypotheses=three_predictions)
+            triple_follow=dict(followup,hypotheses=three_predictions)
             denied_preparation=client.call('cortex_test_step_prepare',
-                report_id=unresolved_id,candidates=[old_input,followup],
+                report_id=three_report["id"],candidates=[triple_old,triple_follow],
                 mutation_permission=False)
             assert denied_preparation['isError'],denied_preparation
             checks.append('step_persistence_permission_required')
             prepared=client.data('cortex_test_step_prepare',
-                report_id=unresolved_id,candidates=[old_input,followup],
+                report_id=three_report["id"],candidates=[triple_old,triple_follow],
                 mutation_permission=True)
             step_id=prepared['step']['id']
             assert prepared['step']['choice']['id']=='key_then_settle' and \
@@ -423,7 +436,7 @@ def main():
             assert completed['step']['status']=='completed' and \
                 completed['step']['revision']==3 and \
                 completed['step']['hypothesis_summary']=={
-                    'consistent':1,'contradicted':1,'inconclusive':0},completed
+                    'consistent':2,'contradicted':1,'inconclusive':0},completed
             assert completed['step']['semantic_verified'] is False
             checks.append('supervised_pair_archived_without_semantic_upgrade')
             stale_bind=client.call('cortex_test_step_record',id=step_id,
@@ -431,6 +444,76 @@ def main():
                 expected_revision=2,mutation_permission=True)
             assert stale_bind['isError'],stale_bind
             checks.append('step_revision_conflict_prevents_replay')
+            # The first supervised pair leaves two explanations plausible.
+            # Choose and persist the next experiment from its archived report.
+            second_predictions=[
+                {'id':knowledge_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'increased'}},
+                {'id':third_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'unchanged'}}
+            ]
+            old_again={'id':'repeat_first',
+                'control':followup['control'],
+                'action':followup['action'],
+                'hypotheses':second_predictions}
+            second_proposal={'id':'probe_again',
+                'control':followup['control'],
+                'action':{'steps':[{'vk':32,'tap_ms':40},{'delay_ms':90}],
+                          'reads':[{'address':fixture['test_value'],'type':'u32'}]},
+                'hypotheses':second_predictions}
+            next_choice=client.data('cortex_test_step_next',
+                id=step_id,expected_revision=3,
+                candidates=[old_again,second_proposal])
+            assert next_choice['status']=='proposed' and \
+                next_choice['choice']['id']=='probe_again' and \
+                next_choice['candidates'][0]['already_tested'] is True and \
+                next_choice['iteration']==2 and \
+                len(next_choice['history_ids'])>=4 and \
+                next_choice['executed'] is False,next_choice
+            checks.append('next_step_reuses_archived_history_and_avoids_repeat')
+            not_authorized=client.call('cortex_test_step_continue',
+                id=step_id,expected_revision=3,
+                candidates=[old_again,second_proposal],
+                mutation_permission=False)
+            assert not_authorized['isError'],not_authorized
+            persisted=client.data('cortex_test_step_continue',
+                id=step_id,expected_revision=3,
+                candidates=[old_again,second_proposal],
+                mutation_permission=True)
+            second_id=persisted['step']['id']
+            assert persisted['status']=='prepared' and \
+                persisted['step']['parent_step_id']==step_id and \
+                persisted['step']['root_step_id']==step_id and \
+                persisted['step']['iteration']==2 and \
+                persisted['step']['status']=='awaiting_control' and \
+                persisted['parent_step']['revision']==4 and \
+                persisted['executed'] is False,persisted
+            checks.append('second_supervised_step_persisted_without_input')
+            no_parallel=client.data('cortex_test_step_next',
+                id=step_id,expected_revision=4,
+                candidates=[old_again,second_proposal])
+            assert no_parallel['status']=='continuation_already_prepared',no_parallel
+            checks.append('concurrent_second_children_prevented')
+            trial2control=run(steps=[{'delay_ms':30}],
+                              expect=[{'read':0,'op':'unchanged'}])
+            record2control=client.data('cortex_test_step_record',
+                id=second_id,arm='control',test_id=trial2control['id'],
+                expected_revision=1,mutation_permission=True)
+            assert record2control['step']['status']=='awaiting_action',record2control
+            trial2action=run(steps=[{'vk':32,'tap_ms':40},{'delay_ms':90}],
+                             expect=[{'read':0,'op':'increased'}])
+            record2action=client.data('cortex_test_step_record',
+                id=second_id,arm='action',test_id=trial2action['id'],
+                expected_revision=2,mutation_permission=True)
+            assert record2action['step']['status']=='completed' and \
+                record2action['step']['hypothesis_summary']=={
+                    'consistent':1,'contradicted':1,'inconclusive':0},record2action
+            checks.append('two_supervised_rounds_terminate_with_evidence')
+            final_stop=client.data('cortex_test_step_next',
+                id=second_id,expected_revision=3,
+                candidates=[second_proposal])
+            assert final_stop['status']=='need_competing_hypotheses',final_stop
+            checks.append('bounded_loop_stops_when_only_one_model_remains')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -455,6 +538,13 @@ def main():
                 resumed_step['step']['action_id']==step_action['id'] and \
                 resumed_step['hypothesis_tests']['summary']['contradicted']==1,resumed_step
             checks.append('supervised_step_recovered_after_reconnect')
+            root_step=client.data('cortex_test_step_get',id=step_id)
+            child_step=client.data('cortex_test_step_get',id=second_id)
+            assert root_step['step']['next_step_id']==second_id and \
+                child_step['step']['parent_step_id']==step_id and \
+                child_step['step']['status']=='completed' and \
+                child_step['hypothesis_tests']['summary']['contradicted']==1,(root_step,child_step)
+            checks.append('two_round_investigation_reopens_after_reconnect')
             checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:

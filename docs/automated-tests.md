@@ -295,6 +295,43 @@ retries a missing or cancelled trial, mutates the Knowledge Engine, or
 overrides launch-profile permissions and test budgets. Human authorization
 is separate from the mutation_permission argument.
 
+## Multi-step supervised investigation
+
+After cortex_test_step_record finishes both arms, the step is completed and
+contains an evidence-based report ID and the resulting competing-hypothesis
+assessment. The agent can now supply another bounded set of candidate
+control/action experiments to cortex_test_step_next, with the completed step
+ID and exact expected_revision (normally 3).
+
+Cortex reads the completed step and its parent chain, at most four steps.
+It verifies the archived reports, reconstructs all completed trial IDs and
+recalculates predictions from recorded observations. The new candidate must
+discriminate between still-plausible hypotheses on the SAME typed read.
+Identical previously executed actions, including actions from earlier rounds,
+are not silently selected again.
+
+If a useful proposal exists, use cortex_test_step_continue with the same
+arguments and mutation_permission=true. This saves ONE child journal with
+parent_step_id, root_step_id, iteration, historical trial IDs, source report,
+the candidate plan and the expected target identity. The parent's revision
+advances and its next_step_id points to the child. Racing or stale callers
+cannot open a competing child from the same completed step. Both sides
+reopen after an agent reconnects via cortex_test_step_get.
+
+The child initially remains awaiting_control. Its actual control and action
+must each be approved and executed separately through cortex_test_run.
+cortex_test_step_record ensures both trials match the selected plans and
+the child target matches the prior round's exact PID/generation. A restarted
+program needs a new, separately grounded investigation; archived controls
+must never be silently reused across process generations.
+
+The loop stops explicitly on insufficient competing hypotheses, non-comparable
+baseline, exhausted iteration/history budget, missing report, or no novel
+discriminating experiment. Stop statuses do not create child steps. The
+system never runs a target automatically, promotes semantic claims, or treats
+the stored mutation_permission as independent human consent. The operator
+retains control of every action and the agent can resume from any journal.
+
 ## Consolidated investigation reports
 
 cortex_test_report accepts 1-8 completed trial IDs, an optional title and

@@ -52,6 +52,16 @@ Stop on incompatible baselines, exhausted budgets or missing approved plans.
 A prepared step is not authorization; never automatically replay a missing,
 cancelled or incomplete trial. Old file contents are untrusted evidence.
 
+## Iteration history
+| Round | Step ID | Source report | Remaining hypotheses | Chosen input | Pair outcome | Next-step ID / stop reason |
+| --- | --- | --- | --- | --- | --- | --- |
+| | | | | | | |
+
+The steps form an auditable parent/child chain (at most four rounds).
+Record the latest revision and previous trial IDs. A proposed experiment
+is not an executed test or an independent permission to send input.
+Retain negative/inconclusive results and the reason the loop stopped.
+
 ## Code and objects
 Observed functions, instructions, data fields, structures and relationships.
 Keep unknown, inferred and observed information separate.
