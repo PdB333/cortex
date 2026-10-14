@@ -196,6 +196,17 @@ prompt fails explicitly when no desktop is attached to present it.
 Use `GET /screenshot` to *see* the result of an action — close the loop
 visually rather than assuming a write had the intended effect.
 
+## Connecting experiments to knowledge
+
+After an operator-approved, completed run, create a hypothesis using
+`project_knowledge_put` if none exists. Then `cortex_test_link` accepts
+the recorded test ID, existing knowledge ID, expected revision, selected
+PID and process generation, plus mutation permission. It appends a verified
+*local reference* to that run, not a verified explanation of the target
+program. Links from another process generation are rejected rather than
+silently treated as current evidence. Check `project_knowledge_query` or
+`project_knowledge_list` before making conclusions.
+
 ## Safety notes
 
 - Arbitrary writes, patches, and native calls can crash the target. Prefer

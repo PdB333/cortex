@@ -2,6 +2,7 @@
 #include "launch_config.h"
 #include "launch_manager.h"
 #include "test_target_io.h"
+#include "test_knowledge.h"
 #include "agent_guide.h"
 
 #include "ai_activity_channel.h"
@@ -298,6 +299,85 @@ if(name=="cortex_test_compare"){
     }
     auto comparison=s->tests->Compare(a["first"].get<std::string>(),a["second"].get<std::string>());
     response=LocalToolResponse(MessageId(m),comparison,!comparison.value("ok",false));return true;
+}
+// Link a real completed trial to a pre-existing hypothesis. This avoids
+// accepting free-form evidence references without checking the local result
+// file, selected process lifetime and optimistic knowledge revision.
+if(name=="cortex_test_link"){
+    if(!a.is_object()||a.size()!=6||
+       !a.contains("test_id")||!a["test_id"].is_string()||
+       !a.contains("knowledge_id")||!a["knowledge_id"].is_string()||
+       !a.contains("expected_revision")||!a["expected_revision"].is_number_integer()||
+       !a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_link_request","Expected trial ID, knowledge ID, revision, target, generation and mutation permission"),true);
+        return true;
+    }
+    const auto revision=a["expected_revision"].get<int64_t>();
+    if(revision<1||revision>1000000){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_expected_revision","Revision must be between 1 and 1000000"),true);
+        return true;
+    }
+    const std::string testId=a["test_id"].get<std::string>();
+    const std::string knowledgeId=a["knowledge_id"].get<std::string>();
+    if(!project::knowledge::ValidId(knowledgeId)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_id","Use the ID of an existing project knowledge record"),true);
+        return true;
+    }
+    const auto trial=s->tests->Get(testId);
+    if(!trial.value("ok",false)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","Cortex has no recorded trial with this ID"),true);
+        return true;
+    }
+    std::string code,message;
+    const auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const auto target=TargetJson(runtime->target,true);
+    json loaded;
+    std::string callError;
+    const auto path="/project/knowledge/"+knowledgeId;
+    if(!runtime->payload->CallRouteExisting("GET",path,json::object(),loaded,&callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_read_failed",callError.empty()?"Could not fetch knowledge record":callError),true);
+        return true;
+    }
+    const json record=loaded.value("result",json::object()).value("record",json(nullptr));
+    json update;
+    if(!cortex::test::knowledge::PrepareLink(record,trial["run"],target,
+            static_cast<int>(revision),update,callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(callError,callError),true);
+        return true;
+    }
+    json saved;
+    if(!runtime->payload->CallRouteExisting("POST","/project/knowledge",update,saved,&callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            callError=="revision_conflict"?"knowledge_revision_conflict":"knowledge_write_failed",
+            callError.empty()?"Knowledge record was not saved":callError),true);
+        return true;
+    }
+    const json item=saved.value("result",json::object()).value("record",json(nullptr));
+    if(!item.is_object()||!item.value("revision",0)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_save_invalid","Target returned an invalid knowledge update"),true);
+        return true;
+    }
+    RecordEvent(s,"knowledge.evidence_linked",runtime,{
+        {"id",knowledgeId},{"test_id",testId},{"revision",item["revision"]}});
+    response=LocalToolResponse(MessageId(m),{
+        {"ok",true},{"id",knowledgeId},{"linked_test",testId},
+        {"revision",item["revision"]},{"claim_status",item["status"]},
+        {"evidence_count",item["evidence"].size()},{"semantic_verified",false},
+        {"notice","A recorded observation does not validate the claim's semantic meaning."}
+    });
+    return true;
 }
 if(name=="cortex_test_run"){
     cortex::test::Plan plan;std::string error;

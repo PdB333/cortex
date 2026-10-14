@@ -44,7 +44,7 @@ def main():
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
         config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':9}]}))
         try:
-            client=Mcp(exe,['--launch-config',str(config),'--test-results',str(evidence)],root)
+            client=Mcp(exe,['--tools','all','--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
             started=client.data('cortex_launch',profile='fixture',attach=True,mutation_permission=True)
             pid=started['pid'];assert started['attached'];generation=started['generation'];checks.append('launch_auto_attach')
@@ -66,6 +66,38 @@ def main():
             passed=run();assert passed['outcome']=='passed',passed
             assert passed['before'][0]['value']==0 and passed['after'][0]['value']==1,passed
             saved=passed['id'];checks.append('real_input_before_after')
+            # Knowledge link checks the actual completed run and the current
+            # process identity before adding a provenance reference. It must
+            # not upgrade a hypothesis into a semantic "verified" fact.
+            knowledge_id='fixture.HealthCandidate_'+__import__('uuid').uuid4().hex
+            created=client.data('project_knowledge_put',id=knowledge_id,kind='field',
+                statement='Candidate field involved in fixture input handling',
+                status='hypothesis',mutation_permission=True)
+            record=created['result']['record']
+            assert record['revision']==1 and record['status']=='hypothesis',created
+            link_args={'test_id':saved,'knowledge_id':knowledge_id,'expected_revision':1,
+                       '_cortex_target':pid,'_cortex_generation':generation,
+                       'mutation_permission':True}
+            denied_link=client.call('cortex_test_link',**dict(link_args,mutation_permission=False))
+            assert denied_link['isError'],denied_link
+            checks.append('knowledge_link_permission_denied')
+            linked=client.data('cortex_test_link',**link_args)
+            assert linked['revision']==2 and linked['claim_status']=='hypothesis' and \
+                linked['semantic_verified'] is False and linked['evidence_count']==1,linked
+            checks.append('trial_linked_to_knowledge')
+            reloaded_claim=client.data('project_knowledge_list')['result']['records'][knowledge_id]
+            assert reloaded_claim['evidence'][0]['source']=='cortex_test' and \
+                reloaded_claim['evidence'][0]['reference']==saved,reloaded_claim
+            assert reloaded_claim['status']=='hypothesis' and \
+                reloaded_claim['last_verification']['status']=='not_run',reloaded_claim
+            checks.append('knowledge_evidence_persisted')
+            stale_link=client.call('cortex_test_link',**link_args)
+            assert stale_link['isError'] and \
+                stale_link['structuredContent']['error']['code']=='knowledge_revision_conflict',stale_link
+            duplicate_link=client.call('cortex_test_link',**dict(link_args,expected_revision=2))
+            assert duplicate_link['isError'] and \
+                duplicate_link['structuredContent']['error']['code']=='test_evidence_already_linked',duplicate_link
+            checks.append('knowledge_revision_and_duplicate_guards')
             control=run(steps=[{'delay_ms':30}],expect=[{'read':0,'op':'unchanged'}]);assert control['outcome']=='passed',control;checks.append('control_trial')
             false=run(expect=[{'read':0,'op':'unchanged'}]);assert false['outcome']=='failed',false;checks.append('false_prediction_rejected')
             missing=run(reads=[{'address':'0x1','type':'u32'}]);assert missing['outcome']=='inconclusive' and missing['error']=='baseline_unreadable',missing;checks.append('unreadable_prevents_input')
@@ -99,6 +131,15 @@ def main():
             assert restarted['generation']!=generation and restarted['attached'] and restarted['reset_scope']=='process_only',restarted
             assert restarted['previous_generation']==generation
             checks.append('atomic_profile_restart_and_attach')
+            carried=client.data('project_knowledge_list')['result']['records'][knowledge_id]
+            assert carried['revision']==2 and carried['evidence'][0]['reference']==saved,carried
+            checks.append('knowledge_survives_target_restart')
+            old_generation_link=client.call('cortex_test_link',**dict(link_args,
+                expected_revision=2,_cortex_target=pid,
+                _cortex_generation=restarted['generation']))
+            assert old_generation_link['isError'] and \
+                old_generation_link['structuredContent']['error']['code']=='test_target_identity_mismatch',old_generation_link
+            checks.append('cross_generation_evidence_revalidated')
             fixture=json.loads(manifest.read_text())
             base.update({'_cortex_target':pid,'_cortex_generation':restarted['generation'],
                          'reads':[{'address':fixture['test_value'],'type':'u32'}]})
