@@ -84,7 +84,138 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(name);
         if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
+        return StartLocked(it->second, result, error);
+    }
+
+    // Restarts are opt-in. The operator must permit both abrupt termination
+    // and reset at MCP startup. The entire stop/start transaction is serialized
+    // with other start/stop/test actions for this manager.
+    bool Restart(const std::string& name, uint64_t requestedPid,
+                 uint64_t requestedGeneration, json& result, std::string& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = entries_.find(name);
+        if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
         Entry& entry = it->second;
+        if (!entry.profile.allowReset || !entry.profile.allowStop) {
+            error = "launch_reset_not_allowed"; return false;
+        }
+        if (entry.testRunning) { error = "test_in_progress"; return false; }
+        if (!entry.handle || requestedPid == 0 || requestedPid != entry.pid ||
+            requestedGeneration == 0 || requestedGeneration != entry.generation) {
+            error = "restart_process_identity_mismatch"; return false;
+        }
+        if (WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
+            error = "restart_process_not_running"; return false;
+        }
+        // Consume no external state before checking whether a new run is
+        // within the operator-provided maximum count.
+        if (entry.launches >= entry.profile.maxRuns) {
+            error = "launch_profile_run_limit_reached"; return false;
+        }
+        if (!TerminateProcess(entry.handle, 1)) {
+            error = "restart_stop_failed:" + std::to_string(GetLastError()); return false;
+        }
+        if (WaitForSingleObject(entry.handle, 3000) != WAIT_OBJECT_0) {
+            error = "restart_termination_timeout"; return false;
+        }
+        const auto oldPid=entry.pid;
+        const auto oldGeneration=entry.generation;
+        if (!StartLocked(entry, result, error)) {
+            error = "restart_launch_failed:" + error;
+            return false;
+        }
+        result["previous_pid"]=oldPid;
+        result["previous_generation"]=oldGeneration;
+        result["reset_scope"]="process_only";
+        result["note"]="Restarted executable; saves, files, network state and subprocesses are NOT reset.";
+        return true;
+    }
+
+    // This permission is provided by a startup profile, never by target data
+    // or a tool-call flag. A lease excludes concurrent tests/restarts/stops.
+    bool BeginTest(uint64_t pid, uint64_t generation, const std::vector<int>& keys,
+                   std::string& error, bool mouseRequested = false) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            Entry& entry = pair.second;
+            if (entry.pid != pid || !entry.handle) continue;
+            if (!generation || generation != entry.generation ||
+                WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
+                error = "test_target_generation_changed"; return false;
+            }
+            if (!entry.profile.allowInput) { error = "test_input_not_allowed"; return false; }
+            if (mouseRequested && !entry.profile.allowMouse) {
+                error = "test_mouse_not_allowed"; return false;
+            }
+            for (int key : keys) {
+                if (std::find(entry.profile.testKeys.begin(), entry.profile.testKeys.end(), key) ==
+                        entry.profile.testKeys.end()) { error = "test_key_not_allowed"; return false; }
+            }
+            if (entry.testRunning) { error = "test_already_running"; return false; }
+            if (entry.tests >= entry.profile.maxTests) { error = "test_run_limit_reached"; return false; }
+            entry.testRunning = true;
+            ++entry.tests;
+            return true;
+        }
+        error = "test_target_not_launched_by_cortex";
+        return false;
+    }
+    void EndTest(uint64_t pid, uint64_t generation) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            Entry& entry = pair.second;
+            if (entry.pid == pid && entry.generation == generation) entry.testRunning = false;
+        }
+    }
+    bool IsCurrent(uint64_t pid, uint64_t generation) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            const Entry& e = pair.second;
+            if (e.pid == pid && e.generation == generation && e.handle &&
+                WaitForSingleObject(e.handle, 0) == WAIT_TIMEOUT) return true;
+        }
+        return false;
+    }
+
+    bool Stop(const std::string& name, uint64_t requestedPid,
+              json& result, std::string& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = entries_.find(name);
+        if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
+        Entry& entry = it->second;
+        if (entry.testRunning) { error = "test_in_progress"; return false; }
+        if (!entry.profile.allowStop) { error = "launch_stop_not_allowed"; return false; }
+        if (!entry.handle || requestedPid == 0 || requestedPid != entry.pid) {
+            error = "launch_pid_mismatch"; return false;
+        }
+        if (WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
+            error = "launch_process_not_running"; return false;
+        }
+        // TerminateProcess is intentionally NOT automatic on MCP exit or
+        // debugger detach. It is only available for an explicitly permitted
+        // profile and a matching child PID, with a separate permission check.
+        if (!TerminateProcess(entry.handle, 1)) {
+            error = "launch_stop_failed:" + std::to_string(GetLastError());
+            return false;
+        }
+        WaitForSingleObject(entry.handle, 3000);
+        result = MakeStatus(entry);
+        result["ok"] = true;
+        return true;
+    }
+
+private:
+    struct Entry {
+        Profile profile;
+        HANDLE handle = nullptr;
+        DWORD pid = 0;
+        uint64_t generation = 0;
+        uint64_t startedMs = 0;
+        int launches = 0;
+        int tests = 0;
+        bool testRunning = false;
+    };
+    bool StartLocked(Entry& entry, json& result, std::string& error) {
         if (entry.testRunning) { error = "test_in_progress"; return false; }
         if (entry.handle && WaitForSingleObject(entry.handle, 0) == WAIT_TIMEOUT) {
             error = "launch_profile_already_running"; return false;
@@ -178,91 +309,6 @@ public:
         result["note"] = "Process launched. Use cortex_attach with this PID to enable runtime tools.";
         return true;
     }
-
-    // This permission is provided by a startup profile, never by target data
-    // or a tool-call flag. A lease excludes concurrent tests/restarts/stops.
-    bool BeginTest(uint64_t pid, uint64_t generation, const std::vector<int>& keys,
-                   std::string& error, bool mouseRequested = false) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& pair : entries_) {
-            Entry& entry = pair.second;
-            if (entry.pid != pid || !entry.handle) continue;
-            if (!generation || generation != entry.generation ||
-                WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
-                error = "test_target_generation_changed"; return false;
-            }
-            if (!entry.profile.allowInput) { error = "test_input_not_allowed"; return false; }
-            if (mouseRequested && !entry.profile.allowMouse) {
-                error = "test_mouse_not_allowed"; return false;
-            }
-            for (int key : keys) {
-                if (std::find(entry.profile.testKeys.begin(), entry.profile.testKeys.end(), key) ==
-                        entry.profile.testKeys.end()) { error = "test_key_not_allowed"; return false; }
-            }
-            if (entry.testRunning) { error = "test_already_running"; return false; }
-            if (entry.tests >= entry.profile.maxTests) { error = "test_run_limit_reached"; return false; }
-            entry.testRunning = true;
-            ++entry.tests;
-            return true;
-        }
-        error = "test_target_not_launched_by_cortex";
-        return false;
-    }
-    void EndTest(uint64_t pid, uint64_t generation) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& pair : entries_) {
-            Entry& entry = pair.second;
-            if (entry.pid == pid && entry.generation == generation) entry.testRunning = false;
-        }
-    }
-    bool IsCurrent(uint64_t pid, uint64_t generation) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& pair : entries_) {
-            const Entry& e = pair.second;
-            if (e.pid == pid && e.generation == generation && e.handle &&
-                WaitForSingleObject(e.handle, 0) == WAIT_TIMEOUT) return true;
-        }
-        return false;
-    }
-
-    bool Stop(const std::string& name, uint64_t requestedPid,
-              json& result, std::string& error) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = entries_.find(name);
-        if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
-        Entry& entry = it->second;
-        if (entry.testRunning) { error = "test_in_progress"; return false; }
-        if (!entry.profile.allowStop) { error = "launch_stop_not_allowed"; return false; }
-        if (!entry.handle || requestedPid == 0 || requestedPid != entry.pid) {
-            error = "launch_pid_mismatch"; return false;
-        }
-        if (WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
-            error = "launch_process_not_running"; return false;
-        }
-        // TerminateProcess is intentionally NOT automatic on MCP exit or
-        // debugger detach. It is only available for an explicitly permitted
-        // profile and a matching child PID, with a separate permission check.
-        if (!TerminateProcess(entry.handle, 1)) {
-            error = "launch_stop_failed:" + std::to_string(GetLastError());
-            return false;
-        }
-        WaitForSingleObject(entry.handle, 3000);
-        result = MakeStatus(entry);
-        result["ok"] = true;
-        return true;
-    }
-
-private:
-    struct Entry {
-        Profile profile;
-        HANDLE handle = nullptr;
-        DWORD pid = 0;
-        uint64_t generation = 0;
-        uint64_t startedMs = 0;
-        int launches = 0;
-        int tests = 0;
-        bool testRunning = false;
-    };
     static json MakeStatus(const Entry& e) {
         bool alive = e.handle && WaitForSingleObject(e.handle, 0) == WAIT_TIMEOUT;
         json data = {
@@ -271,6 +317,7 @@ private:
             {"allow_attach", e.profile.allowAttach},
             {"allow_input", e.profile.allowInput},
             {"allow_mouse", e.profile.allowMouse},
+            {"allow_reset", e.profile.allowReset},
             {"test_keys", e.profile.testKeys},
             {"max_tests", e.profile.maxTests},
             {"tests", e.tests},

@@ -70,6 +70,8 @@ The startup profile can additionally contain:
     "allow_attach": true,
     "allow_input": true,
     "allow_mouse": true,
+    "allow_reset": true,
+    "allow_stop": true,
     "test_keys": [32],
     "max_tests": 10
 
@@ -134,3 +136,18 @@ Both actions share the same duration, window/process and observation budgets.
 A wait that never matches ends inconclusively with wait_condition_not_met.
 A click fails rather than forwarding outside the intended application's
 client rectangle. Minimized windows and ambiguous window selection are refused.
+
+## Restarting between trials
+
+When the operator enables both allow_reset and allow_stop, cortex_restart
+stops the owned running process and relaunches the SAME fixed executable and
+arguments. Supply the profile name, previous pid, exact previous generation,
+mutation_permission=true and optionally attach=true.
+
+The stop/start transaction is serialized with other launches/stops/trials and
+checks max_runs BEFORE stopping. If relaunch fails, the old program may already
+have terminated and the error is explicit.
+
+This is a PROCESS-ONLY reset. Saves, local files, caches, network effects and
+child processes are NOT restored. An agent must acknowledge external state
+differences when comparing experiments across process generations.

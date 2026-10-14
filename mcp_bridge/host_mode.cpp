@@ -206,6 +206,7 @@ json LocalTools(bool requireTarget=false){json t=json::array({
 {{"name","cortex_hooks"},{"description","Inspect the runtime HookManager registry, ownership, conflicts and hit/exception counters."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
 {{"name","cortex_launch"},{"description","Start a program from an operator-owned --launch-config profile. Executable and arguments cannot be supplied by the agent."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"attach",{{"type","boolean"}}},{"wait_ms",{{"type","integer"},{"minimum",100},{"maximum",10000}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
 {{"name","cortex_launch_status"},{"description","List configured launch profiles, remaining run budgets, and the liveness of processes started by this MCP server."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}}}},{"additionalProperties",false}}},{"_cortex",{{"host_control",true},{"read_only",true}}}},
+{{"name","cortex_restart"},{"description","Restart the same program when explicitly allow_reset and allow_stop are enabled. Only process state resets; saves and external effects persist."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"pid",{{"type","integer"},{"minimum",1}}},{"generation",{{"type","integer"},{"minimum",1}}},{"attach",{{"type","boolean"}}},{"wait_ms",{{"type","integer"},{"minimum",100},{"maximum",10000}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","pid","generation","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
 {{"name","cortex_stop"},{"description","Terminate only a process created from an explicitly stoppable profile, with matching PID and mutation permission. Unsaved target state may be lost."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}},{"pid",{{"type","integer"},{"minimum",1}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","pid","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}}
 });
 for (const auto& tool : CortexTestTools()) t.push_back(tool);
@@ -295,14 +296,14 @@ if(name=="cortex_launch_status"){
     json result=s->launcher->Status(profile);
     response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
 }
-if(name=="cortex_launch"||name=="cortex_stop"){
+if(name=="cortex_launch"||name=="cortex_restart"||name=="cortex_stop"){
     if(!s->launcher){response=LocalToolResponse(MessageId(m),LocalToolFailure("launch_not_configured","Pass --launch-config to Cortex MCP at startup"),true);return true;}
     if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||!a["mutation_permission"].get<bool>()){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("mutation_permission_required","Starting and stopping a program requires mutation_permission=true and a configured profile"),true);return true;
     }
     if(!a.contains("profile")||!a["profile"].is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_profile","A configured profile name is required"),true);return true;}
     for(auto it=a.begin();it!=a.end();++it){
-        if(it.key()!="profile"&&it.key()!="pid"&&it.key()!="mutation_permission"&&it.key()!="attach"&&it.key()!="wait_ms"){
+        if(it.key()!="profile"&&it.key()!="pid"&&it.key()!="generation"&&it.key()!="mutation_permission"&&it.key()!="attach"&&it.key()!="wait_ms"){
             response=LocalToolResponse(MessageId(m),LocalToolFailure("unexpected_launch_argument",it.key()),true);return true;}
     }
     const std::string profile=a["profile"].get<std::string>();
@@ -311,9 +312,23 @@ if(name=="cortex_launch"||name=="cortex_stop"){
     const auto policy=s->launcher->Status(profile);
     if(attach&&(!policy.value("ok",false)||!policy["profile"].value("allow_attach",false))){response=LocalToolResponse(MessageId(m),LocalToolFailure("launch_attach_not_allowed","Enable allow_attach in the startup profile"),true);return true;}
     json result;std::string error;
-    if(name=="cortex_launch"){
-        if(!s->launcher->Start(profile,result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
-        RecordEvent(s,"process.launched",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+    if(name=="cortex_launch"||name=="cortex_restart"){
+        if(name=="cortex_restart"){
+            if(!a.contains("pid")||!a["pid"].is_number_integer()||UnsignedArg(a,"pid")==0||
+               !a.contains("generation")||!a["generation"].is_number_integer()||
+               UnsignedArg(a,"generation")==0){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_restart_identity","Require previous PID and process generation"),true);return true;
+            }
+            if(!s->launcher->Restart(profile,UnsignedArg(a,"pid"),UnsignedArg(a,"generation"),result,error)){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;
+            }
+            RecordEvent(s,"process.restarted",nullptr,{{"profile",profile},{"previous_pid",UnsignedArg(a,"pid")},
+                {"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+            if(PruneDeadRuntimes(s))EmitToolsChanged(s);
+        }else{
+            if(!s->launcher->Start(profile,result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+            RecordEvent(s,"process.launched",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+        }
         if(attach){
             const uint64_t pid=result.at("pid").get<uint64_t>();
             const uint64_t generation=result.at("generation").get<uint64_t>();

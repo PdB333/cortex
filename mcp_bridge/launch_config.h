@@ -20,6 +20,7 @@ struct Profile {
     bool allowAttach = false;
     bool allowInput = false;
     bool allowMouse = false;
+    bool allowReset = false;
     std::vector<int> testKeys;
     int maxRuns = 3;
     int maxTests = 10;
@@ -56,7 +57,7 @@ inline bool ParseProfiles(const json& config, std::vector<Profile>& result, std:
                 it.key() != "working_directory" && it.key() != "arguments" &&
                 it.key() != "allow_stop" && it.key() != "max_runs" &&
                 it.key() != "allow_attach" && it.key() != "allow_input" &&
-                it.key() != "allow_mouse" &&
+                it.key() != "allow_mouse" && it.key() != "allow_reset" &&
                 it.key() != "test_keys" && it.key() != "max_tests") {
                 error = "unknown_launch_profile_field:" + it.key();
                 return false;
@@ -131,7 +132,7 @@ inline bool ParseProfiles(const json& config, std::vector<Profile>& result, std:
             }
             profile.allowStop = item["allow_stop"].get<bool>();
         }
-        for (const char* flag : {"allow_attach", "allow_input", "allow_mouse"}) {
+        for (const char* flag : {"allow_attach", "allow_input", "allow_mouse", "allow_reset"}) {
             if (item.contains(flag) && !item[flag].is_boolean()) {
                 error = std::string("invalid_") + flag; return false;
             }
@@ -139,6 +140,7 @@ inline bool ParseProfiles(const json& config, std::vector<Profile>& result, std:
         profile.allowAttach = item.value("allow_attach", false);
         profile.allowInput = item.value("allow_input", false);
         profile.allowMouse = item.value("allow_mouse", false);
+        profile.allowReset = item.value("allow_reset", false);
         if (item.contains("test_keys")) {
             if (!item["test_keys"].is_array() || item["test_keys"].size() > 32) {
                 error = "invalid_test_keys"; return false;

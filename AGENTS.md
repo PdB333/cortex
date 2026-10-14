@@ -56,6 +56,10 @@ local program through its MCP tools.
 - The mutation_permission argument is not independent human consent. Ask for
   authorization in the human workflow before starting/stopping the target,
   replaying input, patching memory or calling code.
+- cortex_restart requires allow_reset and allow_stop in the operator's profile,
+  the current PID/generation, and mutation_permission=true. It serializes
+  stop/relaunch, refuses active tests and respects max_runs. Restarting a process
+  is NOT a reset of saves, files, network state or child processes.
 - cortex_stop can force-terminate only a child started by this MCP instance
   using an explicit allow_stop profile and matching PID. Forced termination
   may lose game progress and external side effects cannot be rolled back.
