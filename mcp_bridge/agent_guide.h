@@ -232,6 +232,12 @@ inline nlohmann::json CortexTestTools() {
         {"settle_ms",{{"type","integer"},{"minimum",0},{"maximum",1000}}},
         {"mutation_permission",{{"type","boolean"}}},{"_cortex_target",selector},{"_cortex_generation",generation}
     },json::array({"steps","reads","mutation_permission"})));
+    tools.push_back(tool("cortex_test_evidence_graph",
+        "Read-only, bounded graph linking two completed trials, their planned actions and measured memory changes. Edges are observations, NEVER verified causal relationships.",{
+        {"control",{{"type","string"},{"minLength",6},{"maxLength",96}}},
+        {"action",{{"type","string"},{"minLength",6},{"maxLength",96}}},
+        {"report_id",{{"type","string"},{"minLength",8},{"maxLength",96}}}
+    },json::array({"control","action"})));
     tools.push_back(tool("cortex_test_compare","Compare two completed trial observations and flag differing baselines. Does not imply causality.",{
         {"first",{{"type","string"},{"minLength",6},{"maxLength",96}}},
         {"second",{{"type","string"},{"minLength",6},{"maxLength",96}}}

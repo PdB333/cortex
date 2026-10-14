@@ -8,6 +8,7 @@
 #include "test_file_version.h"
 #include "pe_unwind.h"
 #include "agent_guide.h"
+#include "test_evidence_graph.h"
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
@@ -265,6 +266,70 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     const std::string id=a["id"].get<std::string>();
     if(name=="cortex_test_get"){auto out=s->tests->Get(id);response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));}
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
+    return true;
+}
+if(name=="cortex_test_evidence_graph"){
+    if(!a.is_object()||a.size()<2||a.size()>3||!a.contains("control")||
+       !a["control"].is_string()||!a.contains("action")||
+       !a["action"].is_string()||
+       (a.contains("report_id") && !a["report_id"].is_string())){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_graph_request","Provide control and action trial IDs"),true);
+        return true;
+    }
+    const auto first=s->tests->Get(a["control"].get<std::string>());
+    const auto second=s->tests->Get(a["action"].get<std::string>());
+    if(!first.value("ok",false)||!second.value("ok",false)||
+       !first.contains("run")||!second.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "trial_not_found","Both trials must already exist"),true);
+        return true;
+    }
+    const auto pair=s->tests->Compare(a["control"].get<std::string>(),
+                                     a["action"].get<std::string>());
+    json evaluated=nullptr;
+    if(a.contains("report_id")) {
+        const auto report=s->tests->GetReport(a["report_id"].get<std::string>());
+        if(!report.value("ok",false)||!report.contains("report")||
+           !report["report"].is_object()) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "report_not_found","Existing report required"),true);return true;
+        }
+        const auto& data=report["report"];
+        if(!data.contains("trials")||!data["trials"].is_array()||
+           data["trials"].size()!=2||!data["trials"][0].is_object()||
+           !data["trials"][1].is_object()||
+           data["trials"][0].value("id",std::string())!=a["control"]||
+           data["trials"][1].value("id",std::string())!=a["action"]||
+           !data.contains("hypothesis_tests")||
+           !data["hypothesis_tests"].is_object()||
+           !data["hypothesis_tests"].contains("results")||
+           !data["hypothesis_tests"]["results"].is_array()) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "graph_report_pair_mismatch","Report must reference this trial pair"),true);return true;
+        }
+        json predictions=json::array();
+        for(const auto& row:data["hypothesis_tests"]["results"]) {
+            if(!row.is_object()||!row.contains("id")||!row.contains("read")||
+               !row.contains("control")||!row.contains("action")) {
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                    "invalid_graph_report","Malformed archived predictions"),true);return true;
+            }
+            predictions.push_back({{"id",row["id"]},{"read",row["read"]},
+                {"control",row["control"]},{"action",row["action"]}});
+        }
+        std::string err;
+        if(!cortex::test::predictions::Validate(predictions,
+                 first["run"]["before"].size(),err)) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_graph_predictions",err),true);return true;
+        }
+        evaluated=cortex::test::predictions::Evaluate(predictions,
+             first["run"],second["run"],pair);
+    }
+    const auto graph=cortex::test::graph::Build(
+        first["run"],second["run"],pair,json::array(),evaluated);
+    response=LocalToolResponse(MessageId(m),graph,!graph.value("ok",false));
     return true;
 }
 if(name=="cortex_test_choose"){

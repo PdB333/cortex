@@ -453,6 +453,10 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_test_knowledge_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_test_knowledge_tests COMMAND cortex_test_knowledge_tests)
 
+    add_executable(cortex_test_evidence_graph_tests tests/test_evidence_graph_tests.cpp)
+    target_link_libraries(cortex_test_evidence_graph_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_test_evidence_graph_tests COMMAND cortex_test_evidence_graph_tests)
+
     add_executable(cortex_test_runner_tests tests/test_runner_tests.cpp)
     target_link_libraries(cortex_test_runner_tests PRIVATE nlohmann_json::nlohmann_json)
     if(MINGW)

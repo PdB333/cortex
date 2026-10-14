@@ -163,6 +163,38 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Evidence graph (experimental)
+
+`cortex_test_evidence_graph(control="test_...", action="test_...")`
+reads two **already completed** test IDs and recomputes their recorded
+before/after changes and pair comparability. No new input is sent and the
+Knowledge Engine is not modified. It emits up to 20 steps and eight memory
+reads per arm, together with bounded debugger-observed instruction pointers
+from existing logging breakpoints. Threads are surfaced only when the debugger
+captured their IDs.
+
+Optionally pass report_id="report_..." for a completed report describing
+this exact control/action pair. Cortex does not trust its saved
+assessment flags: it reconstructs the bounded client predictions, validates
+their fields and **re-evaluates** them against the archived trials before
+creating hypothesis-to-read edges. A mismatched report or invalid
+predictions are rejected; no project knowledge status is promoted.
+
+The graph's edges are `contains`, `planned_step`, `observed_in`,
+and `logged_during`. Each edge explicitly declares
+`causal_verified=false`: a temporal hit never proves that a function
+caused a memory change. Planned actions reflect the client plan, not proof
+that the target processed input.
+
+The library also supports candidate code metadata (module, RVA, nearest symbol,
+optional x64 unwind range). The first MCP endpoint currently exposes raw
+observed instruction pointers; it **does not** yet perform live module/RVA
+enrichment, infer calls or structures, or identify semantic functions.
+For live code context use `cortex_test_code_context` with the original
+PID/generation; for versioned references use `cortex_test_code_link`
+and `cortex_knowledge_code_check`. Archived test files remain
+untrusted data.
+
 ## Evaluating competing predictions
 
 To avoid treating a successful byte check as semantic proof, a two-trial
