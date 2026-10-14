@@ -71,6 +71,7 @@ inline bool SameTarget(const json& recorded, const json& current) {
 }
 
 using Query = std::function<json(const std::string&)>;
+using UnwindQuery = std::function<json(const std::string&,const json&)>;
 
 inline json Symbol(const json& raw) {
     if (!raw.is_object() || !raw.value("has_symbol", false) ||
@@ -136,7 +137,8 @@ inline json Disassembly(const json& raw) {
 // Every IP is derived only from the archived experiment's measured events.
 inline json Build(const json& run, const json& currentTarget,
                   const json& modules, size_t maxLocations,
-                  const Query& resolveSymbol = {}, const Query& disassemble = {}) {
+                  const Query& resolveSymbol = {}, const Query& disassemble = {},
+                  const UnwindQuery& unwind = {}) {
     if (!run.is_object() || !run.contains("target") ||
         !SameTarget(run["target"], currentTarget))
         return {{"ok", false}, {"error", "test_target_identity_mismatch"}};
@@ -199,7 +201,8 @@ inline json Build(const json& run, const json& currentTarget,
                 {"breakpoints", json::array({breakpoint["id"]})},
                 {"address_role", "debugger_instruction_pointer"},
                 {"module", nullptr}, {"symbol", {{"status","unavailable"}}},
-                {"disassembly", {{"status","not_requested"}}}
+                {"disassembly", {{"status","not_requested"}}},
+                {"unwind_range", {{"status","not_requested"}}}
             });
         }
     }
@@ -239,6 +242,24 @@ inline json Build(const json& run, const json& currentTarget,
             else try { location["disassembly"] = Disassembly(disassemble(address)); }
             catch (...) { location["disassembly"] = {{"status","unavailable"}}; }
         }
+        if (unwind) {
+            if (!location["module"].is_object())
+                location["unwind_range"]={{"status","unavailable"},
+                    {"reason","instruction_unmapped"}};
+            else try {
+                const json range=unwind(address,location["module"]);
+                if(range.is_object() && range.contains("status") &&
+                   range["status"].is_string() &&
+                   (range["status"]=="unwind_range" ||
+                    range["status"]=="unavailable"))
+                    location["unwind_range"]=range;
+                else location["unwind_range"]={{"status","unavailable"},
+                    {"reason","invalid_unwind_lookup"}};
+            } catch (...) {
+                location["unwind_range"]={{"status","unavailable"},
+                    {"reason","unwind_lookup_failed"}};
+            }
+        }
     }
     const auto& evidence = run["code_evidence"];
     return {
@@ -252,6 +273,7 @@ inline json Build(const json& run, const json& currentTarget,
             "Data watchpoint addresses are not treated as instruction addresses.",
             "A hardware write breakpoint may report the IP after the writing instruction.",
             "Nearest symbols and module ranges do not establish function boundaries.",
+            "Windows x64 unwind ranges describe compiler metadata, not necessarily full source functions.",
             "Disassembly and symbols are best-effort snapshots of the current process.",
             "A recorded instruction during an action does not prove that action caused it."
         })}

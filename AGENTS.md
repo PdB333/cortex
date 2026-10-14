@@ -46,7 +46,9 @@ local program through its MCP tools.
    stable RVAs; optional symbols and disassembly are read-only and best
    effort. Never mistake a watched DATA address for an instruction pointer.
    A write trap may report the next instruction; a nearest symbol does
-   not prove function boundaries.
+   not prove function boundaries. On Windows x64, Cortex may also return a
+   bounded PE unwind range from the running image's exception directory.
+   This is loader metadata, NOT a certain source-level function boundary.
 9. Observe again and compare. Use cortex_test_compare(first,second) for
    completed control/experiment pairs; check baseline_aligned and individual
    readings. Different initial values make a test inconclusive, and matching

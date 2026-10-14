@@ -216,7 +216,8 @@ use `cortex_test_code_context` while the original process is still alive:
       _cortex_generation=<original process generation>,
       max_locations=4,
       symbols=true,
-      disassemble=true)
+      disassemble=true,
+      unwind=true)
 
 It only examines instruction pointers already recorded in the trial (not
 arbitrary addresses supplied with the request). The response maps up to
@@ -233,8 +234,17 @@ as an investigation lead only after revalidating the matching binary build.
 Data watchpoint addresses are watched *data*, not code addresses, and the
 hardware trap's saved IP may point after the writing instruction.
 
+On Windows x64 PE32+ images, `unwind_range` uses the current process's
+exception directory (`.pdata`) to locate a bounded RVA range that covers the
+captured IP, even when no PDB is present. It reads only PE headers and selected
+unwind table rows via the existing process session; it never scans the whole
+binary or inserts code. Functions without unwind entries (leaf, JIT or some
+hand-written code) and x86 targets report `status=unavailable`. A single
+unwind entry is NOT necessarily a whole source-level function. Always confirm
+the actual behavior with further debugger traces and controlled experiments.
+
 This is a read-only lookup: it neither creates breakpoints nor establishes
-function boundaries, semantic meaning or a causal explanation.
+complete function boundaries, semantic meaning or a causal explanation.
 
 ## Linking a recorded trial to project knowledge
 
