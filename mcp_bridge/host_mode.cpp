@@ -260,6 +260,36 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
     return true;
 }
+if(name=="cortex_test_report_get"){
+    if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_id","Provide report ID"),true);return true;
+    }
+    auto result=s->tests->GetReport(a["id"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_report"){
+    if(!a.is_object()||!a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||!a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("mutation_permission_required","Persisting a report requires permission"),true);return true;
+    }
+    if(!a.contains("ids")||!a["ids"].is_array()||a["ids"].empty()||a["ids"].size()>8){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Select 1 to 8 completed trials"),true);return true;
+    }
+    if(a.size()>3||(a.contains("title")&&
+       (!a["title"].is_string()||a["title"].get_ref<const std::string&>().size()>100))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_title","Title must be at most 100 characters"),true);return true;
+    }
+    std::vector<std::string> ids;
+    for(const auto& id:a["ids"]){
+        if(!id.is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Trial ids must be strings"),true);return true;}
+        ids.push_back(id.get<std::string>());
+    }
+    json output;std::string error;
+    if(!s->tests->Report(ids,a.value("title",std::string("Cortex investigation")),output,error)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;
+    }
+    response=LocalToolResponse(MessageId(m),output);return true;
+}
 if(name=="cortex_test_compare"){
     if(!a.is_object()||a.size()!=2||!a.contains("first")||!a.contains("second")||
        !a["first"].is_string()||!a["second"].is_string()){

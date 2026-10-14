@@ -111,6 +111,22 @@ int main(){
               "different initial states cannot form a controlled comparison");
         Check(!runner.Compare(experimentId,experimentId).value("ok",true),
               "cannot compare same experiment to itself");
+        json report;std::string reportError;
+        Check(runner.Report({controlId,experimentId},"Movement | test",report,reportError),
+              "generate multi-trial report");
+        if(report.value("ok",false)){
+            const auto dir=std::filesystem::u8path(report["report_directory"].get<std::string>());
+            Check(std::filesystem::exists(dir/"report.json")&&
+                  std::filesystem::exists(dir/"investigation.md"),"report files exist");
+            auto loaded=runner.GetReport(report["id"].get<std::string>());
+            Check(loaded.value("ok",false)&&
+                  loaded["report"]["comparison"].value("comparison",std::string())=="aligned",
+                  "report includes controlled pair");
+        }
+        Check(!runner.Report({controlId,controlId},"Duplicate",report,reportError),
+              "duplicate trial IDs refused");
+        Check(!runner.GetReport("../../escape").value("ok",true),
+              "report path traversal refused");
         Check(!runner.Get("../../etc").value("ok",true),"reject traversal");
         Check(runner.List()["runs"].size()==13,"bounded run index");
         Check(released==13,"all leases released");

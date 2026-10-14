@@ -45,6 +45,9 @@ local program through its MCP tools.
 9. Keep experiments bounded. Respect maximum launch counts, user-approved
    mutation permissions, time limits and cancellation requests.
 10. Each trial automatically writes plan.json, result.json and investigation.md.
+    Finish with cortex_test_report(ids, title, mutation_permission=true) for
+    an archived multi-run investigation.md and report.json. The consolidated
+    report is an evidence index, not a proven code explanation.
     The report directory is selected at startup with --test-results. Reuse
     these references in project_knowledge_put and in a human-readable final
     summary using agent/investigation-template.md. Include negative results.
