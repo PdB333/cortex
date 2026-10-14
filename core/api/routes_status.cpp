@@ -269,6 +269,13 @@ json BuildToolsManifest() {
                      {"description", "List revisioned investigation claims and server-owned byte verification outcomes. No claim is automatically confirmed."}});
         j.push_back({{"name", "project_knowledge_get"}, {"method", "GET"}, {"path", "/project/knowledge/{id}"},
                      {"description", "Get a named investigation claim, evidence references, history, and last verification."}});
+        j.push_back({{"name", "project_knowledge_query"}, {"method", "POST"}, {"path", "/project/knowledge/query"},
+                     {"description", "Read-only bounded search or resumption of investigation knowledge. Deterministic compact previews, not full history."},
+                     {"body", {{"text", "optional search substring"},
+                               {"kind", "optional exact kind"}, {"status", "optional exact status"},
+                               {"resume", "optional bool, default false"},
+                               {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 20}}},
+                               {"offset", {{"type", "integer"}, {"minimum", 0}, {"maximum", 1000000}}}}}});
         j.push_back({{"name", "project_knowledge_put"}, {"method", "POST"}, {"path", "/project/knowledge"},
                      {"description", "Create/update an evidence-linked investigation claim with optimistic revision; this does not verify the claim."},
                      {"body", {{"id", "required"}, {"kind", "required"}, {"statement", "required"},

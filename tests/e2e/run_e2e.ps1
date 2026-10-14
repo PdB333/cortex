@@ -269,6 +269,15 @@ Run-Scenario "api-memory-security" {
         Assert-That $loaded.ok "Knowledge fetch failed"
         Assert-That ($loaded.record.id -eq $knowledgeId) "Knowledge readback differs"
 
+        $searched = Request-Json POST "/project/knowledge/query" -Body @{ text = $knowledgeId; limit = 5 }
+        Assert-That ([int]$searched.total -eq 1) "Knowledge query did not find the new claim"
+        Assert-That ($searched.records[0].id -eq $knowledgeId) "Knowledge query returned incorrect id"
+        Assert-That (-not ($searched.records[0].PSObject.Properties.Name -contains "history")) "Knowledge query leaked history"
+        $resume = Request-Json POST "/project/knowledge/query" -Body @{ text = $knowledgeId; resume = $true; limit = 5 }
+        Assert-That ([int]$resume.total -eq 1) "Resume query did not find the open hypothesis"
+        $oversized = Request-Json POST "/project/knowledge/query" -Body @{ limit = 100 } -ExpectedStatus @(400)
+        Assert-That ($oversized.error -eq "invalid_limit") "Unbounded query was accepted"
+
         $verified = Request-Json POST "/project/knowledge/$knowledgeId/verify" -Body @{}
         Assert-That $verified.ok "Knowledge verification request failed"
         Assert-That ($verified.record.last_verification.status -eq "passed") "Known u32 canary bytes failed verification: $($verified.record.last_verification | ConvertTo-Json -Depth 8 -Compress)"
