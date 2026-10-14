@@ -163,6 +163,30 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Observed code regions: comparison of real control and action trials
+
+Use `cortex_test_code_candidates(control="test_...", action="test_...",
+_cortex_target=<original PID>, _cortex_generation=<exact generation>)`
+while the **original target process remains alive**. Both completed trials
+must belong to the same executable, PID, architecture and process generation.
+The tool reads only the debugger IPs already saved from approved logging
+breakpoints, maps them through the current module table to ASLR-independent
+module+RVA locations, and compares sampled event counts.
+
+On PE32+ Windows x64 only, Cortex uses live `.pdata` unwind ranges to
+group multiple observed instructions into compiler-described candidate
+regions. x86, JIT, leaf or other code without unwind metadata remains
+instruction-level. A region is **not necessarily a complete C++ function**.
+No arguments, structure types, call graph edges or gameplay labels are
+inferred. "More during action" is emitted only when the control/action pair
+and code logging coverage support comparison. Zero sampled hits do not mean
+a path is unreachable. The result is read-only and must not be interpreted
+as semantic verification.
+
+After a binary update or restart, revalidate versioned module references
+with `cortex_knowledge_code_check` rather than reusing old addresses.
+The tool never arms breakpoints, injects code or grants agent permissions.
+
 ## Automatic bounded experiment proposals (experimental)
 
 `cortex_test_generate(report_id="report_...", objective="Why does this field change?")`
