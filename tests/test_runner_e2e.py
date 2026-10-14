@@ -78,6 +78,23 @@ def main():
             assert code['status']=='observed' and code['breakpoints'][0]['new_hits']>=1,code
             assert code['breakpoints'][0]['events'] and                 code['breakpoints'][0]['truncated_or_missing'] is False,code
             checks.append('runtime_instruction_hit_recorded')
+            code_context=client.data('cortex_test_code_context',
+                test_id=passed['id'],_cortex_target=pid,_cortex_generation=generation)
+            assert code_context['ok'] and code_context['locations'],code_context
+            first_ip=code_context['locations'][0]
+            assert first_ip['address_role']=='debugger_instruction_pointer' and                 first_ip['module'] is not None and                 first_ip['module']['name'].lower()==target.name.lower() and                 first_ip['module']['rva'].startswith('0x'),code_context
+            assert first_ip['symbol']['status'] in ('resolved','unavailable'),first_ip
+            assert first_ip['disassembly']['status']=='readable' and                 1<=len(first_ip['disassembly']['instructions'])<=3 and                 first_ip['disassembly']['source']=='host_external_memory',first_ip
+            checks.append('module_rva_and_disassembly_from_recorded_instruction')
+            disabled=client.data('cortex_test_code_context',
+                test_id=passed['id'],_cortex_target=pid,_cortex_generation=generation,
+                symbols=False,disassemble=False,max_locations=1)
+            assert disabled['locations'][0]['disassembly']['status']=='not_requested' and                 disabled['locations'][0]['symbol']['status']=='unavailable',disabled
+            checks.append('bounded_read_only_code_lookup')
+            bad_ctx=client.call('cortex_test_code_context',test_id=passed['id'],
+                _cortex_target=pid,_cortex_generation=generation,max_locations=0)
+            assert bad_ctx['isError'] and                 bad_ctx['structuredContent']['error']['code']=='invalid_code_context_request',bad_ctx
+            checks.append('invalid_code_context_budget_rejected')
             removed=client.data('debug_breakpoint_delete',id=breakpoint_id,
                                 mutation_permission=True)
             assert removed['result']['ok'],removed
@@ -116,6 +133,11 @@ def main():
                 duplicate_link['structuredContent']['error']['code']=='test_evidence_already_linked',duplicate_link
             checks.append('knowledge_revision_and_duplicate_guards')
             control=run(steps=[{'delay_ms':30}],expect=[{'read':0,'op':'unchanged'}]);assert control['outcome']=='passed',control;checks.append('control_trial')
+            missing_code=client.call('cortex_test_code_context',
+                test_id=control['id'],_cortex_target=pid,
+                _cortex_generation=generation)
+            assert missing_code['isError'] and                 missing_code['structuredContent']['error']['code']=='no_completed_code_observations',missing_code
+            checks.append('no_code_events_cannot_invent_function')
             false=run(expect=[{'read':0,'op':'unchanged'}]);assert false['outcome']=='failed',false;checks.append('false_prediction_rejected')
             missing=run(reads=[{'address':'0x1','type':'u32'}]);assert missing['outcome']=='inconclusive' and missing['error']=='baseline_unreadable',missing;checks.append('unreadable_prevents_input')
             clicked=run(reads=[{'address':fixture['test_clicks'],'type':'u32'}],
@@ -157,6 +179,11 @@ def main():
             assert old_generation_link['isError'] and \
                 old_generation_link['structuredContent']['error']['code']=='test_target_identity_mismatch',old_generation_link
             checks.append('cross_generation_evidence_revalidated')
+            stale_ctx=client.call('cortex_test_code_context',
+                test_id=saved,_cortex_target=pid,
+                _cortex_generation=restarted['generation'],max_locations=2)
+            assert stale_ctx['isError'] and                 stale_ctx['structuredContent']['error']['code']=='test_target_identity_mismatch',stale_ctx
+            checks.append('stale_code_context_denied_after_restart')
             fixture=json.loads(manifest.read_text())
             base.update({'_cortex_target':pid,'_cortex_generation':restarted['generation'],
                          'reads':[{'address':fixture['test_value'],'type':'u32'}]})

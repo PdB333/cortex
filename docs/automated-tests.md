@@ -205,6 +205,37 @@ thread coverage and retained event logs are complete; otherwise it marks the
 comparison inconclusive or unavailable. `cortex_test_report` carries compact
 per-trial hit counts and comparison summaries into the consolidated report.
 
+## Finding the module and symbol for observed code
+
+Once a completed trial has `code_evidence` with actual instruction events,
+use `cortex_test_code_context` while the original process is still alive:
+
+    cortex_test_code_context(
+      test_id="test_...",
+      _cortex_target=<original PID>,
+      _cortex_generation=<original process generation>,
+      max_locations=4,
+      symbols=true,
+      disassemble=true)
+
+It only examines instruction pointers already recorded in the trial (not
+arbitrary addresses supplied with the request). The response maps up to
+eight unique IPs to a loaded module and an RVA such as `Test.exe+0x112`.
+Runtime symbol resolution supplies an optional symbol, source line and PDB
+match information if actually available. Best-effort disassembly is limited
+to three instructions at each IP, and is unavailable when the runtime cannot
+safely be queried. A missing symbol is returned as unavailable, not guessed.
+
+The tool rejects a trial from a different PID, generation, executable or
+architecture. After restarting a game, do **not** reinterpret an old absolute
+IP in the new address space. You may use a previously observed module+RVA
+as an investigation lead only after revalidating the matching binary build.
+Data watchpoint addresses are watched *data*, not code addresses, and the
+hardware trap's saved IP may point after the writing instruction.
+
+This is a read-only lookup: it neither creates breakpoints nor establishes
+function boundaries, semantic meaning or a causal explanation.
+
 ## Linking a recorded trial to project knowledge
 
 Use `project_knowledge_put` to create a hypothesis or field claim first.

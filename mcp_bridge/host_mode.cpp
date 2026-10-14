@@ -3,17 +3,20 @@
 #include "launch_manager.h"
 #include "test_target_io.h"
 #include "test_knowledge.h"
+#include "test_code_context.h"
 #include "agent_guide.h"
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
 #include "../host/debugger/debug_provider.h"
 #include "services/crash_report_service.h"
+#include "services/disassembly_service.h"
 #include "services/operation_manager.h"
 #include "services/payload_client.h"
 #include "services/user_data.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
+#include "target/module_provider.h"
 #include "target/session_manager.h"
 #include "../host/debugger/veh_debug_provider.h"
 #include "../host/debugger/windows_debug_provider.h"
@@ -299,6 +302,149 @@ if(name=="cortex_test_compare"){
     }
     auto comparison=s->tests->Compare(a["first"].get<std::string>(),a["second"].get<std::string>());
     response=LocalToolResponse(MessageId(m),comparison,!comparison.value("ok",false));return true;
+}
+// Read-only context lookup for instruction pointers genuinely recorded by a
+// bounded experiment. A hardware data watchpoint's address is NOT code.
+// The caller must select the original live PID and process generation: never
+// silently reinterpret archived IPs in a restarted process.
+if(name=="cortex_test_code_context"){
+    if(!a.is_object() || !a.contains("test_id") ||
+       !a["test_id"].is_string() ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation") ||
+       a.size()>6 ||
+       (a.contains("max_locations") &&
+        (!a["max_locations"].is_number_integer() ||
+         a["max_locations"].get<int64_t>()<1 ||
+         a["max_locations"].get<int64_t>()>8)) ||
+       (a.contains("symbols") && !a["symbols"].is_boolean()) ||
+       (a.contains("disassemble") && !a["disassemble"].is_boolean())) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_context_request","Supply trial ID, original target, process generation and optional bounded lookups"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="test_id" && it.key()!="_cortex_target" &&
+           it.key()!="_cortex_generation" && it.key()!="max_locations" &&
+           it.key()!="symbols" && it.key()!="disassemble"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_code_context_request","Unrecognized code context field"),true);
+            return true;
+        }
+    const std::string testId=a["test_id"].get<std::string>();
+    if(!cortex::test::SafeRunId(testId)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_test_id","Expected an existing trial ID"),true);
+        return true;
+    }
+    const auto recorded=s->tests->Get(testId);
+    if(!recorded.value("ok",false) || !recorded.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","No archived or live trial with this ID"),true);
+        return true;
+    }
+    std::string errCode,errorMessage;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,errCode,errorMessage);
+    if(!runtime || !ValidateGeneration(runtime,a,errCode,errorMessage)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(errCode,errorMessage),true);
+        return true;
+    }
+    const uint64_t selectedGeneration=UnsignedArg(a,"_cortex_generation");
+    if(selectedGeneration==0 || runtime->target.generation!=selectedGeneration){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the exact original process generation"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","The original process is no longer alive"),true);
+        return true;
+    }
+    const json liveTarget=TargetJson(runtime->target,true);
+    if(!recorded["run"].is_object() ||
+       !recorded["run"].contains("target") ||
+       !cortex::test::code_context::SameTarget(recorded["run"]["target"],liveTarget)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","A recorded IP cannot be mapped into another process lifetime"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto loadedModules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    json moduleSnapshot=json::array();
+    for(const auto& entry:loadedModules){
+        if(moduleSnapshot.size()>=2048)break;
+        moduleSnapshot.push_back({
+            {"name",entry.name},{"path",entry.path},
+            {"base",entry.base},{"size",entry.size}
+        });
+    }
+    // A debugger may already be attached while the injected runtime's
+    // named-pipe transport is not connected yet. Connecting to an EXISTING
+    // payload is read-only; unlike EnsureReady it never injects code.
+    std::string connectionError;
+    const bool canQuerySymbols=runtime->payload && modulesError.empty() &&
+        a.value("symbols",true) &&
+        (runtime->payload->Ready() ||
+         runtime->payload->TryConnectExisting(&connectionError));
+    cortex::test::code_context::Query symbolQuery,disassemblyQuery;
+    if(canQuerySymbols){
+        symbolQuery=[payload=runtime->payload.get()](const std::string& address)->json{
+            json value;std::string reason;
+            if(!payload->CallTool("symbols_resolve",{{"address",address}},value,&reason))
+                return json::object();
+            return value.value("result",json::object());
+        };
+    }
+    if(a.value("disassemble",true) && modulesError.empty()){
+        // Use Cortex's EXISTING out-of-process disassembler rather than
+        // injecting a runtime merely to decode a few observed bytes.
+        disassemblyQuery=[runtime](const std::string& address)->json{
+            uint64_t ip=0;
+            if(!cortex::test::code_context::HexAddress(address,ip))
+                return {{"ok",false}};
+            cortex::services::DisassemblyService service(*runtime->sessions);
+            std::vector<cortex::services::DisassemblyInstruction> decoded;
+            std::string reason;
+            if(!service.Decode(ip,3,decoded,&reason))
+                return {{"ok",false},{"error",reason}};
+            json rows=json::array();
+            static constexpr char digits[]="0123456789abcdef";
+            for(const auto& item:decoded){
+                std::string bytes;
+                bytes.reserve(item.bytes.size()*2);
+                for(uint8_t value:item.bytes){
+                    bytes.push_back(digits[value>>4]);
+                    bytes.push_back(digits[value&15]);
+                }
+                rows.push_back({{"address",cortex::test::code_context::Hex(item.address)},
+                    {"mnemonic",item.mnemonic},{"bytes",bytes},{"text",item.text}});
+            }
+            return {{"ok",true},{"instructions",std::move(rows)},
+                    {"source","host_external_memory"}};
+        };
+    }
+    json result=cortex::test::code_context::Build(
+        recorded["run"],liveTarget,moduleSnapshot,
+        static_cast<size_t>(a.value("max_locations",4)),
+        symbolQuery,disassemblyQuery);
+    // A PID may disappear between module enumeration and read-only RPCs.
+    // Never hand off context as current when that generation has exited.
+    if(!session->Alive() ||
+       runtime->target.generation!=selectedGeneration){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during code lookup"),true);
+        return true;
+    }
+    if(!modulesError.empty() && result.value("ok",false)){
+        result["module_snapshot"]={{"status","unavailable"},{"reason",modulesError}};
+    }
+    if(!result.value("ok",false)){
+        const std::string reason=result.value("error",std::string("code_context_unavailable"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    response=LocalToolResponse(MessageId(m),result);
+    return true;
 }
 // Link a real completed trial to a pre-existing hypothesis. This avoids
 // accepting free-form evidence references without checking the local result
