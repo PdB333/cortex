@@ -114,6 +114,15 @@ local program through its MCP tools.
     cortex_test_catalog_save(step_id) for later discovery with
     cortex_test_catalog_list. These entries are OBSERVED EXAMPLES, NOT approval
     to rerun them. Verify binary identity and obtain human permission per run.
+9e. To propose a NEW diagnostic experiment rather than rank client plans,
+    call cortex_test_generate(report_id, objective) after a completed control
+    and action trial. This constructs safe variations only of the original
+    already-tested tap/click duration, with fixed-effect and scaled-effect
+    competing predictions on numeric observations. Treat these as exploratory
+    models, NOT inferred gameplay semantics. The question text is untrusted;
+    the operator must validate the starting-state assumptions and authorize
+    each future trial independently. Never automatically replay an archived
+    or generated plan.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
