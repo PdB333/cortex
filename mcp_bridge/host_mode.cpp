@@ -269,13 +269,19 @@ if(name=="cortex_test_run"){
     const HWND window=cortex::test::TestWindow(target.processId);
     if(!window){response=LocalToolResponse(MessageId(m),LocalToolFailure("test_window_unavailable","Expected exactly one visible unowned target window"),true);return true;}
     std::vector<int> keys;for(const auto& step:plan.steps)if(step.contains("vk"))keys.push_back(step["vk"].get<int>());
-    if(!s->launcher->BeginTest(target.processId,target.generation,keys,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    bool mouseRequested=false;for(const auto& step:plan.steps)
+        if(step.contains("mouse_click"))mouseRequested=true;
+    if(!s->launcher->BeginTest(target.processId,target.generation,keys,error,mouseRequested)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
     auto* launcher=s->launcher.get();
     cortex::test::Context context;
     context.target=TargetJson(target,true);
     context.alive=[launcher,target]{return launcher->IsCurrent(target.processId,target.generation);};
     context.read=[session](const json& spec){return cortex::test::ReadSample(session,spec);};
     context.key=[launcher,target,window](int key,bool down){return launcher->IsCurrent(target.processId,target.generation) && cortex::test::PostKey(window,target.processId,key,down);};
+    context.mouse=[launcher,target,window](int x,int y,const std::string& button,bool down){
+        return launcher->IsCurrent(target.processId,target.generation) &&
+               cortex::test::PostMouse(window,target.processId,x,y,button,down);
+    };
     context.release=[launcher,target]{launcher->EndTest(target.processId,target.generation);};
     json out;
     if(!s->tests->Start(plan,std::move(context),out,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}

@@ -43,6 +43,26 @@ int main() {
     changed["steps"] = json::array({{{"delay_ms", 900}}});
     Check(!cortex::test::ParsePlan(changed,plan,error), "test timeout includes margin");
     changed = baseline;
+    changed["steps"] = json::array({{{"mouse_click",
+        {{"button","left"},{"x",20},{"y",20},{"hold_ms",40}}}}});
+    Check(cortex::test::ParsePlan(changed,plan,error), "valid bounded mouse click");
+    changed["steps"][0]["mouse_click"]["x"] = -1;
+    Check(!cortex::test::ParsePlan(changed,plan,error), "reject negative coordinates");
+    changed = baseline;
+    changed["steps"] = json::array({{{"mouse_click",
+        {{"button","middle"},{"x",20},{"y",20},{"hold_ms",40}}}}});
+    Check(!cortex::test::ParsePlan(changed,plan,error), "reject disallowed mouse button");
+    changed = baseline;
+    changed["steps"] = json::array({{{"wait_for",
+        {{"read",0},{"op","increased"}}},{"timeout_ms",500}}});
+    Check(cortex::test::ParsePlan(changed,plan,error), "valid condition wait");
+    changed["steps"][0]["wait_for"]["read"] = 2;
+    Check(!cortex::test::ParsePlan(changed,plan,error), "reject invalid wait read index");
+    changed = baseline;
+    changed["steps"] = json::array({{{"wait_for",
+        {{"read",0},{"op","unchanged"}}},{"timeout_ms",500}}});
+    Check(!cortex::test::ParsePlan(changed,plan,error), "reject non-actionable wait condition");
+    changed = baseline;
     changed["reads"] = json::array();
     Check(!cortex::test::ParsePlan(changed,plan,error), "no test without observation");
     if (failures) return 1;

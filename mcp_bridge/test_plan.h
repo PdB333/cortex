@@ -90,13 +90,24 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
                    IntegerInRange(step["vk"], 1, 254) &&
                    IntegerInRange(step["tap_ms"], 20, 500)) {
             duration += step["tap_ms"].get<int>();
-        } else if (step.contains("mouse_move") && step.size() == 1 &&
-                   step["mouse_move"].is_object() && step["mouse_move"].size() == 2 &&
-                   step["mouse_move"].contains("dx") && step["mouse_move"].contains("dy") &&
-                   IntegerInRange(step["mouse_move"]["dx"], -500, 500) &&
-                   IntegerInRange(step["mouse_move"]["dy"], -500, 500) &&
-                   plan.mode != "game") {
-            duration += 20;
+        } else if (step.contains("mouse_click") && step.size() == 1 &&
+                   step["mouse_click"].is_object()) {
+            const auto& click = step["mouse_click"];
+            if (click.size() != 4 || !click.contains("button") ||
+                !click["button"].is_string() ||
+                !IsOneOf(click["button"].get<std::string>(), {"left", "right"}) ||
+                !click.contains("x") || !IntegerInRange(click["x"], 0, 8191) ||
+                !click.contains("y") || !IntegerInRange(click["y"], 0, 8191) ||
+                !click.contains("hold_ms") ||
+                !IntegerInRange(click["hold_ms"], 20, 500)) {
+                error = "invalid_test_mouse_click"; return false;
+            }
+            duration += click["hold_ms"].get<int>() + 30;
+        } else if (step.contains("wait_for") && step.contains("timeout_ms") &&
+                   step.size() == 2 && step["wait_for"].is_object() &&
+                   IntegerInRange(step["timeout_ms"], 50, 3000)) {
+            // The condition's read index and operator are validated after reads.
+            duration += step["timeout_ms"].get<int>();
         } else {
             error = "unsupported_test_step"; return false;
         }
@@ -140,6 +151,25 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
     }
     if (totalBytes > 128) { error = "test_read_budget_exceeded"; return false; }
     plan.reads = request["reads"];
+    for (const auto& step : plan.steps) {
+        if (!step.contains("wait_for")) continue;
+        const auto& check = step["wait_for"];
+        if (!check.is_object() || !check.contains("read") ||
+            !IntegerInRange(check["read"], 0, static_cast<int>(plan.reads.size()) - 1) ||
+            !check.contains("op") || !check["op"].is_string()) {
+            error = "invalid_test_wait_condition"; return false;
+        }
+        const std::string op = check["op"].get<std::string>();
+        if (!IsOneOf(op, {"changed", "equal", "increased", "decreased"}) ||
+            check.size() != (op == "equal" ? 3u : 2u) ||
+            (op == "equal" &&
+             (!check.contains("value") ||
+              !(check["value"].is_number() ||
+                (check["value"].is_string() &&
+                 check["value"].get_ref<const std::string&>().size() <= 64))))) {
+            error = "invalid_test_wait_operator"; return false;
+        }
+    }
     if (request.contains("expect")) {
         if (!request["expect"].is_array() || request["expect"].size() > 8) {
             error = "invalid_test_expectations"; return false;

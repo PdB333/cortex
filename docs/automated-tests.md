@@ -69,10 +69,11 @@ The startup profile can additionally contain:
 
     "allow_attach": true,
     "allow_input": true,
+    "allow_mouse": true,
     "test_keys": [32],
     "max_tests": 10
 
-Both permissions default to false, and the key list defaults to empty. Test
+All permissions default to false, and the key list defaults to empty. Test
 budgets apply to the whole MCP session, not just one process restart.
 Run `cortex_launch` with `attach=true` to launch and attach. Readiness is bounded;
 bootstrap errors leave the process running and return an explicit attach error.
@@ -89,7 +90,8 @@ Then call `cortex_test_run`, for example on the controlled fixture:
 
 The returned ID is polled using `cortex_test_get`; `cortex_test_cancel` interrupts
 and releases a held key. `cortex_test_list` returns recent summaries. The initial
-runner deliberately supports only window-message taps/delays; existing low-level
+runner supports window-message key taps, optional window-local mouse clicks
+and wait_for conditions over approved memory reads; existing low-level
 OS/DirectInput tools are unchanged. No automatic fallback sends input to the
 user's foreground window. One trial per target may execute; stop/relaunch is
 blocked while that trial holds its lease.
@@ -103,7 +105,11 @@ to the existing knowledge ledger explicitly; automatic code understanding is not
 implemented here.
 
 Limits: 20 steps, 10 seconds of planned actions, 8 reads totaling 128 bytes,
-20-second trial deadline and 100 runs per host. Low-level observation uses the
+20-second trial deadline and 100 runs per host. Mouse clicks require
+allow_mouse=true in the operator-authored profile. Click coordinates are
+client-relative and checked against the live window bounds before delivery.
+wait_for polls a selected read until changed/increased/decreased/equal or a
+bounded timeout (50-3000 ms) and cannot infer causal relationships. Low-level observation uses the
 external process session, not a blocking RPC to a suspended target. Input events
 are checked against the exact owned process generation and a single unambiguous
 window. Posted input does not establish the application handled it. Assertions
@@ -115,3 +121,16 @@ persistence), test_plan_tests.cpp, and test_runner_e2e.py (real Windows launch,
 auto-attach, isolated window input, control/false-prediction trials, cancellation,
 permissions, budgets, reports and reopened sessions). The Full Windows Build
 runs the E2E test for x86 and x64 and uploads the reports.
+
+Example mouse click (only when allow_mouse is enabled):
+
+    {"steps":[{"mouse_click":{"button":"left","x":20,"y":20,"hold_ms":40}}]}
+
+Example conditional wait for a rising counter:
+
+    {"steps":[{"wait_for":{"read":0,"op":"increased"},"timeout_ms":1000}]}
+
+Both actions share the same duration, window/process and observation budgets.
+A wait that never matches ends inconclusively with wait_condition_not_met.
+A click fails rather than forwarding outside the intended application's
+client rectangle. Minimized windows and ambiguous window selection are refused.
