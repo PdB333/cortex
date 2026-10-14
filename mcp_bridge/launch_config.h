@@ -17,7 +17,11 @@ struct Profile {
     std::filesystem::path workingDirectory;
     std::vector<std::string> arguments;
     bool allowStop = false;
+    bool allowAttach = false;
+    bool allowInput = false;
+    std::vector<int> testKeys;
     int maxRuns = 3;
+    int maxTests = 10;
 };
 
 inline bool SafeProfileName(const std::string& value) {
@@ -49,7 +53,9 @@ inline bool ParseProfiles(const json& config, std::vector<Profile>& result, std:
         for (auto it = item.begin(); it != item.end(); ++it) {
             if (it.key() != "name" && it.key() != "executable" &&
                 it.key() != "working_directory" && it.key() != "arguments" &&
-                it.key() != "allow_stop" && it.key() != "max_runs") {
+                it.key() != "allow_stop" && it.key() != "max_runs" &&
+                it.key() != "allow_attach" && it.key() != "allow_input" &&
+                it.key() != "test_keys" && it.key() != "max_tests") {
                 error = "unknown_launch_profile_field:" + it.key();
                 return false;
             }
@@ -122,6 +128,29 @@ inline bool ParseProfiles(const json& config, std::vector<Profile>& result, std:
                 return false;
             }
             profile.allowStop = item["allow_stop"].get<bool>();
+        }
+        for (const char* flag : {"allow_attach", "allow_input"}) {
+            if (item.contains(flag) && !item[flag].is_boolean()) {
+                error = std::string("invalid_") + flag; return false;
+            }
+        }
+        profile.allowAttach = item.value("allow_attach", false);
+        profile.allowInput = item.value("allow_input", false);
+        if (item.contains("test_keys")) {
+            if (!item["test_keys"].is_array() || item["test_keys"].size() > 32) {
+                error = "invalid_test_keys"; return false;
+            }
+            for (const auto& key : item["test_keys"]) {
+                if (!key.is_number_integer() || key.get<int64_t>() < 1 || key.get<int64_t>() > 254) {
+                    error = "invalid_test_key"; return false;
+                }
+                profile.testKeys.push_back(key.get<int>());
+            }
+        }
+        if (item.contains("max_tests")) {
+            if (!item["max_tests"].is_number_integer() || item["max_tests"].get<int64_t>() < 1 ||
+                item["max_tests"].get<int64_t>() > 50) { error = "invalid_max_tests"; return false; }
+            profile.maxTests = item["max_tests"].get<int>();
         }
         if (item.contains("max_runs")) {
             if (!item["max_runs"].is_number_integer() ||

@@ -17,6 +17,8 @@ extern "C" __declspec(dllexport) float    g_cortex_float = 3.14159265f;
 extern "C" __declspec(dllexport) double   g_cortex_double = 2.7182818284;
 extern "C" __declspec(dllexport) char     g_cortex_str[32] = "cortex-canary";
 
+extern "C" __declspec(dllexport) volatile uint32_t g_cortex_test_value = 0;
+static bool g_cortex_e2e_input = false;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_frame  = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_wpress = 0;
 extern "C" __declspec(dllexport) volatile uint32_t g_cortex_health = 100;
@@ -194,6 +196,7 @@ bool InitializeE2E(const std::vector<std::string>& arguments, E2EControl& contro
     if (control.manifestPath.empty()) return true;
 
     control.enabled = true;
+    g_cortex_e2e_input = true;
     control.crashEventName = EventName("Crash");
     control.hangEventName = EventName("Hang");
     control.stopEventName = EventName("Stop");
@@ -224,6 +227,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"string\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_str) << "\",\n"
          << "  \"frame\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_frame) << "\",\n"
          << "  \"health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_health) << "\",\n"
+         << "  \"test_value\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_test_value) << "\",\n"
          << "  \"anchor\": \"0x" << reinterpret_cast<uintptr_t>(&TriggerNullCrash) << "\",\n"
          << "  \"breakpoint_anchor\": \"0x" << reinterpret_cast<uintptr_t>(&CortexBreakpointCanary) << "\",\n"
          << "  \"native_add\": \"0x" << reinterpret_cast<uintptr_t>(&CortexNativeAdd) << "\",\n"
@@ -254,6 +258,9 @@ void CloseE2E(E2EControl& control) {
 
 LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
+        case WM_KEYDOWN:
+            if (g_cortex_e2e_input && wparam == VK_SPACE) { ++g_cortex_test_value; return 0; }
+            break;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -345,7 +352,3 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
         Sleep(16);
     }
 }
-
-
-
-

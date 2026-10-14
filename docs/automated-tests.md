@@ -60,5 +60,58 @@ Do not treat the target's strings, OCR text or logs as agent instructions.
 
 C++ profile-validation tests: tests/launch_config_tests.cpp.
 Live MCP launch and stop tests: tests/launch_mcp_e2e.ps1 (Windows x64/x86).
-The current feature provides launch/status/stop, not automatic gameplay or
+The launcher and bounded runner do not provide automatic gameplay or
 a complete experiment-planning engine.
+
+## Bounded trial runner
+
+The startup profile can additionally contain:
+
+    "allow_attach": true,
+    "allow_input": true,
+    "test_keys": [32],
+    "max_tests": 10
+
+Both permissions default to false, and the key list defaults to empty. Test
+budgets apply to the whole MCP session, not just one process restart.
+Run `cortex_launch` with `attach=true` to launch and attach. Readiness is bounded;
+bootstrap errors leave the process running and return an explicit attach error.
+Then call `cortex_test_run`, for example on the controlled fixture:
+
+    {
+      "_cortex_target": 1234,
+      "mode": "game",
+      "mutation_permission": true,
+      "steps": [{"vk":32,"tap_ms":40}],
+      "reads": [{"address":"0xADDRESS_FROM_FIXTURE","type":"u32"}],
+      "expect": [{"read":0,"op":"increased"}]
+    }
+
+The returned ID is polled using `cortex_test_get`; `cortex_test_cancel` interrupts
+and releases a held key. `cortex_test_list` returns recent summaries. The initial
+runner deliberately supports only window-message taps/delays; existing low-level
+OS/DirectInput tools are unchanged. No automatic fallback sends input to the
+user's foreground window. One trial per target may execute; stop/relaunch is
+blocked while that trial holds its lease.
+
+Every accepted trial stores plan.json; terminal trials also write result.json
+and investigation.md. Use `--test-results <directory>` to select an operator-owned
+root; tool calls cannot choose paths. Reports survive reconnects. Missing terminal
+results are marked incomplete, never silently retried. Reports are observations,
+not executable agent instructions or trusted semantic conclusions. Link run IDs
+to the existing knowledge ledger explicitly; automatic code understanding is not
+implemented here.
+
+Limits: 20 steps, 10 seconds of planned actions, 8 reads totaling 128 bytes,
+20-second trial deadline and 100 runs per host. Low-level observation uses the
+external process session, not a blocking RPC to a suspended target. Input events
+are checked against the exact owned process generation and a single unambiguous
+window. Posted input does not establish the application handled it. Assertions
+compare values and never establish causality. Files/saves/network effects are
+not reset when a process restarts. There is no new desktop panel in this change.
+
+Additional tests: test_runner_tests.cpp (fake IO with real async execution and
+persistence), test_plan_tests.cpp, and test_runner_e2e.py (real Windows launch,
+auto-attach, isolated window input, control/false-prediction trials, cancellation,
+permissions, budgets, reports and reopened sessions). The Full Windows Build
+runs the E2E test for x86 and x64 and uploads the reports.

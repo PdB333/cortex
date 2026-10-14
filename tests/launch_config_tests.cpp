@@ -46,6 +46,18 @@ int main() {
     changed = allowed;
     changed["profiles"][0]["name"] = "../escape";
     Check(!ParseProfiles(changed, profiles, error), "unsafe profile name rejected");
+    changed = allowed;
+    changed["profiles"][0]["allow_input"] = "yes";
+    Check(!ParseProfiles(changed, profiles, error), "input permission must be boolean");
+    changed = allowed;
+    changed["profiles"][0]["test_keys"] = json::array({256});
+    Check(!ParseProfiles(changed, profiles, error), "test keys bounded");
+    changed = allowed;
+    changed["profiles"][0]["max_tests"] = 51;
+    Check(!ParseProfiles(changed, profiles, error), "test budget bounded");
+    changed = allowed;
+    Check(ParseProfiles(changed, profiles, error) && !profiles[0].allowInput &&
+          !profiles[0].allowAttach && profiles[0].testKeys.empty(), "new permissions default denied");
     if (failures) return 1;
     std::cout << "PASS: allowlisted launch profile validation\n";
     return 0;

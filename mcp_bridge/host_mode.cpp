@@ -1,6 +1,8 @@
 #include "host_mode.h"
 #include "launch_config.h"
 #include "launch_manager.h"
+#include "test_target_io.h"
+#include "agent_guide.h"
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
@@ -47,7 +49,7 @@ constexpr std::size_t kMaxStdioMessageBytes = 4u * 1024u * 1024u;
 constexpr std::size_t kMaxConcurrentRequests = 64;
 
 struct TargetSelector { std::optional<uint64_t> pid; std::string process; };
-struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact", launchConfigPath; bool help = false; };
+struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact", launchConfigPath, testResults; bool help = false; };
 
 struct TargetRuntime {
     TargetDescriptor target;
@@ -77,6 +79,7 @@ struct RunState {
     cortex::target::Catalog* catalog = nullptr;
     std::string runtimeDirectory, toolProfile;
     std::unique_ptr<cortex::launch::Manager> launcher;
+    std::unique_ptr<cortex::test::Runner> tests;
 
     cortex::services::OperationManager operations;
     std::mutex operationRouteMutex;
@@ -115,6 +118,7 @@ bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
         if (a=="--process"&&i+1<argc) { TargetSelector s;s.process=argv[++i]?argv[i]:""; if(s.process.empty()){error="--process requires a non-empty process name";return false;} options.targets.push_back(std::move(s)); continue; }
         if (a=="--tools"&&i+1<argc) { options.toolProfile=argv[++i]?argv[i]:""; if(options.toolProfile!="compact"&&options.toolProfile!="all"){error="--tools must be compact or all";return false;} continue; }
         if (a=="--launch-config"&&i+1<argc) { options.launchConfigPath=argv[++i]?argv[i]:""; if(options.launchConfigPath.empty()){error="--launch-config requires a JSON file";return false;} continue; }
+        if (a=="--test-results"&&i+1<argc) {options.testResults=argv[++i]?argv[i]:"";if(options.testResults.empty()){error="--test-results requires a directory";return false;}continue;}
         error="unknown or incomplete argument: "+a; return false;
     }
     return true;
@@ -200,15 +204,16 @@ json LocalTools(bool requireTarget=false){json t=json::array({
 {{"name","cortex_events"},{"description","Read bounded host target/debugger/operation event history."},{"inputSchema",{{"type","object"},{"properties",{{"since_id",{{"type","integer"},{"minimum",0}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",512}}},{"_cortex_target",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}}}}}},{"_cortex",{{"read_only",true}}}},
 {{"name","cortex_crash_report"},{"description","Load the latest Cortex diagnostics crash bundle for a target and recent host events."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
 {{"name","cortex_hooks"},{"description","Inspect the runtime HookManager registry, ownership, conflicts and hit/exception counters."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
-{{"name","cortex_launch"},{"description","Start a program from an operator-owned --launch-config profile. Executable and arguments cannot be supplied by the agent."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_launch"},{"description","Start a program from an operator-owned --launch-config profile. Executable and arguments cannot be supplied by the agent."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"attach",{{"type","boolean"}}},{"wait_ms",{{"type","integer"},{"minimum",100},{"maximum",10000}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
 {{"name","cortex_launch_status"},{"description","List configured launch profiles, remaining run budgets, and the liveness of processes started by this MCP server."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}}}},{"additionalProperties",false}}},{"_cortex",{{"host_control",true},{"read_only",true}}}},
 {{"name","cortex_stop"},{"description","Terminate only a process created from an explicitly stoppable profile, with matching PID and mutation permission. Unsaved target state may be lost."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}},{"pid",{{"type","integer"},{"minimum",1}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","pid","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}}
 });
+for (const auto& tool : CortexTestTools()) t.push_back(tool);
 const json selector={{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})},{"description","Attached target PID, id, or unique process name."}};
 for(size_t index:{size_t{2},size_t{4},size_t{5},size_t{8},size_t{9},size_t{10}}){auto&schema=t[index]["inputSchema"];if(!schema.contains("properties")||!schema["properties"].is_object())schema["properties"]=json::object();schema["properties"]["_cortex_target"]=selector;schema["properties"]["_cortex_generation"]={{"type","integer"},{"minimum",1},{"description","Optional process-lifetime generation from cortex_targets."}};if(requireTarget)schema["required"]=json::array({"_cortex_target"});}
 return t;}
 
-void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
+void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=CortexAgentGuide();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
 
 bool HandleLocalProtocol(const std::shared_ptr<RunState>&s,const json&m,json&r,bool&has){api::mcp_protocol::Handler h;h.profile=s->toolProfile=="compact"?api::mcp_protocol::ToolProfile::Compact:api::mcp_protocol::ToolProfile::All;h.listTools=[](auto){return LocalTools();};auto z=api::mcp_protocol::Handle(m,h);r=z.response;has=z.hasResponse;if(has&&m.is_object()&&(m.value("method",std::string())=="initialize"||m.value("method",std::string())=="server/discover"))PatchHandshake(r,RuntimeSnapshot(s).size());return true;}
 void RememberInitialize(const std::shared_ptr<RunState>&s,const json&m){std::lock_guard<std::mutex>l(s->protocolMutex);s->initializeMessage=m;s->initializedNotificationSeen=false;if(m.contains("params")&&m["params"].is_object()&&m["params"].contains("clientInfo")&&m["params"]["clientInfo"].is_object()){s->activityClientName=m["params"]["clientInfo"].value("name",s->activityClientName);s->activityClientVersion=m["params"]["clientInfo"].value("version",std::string());}}
@@ -245,6 +250,38 @@ void RegisterOpRoute(const std::shared_ptr<RunState>&s,uint64_t op,const json&id
 void ForgetOpRoute(const std::shared_ptr<RunState>&s,uint64_t op){std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end()){s->requestOperations.erase(RequestKey(it->second));s->operationRequestIds.erase(it);}}
 
 bool HandleLocalTool(const std::shared_ptr<RunState>&s,const json&m,const std::string&name,const json&a,json&response){const bool local=name.rfind("cortex_",0)==0;if(!local)return false;if(PruneDeadRuntimes(s))EmitToolsChanged(s);
+if(name=="cortex_agent_guide"){response=LocalToolResponse(MessageId(m),{{"ok",true},{"guide",CortexAgentGuide()}});return true;}
+if(name=="cortex_test_list"){response=LocalToolResponse(MessageId(m),s->tests->List());return true;}
+if(name=="cortex_test_get"||name=="cortex_test_cancel"){
+    if(!a.contains("id")||!a["id"].is_string()) {response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_test_id","Expected a test id"),true);return true;}
+    const std::string id=a["id"].get<std::string>();
+    if(name=="cortex_test_get"){auto out=s->tests->Get(id);response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));}
+    else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
+    return true;
+}
+if(name=="cortex_test_run"){
+    cortex::test::Plan plan;std::string error;
+    if(!cortex::test::ParsePlan(a,plan,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    std::string code,message;auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;}
+    const auto target=runtime->target;const auto session=runtime->sessions->Active();
+    if(!session||!session->Alive()){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_exited","Target exited"),true);return true;}
+    const HWND window=cortex::test::TestWindow(target.processId);
+    if(!window){response=LocalToolResponse(MessageId(m),LocalToolFailure("test_window_unavailable","Expected exactly one visible unowned target window"),true);return true;}
+    std::vector<int> keys;for(const auto& step:plan.steps)if(step.contains("vk"))keys.push_back(step["vk"].get<int>());
+    if(!s->launcher->BeginTest(target.processId,target.generation,keys,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    auto* launcher=s->launcher.get();
+    cortex::test::Context context;
+    context.target=TargetJson(target,true);
+    context.alive=[launcher,target]{return launcher->IsCurrent(target.processId,target.generation);};
+    context.read=[session](const json& spec){return cortex::test::ReadSample(session,spec);};
+    context.key=[launcher,target,window](int key,bool down){return launcher->IsCurrent(target.processId,target.generation) && cortex::test::PostKey(window,target.processId,key,down);};
+    context.release=[launcher,target]{launcher->EndTest(target.processId,target.generation);};
+    json out;
+    if(!s->tests->Start(plan,std::move(context),out,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    RecordEvent(s,"test.started",runtime,{{"id",out["id"]}});
+    response=LocalToolResponse(MessageId(m),out);return true;
+}
 if(name=="cortex_launch_status"){
     if(!s->launcher){response=LocalToolResponse(MessageId(m),{{"ok",true},{"configured",false},{"profiles",json::array()}});return true;}
     std::string profile;
@@ -258,11 +295,42 @@ if(name=="cortex_launch"||name=="cortex_stop"){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("mutation_permission_required","Starting and stopping a program requires mutation_permission=true and a configured profile"),true);return true;
     }
     if(!a.contains("profile")||!a["profile"].is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_profile","A configured profile name is required"),true);return true;}
+    for(auto it=a.begin();it!=a.end();++it){
+        if(it.key()!="profile"&&it.key()!="pid"&&it.key()!="mutation_permission"&&it.key()!="attach"&&it.key()!="wait_ms"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure("unexpected_launch_argument",it.key()),true);return true;}
+    }
     const std::string profile=a["profile"].get<std::string>();
+    const bool attach=a.contains("attach")&&a["attach"].is_boolean()&&a["attach"].get<bool>();
+    if(a.contains("attach")&&!a["attach"].is_boolean()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_attach","attach must be boolean"),true);return true;}
+    const auto policy=s->launcher->Status(profile);
+    if(attach&&(!policy.value("ok",false)||!policy["profile"].value("allow_attach",false))){response=LocalToolResponse(MessageId(m),LocalToolFailure("launch_attach_not_allowed","Enable allow_attach in the startup profile"),true);return true;}
     json result;std::string error;
     if(name=="cortex_launch"){
         if(!s->launcher->Start(profile,result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
         RecordEvent(s,"process.launched",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+        if(attach){
+            const uint64_t pid=result.at("pid").get<uint64_t>();
+            const uint64_t generation=result.at("generation").get<uint64_t>();
+            const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(std::clamp<uint64_t>(UnsignedArg(a,"wait_ms",5000),100,10000));
+            std::optional<TargetDescriptor> target;
+            while(std::chrono::steady_clock::now()<until && s->launcher->IsCurrent(pid,generation)){
+                for(const auto& t:s->catalog->Targets())if(t.processId==pid&&t.generation==generation){target=t;break;}
+                if(target&&cortex::test::TestWindow(pid))break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+            std::string code,message;
+            if(target&&s->launcher->IsCurrent(pid,generation)&&cortex::test::TestWindow(pid)){
+                std::lock_guard<std::mutex> lock(s->targetMutationMutex);
+                auto runtime=CreateRuntime(*s->catalog,*target,s->runtimeDirectory,code,message);
+                if(runtime&&PrimeRuntime(s,runtime,message)){
+                    {std::lock_guard<std::mutex> lock(s->runtimeMutex);s->runtimes.push_back(runtime);}
+                    result["attached"]=true;result["target"]=TargetJson(*target,true);
+                    RecordEvent(s,"target.attached",runtime,{{"launch_profile",profile}});EmitToolsChanged(s);
+                } else {result["attached"]=false;result["attach_error"]=message.empty()?code:message;}
+            }else{result["attached"]=false;result["attach_error"]="launch_readiness_timeout";}
+            // Do not silently kill the application on bootstrap failure.
+            result["ok"]=result.value("attached",false);
+        }
     }else{
         if(!a.contains("pid")||!a["pid"].is_number_integer()||UnsignedArg(a,"pid")==0){
             response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_pid","Provide the launched process PID"),true);return true;
@@ -270,7 +338,7 @@ if(name=="cortex_launch"||name=="cortex_stop"){
         if(!s->launcher->Stop(profile,UnsignedArg(a,"pid"),result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
         RecordEvent(s,"process.stopped",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)}});
     }
-    response=LocalToolResponse(MessageId(m),result);return true;
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
 }
 if(name=="cortex_targets"){response=LocalToolResponse(MessageId(m),TargetList(RuntimeSnapshot(s)));return true;}
 if(name=="cortex_processes"){std::string c,x;auto r=ProcessList(s,a,c,x);response=c.empty()?LocalToolResponse(MessageId(m),r):LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
@@ -301,5 +369,9 @@ void Watchdog(const std::shared_ptr<RunState>&s){while(s->watchdogRunning.load()
 
 } // namespace
 
-int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;{    std::vector<cortex::launch::Profile> profiles;    if(!options.launchConfigPath.empty()){        try{            std::ifstream file(std::filesystem::u8path(options.launchConfigPath));            if(!file){std::cerr<<"cortex mcp: could not read --launch-config\n";return 2;}            const json config=json::parse(file);            if(!cortex::launch::ParseProfiles(config,profiles,error)){                std::cerr<<"cortex mcp: "<<error<<"\n";return 2;            }        }catch(const std::exception& e){std::cerr<<"cortex mcp: invalid --launch-config: "<<e.what()<<"\n";return 2;}    }    state->launcher=std::make_unique<cortex::launch::Manager>(std::move(profiles));}{std::ostringstream activityId;activityId<<std::hex<<GetCurrentProcessId()<<'-'<<GetTickCount64();state->activitySessionId=activityId.str();}auto available=catalog.Targets();for(const auto&selector:options.targets){auto target=ResolveUniqueTarget(selector,available,error);if(!target){std::cerr<<"cortex mcp: "<<error<<'\n';return 3;}std::string c,x;auto runtime=CreateRuntime(catalog,*target,runtimeDirectory,c,x);if(!runtime){std::cerr<<"cortex mcp: target setup failed: "<<(x.empty()?c:x)<<'\n';return 4;}state->runtimes.push_back(runtime);RecordEvent(state,"target.attached",runtime,{{"startup",true},{"debugger_backend",runtime->debuggerBackend}});}PublishActivity(state,{{"kind","session"},{"phase","started"},{"summary","AI/MCP session started"}});state->watchdogRunning=true;state->watchdog=std::thread([state]{Watchdog(state);});std::ios::sync_with_stdio(false);std::cin.tie(nullptr);std::string line;while(std::getline(std::cin,line)){if(line.empty())continue;if(line.size()>kMaxStdioMessageBytes){WriteOutput(state,TransportError(nullptr,"message_too_large","MCP stdio message exceeds 4 MiB"));continue;}json m;try{m=json::parse(line);}catch(const std::exception&e){WriteOutput(state,{{"jsonrpc","2.0"},{"id",nullptr},{"error",{{"code",-32700},{"message",e.what()}}}});continue;}if(IsNotification(m)){json r;bool has=false;std::string e;if(!ForwardOne(state,m,r,has,&e))std::cerr<<"cortex mcp: notification forwarding failed: "<<e<<'\n';else if(has)WriteOutput(state,r);continue;}if(!ReserveWorker(state)){WriteOutput(state,TransportError(MessageId(m),"too_many_requests","Cortex MCP concurrency limit reached"));continue;}try{std::thread([m,state]{ForwardObserved(m,state);ReleaseWorker(state);}).detach();}catch(const std::exception&e){ReleaseWorker(state);WriteOutput(state,TransportError(MessageId(m),"worker_start_failed",e.what()));}}
+int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;{    std::vector<cortex::launch::Profile> profiles;    if(!options.launchConfigPath.empty()){        try{            std::ifstream file(std::filesystem::u8path(options.launchConfigPath));            if(!file){std::cerr<<"cortex mcp: could not read --launch-config\n";return 2;}            const json config=json::parse(file);            if(!cortex::launch::ParseProfiles(config,profiles,error)){                std::cerr<<"cortex mcp: "<<error<<"\n";return 2;            }        }catch(const std::exception& e){std::cerr<<"cortex mcp: invalid --launch-config: "<<e.what()<<"\n";return 2;}    }    state->launcher=std::make_unique<cortex::launch::Manager>(std::move(profiles));}{
+    const auto root=options.testResults.empty() ? cortex::services::UserDataDirectory(std::filesystem::u8path(runtimeDirectory))/"tests"
+        : std::filesystem::absolute(std::filesystem::u8path(options.testResults));
+    state->tests=std::make_unique<cortex::test::Runner>(root,std::to_string(GetCurrentProcessId()));
+}{std::ostringstream activityId;activityId<<std::hex<<GetCurrentProcessId()<<'-'<<GetTickCount64();state->activitySessionId=activityId.str();}auto available=catalog.Targets();for(const auto&selector:options.targets){auto target=ResolveUniqueTarget(selector,available,error);if(!target){std::cerr<<"cortex mcp: "<<error<<'\n';return 3;}std::string c,x;auto runtime=CreateRuntime(catalog,*target,runtimeDirectory,c,x);if(!runtime){std::cerr<<"cortex mcp: target setup failed: "<<(x.empty()?c:x)<<'\n';return 4;}state->runtimes.push_back(runtime);RecordEvent(state,"target.attached",runtime,{{"startup",true},{"debugger_backend",runtime->debuggerBackend}});}PublishActivity(state,{{"kind","session"},{"phase","started"},{"summary","AI/MCP session started"}});state->watchdogRunning=true;state->watchdog=std::thread([state]{Watchdog(state);});std::ios::sync_with_stdio(false);std::cin.tie(nullptr);std::string line;while(std::getline(std::cin,line)){if(line.empty())continue;if(line.size()>kMaxStdioMessageBytes){WriteOutput(state,TransportError(nullptr,"message_too_large","MCP stdio message exceeds 4 MiB"));continue;}json m;try{m=json::parse(line);}catch(const std::exception&e){WriteOutput(state,{{"jsonrpc","2.0"},{"id",nullptr},{"error",{{"code",-32700},{"message",e.what()}}}});continue;}if(IsNotification(m)){json r;bool has=false;std::string e;if(!ForwardOne(state,m,r,has,&e))std::cerr<<"cortex mcp: notification forwarding failed: "<<e<<'\n';else if(has)WriteOutput(state,r);continue;}if(!ReserveWorker(state)){WriteOutput(state,TransportError(MessageId(m),"too_many_requests","Cortex MCP concurrency limit reached"));continue;}try{std::thread([m,state]{ForwardObserved(m,state);ReleaseWorker(state);}).detach();}catch(const std::exception&e){ReleaseWorker(state);WriteOutput(state,TransportError(MessageId(m),"worker_start_failed",e.what()));}}
 WaitWorkers(state);state->watchdogRunning=false;if(state->watchdog.joinable())state->watchdog.join();for(auto&r:RuntimeSnapshot(state))if(r&&r->debugger){std::lock_guard<std::mutex>l(r->debuggerMutex);r->debugger->Detach();}PublishActivity(state,{{"kind","session"},{"phase","ended"},{"summary","AI/MCP session ended"}});return 0;}

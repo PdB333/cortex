@@ -51,7 +51,8 @@ public:
         for (auto& profile : profiles) {
             Entry entry;
             entry.profile = std::move(profile);
-            entries_.emplace(entry.profile.name, std::move(entry));
+            const std::string name = entry.profile.name;
+            entries_.emplace(name, std::move(entry));
         }
     }
     ~Manager() {
@@ -84,6 +85,7 @@ public:
         auto it = entries_.find(name);
         if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
         Entry& entry = it->second;
+        if (entry.testRunning) { error = "test_in_progress"; return false; }
         if (entry.handle && WaitForSingleObject(entry.handle, 0) == WAIT_TIMEOUT) {
             error = "launch_profile_already_running"; return false;
         }
@@ -177,12 +179,56 @@ public:
         return true;
     }
 
+    // This permission is provided by a startup profile, never by target data
+    // or a tool-call flag. A lease excludes concurrent tests/restarts/stops.
+    bool BeginTest(uint64_t pid, uint64_t generation, const std::vector<int>& keys,
+                   std::string& error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            Entry& entry = pair.second;
+            if (entry.pid != pid || !entry.handle) continue;
+            if (!generation || generation != entry.generation ||
+                WaitForSingleObject(entry.handle, 0) != WAIT_TIMEOUT) {
+                error = "test_target_generation_changed"; return false;
+            }
+            if (!entry.profile.allowInput) { error = "test_input_not_allowed"; return false; }
+            for (int key : keys) {
+                if (std::find(entry.profile.testKeys.begin(), entry.profile.testKeys.end(), key) ==
+                        entry.profile.testKeys.end()) { error = "test_key_not_allowed"; return false; }
+            }
+            if (entry.testRunning) { error = "test_already_running"; return false; }
+            if (entry.tests >= entry.profile.maxTests) { error = "test_run_limit_reached"; return false; }
+            entry.testRunning = true;
+            ++entry.tests;
+            return true;
+        }
+        error = "test_target_not_launched_by_cortex";
+        return false;
+    }
+    void EndTest(uint64_t pid, uint64_t generation) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            Entry& entry = pair.second;
+            if (entry.pid == pid && entry.generation == generation) entry.testRunning = false;
+        }
+    }
+    bool IsCurrent(uint64_t pid, uint64_t generation) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& pair : entries_) {
+            const Entry& e = pair.second;
+            if (e.pid == pid && e.generation == generation && e.handle &&
+                WaitForSingleObject(e.handle, 0) == WAIT_TIMEOUT) return true;
+        }
+        return false;
+    }
+
     bool Stop(const std::string& name, uint64_t requestedPid,
               json& result, std::string& error) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(name);
         if (it == entries_.end()) { error = "launch_profile_not_found"; return false; }
         Entry& entry = it->second;
+        if (entry.testRunning) { error = "test_in_progress"; return false; }
         if (!entry.profile.allowStop) { error = "launch_stop_not_allowed"; return false; }
         if (!entry.handle || requestedPid == 0 || requestedPid != entry.pid) {
             error = "launch_pid_mismatch"; return false;
@@ -211,12 +257,20 @@ private:
         uint64_t generation = 0;
         uint64_t startedMs = 0;
         int launches = 0;
+        int tests = 0;
+        bool testRunning = false;
     };
     static json MakeStatus(const Entry& e) {
         bool alive = e.handle && WaitForSingleObject(e.handle, 0) == WAIT_TIMEOUT;
         json data = {
             {"name", e.profile.name},
             {"allow_stop", e.profile.allowStop},
+            {"allow_attach", e.profile.allowAttach},
+            {"allow_input", e.profile.allowInput},
+            {"test_keys", e.profile.testKeys},
+            {"max_tests", e.profile.maxTests},
+            {"tests", e.tests},
+            {"test_running", e.testRunning},
             {"max_runs", e.profile.maxRuns},
             {"runs", e.launches},
             {"pid", e.pid},
