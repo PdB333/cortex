@@ -514,6 +514,36 @@ def main():
                 candidates=[second_proposal])
             assert final_stop['status']=='need_competing_hypotheses',final_stop
             checks.append('bounded_loop_stops_when_only_one_model_remains')
+            # Whole investigation report over both genuine supervised trials.
+            global_summary=client.data('cortex_test_investigation_summary',id=second_id)
+            assert global_summary['round_count']==2 and \
+                global_summary['rounds'][0]['summary']['consistent']==2 and \
+                global_summary['rounds'][1]['summary']['consistent']==1 and \
+                global_summary['rounds'][1]['summary']['contradicted']==1 and \
+                global_summary['verified_semantics'] is False,global_summary
+            checks.append('whole_investigation_rechecks_two_rounds')
+            no_report=client.call('cortex_test_investigation_report',
+                id=second_id,mutation_permission=False)
+            assert no_report['isError'],no_report
+            archive=client.data('cortex_test_investigation_report',
+                id=second_id,mutation_permission=True)
+            report_path=pathlib.Path(archive['path'])
+            assert (report_path/'report.json').is_file() and \
+                (report_path/'investigation.md').is_file(),archive
+            assert 'Round' in (report_path/'investigation.md').read_text()
+            checks.append('one_markdown_and_json_for_entire_investigation')
+            not_catalog=client.call('cortex_test_catalog_save',
+                id=second_id,mutation_permission=False)
+            assert not_catalog['isError'],not_catalog
+            catalog_saved=client.data('cortex_test_catalog_save',
+                id=second_id,mutation_permission=True)
+            assert catalog_saved['entry']['requires_separate_permission'] and \
+                catalog_saved['entry']['operator_approved_for_future_use'] is False
+            entries=client.data('cortex_test_catalog_list')['entries']
+            assert any(e['id']==second_id and
+                e['candidate']['action']['steps']==second_proposal['action']['steps']
+                for e in entries),entries
+            checks.append('catalog_records_completed_scenario_without_approval')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -545,6 +575,11 @@ def main():
                 child_step['step']['status']=='completed' and \
                 child_step['hypothesis_tests']['summary']['contradicted']==1,(root_step,child_step)
             checks.append('two_round_investigation_reopens_after_reconnect')
+            reopened_summary=client.data('cortex_test_investigation_summary',id=second_id)
+            reopened_catalog=client.data('cortex_test_catalog_list')
+            assert reopened_summary['round_count']==2 and \
+                any(e['id']==second_id for e in reopened_catalog['entries'])
+            checks.append('complete_report_and_catalog_survive_reconnection')
             checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:

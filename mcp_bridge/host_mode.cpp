@@ -290,6 +290,46 @@ if(name=="cortex_test_choose"){
     response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
     return true;
 }
+if(name=="cortex_test_investigation_summary"||
+   name=="cortex_test_investigation_report"||
+   name=="cortex_test_catalog_save"){
+    const bool persist=name!="cortex_test_investigation_summary";
+    if(!a.is_object()||a.size()!=(persist?2:1)||
+       !a.contains("id")||!a["id"].is_string()||
+       (persist&&(!a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_investigation_request",
+            "Provide a step ID; persistent writes require explicit permission"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="id"&&!(persist&&it.key()=="mutation_permission")) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_investigation_request","Unsupported field"),true);return true;
+        }
+    const auto id=a["id"].get<std::string>();
+    const auto out=name=="cortex_test_investigation_summary"?
+        s->tests->InvestigationSummary(id):
+        name=="cortex_test_investigation_report"?
+        s->tests->InvestigationSave(id):s->tests->CatalogSave(id);
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_catalog_list"){
+    if(!a.is_object()||a.size()>1 ||
+       (a.contains("program")&&
+        (!a["program"].is_string()||
+         a["program"].get_ref<const std::string&>().size()>260))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_catalog_request","Optional program filter is a path string"),true);
+        return true;
+    }
+    const auto out=s->tests->CatalogList(a.value("program",std::string()));
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_step_next"||name=="cortex_test_step_continue"){
     const bool persist=name=="cortex_test_step_continue";
     if(!a.is_object() ||
