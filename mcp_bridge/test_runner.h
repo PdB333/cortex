@@ -580,6 +580,80 @@ public:
 
     // Persist the decision as a *proposal*, never as authority to send input.
     // Both arms must later be executed using separately permitted test_run calls.
+    // Prepare a generated diagnostic candidate using the SAME supervised
+    // journal and per-arm approval gates as client-authored proposals.
+    // This performs only an authorized journal write; no target action.
+    json GeneratePrepare(const std::string& reportId,const std::string& objective) {
+        const auto generated=Generate(reportId,objective);
+        if(!generated.value("ok",false)||
+           generated.value("status",std::string())!="proposed")
+            return generated;
+        try {
+            if(!generated.contains("candidates")||
+               !generated["candidates"].is_array()||
+               generated["candidates"].empty())
+                return {{ "ok",false},{"error","no_generated_candidates"}};
+            const auto source=GetReport(reportId);
+            if(!source.value("ok",false)||!source.contains("report")||
+               !source["report"].is_object())
+                return {{"ok",false},{"error","invalid_source_report"}};
+            const auto& report=source["report"];
+            if(!report.contains("program")||!report["program"].is_string()||
+               !report.contains("architecture")||!report["architecture"].is_string())
+                return {{"ok",false},{"error","invalid_source_investigation"}};
+            const auto sourceId=generated["source_trial_ids"][1].get<std::string>();
+            const auto original=Get(sourceId);
+            if(!original.value("ok",false)||!original.contains("run")||
+               !original["run"].contains("target")||
+               !step::TargetValid(original["run"]["target"]))
+                return {{"ok",false},{"error","generated_target_unavailable"}};
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            const auto stepsDir=root_/"steps";
+            if(std::filesystem::is_symlink(stepsDir))
+                return {{"ok",false},{"error","step_storage_untrusted"}};
+            std::filesystem::create_directories(stepsDir);
+            std::filesystem::path folder;bool created=false;
+            for(int i=0;i<8 && !created;++i) {
+                const auto id="step_"+std::to_string(WallMs())+"_"+tag_+"_"+
+                    std::to_string(++stepSequence_);
+                if(!step::SafeId(id))
+                    return {{"ok",false},{"error","invalid_step_id"}};
+                folder=stepsDir/id;
+                created=std::filesystem::create_directory(folder);
+            }
+            if(!created)
+                return {{"ok",false},{"error","step_directory_collision"}};
+            json record={{"schema","cortex.step.v1"},
+                {"id",folder.filename().string()},{"revision",1},
+                {"source_report",reportId},
+                {"source_trials",generated["source_trial_ids"]},
+                {"program",report["program"]},{"architecture",report["architecture"]},
+                {"expected_target",original["run"]["target"]},
+                {"choice",generated["candidates"][0]},
+                {"generated_objective",objective},
+                {"generation_source","measured_duration_probe"},
+                {"status","awaiting_control"},
+                {"control_id",nullptr},{"action_id",nullptr},
+                {"created_ms",WallMs()},{"updated_ms",WallMs()},
+                {"executed_by_step",false},{"semantic_verified",false},
+                {"required_action","run_control_separately_with_operator_approval"},
+                {"limitations",json::array({
+                    "Generated alternatives are exploratory predictions, not facts.",
+                    "Input duration variations are not automatically executed.",
+                    "The original PID/generation is pinned until human review.",
+                    "Both arms require separate operator consent and a reset baseline.",
+                    "Never silently repeat an incomplete trial."})}};
+            try{Write(folder/"step.json",record.dump(2));}
+            catch(...){
+                std::error_code ec;std::filesystem::remove_all(folder,ec);throw;
+            }
+            return {{"ok",true},{"step",record},{"untrusted_data",true},
+                    {"requires_separate_permission",true}};
+        }catch(const std::exception&) {
+            return {{"ok",false},{"error","generated_step_prepare_failed"}};
+        }
+    }
+
     json StepPrepare(const std::string& reportId,const json& candidates,
                      const json& previousIds=json::array()) {
         const auto proposal=Choose(reportId,candidates,previousIds);
