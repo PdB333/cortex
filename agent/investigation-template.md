@@ -15,6 +15,16 @@ Question being investigated and observations that would answer it.
 | --- | --- | --- | --- | --- | --- |
 | 1 | | | | | |
 
+## Competing hypotheses and measured predictions
+| Knowledge or hypothesis ID | Observable read | Control prediction | Action prediction | Assessment | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| | | | | | |
+
+For an aligned control/action pair, list predictions that match the recorded
+measurements, those contradicted by measurements and inconclusive cases.
+A matching prediction is not a causal or semantic proof. Do not automatically
+change a knowledge record's status based on trial measurements.
+
 ## Code and objects
 Observed functions, instructions, data fields, structures and relationships.
 Keep unknown, inferred and observed information separate.

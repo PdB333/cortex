@@ -132,6 +132,11 @@ def main():
             assert reloaded_claim['status']=='hypothesis' and \
                 reloaded_claim['last_verification']['status']=='not_run',reloaded_claim
             checks.append('knowledge_evidence_persisted')
+            rival_id='fixture.AlternateCandidate_'+__import__('uuid').uuid4().hex
+            rival=client.data('project_knowledge_put',id=rival_id,kind='behavior',
+                statement='Alternative prediction: input leaves the counter unchanged',
+                status='hypothesis',mutation_permission=True)
+            assert rival['result']['record']['status']=='hypothesis',rival
             stale_link=client.call('cortex_test_link',**link_args)
             assert stale_link['isError'] and \
                 stale_link['structuredContent']['error']['code']=='knowledge_revision_conflict',stale_link
@@ -260,14 +265,31 @@ def main():
             code_pair=comparisons['code_comparison']
             assert code_pair['status']=='aligned' and                 code_pair['breakpoints'][0]['control_hits']==0 and                 code_pair['breakpoints'][0]['action_hits']>=1 and                 code_pair['breakpoints'][0]['candidate_more_during_action'],code_pair
             checks.append('instruction_hits_compared_against_control')
+            hypotheses=[
+                {'id':knowledge_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'increased'}},
+                {'id':rival_id,'read':0,
+                 'control':{'op':'unchanged'},'action':{'op':'unchanged'}}
+            ]
             denied_report=client.call('cortex_test_report',
-                ids=[fresh_control['id'],fresh_action['id']],title='Damage | report',
-                mutation_permission=False)
+                ids=[fresh_control['id'],fresh_action['id']],title='Counter | report',
+                hypotheses=hypotheses,mutation_permission=False)
             assert denied_report['isError'],denied_report
             checks.append('report_permission_denied')
-            combined=client.data('cortex_test_report',
-                ids=[fresh_control['id'],fresh_action['id']],title='Damage | report',
+            empty=client.call('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],title='Empty predictions',
+                hypotheses=[],mutation_permission=True)
+            assert empty['isError'] and empty['structuredContent']['error']['code']=='invalid_hypotheses',empty
+            checks.append('empty_prediction_list_rejected')
+            malformed=client.call('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],title='Bad prediction',
+                hypotheses=[dict(hypotheses[0],action={'op':'execute'})],
                 mutation_permission=True)
+            assert malformed['isError'],malformed
+            checks.append('malformed_prediction_rejected')
+            combined=client.data('cortex_test_report',
+                ids=[fresh_control['id'],fresh_action['id']],title='Counter | report',
+                hypotheses=hypotheses,mutation_permission=True)
             report_id=combined['id']
             folder=pathlib.Path(combined['report_directory'])
             assert (folder/'investigation.md').exists() and (folder/'report.json').exists()
@@ -275,6 +297,17 @@ def main():
             assert combined['report']['trials'][0]['code_breakpoints'] and                 combined['report']['comparison']['code_comparison']['status']=='aligned',combined
             checks.append('consolidated_report_contains_code_hits')
             checks.append('multi_trial_report_persisted')
+            evaluated=combined['report']['hypothesis_tests']
+            assert evaluated['pair_comparable'] and evaluated['summary']=={
+                'consistent':1,'contradicted':1,'inconclusive':0},evaluated
+            assert evaluated['results'][0]['semantic_verified'] is False and \
+                evaluated['results'][0]['id']==knowledge_id and \
+                evaluated['results'][1]['assessment']=='contradicted_by_measurements',evaluated
+            assert 'contradicted_by_measurements' in (folder/'investigation.md').read_text()
+            ledger=client.data('project_knowledge_list')['result']['records']
+            assert ledger[knowledge_id]['status']=='hypothesis' and \
+                ledger[rival_id]['status']=='hypothesis',ledger
+            checks.append('competing_predictions_evaluated_without_status_upgrade')
             limit=client.call('cortex_test_run',**base)
             assert limit['isError'] and limit['structuredContent']['error']['code']=='test_run_limit_reached',limit
             checks.append('operator_test_budget')
@@ -288,6 +321,8 @@ def main():
             archived=client.data('cortex_test_get',id=saved);assert archived['archived'] and archived['run']['outcome']=='passed';checks.append('report_reloaded_new_agent')
             combined_reloaded=client.data('cortex_test_report_get',id=report_id)
             assert combined_reloaded['report']['id']==report_id and combined_reloaded['untrusted_data']
+            assert combined_reloaded['report']['hypothesis_tests']['summary']['contradicted']==1
+            checks.append('prediction_evidence_survives_reconnect')
             checks.append('final_report_reloaded_new_agent')
             assert len(client.data('cortex_test_list')['runs'])>=5
         finally:

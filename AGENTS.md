@@ -63,6 +63,15 @@ local program through its MCP tools.
    readings. Different initial values make a test inconclusive, and matching
    baselines do not prove causality. Choose the next experiment to distinguish
    competing mechanisms.
+9b. Before reporting a pair of completed control/action trials, explicitly
+    formulate competing measurable predictions. Optionally pass up to eight
+    entries as cortex_test_report(hypotheses=[{id, read, control:{op},
+    action:{op}}, ...]) with two trial IDs (control first). Cortex evaluates
+    their agreement with actual before/after observations and preserves
+    contradictions in report.json/investigation.md. An aligned, matching
+    prediction is NOT semantic or causal verification. An unaligned pair
+    yields inconclusive results. Client hypothesis IDs are not attested to
+    project records; check the Knowledge Engine independently.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.

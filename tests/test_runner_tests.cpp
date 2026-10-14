@@ -129,6 +129,105 @@ int main(){
         Check(aligned.value("ok",false)&&aligned.value("comparison",std::string())=="aligned"&&
               aligned["reads"][0].value("candidate_difference",false),
               "paired trials report aligned baseline and differing observation");
+        // A single controlled pair can distinguish incompatible *predictions*.
+        // This does not mutate either project's hypothesis status.
+        const json hypotheses=json::array({
+            {{"id","fixture.counter_rises"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","increased"}}}},
+            {{"id","fixture.counter_stays"},{"read",0},
+             {"control",{{"op","unchanged"}}},{"action",{{"op","unchanged"}}}}
+        });
+        json assessed;std::string assessedError;
+        Check(runner.Report({controlId,experimentId},"Prediction evaluation",
+                            assessed,assessedError,hypotheses),
+              "archive competing predictions");
+        if(assessed.value("ok",false)) {
+            const auto& evaluation=assessed["report"]["hypothesis_tests"];
+            Check(evaluation["pair_comparable"]==true &&
+                  evaluation["summary"]["consistent"]==1 &&
+                  evaluation["summary"]["contradicted"]==1 &&
+                  evaluation["summary"]["inconclusive"]==0,
+                  "paired prediction outcomes are counted");
+            Check(evaluation["results"][0]["assessment"]=="consistent_with_measurements" &&
+                  evaluation["results"][1]["assessment"]=="contradicted_by_measurements" &&
+                  evaluation["results"][0]["semantic_verified"]==false &&
+                  assessed["report"]["conclusion"]=="not_inferred",
+                  "prediction checks never prove semantic claims");
+            const auto folder=std::filesystem::u8path(
+                assessed["report_directory"].get<std::string>());
+            std::ifstream md(folder/"investigation.md");
+            const std::string text((std::istreambuf_iterator<char>(md)),
+                                   std::istreambuf_iterator<char>());
+            Check(text.find("## Predictions against the control/action pair")!=
+                      std::string::npos &&
+                  text.find("contradicted_by_measurements")!=std::string::npos,
+                  "contradiction archived in investigation Markdown");
+            const auto archived=runner.GetReport(assessed["id"].get<std::string>());
+            Check(archived.value("ok",false) &&
+                  archived["report"]["hypothesis_tests"]["summary"]["contradicted"]==1,
+                  "evaluated predictions survive reopening report");
+        }
+        auto crossGeneration=aligned;
+        crossGeneration["different_generation"]=true;
+        const auto originalControl=runner.Get(controlId)["run"];
+        const auto originalAction=runner.Get(experimentId)["run"];
+        const auto unsafePair=predictions::Evaluate(
+            hypotheses,originalControl,originalAction,crossGeneration);
+        Check(unsafePair["summary"]["inconclusive"]==2,
+              "cross-generation pair cannot attest binary identity");
+        auto incomplete=originalAction;
+        incomplete["outcome"]="inconclusive";
+        const auto missingStep=predictions::Evaluate(
+            hypotheses,originalControl,incomplete,aligned);
+        Check(missingStep["summary"]["inconclusive"]==2,
+              "an inconclusive trial cannot support a matching prediction");
+        auto differentTarget=originalAction;
+        differentTarget["target"]["pid"]=1234;
+        Check(predictions::Evaluate(hypotheses,originalControl,differentTarget,
+                                    aligned)["summary"]["inconclusive"]==2,
+              "a different target PID invalidates paired predictions");
+        auto nullBaseline=aligned;
+        nullBaseline["baseline_aligned"]=nullptr;
+        Check(predictions::Evaluate(hypotheses,originalControl,originalAction,
+                                    nullBaseline)["summary"]["inconclusive"]==2,
+              "missing baseline alignment is inconclusive, not an exception");
+        Check(!predictions::ValidCondition({{"op","equal"}}) &&
+              predictions::ValidCondition({{"op","equal"},{"value",51}}),
+              "exact predictions need a bounded expected value");
+        Check(!predictions::Matches({{"ok",true},{"value","18446744073709551615"}},
+                                    {{"ok",true},{"value","18446744073709551614"}},
+                                    {{"op","increased"}}).has_value(),
+              "64-bit integer strings are not coerced for ordering");
+        json invalidPredictions=hypotheses;
+        invalidPredictions[0]["action"]["op"]="execute";
+        Check(!runner.Report({controlId,experimentId},"Invalid",assessed,
+                             assessedError,invalidPredictions) &&
+              assessedError=="invalid_hypothesis_prediction",
+              "reject unsupported prediction operation");
+        invalidPredictions=hypotheses;
+        invalidPredictions[1]["id"]=invalidPredictions[0]["id"];
+        Check(!runner.Report({controlId,experimentId},"Duplicate",assessed,
+                             assessedError,invalidPredictions) &&
+              assessedError=="invalid_hypothesis",
+              "reject duplicate predictions");
+        invalidPredictions=hypotheses;
+        invalidPredictions[0]["read"]=8;
+        Check(!runner.Report({controlId,experimentId},"Invalid read",assessed,
+                             assessedError,invalidPredictions) &&
+              assessedError=="invalid_hypothesis_prediction",
+              "reject prediction outside observed reads");
+        Check(!runner.Report({controlId},"Single",assessed,
+                             assessedError,hypotheses) &&
+              assessedError=="hypotheses_require_two_trials",
+              "predictions require a real control/action pair");
+        json unalignedReport;std::string unalignedError;
+        Check(runner.Report({saved,experimentId},"Unaligned",
+                            unalignedReport,unalignedError,hypotheses),
+              "archive unaligned predictions as inconclusive");
+        if(unalignedReport.value("ok",false))
+            Check(unalignedReport["report"]["hypothesis_tests"]["summary"]["inconclusive"]==2 &&
+                  unalignedReport["report"]["hypothesis_tests"]["pair_comparable"]==false,
+                  "unaligned trials never contradict hypotheses");
         const auto misaligned=runner.Compare(saved,experimentId);
         Check(misaligned.value("ok",false)&&misaligned.value("comparison",std::string())=="inconclusive",
               "different initial states cannot form a controlled comparison");

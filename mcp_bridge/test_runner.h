@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "test_plan.h"
 #include "test_code.h"
+#include "test_predictions.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -249,7 +250,8 @@ public:
 
     // Record a bounded multi-trial investigation without inferring semantic facts.
     bool Report(const std::vector<std::string>& ids,const std::string& title,
-                json& output,std::string& error) {
+                json& output,std::string& error,
+                const json& hypotheses=json::array()) {
         if(ids.empty()||ids.size()>8||title.size()>100){
             error="invalid_report_request";return false;
         }
@@ -310,10 +312,28 @@ public:
         }
         json comparison=nullptr;
         if(ids.size()==2)comparison=Compare(ids[0],ids[1]);
+        // Two *completed* existing trials anchor the assessment; clients may
+        // supply competing predictions but cannot declare semantic truth.
+        json testedHypotheses=nullptr;
+        if(hypotheses != json::array()) {
+            if(ids.size()!=2 || !hypotheses.is_array()) {
+                error="hypotheses_require_two_trials";return false;
+            }
+            if(!predictions::Validate(hypotheses,
+                    entries[0]["read_count"].get<size_t>(),error))return false;
+            const auto first=Get(ids[0]),second=Get(ids[1]);
+            if(!first.value("ok",false)||!second.value("ok",false) ||
+               !first.contains("run")||!second.contains("run")) {
+                error="hypothesis_trials_unavailable";return false;
+            }
+            testedHypotheses=predictions::Evaluate(
+                hypotheses,first["run"],second["run"],comparison);
+        }
         json report={{"schema","cortex.investigation.v1"},
             {"title",title},{"created_ms",WallMs()},
             {"program",program},{"architecture",architecture},
             {"trials",entries},{"comparison",comparison},
+            {"hypothesis_tests",testedHypotheses},
             {"conclusion","not_inferred"},
             {"limits",json::array({
                 "Trial outcomes are measurements, not verified explanations.",
@@ -370,6 +390,22 @@ public:
                           (row["candidate_difference"].get<bool>()?"yes":"no"):
                           "not comparable")<<"\n";
             }else md<<"No controlled comparison established.\n";
+            if(testedHypotheses.is_object()) {
+                md<<"\n## Predictions against the control/action pair\n\n"
+                    "These are client-authored hypotheses. Matching a measured"
+                    " change does not prove the mechanism.\n\n"
+                    "| Hypothesis ID | Read | Control prediction | Action prediction | Result |\n"
+                    "| --- | --- | --- | --- | --- |\n";
+                for(const auto& row:testedHypotheses["results"])
+                    md<<"| "<<escape(row["id"].get<std::string>())
+                      <<" | "<<row["read"].get<size_t>()
+                      <<" | "<<row["control"]["op"].get<std::string>()
+                      <<" | "<<row["action"]["op"].get<std::string>()
+                      <<" | "<<row["assessment"].get<std::string>()<<" |\n";
+                md<<"\nSuggested next step: "
+                  <<testedHypotheses["recommended_next_step"].get<std::string>()
+                  <<".\n";
+            }
             md<<"\n## Logged instructions (only previously configured breakpoints)\n\n";
             for(const auto& trial:entries)
                 for(const auto& bp:trial["code_breakpoints"])

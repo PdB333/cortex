@@ -163,6 +163,45 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Evaluating competing predictions
+
+To avoid treating a successful byte check as semantic proof, a two-trial
+consolidated report may now include up to eight **client-authored** predictions
+for an explicit control/action pair. The first ID is the control trial, the
+second is the experiment. Both must already be completed; Cortex does not
+replay, start or modify a target while evaluating them.
+
+Example:
+
+    cortex_test_report(
+      ids=["test_CONTROL_ID", "test_ACTION_ID"],
+      title="Does the fixture input change the counter?",
+      hypotheses=[
+        {"id":"counter_rises", "read":0,
+         "control":{"op":"unchanged"}, "action":{"op":"increased"}},
+        {"id":"counter_constant", "read":0,
+         "control":{"op":"unchanged"}, "action":{"op":"unchanged"}}
+      ],
+      mutation_permission=true)
+
+The read is the index of the **same typed observation** in both trials.
+Operators are changed/unchanged/increased/decreased, plus
+{"op":"equal","value":...}. Values must be numeric for an ordered
+comparison; 64-bit integer strings are never coerced into floating-point
+numbers. Prediction IDs may reference existing project knowledge IDs but
+are **not independently authenticated** against that ledger.
+
+The report.json gets hypothesis_tests with per-arm matches, the assessment
+consistent_with_measurements, contradicted_by_measurements or inconclusive,
+a summary, and a conservative recommended next step. The Markdown report
+preserves the positive and negative predictions. Incomparable baselines,
+unreadable observations and missing values always yield **inconclusive**.
+Predictions that disagree with captured values are contradicted **as
+measurements**, not semantically refuted explanations. The Knowledge Engine
+status is never updated automatically. Repeating a pair under controlled
+independent initial conditions is required before strong behavioral claims.
+Archived results remain untrusted, human-editable data.
+
 ## Consolidated investigation reports
 
 cortex_test_report accepts 1-8 completed trial IDs, an optional title and
