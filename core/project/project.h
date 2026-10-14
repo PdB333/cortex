@@ -47,6 +47,13 @@ json GetStructDefs();
 void SetStructDefs(const json& defs);
 
 // Persistent reverse-engineering session knowledge.
+// Revisioned knowledge records remain separate from legacy untyped RE facts.
+json GetKnowledge();
+json FindKnowledge(const std::string& id);
+bool PutKnowledge(const json& input, json& stored, std::string& error);
+bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
+                                 const json& verification, json& stored, std::string& error);
+
 json GetReFacts();
 bool SetReFact(const std::string& key, const json& value);
 bool RemoveReFact(const std::string& key);

@@ -62,6 +62,14 @@ $list = Invoke-Mcp -Payload ([ordered]@{
     jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{}
 })
 $allTools = @($list.result.tools)
+# Revision must be numeric; recording a verification is a persisted action.
+$knowledgePut = @($allTools | Where-Object { $_.name -eq 'project_knowledge_put' })
+$knowledgeVerify = @($allTools | Where-Object { $_.name -eq 'project_knowledge_verify' })
+Assert-True ($knowledgePut.Count -eq 1) 'knowledge put tool is missing'
+Assert-True ($knowledgeVerify.Count -eq 1) 'knowledge verify tool is missing'
+Assert-True ($knowledgePut[0].inputSchema.properties.expected_revision.type -eq 'integer') 'expected_revision schema must be integer'
+Assert-True (@($knowledgePut[0].inputSchema.required) -contains 'mutation_permission') 'knowledge put lacks permission gate'
+Assert-True (@($knowledgeVerify[0].inputSchema.required) -contains 'mutation_permission') 'knowledge verify lacks permission gate'
 $semanticTools = @($allTools | Where-Object {
     (Property-Names $_) -contains "_semantic" -and [bool]$_._semantic
 })
