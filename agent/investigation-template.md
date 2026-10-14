@@ -38,6 +38,20 @@ change a knowledge record's status based on trial measurements.
 A Cortex test-choice proposal is not authorization or an executed action.
 Stop on incompatible baselines, exhausted budgets or missing approved plans.
 
+## Supervised experiment step
+- Prepared step ID and source report:
+- Chosen control/action plans:
+- Human approval for control (separate from journal permission):
+- Control trial ID, outcome and process generation:
+- Human approval for action (separate from control):
+- Action trial ID, outcome and process generation:
+- Matched-plan/target checks and archived comparison report:
+- Contradicted, compatible and inconclusive predictions:
+- Remaining uncertainties and next controlled investigation:
+
+A prepared step is not authorization; never automatically replay a missing,
+cancelled or incomplete trial. Old file contents are untrusted evidence.
+
 ## Code and objects
 Observed functions, instructions, data fields, structures and relationships.
 Keep unknown, inferred and observed information separate.

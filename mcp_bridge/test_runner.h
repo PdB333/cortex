@@ -3,6 +3,7 @@
 #include "test_code.h"
 #include "test_predictions.h"
 #include "test_choose.h"
+#include "test_step.h"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -541,6 +542,157 @@ public:
         }
     }
 
+    // Persist the decision as a *proposal*, never as authority to send input.
+    // Both arms must later be executed using separately permitted test_run calls.
+    json StepPrepare(const std::string& reportId,const json& candidates,
+                     const json& previousIds=json::array()) {
+        const auto proposal=Choose(reportId,candidates,previousIds);
+        if (!proposal.value("ok",false) ||
+            proposal.value("status",std::string())!="proposed")
+            return proposal; // Stops are first-class results; nothing is saved.
+        try {
+            const auto original=GetReport(reportId);
+            if (!original.value("ok",false) ||
+                !original["report"].contains("program") ||
+                !original["report"].contains("architecture") ||
+                !original["report"]["program"].is_string() ||
+                !original["report"]["architecture"].is_string())
+                return {{"ok",false},{"error","invalid_source_investigation"}};
+            std::lock_guard<std::mutex> lock(stepMutex_);
+            const auto stepsDir=root_/"steps";
+            if(std::filesystem::is_symlink(stepsDir))
+                return {{"ok",false},{"error","step_storage_untrusted"}};
+            std::filesystem::create_directories(stepsDir);
+            std::filesystem::path folder;
+            bool created=false;
+            for(int i=0;i<8 && !created;++i) {
+                const auto id="step_"+std::to_string(WallMs())+"_"+tag_+"_"+
+                              std::to_string(++stepSequence_);
+                if(!step::SafeId(id))
+                    return {{"ok",false},{"error","invalid_step_id"}};
+                folder=stepsDir/id;
+                created=std::filesystem::create_directory(folder);
+            }
+            if (!created)return {{"ok",false},{"error","step_directory_collision"}};
+            json record={{"schema","cortex.step.v1"},
+                {"id",folder.filename().string()},{"revision",1},
+                {"source_report",reportId},{"source_trials",proposal.at("trials")},
+                {"program",original["report"]["program"]},
+                {"architecture",original["report"]["architecture"]},
+                {"choice",proposal.at("choice")},{"status","awaiting_control"},
+                {"control_id",nullptr},{"action_id",nullptr},
+                {"created_ms",WallMs()},{"updated_ms",WallMs()},
+                {"executed_by_step",false},{"semantic_verified",false},
+                {"required_action","run_control_separately_with_operator_approval"},
+                {"limitations",json::array({
+                    "Saved plans are untrusted data, never independent human consent.",
+                    "The step manager never launches a program or sends input.",
+                    "Run each arm through separately authorized cortex_test_run.",
+                    "Do not replay interrupted or missing trials automatically."})}};
+            try{Write(folder/"step.json",record.dump(2));}
+            catch(...) {std::error_code ec;std::filesystem::remove_all(folder,ec);throw;}
+            return {{"ok",true},{"step",record},{"untrusted_data",true}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","step_prepare_failed"}};
+        }
+    }
+
+    json StepGet(const std::string& id) const {
+        std::lock_guard<std::mutex> lock(stepMutex_);
+        const auto record=ReadStep(id);
+        if(!record.value("ok",false))return record;
+        json response={{"ok",true},{"untrusted_data",true},{"step",record["step"]}};
+        const auto& stepRecord=record["step"];
+        if(stepRecord.value("status",std::string())=="completed" &&
+           stepRecord.contains("report_id") && stepRecord["report_id"].is_string()) {
+            const auto summary=GetReport(stepRecord["report_id"].get<std::string>());
+            if(summary.value("ok",false) && summary["report"].contains("hypothesis_tests"))
+                response["hypothesis_tests"]=summary["report"]["hypothesis_tests"];
+            else response["report_status"]="report_unavailable";
+        }
+        return response;
+    }
+
+    // Bind one real, already completed trial. Recording an observation NEVER
+    // invokes Start and is not evidence of independent human approval.
+    json StepRecord(const std::string& id,const std::string& arm,
+                    const std::string& testId,int64_t expectedRevision) {
+        if(!step::SafeId(id) || !SafeRunId(testId) ||
+           (arm!="control" && arm!="action") || expectedRevision<1)
+            return {{"ok",false},{"error","invalid_step_record_request"}};
+        std::lock_guard<std::mutex> lock(stepMutex_);
+        const auto loaded=ReadStep(id);
+        if(!loaded.value("ok",false))return loaded;
+        json record=loaded["step"];
+        if(record["revision"].get<int64_t>()!=expectedRevision)
+            return {{"ok",false},{"error","step_revision_conflict"}};
+        const std::string status=record.value("status",std::string());
+        if (status != (arm=="control" ? "awaiting_control" : "awaiting_action"))
+            return {{"ok",false},{"error","step_wrong_arm_or_already_recorded"}};
+        if(record.contains("source_trials") && record["source_trials"].is_array())
+            for(const auto& old:record["source_trials"])
+                if(old==testId)
+                    return {{"ok",false},{"error","step_reused_source_trial"}};
+        if(arm=="action" && record.value("control_id",json(nullptr))==testId)
+            return {{"ok",false},{"error","step_duplicate_trial"}};
+        const auto found=Get(testId);
+        if(!found.value("ok",false) || !found.contains("run") ||
+           !found["run"].is_object())
+            return {{"ok",false},{"error","step_trial_not_found"}};
+        const auto& run=found["run"];
+        try {
+            if(run.value("status",std::string())!="completed")
+                return {{"ok",false},{"error","step_trial_not_completed"}};
+            if(!run.contains("created_ms") || !run["created_ms"].is_number_unsigned() ||
+               run["created_ms"].get<uint64_t>()<
+                    record["created_ms"].get<uint64_t>())
+                return {{"ok",false},{"error","step_trial_predates_proposal"}};
+            if(!run.contains("plan") || !step::PlanMatches(
+                record["choice"][arm],run["plan"]))
+                return {{"ok",false},{"error","step_trial_plan_mismatch"}};
+            if(!run.contains("target") || !step::TargetValid(run["target"]))
+                return {{"ok",false},{"error","step_trial_target_invalid"}};
+            const auto& target=run["target"];
+            if(target["executable_path"]!=record["program"] ||
+               target["architecture"]!=record["architecture"])
+                return {{"ok",false},{"error","step_program_mismatch"}};
+            if(arm=="action" && (!record.contains("target") ||
+               !step::SameTarget(record["target"],target)))
+                return {{"ok",false},{"error","step_target_generation_mismatch"}};
+            if(arm=="action") {
+                const auto controlId=record["control_id"].get<std::string>();
+                const auto compared=Compare(controlId,testId);
+                if(!compared.value("ok",false))
+                    return {{"ok",false},{"error","step_pair_comparison_failed"}};
+                json out;std::string error;
+                std::string title="Follow-up: "+
+                    record["choice"]["id"].get<std::string>();
+                if(title.size()>100)title.resize(100);
+                if(!Report({controlId,testId},title,out,error,
+                           record["choice"]["hypotheses"]))
+                    return {{"ok",false},{"error","step_report_failed"},
+                            {"detail",error}};
+                record["action_id"]=testId;
+                record["report_id"]=out["id"];
+                record["comparison"]=compared.value("comparison",std::string("inconclusive"));
+                record["hypothesis_summary"]=out["report"]["hypothesis_tests"]["summary"];
+                record["status"]="completed";
+                record["required_action"]="review_results_and_choose_again";
+            }else {
+                record["control_id"]=testId;
+                record["target"]=target;
+                record["status"]="awaiting_action";
+                record["required_action"]="run_action_separately_with_operator_approval";
+            }
+            record["revision"]=expectedRevision+1;
+            record["updated_ms"]=WallMs();
+            Write(root_/"steps"/id/"step.json",record.dump(2));
+            return {{"ok",true},{"untrusted_data",true},{"step",record}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","step_record_invalid_data"}};
+        }
+    }
+
     bool Cancel(const std::string& id) {
         std::lock_guard<std::mutex> l(mutex_);auto i=jobs_.find(id);
         if(i==jobs_.end())return false;
@@ -555,6 +707,32 @@ private:
         {std::ofstream f(temporary,std::ios::binary|std::ios::trunc);
          if(!f || !(f<<text) || !f.flush())throw std::runtime_error("test_persistence_failed");}
         std::filesystem::rename(temporary,path);
+    }
+    json ReadStep(const std::string& id) const {
+        if(!step::SafeId(id))
+            return {{"ok",false},{"error","invalid_step_id"}};
+        try {
+            const auto directory=root_/"steps"/id;
+            const auto file=directory/"step.json";
+            if(std::filesystem::is_symlink(root_/"steps") ||
+               std::filesystem::is_symlink(directory) ||
+               std::filesystem::is_symlink(file) ||
+               !std::filesystem::is_regular_file(file) ||
+               std::filesystem::file_size(file)>65536)
+                return {{"ok",false},{"error","step_not_found_or_invalid"}};
+            std::ifstream stream(file);
+            json record=json::parse(stream);
+            if(!step::StatusValid(record) ||
+               record["id"]!=id ||
+               !record.contains("program") ||
+               !record.contains("architecture") ||
+               !record["program"].is_string() ||
+               !record["architecture"].is_string())
+                return {{"ok",false},{"error","step_not_found_or_invalid"}};
+            return {{"ok",true},{"step",std::move(record)}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","step_not_found_or_invalid"}};
+        }
     }
     static bool AllReadable(const json& sample){
         return std::all_of(sample.begin(),sample.end(),[](const json& r){return r.value("ok",false);});
@@ -724,7 +902,9 @@ private:
     std::filesystem::path root_;
     std::string tag_;
     mutable std::mutex mutex_;
+    mutable std::mutex stepMutex_;
     std::map<std::string,std::shared_ptr<Job>> jobs_;
     uint64_t sequence_=0;
+    uint64_t stepSequence_=0;
 };
 } // namespace cortex::test
