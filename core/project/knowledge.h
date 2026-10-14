@@ -31,7 +31,7 @@ inline bool ValidHex(const std::string& s) {
 inline bool Validate(const json& in, std::string& error) {
     if (!in.is_object()) { error = "invalid_record"; return false; }
     for (auto it = in.begin(); it != in.end(); ++it) {
-        if (!Choice(it.key(), {"id", "kind", "statement", "status", "evidence", "links",
+        if (!Choice(it.key(), {"id", "kind", "statement", "status", "evidence", "links", "relations",
                                 "checks", "notes", "expected_revision"})) {
             error = "server_owned_or_unknown_field:" + it.key(); return false;
         }
@@ -81,6 +81,31 @@ inline bool Validate(const json& in, std::string& error) {
         if (!link.is_string() || !ValidId(link.get<std::string>())) {
             error = "invalid_link"; return false;
         }
+    }
+    // Explicit typed edges are client assertions and do NOT confer causal
+    // or semantic verification. Existing plain links remain supported.
+    const json relations = in.value("relations", json::array());
+    if(!relations.is_array() || relations.size()>16) {
+        error="invalid_relations";return false;
+    }
+    for(const auto& relation:relations) {
+        if(!relation.is_object()||relation.size()<2||relation.size()>3||
+           !StringField(relation,"target",128)||
+           !ValidId(relation["target"].get<std::string>())||
+           !StringField(relation,"type",32)||
+           !Choice(relation["type"].get<std::string>(),{
+               "related_to","contains","calls_candidate","reads_candidate",
+               "writes_candidate","triggers_candidate","correlates",
+               "contradicts","depends_on"})||
+           (relation.contains("reference") &&
+            (!StringField(relation,"reference",128)||
+             !ValidId(relation["reference"].get<std::string>())))) {
+            error="invalid_relation_entry";return false;
+        }
+        for(auto it=relation.begin();it!=relation.end();++it)
+            if(it.key()!="target"&&it.key()!="type"&&it.key()!="reference") {
+                error="invalid_relation_entry";return false;
+            }
     }
     const json checks = in.value("checks", json::array());
     if (!checks.is_array() || checks.size() > 8) {
@@ -187,11 +212,20 @@ inline bool Prepare(const json& in, const json* previous, json& out, std::string
            {"notes", in.value("notes", std::string())},
            {"evidence", in.value("evidence", json::array())},
            {"links", in.value("links", json::array())},
+           {"relations", in.value("relations",
+                previous ? previous->value("relations", json::array()) : json::array())},
            {"checks", in.value("checks", json::array())},
            {"code_references", previous ? previous->value("code_references", json::array()) : json::array()},
            {"revision", previous ? previous->value("revision", 0) + 1 : 1},
            {"last_verification", {{"status", "not_run"}, {"scope", "byte_invariant"}}},
            {"origin", "client_assertion"}, {"history", json::array()}};
+    // Existing persisted records may have been changed outside Cortex.
+    // Reject malformed previously stored edges rather than propagating them.
+    if(previous && !in.contains("relations")) {
+        const auto saved=out["relations"];
+        json probe=in;probe["relations"]=saved;
+        if(!Validate(probe,error))return false;
+    }
     if (previous) {
         const auto& refs = out["code_references"];
         if (!refs.is_array() || refs.size() > 16 ||

@@ -163,6 +163,30 @@ value is still NOT proof of causality or complete code understanding: compare
 several controls and consider unobserved game state. The tool is read-only and
 works on archived results after reconnecting.
 
+## Persistent typed knowledge graph
+
+Each Knowledge Engine record may now have up to 16 `relations` in addition
+to its legacy untyped `links`. A relation is an object with a target
+knowledge ID, a bounded type (related_to, contains, calls_candidate,
+reads_candidate, writes_candidate, triggers_candidate, correlates,
+contradicts, depends_on), and an optional evidence reference string.
+The revision and history of the knowledge record preserve changes.
+Edits must use the existing optimistic `expected_revision` guard.
+
+Use the read-only MCP tool `project_knowledge_graph(focus, depth, limit)`
+or the native `/project/knowledge/graph` route for a bounded neighborhood
+(maximum depth 2, 32 nodes and 128 edges). The desktop host also exposes
+`cortex_knowledge_graph` for the exact selected live process/generation.
+Outputs have explicit `origin=client_assertion`,
+`semantic_verified=false` and `causal_verified=false` fields.
+
+Typed relations are **client assertions**. Neither a supplied reference
+string nor a status marked `observed` attests code semantics. Validate
+claimed data links through separate runtime trials and versioned code
+references, preserve contradictions and keep stale claims visible.
+Malformed or absent targets are not silently treated as verified edges.
+Legacy `links` continue working.
+
 ## Observed code regions: comparison of real control and action trials
 
 Use `cortex_test_code_candidates(control="test_...", action="test_...",

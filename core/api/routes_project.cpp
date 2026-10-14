@@ -2,6 +2,7 @@
 #include "../process/address.h"
 #include "../project/project.h"
 #include "../project/knowledge_query.h"
+#include "../project/knowledge_graph.h"
 #include "../overlay/overlay.h"
 #include "../memory/memory.h"
 #include <algorithm>
@@ -53,6 +54,27 @@ int64_t ParseSignedOffset(const json& j) {
 } // namespace
 
 void RegisterProjectRoutes(httplib::Server& svr) {
+
+    // Read-only typed knowledge graph, computed from the same persistent
+    // project records as the inspector and MCP query. These are assertions.
+    svr.Post("/project/knowledge/graph", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json request=json::parse(req.body);
+            json output;std::string error;
+            if(!project::knowledge::graph::Build(
+                   project::GetKnowledge(),request,output,error)) {
+                res.status=400;
+                res.set_content(json{{"ok",false},{"error",error}}.dump(),
+                                "application/json");
+                return;
+            }
+            res.set_content(output.dump(),"application/json");
+        }catch(const std::exception&) {
+            res.status=400;
+            res.set_content(json{{"ok",false},{"error","invalid_graph_query"}}.dump(),
+                            "application/json");
+        }
+    });
 
     // Read-only compact knowledge search is independent of the full project dump.
     svr.Post("/project/knowledge/query", [](const httplib::Request& req, httplib::Response& res) {
