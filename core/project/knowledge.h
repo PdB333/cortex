@@ -105,6 +105,67 @@ inline bool Validate(const json& in, std::string& error) {
     return true;
 }
 
+// Only a host-collected, versioned observation may enter this server-owned
+// field. The public project_knowledge_put schema never accepts it.
+inline bool ValidCodeReference(const json& ref) {
+    if (!ref.is_object() || ref.size() != 7 ||
+        !StringField(ref, "test_id", 96) ||
+        !StringField(ref, "module", 260) ||
+        !StringField(ref, "rva", 18) ||
+        !StringField(ref, "file_sha256", 64) ||
+        !StringField(ref, "source", 32) ||
+        ref["test_id"].get<std::string>().rfind("test_", 0) != 0) return false;
+    if (ref["source"] != "debugger_observation" ||
+        !ValidId(ref["test_id"].get<std::string>())) return false;
+    const std::string rva = ref["rva"].get<std::string>();
+    if (rva.size() < 3 || rva.compare(0, 2, "0x") != 0 ||
+        !std::all_of(rva.begin() + 2, rva.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        })) return false;
+    const std::string digest = ref["file_sha256"].get<std::string>();
+    if (digest.size() != 64 || !ValidHex(digest)) return false;
+    for (unsigned char c : digest)
+        if (std::isalpha(c) && !std::islower(c)) return false;
+    return ref.contains("file_size") && ref["file_size"].is_number_unsigned() &&
+           ref["file_size"].get<uint64_t>() > 0 &&
+           ref["file_size"].get<uint64_t>() <= 536870912ULL &&
+           ref.contains("image_size") && ref["image_size"].is_number_unsigned() &&
+           ref["image_size"].get<uint64_t>() > 0;
+}
+
+inline bool AppendCodeReferences(json& record, const json& references, std::string& error) {
+    if (!record.is_object() || !references.is_array() ||
+        references.empty() || references.size() > 4) {
+        error = "invalid_code_references"; return false;
+    }
+    json existing = record.value("code_references", json::array());
+    if (!existing.is_array() || existing.size() > 16) {
+        error = "invalid_existing_code_references"; return false;
+    }
+    for (const auto& item : existing)
+        if (!ValidCodeReference(item)) {
+            error = "invalid_existing_code_references"; return false;
+        }
+    for (const auto& item : references) {
+        if (!ValidCodeReference(item)) {
+            error = "invalid_code_reference"; return false;
+        }
+        for (const auto& old : existing) {
+            if (old["test_id"] == item["test_id"] &&
+                old["module"] == item["module"] &&
+                old["rva"] == item["rva"]) {
+                error = "code_reference_already_linked"; return false;
+            }
+        }
+        if (existing.size() == 16) {
+            error = "code_reference_limit"; return false;
+        }
+        existing.push_back(item);
+    }
+    record["code_references"] = std::move(existing);
+    return true;
+}
+
 inline void AppendHistory(json& record) {
     json& history = record["history"];
     if (!history.is_array()) history = json::array();
@@ -127,10 +188,16 @@ inline bool Prepare(const json& in, const json* previous, json& out, std::string
            {"evidence", in.value("evidence", json::array())},
            {"links", in.value("links", json::array())},
            {"checks", in.value("checks", json::array())},
+           {"code_references", previous ? previous->value("code_references", json::array()) : json::array()},
            {"revision", previous ? previous->value("revision", 0) + 1 : 1},
            {"last_verification", {{"status", "not_run"}, {"scope", "byte_invariant"}}},
            {"origin", "client_assertion"}, {"history", json::array()}};
     if (previous) {
+        const auto& refs = out["code_references"];
+        if (!refs.is_array() || refs.size() > 16 ||
+            !std::all_of(refs.begin(), refs.end(), ValidCodeReference)) {
+            error = "invalid_existing_code_references"; return false;
+        }
         out["history"] = previous->value("history", json::array());
         json snapshot = *previous;
         snapshot.erase("history");

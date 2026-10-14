@@ -139,6 +139,37 @@ def main():
             assert duplicate_link['isError'] and \
                 duplicate_link['structuredContent']['error']['code']=='test_evidence_already_linked',duplicate_link
             checks.append('knowledge_revision_and_duplicate_guards')
+            # Preserve only genuinely observed debugger IPs, mapped to a
+            # versioned module+RVA. A client cannot submit a guessed code IP.
+            code_link_args=dict(link_args,expected_revision=2,max_locations=1)
+            denied_code=client.call('cortex_test_code_link',
+                                    **dict(code_link_args,mutation_permission=False))
+            assert denied_code['isError'],denied_code
+            checks.append('code_link_permission_denied')
+            linked_code=client.data('cortex_test_code_link',**code_link_args)
+            assert linked_code['revision']==3 and linked_code['added']==1 and \
+                linked_code['claim_status']=='hypothesis' and \
+                linked_code['semantic_verified'] is False,linked_code
+            versioned=client.data('project_knowledge_list')['result']['records'][knowledge_id]
+            ref=versioned['code_references'][0]
+            assert ref['test_id']==saved and ref['source']=='debugger_observation' and \
+                ref['module'].lower()==target.name.lower() and \
+                ref['rva']==first_ip['module']['rva'] and \
+                len(ref['file_sha256'])==64 and ref['file_size']>0 and \
+                'address' not in ref and 'base' not in ref,versioned
+            checks.append('code_reference_persisted_with_binary_hash')
+            current_code=client.data('cortex_knowledge_code_check',
+                knowledge_id=knowledge_id,_cortex_target=pid,_cortex_generation=generation)
+            assert current_code['checked']==1 and current_code['matched']==1 and \
+                current_code['results'][0]['status']=='matched' and \
+                current_code['results'][0]['address']==first_ip['address'] and \
+                current_code['semantic_verified'] is False,current_code
+            checks.append('code_reference_revalidated_in_same_generation')
+            duplicate_code=client.call('cortex_test_code_link',
+                **dict(code_link_args,expected_revision=3))
+            assert duplicate_code['isError'] and \
+                duplicate_code['structuredContent']['error']['code']=='code_reference_already_linked',duplicate_code
+            checks.append('duplicate_code_link_denied')
             control=run(steps=[{'delay_ms':30}],expect=[{'read':0,'op':'unchanged'}]);assert control['outcome']=='passed',control;checks.append('control_trial')
             missing_code=client.call('cortex_test_code_context',
                 test_id=control['id'],_cortex_target=pid,
@@ -178,10 +209,26 @@ def main():
             assert restarted['previous_generation']==generation
             checks.append('atomic_profile_restart_and_attach')
             carried=client.data('project_knowledge_list')['result']['records'][knowledge_id]
-            assert carried['revision']==2 and carried['evidence'][0]['reference']==saved,carried
+            assert carried['revision']==3 and carried['evidence'][0]['reference']==saved and \
+                carried['code_references'][0]['file_sha256']==ref['file_sha256'],carried
             checks.append('knowledge_survives_target_restart')
+            # The old absolute IP is invalid; an identical new on-disk file
+            # allows Cortex to recompute the offset in the CURRENT module.
+            after_restart=client.data('cortex_knowledge_code_check',
+                knowledge_id=knowledge_id,_cortex_target=pid,
+                _cortex_generation=restarted['generation'])
+            assert after_restart['matched']==1 and \
+                after_restart['results'][0]['status']=='matched' and \
+                after_restart['results'][0]['address'].startswith('0x') and \
+                after_restart['semantic_verified'] is False,after_restart
+            checks.append('code_reference_revalidated_after_restart')
+            old_version=client.call('cortex_knowledge_code_check',
+                knowledge_id=knowledge_id,_cortex_target=pid,
+                _cortex_generation=generation)
+            assert old_version['isError'],old_version
+            checks.append('stale_code_check_generation_denied')
             old_generation_link=client.call('cortex_test_link',**dict(link_args,
-                expected_revision=2,_cortex_target=pid,
+                expected_revision=3,_cortex_target=pid,
                 _cortex_generation=restarted['generation']))
             assert old_generation_link['isError'] and \
                 old_generation_link['structuredContent']['error']['code']=='test_target_identity_mismatch',old_generation_link

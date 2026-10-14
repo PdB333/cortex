@@ -49,6 +49,15 @@ local program through its MCP tools.
    not prove function boundaries. On Windows x64, Cortex may also return a
    bounded PE unwind range from the running image's exception directory.
    This is loader metadata, NOT a certain source-level function boundary.
+8b. To retain an observed module/RVA across sessions, call cortex_test_code_link
+    on an EXISTING claim while the original process generation is live and
+    the completed debugger trial is available. Require the claim's current
+    expected_revision and explicit authorization for project mutation. Cortex
+    hashes the loaded module's on-disk file (SHA-256) and stores the test ID,
+    module name, RVA and file version, not the absolute IP. After a restart,
+    use read-only cortex_knowledge_code_check with the new target generation:
+    only matching on-disk binaries yield a NEW absolute address. A file hash
+    is not a guarantee of unmodified live memory or behavior.
 9. Observe again and compare. Use cortex_test_compare(first,second) for
    completed control/experiment pairs; check baseline_aligned and individual
    readings. Different initial values make a test inconclusive, and matching

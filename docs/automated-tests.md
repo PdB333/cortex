@@ -246,6 +246,51 @@ the actual behavior with further debugger traces and controlled experiments.
 This is a read-only lookup: it neither creates breakpoints nor establishes
 complete function boundaries, semantic meaning or a causal explanation.
 
+## Retaining observed code locations
+
+Use cortex_test_code_link to attach up to four code locations from a
+**completed trial that logged debugger instructions** to an **existing** claim.
+The original target PID and exact process generation must still be live:
+
+    cortex_test_code_link(
+      test_id="test_...", knowledge_id="Player.health",
+      expected_revision=2,
+      _cortex_target=<original PID>,
+      _cortex_generation=<original generation>,
+      max_locations=1,
+      mutation_permission=true)
+
+The host does not accept an arbitrary IP, RVA, module path or hash from the
+agent. It maps the IPs recorded in that trial to modules in the original live
+process, then hashes the **whole on-disk module** using SHA-256 (up to 256 MiB
+per file and two distinct files per request). It saves module name, RVA,
+test ID, SHA-256, file size, loaded image size and observation provenance in
+the existing revisioned project knowledge record. The original IP, load base
+and filesystem path are **not** persisted. The claim's status does not change;
+a successful trial or matching bytes does not prove the semantic statement.
+A missing/unreadable/large image results in an explicit failure or omission.
+
+After restarting, or when returning to the project in another session, call:
+
+    cortex_knowledge_code_check(
+      knowledge_id="Player.health",
+      _cortex_target=<CURRENT PID>,
+      _cortex_generation=<CURRENT generation>)
+
+It checks the recorded references against the new live module list. A matching
+name alone is insufficient: only an identical full-file SHA-256 and file size
+with the RVA inside the new image results in `status="matched"` and a **new**
+absolute address from the current module base. Other statuses include
+`binary_changed`, `module_not_loaded`, `ambiguous_module`,
+`rva_outside_module` and `file_version_unavailable`. Those responses contain
+**no usable address**. The checker never writes or silently updates a claim.
+
+The SHA-256 represents the **disk file at lookup time**. It does not verify
+in-memory patches, JIT code, process state or function semantics. Never
+reinterpret an archived instruction IP in a new process. The operator must
+separately approve project mutations; `mutation_permission` alone is not
+human consent.
+
 ## Linking a recorded trial to project knowledge
 
 Use `project_knowledge_put` to create a hypothesis or field claim first.
