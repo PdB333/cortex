@@ -267,6 +267,29 @@ if(name=="cortex_test_get"||name=="cortex_test_cancel"){
     else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
     return true;
 }
+if(name=="cortex_test_choose"){
+    if(!a.is_object() || !a.contains("report_id") ||
+       !a["report_id"].is_string() || !a.contains("candidates") ||
+       !a["candidates"].is_array() || a["candidates"].empty() ||
+       a["candidates"].size()>8 || a.size()>3 ||
+       (a.contains("previous_ids") &&
+        (!a["previous_ids"].is_array() || a["previous_ids"].size()>16))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_experiment_request","Choose a report and 1-8 bounded candidate experiments"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="report_id" && it.key()!="candidates" &&
+           it.key()!="previous_ids") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_experiment_request","Unsupported chooser field"),true);
+            return true;
+        }
+    auto result=s->tests->Choose(a["report_id"].get<std::string>(),
+        a["candidates"],a.value("previous_ids",json::array()));
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
 if(name=="cortex_test_report_get"){
     if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
         response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_id","Provide report ID"),true);return true;

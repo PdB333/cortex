@@ -202,6 +202,56 @@ status is never updated automatically. Repeating a pair under controlled
 independent initial conditions is required before strong behavioral claims.
 Archived results remain untrusted, human-editable data.
 
+## Choosing a discriminating next experiment
+
+cortex_test_choose is **read-only**. Given a saved two-trial report it reloads
+the real archived trial measurements, recomputes the reported client-authored
+predictions, and retains hypotheses still consistent or inconclusive. A
+contradiction in one experiment is not a globally refuted explanation.
+
+The client supplies 1-8 bounded candidate experiments. Each contains an ID,
+a control plan and an action plan with identical typed reads, plus predictions
+for every still-plausible hypothesis. Example:
+
+    cortex_test_choose(
+      report_id="report_...",
+      candidates=[
+        {"id":"click_probe",
+         "control":{"steps":[{"delay_ms":30}],
+                    "reads":[{"address":"0xAPPROVED","type":"u32"}]},
+         "action":{"steps":[{"mouse_click":{"button":"left",
+                                          "x":20,"y":20,"hold_ms":40}}],
+                   "reads":[{"address":"0xAPPROVED","type":"u32"}]},
+         "hypotheses":[
+           {"id":"hypothesis_a","read":0,
+            "control":{"op":"unchanged"},"action":{"op":"increased"}},
+           {"id":"hypothesis_b","read":0,
+            "control":{"op":"unchanged"},"action":{"op":"unchanged"}}
+         ]}
+      ])
+
+Only mutually exclusive predicted results for the same read count as
+discriminating: unchanged versus changed/increased/decreased, increased versus
+decreased, and unequal exact values. Changed versus increased can both be
+true, so this does not distinguish hypotheses. The selector ranks candidates
+by number of distinguishable hypothesis pairs, bounded test cost and ID.
+It avoids actions found in the report and accepts up to 16 additional
+completed trial IDs as previous_ids to avoid repeated actions.
+
+The response provides an explained proposal with executed=false and
+requires_separate_permission=true. If trials are incomparable, fewer than two
+hypotheses remain plausible, or no new discriminating proposal exists, it
+returns an explicit stop status. No action is launched automatically.
+
+To proceed, obtain independent operator approval, select the exact PID and
+generation, and invoke cortex_test_run separately for control and action.
+Cortex's existing profile, keys, window, time and test budgets remain in
+force. After measuring a new pair, compare it, archive a new report and
+select again only if the evidence supports another test.
+
+This is one bounded decision step, not a universal game player, source-code
+reasoner, or permission to run arbitrary actions from an AI suggestion.
+
 ## Consolidated investigation reports
 
 cortex_test_report accepts 1-8 completed trial IDs, an optional title and

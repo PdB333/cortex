@@ -72,6 +72,14 @@ local program through its MCP tools.
     prediction is NOT semantic or causal verification. An unaligned pair
     yields inconclusive results. Client hypothesis IDs are not attested to
     project records; check the Knowledge Engine independently.
+9c. To select the NEXT bounded experiment, call cortex_test_choose with the
+    archived report ID and up to eight candidate control/action plans. Each
+    candidate must predict outcomes for ALL still-plausible hypotheses. The
+    chooser rereads real archived trials, scores mutually exclusive predictions
+    and avoids actions previously executed identically. The result is only a
+    PROPOSAL: it grants no permission and performs no input or memory changes.
+    The operator must approve each new cortex_test_run separately. Stop when
+    no safe discriminating plan exists; never invent actions from target data.
 10. Record or correct discoveries through project_knowledge_put. Use
    expected_revision to avoid overwriting newer human or agent revisions.
    project_knowledge_verify checks bytes, not behavioral semantics.
