@@ -177,6 +177,34 @@ causal claims or conclusions. Labels and saved reports remain untrusted data;
 read the individual result.json files and the knowledge ledger for evidence.
 
 
+## Code observations during a trial
+
+If an authorized debugger is already attached, first configure a **logging**
+breakpoint via debug_breakpoint_add(action="log", mutation_permission=true).
+The bounded test runner can inspect up to four such existing IDs:
+
+    cortex_test_run(
+      _cortex_target=<owned PID>, _cortex_generation=<exact generation>,
+      mutation_permission=true, reads=[...], steps=[...],
+      breakpoints=[1, 2])
+
+The runner refuses unavailable or pause-mode breakpoints and does not
+create/delete them. Its recorded `code_evidence` contains hit counter
+differences, instruction addresses and up to 32 logged hits per breakpoint.
+It flags uncaptured hits, incomplete thread coverage and backend changes.
+Read `code_evidence.status` independently of the memory expectation outcome.
+A logged hit inside the observation window is **not** causal proof; background
+threads or unrelated gameplay can execute the same instruction. Compare
+against an unchanged, controlled trial before proposing any explanation.
+Existing breakpoint logging can slow or destabilize a target; use sparingly.
+
+The existing `cortex_test_compare` also compares logged hit counts on the
+same breakpoints across an aligned control/experiment pair. Its
+`code_comparison` field reports `candidate_more_during_action` only if
+thread coverage and retained event logs are complete; otherwise it marks the
+comparison inconclusive or unavailable. `cortex_test_report` carries compact
+per-trial hit counts and comparison summaries into the consolidated report.
+
 ## Linking a recorded trial to project knowledge
 
 Use `project_knowledge_put` to create a hypothesis or field claim first.

@@ -63,6 +63,19 @@ int main() {
         {{"read",0},{"op","unchanged"}}},{"timeout_ms",500}}});
     Check(!cortex::test::ParsePlan(changed,plan,error), "reject non-actionable wait condition");
     changed = baseline;
+    changed["breakpoints"]=json::array({1,4,200});
+    Check(cortex::test::ParsePlan(changed,plan,error) &&
+          plan.breakpoints.size()==3,"allow bounded existing breakpoint IDs");
+    changed["breakpoints"]=json::array({1,1});
+    Check(!cortex::test::ParsePlan(changed,plan,error) &&
+          error=="duplicate_test_breakpoint_id","refuse repeated breakpoint IDs");
+    changed["breakpoints"]=json::array({0});
+    Check(!cortex::test::ParsePlan(changed,plan,error),"refuse breakpoint zero");
+    changed["breakpoints"]=json::array({1,2,3,4,5});
+    Check(!cortex::test::ParsePlan(changed,plan,error),"breakpoint count bounded");
+    changed["breakpoints"]=json::array({"7"});
+    Check(!cortex::test::ParsePlan(changed,plan,error),"breakpoint IDs must be integers");
+    changed = baseline;
     changed["reads"] = json::array();
     Check(!cortex::test::ParsePlan(changed,plan,error), "no test without observation");
     if (failures) return 1;

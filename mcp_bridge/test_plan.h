@@ -14,6 +14,7 @@ struct Plan {
     json steps = json::array();
     json reads = json::array();
     json expect = json::array();
+    json breakpoints = json::array();
     int timeoutMs = 15000;
     int settleMs = 100;
 };
@@ -39,7 +40,7 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
         if (!IsOneOf(it.key(), {"label", "mode", "steps", "reads",
                                 "timeout_ms", "settle_ms", "mutation_permission",
                                 "_cortex_target", "_cortex_generation",
-                                "_cortex_timeout_ms", "expect"})) {
+                                "_cortex_timeout_ms", "expect", "breakpoints"})) {
             error = "unsupported_test_field:" + it.key();
             return false;
         }
@@ -169,6 +170,23 @@ inline bool ParsePlan(const json& request, Plan& plan, std::string& error) {
                  check["value"].get_ref<const std::string&>().size() <= 64))))) {
             error = "invalid_test_wait_operator"; return false;
         }
+    }
+    if (request.contains("breakpoints")) {
+        const auto& list=request["breakpoints"];
+        if (!list.is_array() || list.size()>4) {
+            error="invalid_test_breakpoints"; return false;
+        }
+        for (size_t index=0;index<list.size();++index) {
+            if (!IntegerInRange(list[index],1,1000000)) {
+                error="invalid_test_breakpoint_id"; return false;
+            }
+            for (size_t previous=0;previous<index;++previous) {
+                if (list[index]==list[previous]) {
+                    error="duplicate_test_breakpoint_id"; return false;
+                }
+            }
+        }
+        plan.breakpoints=list;
     }
     if (request.contains("expect")) {
         if (!request["expect"].is_array() || request["expect"].size() > 8) {

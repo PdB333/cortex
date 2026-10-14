@@ -19,11 +19,26 @@ int main(){
     std::string saved;
     try{
         Runner runner(root,"unit");std::atomic<int> value{10},keysDown{0},released{0};std::atomic<bool> alive{true};
+        std::atomic<uint64_t> bpHits{0};
         Context context;
         context.target={{"pid",123},{"generation","123456"}};
         context.alive=[&]{return alive.load();};
         context.read=[&](const json& spec){return json{{"ok",true},{"value",value.load()},{"request",spec}};};
-        context.key=[&](int,bool down){if(down){++value;++keysDown;}else --keysDown;return true;};
+        context.key=[&](int,bool down){if(down){++value;++keysDown;++bpHits;}else --keysDown;return true;};
+        context.breakpoint=[&](int id,uint64_t since,size_t limit)->json {
+            if(id!=4)return {{"ok",false},{"error","unknown_breakpoint"}};
+            const uint64_t count=bpHits.load();
+            json entries=json::array();
+            if(limit!=0 && since<=count && count>0) entries.push_back({
+                {"seq",count},{"thread_id",uint64_t{33}},
+                {"timestamp_raw_ms",uint64_t{1200}},
+                {"instruction","0x401123"}
+            });
+            return {{"ok",true},{"id",id},{"backend","mock"},
+                    {"address","0x401123"},{"kind","hw_write"},{"hit_count",count},
+                    {"coverage_complete",true},{"last_seq",count},
+                    {"entries",entries}};
+        };
         std::atomic<int> mouseDown{0};
         context.mouse=[&](int x,int y,const std::string& button,bool down){
             if(x!=20||y!=30||button!="left")return false;
@@ -31,7 +46,7 @@ int main(){
             return true;
         };
         context.release=[&]{++released;};
-        const json request={{"label","example"},{"mode","game"},{"mutation_permission",true},
+        const json request={{"label","example ```\n# untrusted header"},{"mode","game"},{"mutation_permission",true},
             {"steps",json::array({{{"vk",32},{"tap_ms",40}}})},
             {"reads",json::array({{{"address","0x1000"},{"type","i32"}}})},
             {"expect",json::array({{{"read",0},{"op","increased"}}})}};
@@ -43,6 +58,14 @@ int main(){
         Check(released==1&&keysDown==0,"release exactly once");
         Check(good.value("report_saved",false),"report persisted");
         Check(std::filesystem::exists(root/saved/"result.json")&&std::filesystem::exists(root/saved/"investigation.md"),"JSON and Markdown files");
+        {
+            std::ifstream savedMarkdown(root/saved/"investigation.md");
+            const std::string text((std::istreambuf_iterator<char>(savedMarkdown)),
+                                    std::istreambuf_iterator<char>());
+            Check(text.find("````json")!=std::string::npos&&
+                  text.find("\n````\n")!=std::string::npos,
+                  "untrusted backtick sequences cannot close report fence");
+        }
         Check(!runner.Cancel(saved),"cannot cancel completed run");
         auto wrong=plan;wrong.expect=json::array({{{"read",0},{"op","unchanged"}}});
         Check(runner.Start(wrong,context,out,error),"false expectation run");
@@ -128,8 +151,73 @@ int main(){
         Check(!runner.GetReport("../../escape").value("ok",true),
               "report path traversal refused");
         Check(!runner.Get("../../etc").value("ok",true),"reject traversal");
-        Check(runner.List()["runs"].size()==13,"bounded run index");
-        Check(released==13,"all leases released");
+        auto traced=plan;
+        traced.breakpoints=json::array({4});
+        Check(runner.Start(traced,context,out,error),"start test with preconfigured log");
+        auto observedCode=Wait(runner,out["id"]);
+        Check(observedCode["outcome"]=="passed"&&
+              observedCode["code_evidence"]["status"]=="observed"&&
+              observedCode["code_evidence"]["breakpoints"][0]["new_hits"]==1&&
+              observedCode["code_evidence"]["breakpoints"][0]["events"].size()==1,
+              "record breakpoint hit during test");
+        auto notAvailable=context;
+        notAvailable.breakpoint=[](int,uint64_t,size_t)->json {
+            return {{"ok",false},{"error","unknown_breakpoint"}};
+        };
+        const int beforeUnavailable=value.load();
+        Check(runner.Start(traced,notAvailable,out,error),"queue unavailable-code test");
+        auto unavailableCode=Wait(runner,out["id"]);
+        Check(unavailableCode["outcome"]=="inconclusive"&&
+              unavailableCode["error"]=="breakpoint_baseline_unavailable"&&
+              value==beforeUnavailable,"missing code evidence prevents input");
+        auto codeControl=traced;
+        codeControl.steps=json::array({{{"delay_ms",20}}});
+        codeControl.expect=json::array({{{"read",0},{"op","unchanged"}}});
+        value=100;
+        Check(runner.Start(codeControl,context,out,error),"start code control");
+        const std::string codeControlId=out["id"].get<std::string>();
+        Check(Wait(runner,codeControlId)["outcome"]=="passed","code control completed");
+        value=100;
+        Check(runner.Start(traced,context,out,error),"start same-baseline code action");
+        const std::string codeActionId=out["id"].get<std::string>();
+        Check(Wait(runner,codeActionId)["outcome"]=="passed","code action completed");
+        auto withCode=runner.Compare(codeControlId,codeActionId);
+        Check(withCode["comparison"]=="aligned"&&
+              withCode["code_comparison"]["status"]=="aligned"&&
+              withCode["code_comparison"]["breakpoints"][0]["control_hits"]==0 &&
+              withCode["code_comparison"]["breakpoints"][0]["action_hits"]==1 &&
+              withCode["code_comparison"]["breakpoints"][0]["candidate_more_during_action"]==true,
+              "control vs action compares logged instructions");
+        json codeReport;std::string codeReportError;
+        Check(runner.Report({codeControlId,codeActionId},"Code observations",
+                            codeReport,codeReportError),"generate code report");
+        if(codeReport.value("ok",false)){
+            Check(codeReport["report"]["trials"][0]["code_breakpoints"].size()==1 &&
+                  codeReport["report"]["comparison"]["code_comparison"]["status"]=="aligned",
+                  "consolidated report references code evidence");
+        }
+        const json beforeBp={{"ok",true},{"id",4},{"address","0xA"},{"kind","hw_write"},
+            {"backend","mock"},{"hit_count",uint64_t{8}},
+            {"last_seq",uint64_t{8}},{"coverage_complete",true}};
+        const json afterBp={{"ok",true},{"id",4},{"address","0xA"},{"kind","hw_write"},
+            {"backend","mock"},{"hit_count",uint64_t{50}},
+            {"entries",json::array({{{"seq",uint64_t{42}},
+                  {"thread_id",uint64_t{8}},{"timestamp_raw_ms",uint64_t{3}},
+                  {"instruction","0xA"}}})},
+            {"coverage_complete",false}};
+        const auto partial=code::Delta(4,beforeBp,afterBp);
+        Check(partial["status"]=="observed"&&partial["truncated_or_missing"]==true&&
+              partial["unobserved_hits"]==41&&partial["coverage_complete"]==false,
+              "report dropped/log-limited events and thread coverage");
+        const auto oldCount=afterBp;
+        auto reset=oldCount;reset["hit_count"]=uint64_t{2};
+        Check(code::Delta(4,beforeBp,reset)["status"]=="inconclusive",
+              "counter reset invalidates code evidence");
+        auto changedBackend=oldCount;changedBackend["backend"]="other";
+        Check(code::Delta(4,beforeBp,changedBackend)["status"]=="inconclusive",
+              "debugger identity change invalidates code evidence");
+        Check(runner.List()["runs"].size()==17,"bounded run index");
+        Check(released==17,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";
