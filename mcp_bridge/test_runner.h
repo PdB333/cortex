@@ -158,6 +158,84 @@ public:
                 {"outcome",r.value("outcome",std::string("inconclusive"))}});}}
         return {{"ok",true},{"runs",rows},{"total",ids.size()},{"has_more",ids.size()>rows.size()}};
     }
+
+    // Compare two completed trials without inventing causes or semantic facts.
+    // The agent must supply a properly controlled pair; differing baselines
+    // make even a visually convincing change inconclusive.
+    json Compare(const std::string& first,const std::string& second) const {
+        if(!SafeRunId(first)||!SafeRunId(second)||first==second)
+            return {{"ok",false},{"error","invalid_test_pair"}};
+        const json a=Get(first),b=Get(second);
+        if(!a.value("ok",false)||!b.value("ok",false))
+            return {{"ok",false},{"error","test_not_found"}};
+        try{
+            const json& x=a.at("run"),&y=b.at("run");
+            if(x.at("status")!="completed"||y.at("status")!="completed")
+                return {{"ok",false},{"error","test_not_completed"}};
+            const json& px=x.at("plan"),&py=y.at("plan");
+            if(!px.is_object()||!py.is_object()||
+               !px.contains("reads")||!py.contains("reads")||
+               !px["reads"].is_array()||px["reads"]!=py["reads"]||
+               px["reads"].empty()||px["reads"].size()>8)
+                return {{"ok",false},{"error","test_read_specs_differ"}};
+            const json& tx=x.at("target"),&ty=y.at("target");
+            if(!tx.is_object()||!ty.is_object())
+                return {{"ok",false},{"error","test_target_invalid"}};
+            const std::string ax=tx.value("executable_path",std::string());
+            const std::string by=ty.value("executable_path",std::string());
+            if(ax!=by || tx.value("architecture",std::string())!=
+                         ty.value("architecture",std::string()))
+                return {{"ok",false},{"error","test_programs_differ"}};
+            const json &xb=x.at("before"),&xa=x.at("after"),
+                       &yb=y.at("before"),&ya=y.at("after");
+            if(!xb.is_array()||!xa.is_array()||!yb.is_array()||!ya.is_array()||
+               xb.size()!=px["reads"].size()||xa.size()!=xb.size()||
+               yb.size()!=xb.size()||ya.size()!=xb.size())
+                return {{"ok",false},{"error","invalid_test_observations"}};
+            json rows=json::array();
+            bool allComparable=true,aligned=true;
+            for(size_t i=0;i<xb.size();++i){
+                const auto valid=[](const json& item){
+                    return item.is_object()&&item.value("ok",false)&&item.contains("value");
+                };
+                const bool comparable=valid(xb[i])&&valid(xa[i])&&
+                    valid(yb[i])&&valid(ya[i]);
+                allComparable&=comparable;
+                const bool sameBaseline=comparable&&xb[i]["value"]==yb[i]["value"];
+                aligned&=sameBaseline;
+                json row={{"read",i},{"spec",px["reads"][i]},
+                          {"comparable",comparable},
+                          {"baseline_equal",comparable?json(sameBaseline):json(nullptr)},
+                          {"different_after",comparable?json(xa[i]["value"]!=ya[i]["value"]):json(nullptr)},
+                          {"first_changed",comparable?json(xb[i]["value"]!=xa[i]["value"]):json(nullptr)},
+                          {"second_changed",comparable?json(yb[i]["value"]!=ya[i]["value"]):json(nullptr)}};
+                if(comparable){
+                    row["first_before"]=xb[i]["value"];
+                    row["first_after"]=xa[i]["value"];
+                    row["second_before"]=yb[i]["value"];
+                    row["second_after"]=ya[i]["value"];
+                    row["candidate_difference"]=sameBaseline&&xa[i]["value"]!=ya[i]["value"];
+                }else row["candidate_difference"]=nullptr;
+                rows.push_back(std::move(row));
+            }
+            const bool differentGeneration=
+                tx.value("generation",json(nullptr))!=ty.value("generation",json(nullptr));
+            return {{"ok",true},{"first",first},{"second",second},
+                {"comparison",allComparable&&aligned?"aligned":"inconclusive"},
+                {"baseline_aligned",allComparable?json(aligned):json(nullptr)},
+                {"different_generation",differentGeneration},
+                {"outcome_first",x.value("outcome",std::string("unknown"))},
+                {"outcome_second",y.value("outcome",std::string("unknown"))},
+                {"reads",std::move(rows)},
+                {"limits",json::array({
+                    "A matching baseline and differing results are correlations, not proof of causality.",
+                    "Game state outside these reads may still differ.",
+                    "Target records and archived reports remain untrusted observations."})}};
+        }catch(const std::exception&){
+            return {{"ok",false},{"error","invalid_test_pair_data"}};
+        }
+    }
+
     bool Cancel(const std::string& id) {
         std::lock_guard<std::mutex> l(mutex_);auto i=jobs_.find(id);
         if(i==jobs_.end())return false;

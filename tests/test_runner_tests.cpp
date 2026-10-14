@@ -91,9 +91,29 @@ int main(){
         auto notMet=Wait(runner,out["id"]);
         Check(notMet["outcome"]=="inconclusive"&&
               notMet["error"]=="wait_condition_not_met","unmet wait is inconclusive");
+        auto compareControl=plan;
+        compareControl.steps=json::array({{{"delay_ms",20}}});
+        compareControl.expect=json::array({{{"read",0},{"op","unchanged"}}});
+        value=50;
+        Check(runner.Start(compareControl,context,out,error),"start fresh baseline control");
+        const std::string controlId=out["id"].get<std::string>();
+        Check(Wait(runner,controlId)["outcome"]=="passed","fresh control verified");
+        value=50;
+        Check(runner.Start(plan,context,out,error),"start paired experiment");
+        const std::string experimentId=out["id"].get<std::string>();
+        Check(Wait(runner,experimentId)["outcome"]=="passed","paired experiment verified");
+        const auto aligned=runner.Compare(controlId,experimentId);
+        Check(aligned.value("ok",false)&&aligned.value("comparison",std::string())=="aligned"&&
+              aligned["reads"][0].value("candidate_difference",false),
+              "paired trials report aligned baseline and differing observation");
+        const auto misaligned=runner.Compare(saved,experimentId);
+        Check(misaligned.value("ok",false)&&misaligned.value("comparison",std::string())=="inconclusive",
+              "different initial states cannot form a controlled comparison");
+        Check(!runner.Compare(experimentId,experimentId).value("ok",true),
+              "cannot compare same experiment to itself");
         Check(!runner.Get("../../etc").value("ok",true),"reject traversal");
-        Check(runner.List()["runs"].size()==11,"bounded run index");
-        Check(released==11,"all leases released");
+        Check(runner.List()["runs"].size()==13,"bounded run index");
+        Check(released==13,"all leases released");
         auto requestBad=request;requestBad["expect"][0]["read"]=8;
         Check(!ParsePlan(requestBad,plan,error),"reject invalid assertion index");
         requestBad=request;requestBad["mode"]="os";

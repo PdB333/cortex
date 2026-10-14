@@ -59,7 +59,7 @@ exposes, so everything in this guide applies to both.
 Call `cortex_agent_guide` for built-in instructions, even before attach. The
 same guide is embedded in the MCP initialize response and documented in
 [testing.md](testing.md). Configure exact launch/attach/input permissions in
-an operator-owned launch profile. Use `cortex_test_run/get/cancel/list` for
+an operator-owned launch profile. Use `cortex_test_run/get/cancel/list/compare` for
 bounded before/action/after observations and durable reports. Only compatible
 window-message consumers are supported by this first runner. Short
 client-coordinate mouse clicks (allow_mouse) and condition-based memory waits

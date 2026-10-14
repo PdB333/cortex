@@ -151,3 +151,14 @@ have terminated and the error is explicit.
 This is a PROCESS-ONLY reset. Saves, local files, caches, network effects and
 child processes are NOT restored. An agent must acknowledge external state
 differences when comparing experiments across process generations.
+
+## Comparing repeatable trials
+
+Use cortex_test_compare(first="test_...", second="test_...") after running
+a control action and an experimental action against the SAME observed
+variables. It checks that executable identity and read specifications match
+and flags whether starting values were equal. Only trials with aligned,
+readable baselines can yield candidate differences. A different resulting
+value is still NOT proof of causality or complete code understanding: compare
+several controls and consider unobserved game state. The tool is read-only and
+works on archived results after reconnecting.
