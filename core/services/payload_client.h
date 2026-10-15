@@ -41,6 +41,9 @@ public:
     // something a tool call can set. Default: none.
     void SetWritesAuthority(bool allowed) override { writesAuthority_.store(allowed, std::memory_order_relaxed); }
     bool WritesAuthority() const { return writesAuthority_.load(std::memory_order_relaxed); }
+    // The narrower authority to save Cortex's own records (notes, facts, knowledge): --allow-state.
+    void SetStateAuthority(bool allowed) override { stateAuthority_.store(allowed, std::memory_order_relaxed); }
+    bool StateAuthority() const { return stateAuthority_.load(std::memory_order_relaxed); }
 
     // Loading the runtime puts code in the target. When injection is not
     // allowed, EnsureReady only connects to a runtime that is already there
@@ -193,6 +196,7 @@ private:
     std::atomic<uint64_t> requestSequence_{0};
     std::atomic<bool> suspended_{false};
     std::atomic<bool> writesAuthority_{false};
+    std::atomic<bool> stateAuthority_{false};
     std::atomic<bool> injectionAllowed_{true};
 };
 

@@ -15,8 +15,12 @@ using json = nlohmann::json;
 // `writesAllowed` comes from outside the model: the human's launch flag
 // (`cortex.exe mcp --allow-writes`) or the desktop, carried on the
 // authenticated pipe envelope. It defaults to false.
+//
+// `stateAllowed` is the narrower authority to save Cortex's own records (notes, knowledge, facts); it
+// comes from `--allow-state` and is implied by `writesAllowed`.
 struct Authority {
     bool writesAllowed = false;
+    bool stateAllowed = false;
 };
 
 mcp_protocol::ToolProfile ParseProfile(const std::string& value,

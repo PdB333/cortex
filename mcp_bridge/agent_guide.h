@@ -1,5 +1,6 @@
 #pragma once
 #include <nlohmann/json.hpp>
+#include <set>
 #include <string>
 inline const char* CortexAgentGuide() { return R"CORTEXGUIDE(
 # Testing a program with Cortex
@@ -264,6 +265,7 @@ inline nlohmann::json CortexTestTools() {
         if(declaresPermission)
             meta={{"host_control",true},{"mutation_permission_required",true},
                   {"effect",toolName=="cortex_test_run"?"target_input":"cortex_state"}};
+        if(declaresPermission&&toolName!="cortex_test_run") meta["authority"]="state";
         else if(toolName=="cortex_test_cancel") meta={{"host_control",true},{"effect","trial"}};
         else meta={{"read_only",true}};
         return json{{"name",name},{"description",description},{"inputSchema",{
@@ -410,4 +412,17 @@ inline nlohmann::json CortexTestTools() {
     tools.push_back(tool("cortex_test_cancel","Cancel an active trial, release any held key, and preserve partial evidence.",{{"id",{{"type","string"},{"maxLength",96}}}},json::array({"id"})));
     tools.push_back(tool("cortex_test_list","List up to twenty recent trial summaries without loading raw observations.",json::object(),json::array()));
     return tools;
+}
+
+// Host tools that write Cortex's own journals, reports or knowledge. They need the person's --allow-state
+// (or --allow-writes) on top of the caller's mutation_permission declaration.
+inline bool IsCortexStateTool(const std::string& name) {
+    static const std::set<std::string> names=[]{
+        std::set<std::string> result;
+        for(const auto& tool:CortexTestTools())
+            if(tool.contains("_cortex")&&tool["_cortex"].value("effect",std::string())=="cortex_state")
+                result.insert(tool.value("name",std::string()));
+        return result;
+    }();
+    return names.count(name)>0;
 }

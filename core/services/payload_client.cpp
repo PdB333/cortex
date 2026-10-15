@@ -517,6 +517,7 @@ bool PayloadClient::RoundTrip(const json& message,
         {"tools", toolProfile},
         {"session", sessionId},
         {"writes_allowed", WritesAuthority()},
+        {"state_allowed", StateAuthority()},
         {"message", message}
     };
     if (channel && *channel) envelope["channel"] = channel;

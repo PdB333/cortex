@@ -208,6 +208,8 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
             mcp_tools::Authority authority;
             if (envelope.contains("writes_allowed") && envelope["writes_allowed"].is_boolean())
                 authority.writesAllowed = envelope["writes_allowed"].get<bool>();
+            if (envelope.contains("state_allowed") && envelope["state_allowed"].is_boolean())
+                authority.stateAllowed = envelope["state_allowed"].get<bool>();
             const auto result = mcp_tools::Handle(
                 envelope["message"],
                 profile,

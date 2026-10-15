@@ -503,13 +503,13 @@
    "name": "project_address_delete",
    "method": "DELETE",
    "path": "/project/address/{name}",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_address_set",
    "method": "POST",
    "path": "/project/address",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_get",
@@ -539,7 +539,7 @@
    "name": "project_knowledge_put",
    "method": "POST",
    "path": "/project/knowledge",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_knowledge_query",
@@ -551,25 +551,25 @@
    "name": "project_knowledge_verify",
    "method": "POST",
    "path": "/project/knowledge/{id}/verify",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_note_add",
    "method": "POST",
    "path": "/project/note",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_note_delete",
    "method": "DELETE",
    "path": "/project/note/{id}",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_pointer_path_delete",
    "method": "DELETE",
    "path": "/project/pointer_path/{name}",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "project_pointer_path_resolve",
@@ -581,7 +581,7 @@
    "name": "project_pointer_path_set",
    "method": "POST",
    "path": "/project/pointer_path",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "prompt_status",
@@ -653,7 +653,7 @@
    "name": "re_object_delete",
    "method": "DELETE",
    "path": "/re/object/{id}",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "re_object_events",
@@ -695,13 +695,13 @@
    "name": "re_session_fact_delete",
    "method": "DELETE",
    "path": "/re/session/fact",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "re_session_fact_set",
    "method": "POST",
    "path": "/re/session/fact",
-   "risk": "control"
+   "risk": "state"
   },
   {
    "name": "re_test_run",

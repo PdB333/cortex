@@ -93,6 +93,10 @@ on a call only declares that you mean to change something; it is required, and
 it is not sufficient. Do not retry a refused call with different arguments; tell
 the person what you needed and why. Every refused attempt is logged.
 
+Saving notes, facts, knowledge or test journals is a separate, narrower permission: it is refused with
+`state_authority_required` unless the person started `cortex.exe mcp` with `--allow-state` (or
+`--allow-writes`, which includes it). It never lets you change the target.
+
 Without `--allow-writes`, `cortex_attach` only connects to a runtime that is
 already loaded in the process; it will not load one. Inside `batch_run`, only
 the operations on its allowlist run.

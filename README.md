@@ -138,7 +138,7 @@ That server is **read-only**: it attaches only to a process whose runtime is alr
 }
 ```
 
-An MCP client written for v1.0.0 that changed a target must now be started with `--allow-writes`.
+An MCP client written for v1.0.0 that changed a target must now be started with `--allow-writes`. To let the agent only **save its own records** (notes, knowledge, facts, test journals) without letting it touch the target, use `"--allow-state"` instead; `--allow-writes` includes it.
 
 - **Dynamic targets** — `cortex_processes`, `cortex_attach`, `cortex_targets`, `cortex_detach`, with `tools/list_changed` notifications.
 - **Many targets, no races** — each attached process has its own runtime connection; tools take a `_cortex_target` selector.
@@ -156,7 +156,7 @@ Details: [MCP internals](docs/mcp.md) · [Agent guide](agent/agents.md) · [Sema
 
 ```powershell
 cortex.exe                      # desktop application
-cortex.exe mcp [--pid N | --process name] [--tools compact|all] [--allow-writes]
+cortex.exe mcp [--pid N | --process name] [--tools compact|all] [--allow-state | --allow-writes]
 cortex.exe probe --pid 1234     # read-only target and runtime health
 cortex.exe diagnose --pid 1234  # crash and hang watcher
 cortex.exe analyze <folder>     # offline crash analysis
