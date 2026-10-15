@@ -34,6 +34,7 @@ public:
     // call; the runtime refuses state-changing calls without it, whatever the
     // call says about itself. The default does nothing (scripted transports).
     virtual void SetWritesAuthority(bool allowed) { (void)allowed; }
+    virtual void SetStateAuthority(bool allowed) { (void)allowed; }
 
     // Calls a desktop-only private route on an already-connected runtime.
     virtual bool CallRouteExisting(const std::string& method,

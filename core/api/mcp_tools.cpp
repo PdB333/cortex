@@ -267,6 +267,10 @@ Gate CheckAuthority(const std::string& name,
                       {"error", code},
                       {"tool", name},
                       {"risk", mcp_contract::RiskName(shown)}};
+        if (code == "state_authority_required")
+            gate.error["message"] =
+                "Saving notes, facts or knowledge needs authority from the person: start cortex.exe mcp "
+                "with --allow-state (or --allow-writes). mutation_permission alone is not enough.";
         if (code == "write_authority_required")
             gate.error["message"] =
                 "Writes are not authorized for this session. The person running Cortex must start "
@@ -291,6 +295,10 @@ Gate CheckAuthority(const std::string& name,
     if (!mcp_contract::RequiresMutationPermission(effective)) return gate;
     if (!declaredIntent) {
         refuse("mutation_permission_required", effective);
+        return gate;
+    }
+    if (effective == mcp_contract::ToolRisk::State) {
+        if (!authority.stateAllowed && !authority.writesAllowed) refuse("state_authority_required", effective);
         return gate;
     }
     if (!authority.writesAllowed) refuse("write_authority_required", effective);

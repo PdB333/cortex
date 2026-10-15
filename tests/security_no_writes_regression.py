@@ -28,6 +28,7 @@ import time
 DENIAL_REASONS_PREFIXES = (
     "mutation_permission_required",
     "write_authority_required",
+    "state_authority_required",
     "batch_op_",
     "batch_ops_required",
     "method_not_allowed",
@@ -394,7 +395,7 @@ def main():
 
         # Every listed tool must carry a risk class. A tool nobody classified is
         # refused by the runtime, so it must never appear as a usable tool.
-        known_risks = ("observe", "analyze", "control", "mutate", "native_call")
+        known_risks = ("observe", "analyze", "state", "control", "mutate", "native_call")
         unclassified = []
         for tool in tools:
             meta = tool.get("_cortex") or {}
@@ -404,6 +405,10 @@ def main():
                 ok = True  # its steps are classified one by one as primitives
             else:
                 ok = bool(meta.get("host_control") or meta.get("read_only"))
+                # A host tool that writes (sends input, persists knowledge or journals) must make the
+                # caller declare it: mutation_permission required in its schema.
+                if meta.get("effect") in ("target_input", "cortex_state"):
+                    ok = ok and "mutation_permission" in (tool.get("inputSchema") or {}).get("required", [])
             if not ok:
                 unclassified.append("%s (%s)" % (tool.get("name"), meta.get("risk")))
         check(not unclassified, "every listed tool has a risk classification"
@@ -474,7 +479,7 @@ def main():
                         break
                     code = result.get("error") if isinstance(result, dict) else None
                     risk = (primitives[primitive].get("_cortex") or {}).get("risk")
-                    mutating = risk in ("control", "mutate", "native_call")
+                    mutating = risk in ("state", "control", "mutate", "native_call")
                     if is_denial(code) or (isinstance(code, str) and code.startswith("primitive_lacks_safe_rollback")):
                         denied += 1
                     elif mutating:
@@ -510,6 +515,23 @@ def main():
             alive(label)
             code = error_code(result)
             check(is_denial(code), "%s is refused (%s)" % (label, code))
+
+        # Saving notes or knowledge is a separate, narrower authority (--allow-state): without it, refused.
+        by_name = {t["name"]: t for t in tools}
+        note = by_name.get("project_note_add")
+        if note:
+            result = server.call("project_note_add", build_arguments(note, ctx))
+            calls += 1
+            alive("project_note_add (state check)")
+            check(error_code(result) == "state_authority_required",
+                  "project_note_add without --allow-state is refused (%s)" % (error_code(result),))
+        report = by_name.get("cortex_test_catalog_save")
+        if report:
+            result = server.call("cortex_test_catalog_save", {"id": "step-none", "mutation_permission": True})
+            calls += 1
+            alive("cortex_test_catalog_save (state check)")
+            check("state_authority_required" in json.dumps(result),
+                  "cortex_test_catalog_save without --allow-state is refused")
 
         # A raw client message on Cortex's private channel is not forwarded.
         raw = server.request("cortex/private/route", {"method": "POST", "path": "/memory/write",
@@ -598,6 +620,40 @@ def main():
             batch = server.call("batch_run", {"ops": [{"op": "memory_write", "address": ctx.address,
                                                       "type": "u32", "value": 7}], "mutation_permission": True})
             check(error_code(batch) is None, "with --allow-writes batch_run applies an allowlisted write")
+        finally:
+            server.close()
+    finally:
+        process.kill()
+
+    # ------------------------------------------------------------ control A2: --allow-state saves records, never writes the target
+    process, manifest, manifest_path = start_target(runner, target, workdir, "state")
+    try:
+        ctx = Context(manifest)
+        hash_file = manifest["hash_file"]
+        subprocess.run(runner + [cortex, "inject", str(ctx.pid)], cwd=bundle, capture_output=True,
+                       text=True, timeout=120)
+        server = Mcp(runner + [cortex, "mcp", "--pid", str(ctx.pid), "--tools", "all", "--allow-state"], bundle)
+        try:
+            server.initialize()
+            tools_now = {t["name"]: t for t in server.request("tools/list", {}).get("result", {}).get("tools", [])}
+            baseline = read_hash(hash_file)
+            note = tools_now.get("project_note_add")
+            if note:
+                result = server.call("project_note_add", build_arguments(note, ctx))
+                check(error_code(result) is None and "state_authority_required" not in json.dumps(result),
+                      "with --allow-state a note is saved (%s)" % (error_code(result),))
+                result = server.call("project_note_add", {k: v for k, v in build_arguments(note, ctx).items()
+                                                          if k != "mutation_permission"})
+                check(error_code(result) == "mutation_permission_required",
+                      "with --allow-state a note still needs the caller's mutation_permission")
+            result = server.call("cortex_test_catalog_save", {"id": "step-none", "mutation_permission": True})
+            check("state_authority_required" not in json.dumps(result),
+                  "with --allow-state a host journal tool passes the authority check")
+            result = server.call("memory_write", {"address": ctx.address, "type": "u32", "value": 305419896,
+                                                  "mutation_permission": True})
+            check(error_code(result) == "write_authority_required",
+                  "with --allow-state the target still cannot be written (%s)" % (error_code(result),))
+            check(read_hash(hash_file) == baseline, "--allow-state leaves the target's state hash unchanged")
         finally:
             server.close()
     finally:

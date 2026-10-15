@@ -90,6 +90,13 @@ void TestPromptTools() {
         CHECK(ClassifyTool(name, "POST", "/prompt/x") == ToolRisk::Control);
         CHECK(ClassifyTool(name, "GET", "/prompt/1") == ToolRisk::Control);
     }
+    // Cortex's own records are a class of their own: a narrower authority than writing the target.
+    for (const char* name : {"project_note_add", "project_knowledge_put", "re_session_fact_set"}) {
+        CHECK(ClassifyTool(name, "POST", "/x") == ToolRisk::State);
+        CHECK(RequiresMutationPermission(ToolRisk::State));
+    }
+    CHECK(ClassifyTool("project_note_add", "GET", "/project/note") == ToolRisk::Observe);
+    CHECK(std::string(api::mcp_contract::RiskName(ToolRisk::State)) == "state");
     // Reading memory is still observation.
     CHECK(ClassifyTool("memory_read", "POST", "/memory/read") == ToolRisk::Analyze);
     CHECK(ClassifyTool("status", "GET", "/status") == ToolRisk::Observe);

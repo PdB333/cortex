@@ -143,6 +143,29 @@ int main() {
           "allocation watch toggle remains a control operation");
     check(api::mcp_contract::RequiresMutationPermission(allocationControlRisk),
           "allocation watch toggle requires mutation permission");
+    // Knowledge verification reads the target but persists an audit result,
+    // so it is a control operation rather than a side-effect-free analysis.
+    const auto knowledgeReadRisk = api::mcp_contract::ClassifyTool(
+        "project_knowledge_get", "GET", "/project/knowledge/{id}");
+    check(knowledgeReadRisk == api::mcp_contract::ToolRisk::Observe,
+          "knowledge reads remain observational");
+    const auto knowledgePutRisk = api::mcp_contract::ClassifyTool(
+        "project_knowledge_put", "POST", "/project/knowledge");
+    check(knowledgePutRisk == api::mcp_contract::ToolRisk::Control,
+          "knowledge claim persistence requires control permission");
+    const auto knowledgeVerifyRisk = api::mcp_contract::ClassifyTool(
+        "project_knowledge_verify", "POST", "/project/knowledge/{id}/verify");
+    check(knowledgeVerifyRisk == api::mcp_contract::ToolRisk::Control,
+          "knowledge verification persists an audit result and requires control permission");
+    check(api::mcp_contract::RequiresMutationPermission(knowledgeVerifyRisk),
+          "knowledge verification requires MCP permission");
+
+    const auto knowledgeQueryRisk = api::mcp_contract::ClassifyTool(
+        "project_knowledge_query", "POST", "/project/knowledge/query");
+    check(knowledgeQueryRisk == api::mcp_contract::ToolRisk::Analyze,
+          "knowledge search remains nonmutating");
+    check(!api::mcp_contract::RequiresMutationPermission(knowledgeQueryRisk),
+          "knowledge query does not require target mutation permission");
     if (failures) return 1;
     std::cout << "PASS: MCP URI and schema contract\n";
     return 0;

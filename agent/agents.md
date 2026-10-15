@@ -56,6 +56,21 @@ and is **off by default**; it starts only with `http_api_enabled=true` in
 legacy tool. The route names below are the same primitives the MCP catalog
 exposes, so everything in this guide applies to both.
 
+## Bounded automated trials
+
+Call `cortex_agent_guide` for built-in instructions, even before attach. The
+same guide is embedded in the MCP initialize response and documented in
+[testing.md](testing.md). Configure exact launch/attach/input permissions in
+an operator-owned launch profile. Use `cortex_test_run/get/cancel/list/compare` for
+bounded before/action/after observations and durable reports. Only compatible
+window-message consumers are supported by this first runner. Short
+client-coordinate mouse clicks (allow_mouse) and condition-based memory waits
+are supported in addition to key taps. A posted message is not proof that the
+program handled it. Call cortex_test_report to archive completed trials in
+a consolidated investigation.md; it creates no verified semantic facts. An operator-approved cortex_restart can repeat an experiment from a fresh
+PROCESS launch, but does not clear saves, files or other outside state. No
+universal game-playing or causal-reasoning guarantees are implied.
+
 ## First moves in a new session
 
 1. `health` — confirm the runtime is up.
@@ -78,11 +93,16 @@ on a call only declares that you mean to change something; it is required, and
 it is not sufficient. Do not retry a refused call with different arguments; tell
 the person what you needed and why. Every refused attempt is logged.
 
+Saving notes, facts, knowledge or test journals is a separate, narrower permission: it is refused with
+`state_authority_required` unless the person started `cortex.exe mcp` with `--allow-state` (or
+`--allow-writes`, which includes it). It never lets you change the target.
+
 Without `--allow-writes`, `cortex_attach` only connects to a runtime that is
 already loaded in the process; it will not load one. Inside `batch_run`, only
 the operations on its allowlist run.
 
-When writes are allowed, every mutation is journaled and can be rolled back.
+When writes are allowed, every mutation is journaled. Only supported memory mutations have undo
+records; input, process termination and external effects cannot generally be rolled back.
 Use `mutation_permission` only for the specific operation that needs it.
 
 ## Core conventions
@@ -124,7 +144,8 @@ Use `mutation_permission` only for the specific operation that needs it.
 
 ## Background capture and input
 
-Cortex works even when the game window is not focused or is minimized.
+Background support depends on the input/capture backend and target. Cached
+frames may be stale; minimized windows may not produce fresh captures.
 
 - **Screenshots** — `GET /screenshot?mode=auto` tries the render hook, then
   `PrintWindow(PW_RENDERFULLCONTENT)`, then a cached last frame. The response
@@ -190,6 +211,27 @@ prompt fails explicitly when no desktop is attached to present it.
 
 Use `GET /screenshot` to *see* the result of an action — close the loop
 visually rather than assuming a write had the intended effect.
+
+## Module and symbol context from trials
+
+For a completed Cortex automated trial with `code_evidence`, call
+`cortex_test_code_context` while the original PID and generation are still
+attached. The tool maps recorded instruction pointers to live modules and
+RVAs, optionally resolves genuine symbols and reads at most three disassembled
+instructions per IP. Do not confuse hardware watchpoint DATA addresses with
+instruction pointers. Do not infer functions from nearest symbols or reuse
+absolute addresses after restarting the program.
+
+## Connecting experiments to knowledge
+
+After an operator-approved, completed run, create a hypothesis using
+`project_knowledge_put` if none exists. Then `cortex_test_link` accepts
+the recorded test ID, existing knowledge ID, expected revision, selected
+PID and process generation, plus mutation permission. It appends a verified
+*local reference* to that run, not a verified explanation of the target
+program. Links from another process generation are rejected rather than
+silently treated as current evidence. Check `project_knowledge_query` or
+`project_knowledge_list` before making conclusions.
 
 ## Safety notes
 

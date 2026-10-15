@@ -265,6 +265,33 @@ json BuildToolsManifest() {
         j.push_back({{"name", "project_get"}, {"method", "GET"}, {"path", "/project"},
                       {"description", "Returns the entire persistent project for this game (named addresses, pointer paths, notes). JSON file stored beside the DLL, survives across sessions -- this is the AI's long-term memory for this game."}});
 
+        j.push_back({{"name", "project_knowledge_list"}, {"method", "GET"}, {"path", "/project/knowledge"},
+                     {"description", "List revisioned investigation claims and server-owned byte verification outcomes. No claim is automatically confirmed."}});
+        j.push_back({{"name", "project_knowledge_get"}, {"method", "GET"}, {"path", "/project/knowledge/{id}"},
+                     {"description", "Get a named investigation claim, evidence references, history, and last verification."}});
+        j.push_back({{"name", "project_knowledge_query"}, {"method", "POST"}, {"path", "/project/knowledge/query"},
+                     {"description", "Read-only bounded search or resumption of investigation knowledge. Deterministic compact previews, not full history."},
+                     {"body", {{"text", "optional search substring"},
+                               {"kind", "optional exact kind"}, {"status", "optional exact status"},
+                               {"resume", "optional bool, default false"},
+                               {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 20}}},
+                               {"offset", {{"type", "integer"}, {"minimum", 0}, {"maximum", 1000000}}}}}});
+        j.push_back({{"name", "project_knowledge_graph"}, {"method", "POST"},
+                     {"path", "/project/knowledge/graph"},
+                     {"description", "Read-only bounded graph of persisted typed knowledge assertions. Neither status nor relation implies semantic or causal proof."},
+                     {"body", {{"focus", "optional exact knowledge ID"},
+                               {"depth", {{"type", "integer"}, {"minimum", 0}, {"maximum", 2}}},
+                               {"limit", {{"type", "integer"}, {"minimum", 1}, {"maximum", 32}}}}}});
+        j.push_back({{"name", "project_knowledge_put"}, {"method", "POST"}, {"path", "/project/knowledge"},
+                     {"description", "Create/update an evidence-linked investigation claim with optimistic revision; this does not verify the claim."},
+                     {"body", {{"id", "required"}, {"kind", "required"}, {"statement", "required"},
+                               {"status", "optional"}, {"notes", "optional"},
+                               {"expected_revision", {{"type", "integer"}, {"minimum", 0}, {"description", "Current revision required when updating an existing claim."}}},
+                               {"evidence", {{"type", "array"}, {"description", "Untrusted source references."}}},
+                               {"links", {{"type", "array"}}}, {"relations", {{"type", "array"}, {"description", "Up to 16 asserted typed relationships, never automatically verified."}}}, {"checks", {{"type", "array"}}}}}});
+        j.push_back({{"name", "project_knowledge_verify"}, {"method", "POST"}, {"path", "/project/knowledge/{id}/verify"},
+                     {"description", "Rerun bounded read-only byte invariants against the live process. A match validates bytes, not semantic claims."}});
+
         j.push_back({{"name", "project_address_set"}, {"method", "POST"}, {"path", "/project/address"},
                       {"description", "Saves/overwrites a named address."},
                       {"body", {{"name", "required"}, {"address", "required"}, {"type", "optional"}, {"notes", "optional"}}}});

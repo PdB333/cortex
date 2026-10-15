@@ -17,6 +17,9 @@ using json = nlohmann::json;
 enum class ToolRisk {
     Observe,
     Analyze,
+    // Writes Cortex's own records (project notes, saved addresses and pointer paths, knowledge, facts) and
+    // nothing in the target. Needs the person's --allow-state (or --allow-writes), not target authority.
+    State,
     Control,
     Mutate,
     NativeCall,
@@ -28,6 +31,7 @@ inline const char* RiskName(ToolRisk risk) {
     switch (risk) {
         case ToolRisk::Observe: return "observe";
         case ToolRisk::Analyze: return "analyze";
+        case ToolRisk::State: return "state";
         case ToolRisk::Control: return "control";
         case ToolRisk::Mutate: return "mutate";
         case ToolRisk::NativeCall: return "native_call";
@@ -37,12 +41,21 @@ inline const char* RiskName(ToolRisk risk) {
 }
 
 inline bool RequiresMutationPermission(ToolRisk risk) {
-    return risk == ToolRisk::Control || risk == ToolRisk::Mutate || risk == ToolRisk::NativeCall ||
-           risk == ToolRisk::Unclassified;
+    return risk == ToolRisk::State || risk == ToolRisk::Control || risk == ToolRisk::Mutate ||
+           risk == ToolRisk::NativeCall || risk == ToolRisk::Unclassified;
 }
 
 inline bool StartsWith(const std::string& value, const std::string& prefix) {
     return value.rfind(prefix, 0) == 0;
+}
+
+// Non-GET tools that only write Cortex's own records. Anything that can also reach the target stays Control.
+inline const std::set<std::string>& StateTools() {
+    static const std::set<std::string> names = {
+        "project_knowledge_put", "project_knowledge_verify", "project_address_set", "project_address_delete",
+        "project_pointer_path_set", "project_pointer_path_delete", "project_note_add", "project_note_delete",
+        "re_session_fact_set", "re_session_fact_delete", "re_object_delete"};
+    return names;
 }
 
 // Non-GET tools that read or analyze without changing the target. This list is
@@ -74,9 +87,13 @@ inline ToolRisk ClassifyTool(const std::string& name,
 
     if (StartsWith(path, "/call/") || StartsWith(name, "call_")) return ToolRisk::NativeCall;
 
+    if (StateTools().count(name)) return ToolRisk::State;
+
     // POST is sometimes used for structured analysis requests. Keep those
     // callable in inspect mode unless their arguments can change runtime or
     // persisted Cortex state.
+    if (name == "project_knowledge_query" || name == "project_knowledge_graph") return ToolRisk::Analyze;
+
     if (name == "struct_read" || name == "struct_infer" || name == "trace_compare" ||
         name == "pointermap_intersect" || name == "re_object_compare" ||
         name == "re_cpp_subobjects") return ToolRisk::Analyze;

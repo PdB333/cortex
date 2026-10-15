@@ -1,15 +1,29 @@
 #include "host_mode.h"
+#include "launch_config.h"
+#include "launch_manager.h"
+#include "test_target_io.h"
+#include "test_knowledge.h"
+#include "test_code_context.h"
+#include "test_code_candidates.h"
+#include "test_code_knowledge.h"
+#include "test_file_version.h"
+#include "pe_unwind.h"
+#include "agent_guide.h"
+#include "../core/project/knowledge_graph.h"
+#include "test_evidence_graph.h"
 
 #include "ai_activity_channel.h"
 #include "api/mcp_protocol.h"
 #include "../host/debugger/debug_provider.h"
 #include "services/crash_report_service.h"
+#include "services/disassembly_service.h"
 #include "services/operation_manager.h"
 #include "services/payload_client.h"
 #include "services/user_data.h"
 #include "security/denial_log.h"
 #include "target/catalog.h"
 #include "target/local_backend.h"
+#include "target/module_provider.h"
 #include "target/session_manager.h"
 #include "../host/debugger/veh_debug_provider.h"
 #include "../host/debugger/windows_debug_provider.h"
@@ -46,7 +60,7 @@ constexpr std::size_t kMaxStdioMessageBytes = 4u * 1024u * 1024u;
 constexpr std::size_t kMaxConcurrentRequests = 64;
 
 struct TargetSelector { std::optional<uint64_t> pid; std::string process; };
-struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact"; bool help = false; bool allowWrites = false; };
+struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact", launchConfigPath, testResults; bool help = false; bool allowWrites = false; bool allowState = false; };
 
 struct TargetRuntime {
     TargetDescriptor target;
@@ -77,6 +91,9 @@ struct RunState {
     cortex::target::Catalog* catalog = nullptr;
     std::string runtimeDirectory, toolProfile;
     bool allowWrites = false;
+    bool allowState = false;
+    std::unique_ptr<cortex::launch::Manager> launcher;
+    std::unique_ptr<cortex::test::Runner> tests;
 
     cortex::services::OperationManager operations;
     std::mutex operationRouteMutex;
@@ -103,10 +120,13 @@ void PrintUsage(std::ostream& stream) {
     stream << "Cortex MCP stdio mode\n\nUsage:\n  cortex.exe mcp [--tools compact|all] [--allow-writes]\n"
            << "  cortex.exe mcp --pid <pid> [--pid <pid> ...] [--tools compact|all]\n"
            << "  cortex.exe mcp --process <name> [--process <name> ...] [--tools compact|all]\n\n"
+           << "  cortex.exe mcp --launch-config <profiles.json> (explicit launch allowlist)\n\n"
            << "Without selectors Cortex starts targetless. Use cortex_processes/cortex_attach dynamically.\n\n"
            << "Read-only by default. --allow-writes lets this server load the runtime into a target and apply\n"
            << "state-changing calls (a call must still carry mutation_permission). Only the person who starts\n"
-           << "the server can set it; the AI client cannot. Refused calls are logged to cortex_denied_mutations.jsonl.\n";
+           << "the server can set it; the AI client cannot. Refused calls are logged to cortex_denied_mutations.jsonl.\n"
+           << "--allow-state lets the agent save knowledge, notes and journals (Cortex's own records) without letting it\n"
+           << "change the target. --allow-writes includes it.\n";
 }
 
 bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
@@ -114,9 +134,12 @@ bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
         const std::string a=argv[i]?argv[i]:"";
         if (a=="--help"||a=="-h") { options.help=true; continue; }
         if (a=="--allow-writes") { options.allowWrites=true; continue; }
+        if (a=="--allow-state") { options.allowState=true; continue; }
         if (a=="--pid"&&i+1<argc) { try { std::string v=argv[++i]?argv[i]:""; size_t used=0; auto pid=std::stoull(v,&used,10); if(used!=v.size()||pid==0)throw std::invalid_argument("pid"); TargetSelector s;s.pid=pid;options.targets.push_back(std::move(s)); } catch(...) { error="--pid must be a positive integer"; return false; } continue; }
         if (a=="--process"&&i+1<argc) { TargetSelector s;s.process=argv[++i]?argv[i]:""; if(s.process.empty()){error="--process requires a non-empty process name";return false;} options.targets.push_back(std::move(s)); continue; }
         if (a=="--tools"&&i+1<argc) { options.toolProfile=argv[++i]?argv[i]:""; if(options.toolProfile!="compact"&&options.toolProfile!="all"){error="--tools must be compact or all";return false;} continue; }
+        if (a=="--launch-config"&&i+1<argc) { options.launchConfigPath=argv[++i]?argv[i]:""; if(options.launchConfigPath.empty()){error="--launch-config requires a JSON file";return false;} continue; }
+        if (a=="--test-results"&&i+1<argc) {options.testResults=argv[++i]?argv[i]:"";if(options.testResults.empty()){error="--test-results requires a directory";return false;}continue;}
         error="unknown or incomplete argument: "+a; return false;
     }
     return true;
@@ -143,6 +166,7 @@ void PublishActivity(const std::shared_ptr<RunState>& state, json event) {
 }
 
 std::weak_ptr<RunState> g_runState;
+bool g_allowState = false;   // --allow-state: the person lets this server save knowledge, notes and journals
 
 // A debugger attached to the target suspends its threads, so tools that look
 // read-only still have an effect on it. Every attach and detach is journaled.
@@ -232,13 +256,18 @@ json LocalTools(bool requireTarget=false){json t=json::array({
 {{"name","cortex_operation_cancel"},{"description","Request cooperative cancellation of a running Cortex operation."},{"inputSchema",{{"type","object"},{"properties",{{"operation_id",{{"type","integer"},{"minimum",1}}}}},{"required",json::array({"operation_id"})}}},{"_cortex",{{"host_control",true}}}},
 {{"name","cortex_events"},{"description","Read bounded host target/debugger/operation event history."},{"inputSchema",{{"type","object"},{"properties",{{"since_id",{{"type","integer"},{"minimum",0}}},{"limit",{{"type","integer"},{"minimum",1},{"maximum",512}}},{"_cortex_target",{{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})}}}}}}},{"_cortex",{{"read_only",true}}}},
 {{"name","cortex_crash_report"},{"description","Load the latest Cortex diagnostics crash bundle for a target and recent host events."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
-{{"name","cortex_hooks"},{"description","Inspect the runtime HookManager registry, ownership, conflicts and hit/exception counters."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}}
+{{"name","cortex_hooks"},{"description","Inspect the runtime HookManager registry, ownership, conflicts and hit/exception counters."},{"inputSchema",{{"type","object"},{"properties",json::object()}}},{"_cortex",{{"read_only",true}}}},
+{{"name","cortex_launch"},{"description","Start a program from an operator-owned --launch-config profile. Executable and arguments cannot be supplied by the agent."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"attach",{{"type","boolean"}}},{"wait_ms",{{"type","integer"},{"minimum",100},{"maximum",10000}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_launch_status"},{"description","List configured launch profiles, remaining run budgets, and the liveness of processes started by this MCP server."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}}}},{"additionalProperties",false}}},{"_cortex",{{"host_control",true},{"read_only",true}}}},
+{{"name","cortex_restart"},{"description","Restart the same program when explicitly allow_reset and allow_stop are enabled. Only process state resets; saves and external effects persist."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"},{"minLength",1}}},{"pid",{{"type","integer"},{"minimum",1}}},{"generation",{{"type","integer"},{"minimum",1}}},{"attach",{{"type","boolean"}}},{"wait_ms",{{"type","integer"},{"minimum",100},{"maximum",10000}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","pid","generation","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}},
+{{"name","cortex_stop"},{"description","Terminate only a process created from an explicitly stoppable profile, with matching PID and mutation permission. Unsaved target state may be lost."},{"inputSchema",{{"type","object"},{"properties",{{"profile",{{"type","string"}}},{"pid",{{"type","integer"},{"minimum",1}}},{"mutation_permission",{{"type","boolean"}}}}},{"required",json::array({"profile","pid","mutation_permission"})},{"additionalProperties",false}}},{"_cortex",{{"host_control",true}}}}
 });
+for (const auto& tool : CortexTestTools()) t.push_back(tool);
 const json selector={{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})},{"description","Attached target PID, id, or unique process name."}};
 for(size_t index:{size_t{2},size_t{4},size_t{5},size_t{8},size_t{9},size_t{10}}){auto&schema=t[index]["inputSchema"];if(!schema.contains("properties")||!schema["properties"].is_object())schema["properties"]=json::object();schema["properties"]["_cortex_target"]=selector;schema["properties"]["_cortex_generation"]={{"type","integer"},{"minimum",1},{"description","Optional process-lifetime generation from cortex_targets."}};if(requireTarget)schema["required"]=json::array({"_cortex_target"});}
 return t;}
 
-void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
+void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=CortexAgentGuide();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
 
 bool HandleLocalProtocol(const std::shared_ptr<RunState>&s,const json&m,json&r,bool&has){api::mcp_protocol::Handler h;h.profile=s->toolProfile=="compact"?api::mcp_protocol::ToolProfile::Compact:api::mcp_protocol::ToolProfile::All;h.listTools=[](auto){return LocalTools();};auto z=api::mcp_protocol::Handle(m,h);r=z.response;has=z.hasResponse;if(has&&m.is_object()&&(m.value("method",std::string())=="initialize"||m.value("method",std::string())=="server/discover"))PatchHandshake(r,RuntimeSnapshot(s).size());return true;}
 void RememberInitialize(const std::shared_ptr<RunState>&s,const json&m){std::lock_guard<std::mutex>l(s->protocolMutex);s->initializeMessage=m;s->initializedNotificationSeen=false;if(m.contains("params")&&m["params"].is_object()&&m["params"].contains("clientInfo")&&m["params"]["clientInfo"].is_object()){s->activityClientName=m["params"]["clientInfo"].value("name",s->activityClientName);s->activityClientVersion=m["params"]["clientInfo"].value("version",std::string());}}
@@ -246,7 +275,7 @@ void RememberInitialized(const std::shared_ptr<RunState>&s){std::lock_guard<std:
 
 bool PrimeRuntime(const std::shared_ptr<RunState>&s,const TargetRuntimePtr&r,std::string&error){std::optional<json>init;bool initialized=false;{std::lock_guard<std::mutex>l(s->protocolMutex);init=s->initializeMessage;initialized=s->initializedNotificationSeen;}if(!init)return true;json rr;bool has=false;if(!r->payload->ForwardMcp(*init,s->toolProfile,rr,has,&error))return false;if(initialized){json n={{"jsonrpc","2.0"},{"method","notifications/initialized"}};if(!r->payload->ForwardMcp(n,s->toolProfile,rr,has,&error))return false;}return true;}
 
-TargetRuntimePtr CreateRuntime(cortex::target::Catalog&catalog,const TargetDescriptor&t,const std::string&dir,bool allowWrites,std::string&code,std::string&msg){auto r=std::make_shared<TargetRuntime>();r->target=t;r->sessions=std::make_unique<cortex::target::SessionManager>(catalog);std::string e;if(!r->sessions->Attach(t,&e)){code="target_attach_failed";msg=e;return{};}r->payload=std::make_unique<cortex::services::PayloadClient>(*r->sessions,dir);r->payload->SetWritesAuthority(allowWrites);r->payload->SetInjectionAllowed(allowWrites);if(!r->payload->EnsureReady(&e)){code="target_runtime_unavailable";msg=e;if(e.rfind("write_authority_required",0)==0){code="write_authority_required";cortex::security::RecordDenial("host","cortex_attach",code,{{"pid",t.processId},{"process",t.name}});}return{};}r->debuggerBackend=ConfiguredDebuggerBackend(dir);r->debugger=CreateDebugProvider(*r,r->debuggerBackend);if(!r->debugger){code="debugger_provider_unavailable";msg="Could not create debugger provider";return{};}return r;}
+TargetRuntimePtr CreateRuntime(cortex::target::Catalog&catalog,const TargetDescriptor&t,const std::string&dir,bool allowWrites,bool allowInjection,std::string&code,std::string&msg){auto r=std::make_shared<TargetRuntime>();r->target=t;r->sessions=std::make_unique<cortex::target::SessionManager>(catalog);std::string e;if(!r->sessions->Attach(t,&e)){code="target_attach_failed";msg=e;return{};}r->payload=std::make_unique<cortex::services::PayloadClient>(*r->sessions,dir);r->payload->SetWritesAuthority(allowWrites);r->payload->SetStateAuthority(allowWrites||g_allowState);r->payload->SetInjectionAllowed(allowInjection);if(!r->payload->EnsureReady(&e)){code="target_runtime_unavailable";msg=e;if(e.rfind("write_authority_required",0)==0){code="write_authority_required";cortex::security::RecordDenial("host","cortex_attach",code,{{"pid",t.processId},{"process",t.name}});}return{};}r->debuggerBackend=ConfiguredDebuggerBackend(dir);r->debugger=CreateDebugProvider(*r,r->debuggerBackend);if(!r->debugger){code="debugger_provider_unavailable";msg="Could not create debugger provider";return{};}return r;}
 
 json ProcessList(const std::shared_ptr<RunState>&s,const json&a,std::string&code,std::string&msg){if(!s->catalog){code="target_catalog_unavailable";msg="Local target catalog unavailable";return{};}std::string q;if(a.contains("query")&&a["query"].is_string())q=LowerAscii(a["query"].get<std::string>());size_t limit=static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",256),1,2048));auto attached=RuntimeSnapshot(s);json rows=json::array();size_t total=0;for(const auto&t:s->catalog->Targets()){if(!q.empty()&&LowerAscii(t.name+"\n"+t.executablePath+"\n"+t.windowTitle+"\n"+t.id).find(q)==std::string::npos)continue;++total;if(rows.size()>=limit)continue;bool isAttached=false;for(auto&r:attached)if(r->target.id==t.id&&(!r->target.generation||!t.generation||r->target.generation==t.generation))isAttached=true;rows.push_back(TargetJson(t,isAttached));}return{{"ok",true},{"count",rows.size()},{"total_matches",total},{"truncated",total>rows.size()},{"processes",rows}};}
 
@@ -275,11 +304,1096 @@ void RegisterOpRoute(const std::shared_ptr<RunState>&s,uint64_t op,const json&id
 void ForgetOpRoute(const std::shared_ptr<RunState>&s,uint64_t op){std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end()){s->requestOperations.erase(RequestKey(it->second));s->operationRequestIds.erase(it);}}
 
 bool HandleLocalTool(const std::shared_ptr<RunState>&s,const json&m,const std::string&name,const json&a,json&response){const bool local=name.rfind("cortex_",0)==0;if(!local)return false;if(PruneDeadRuntimes(s))EmitToolsChanged(s);
+if(IsCortexStateTool(name)&&a.contains("mutation_permission")&&a["mutation_permission"].is_boolean()&&a["mutation_permission"].get<bool>()&&!(s->allowState||s->allowWrites)){cortex::security::RecordDenial("host",name,"state_authority_required",a);response=LocalToolResponse(MessageId(m),LocalToolFailure("state_authority_required","Saving knowledge, notes or journals needs authority from the person: start cortex.exe mcp with --allow-state (or --allow-writes). mutation_permission alone is not enough."),true);return true;}
+if(name=="cortex_agent_guide"){response=LocalToolResponse(MessageId(m),{{"ok",true},{"guide",CortexAgentGuide()}});return true;}
+if(name=="cortex_test_list"){response=LocalToolResponse(MessageId(m),s->tests->List());return true;}
+if(name=="cortex_test_get"||name=="cortex_test_cancel"){
+    if(!a.contains("id")||!a["id"].is_string()) {response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_test_id","Expected a test id"),true);return true;}
+    const std::string id=a["id"].get<std::string>();
+    if(name=="cortex_test_get"){auto out=s->tests->Get(id);response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));}
+    else {const bool ok=s->tests->Cancel(id);response=LocalToolResponse(MessageId(m),{{"ok",ok},{"id",id},{"cancel_requested",ok}},!ok);}
+    return true;
+}
+if(name=="cortex_knowledge_graph"){
+    if(!a.is_object()||a.size()<2||a.size()>5||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_graph_request","Exact target and generation required"),true);
+        return true;
+    }
+    json query=json::object();
+    for(auto it=a.begin();it!=a.end();++it){
+        if(it.key()=="focus"||it.key()=="depth"||it.key()=="limit")
+            query[it.key()]=it.value();
+        else if(it.key()!="_cortex_target"&&it.key()!="_cortex_generation"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_graph_request","Unrecognized graph field"),true);return true;
+        }
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;
+    }
+    // Never inject a runtime only to read project knowledge.
+    std::string err;
+    if(!runtime->payload ||
+       (!runtime->payload->Ready()&&!runtime->payload->TryConnectExisting(&err))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_runtime_unavailable","No existing project runtime is connected"),true);
+        return true;
+    }
+    json raw;
+    if(!runtime->payload->CallTool("project_knowledge_list",json::object(),raw,&err)||
+       !raw.is_object()||!raw.contains("result")||
+       !raw["result"].is_object()||!raw["result"].value("ok",false)||
+       !raw["result"].contains("records")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_list_unavailable","Cannot read persistent project knowledge"),true);
+        return true;
+    }
+    json graph;std::string graphError;
+    if(!project::knowledge::graph::Build(
+           raw["result"]["records"],query,graph,graphError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_graph_query",graphError),true);return true;
+    }
+    response=LocalToolResponse(MessageId(m),graph);
+    return true;
+}
+if(name=="cortex_test_evidence_graph"){
+    if(!a.is_object()||a.size()<2||a.size()>3||!a.contains("control")||
+       !a["control"].is_string()||!a.contains("action")||
+       !a["action"].is_string()||
+       (a.contains("report_id") && !a["report_id"].is_string())){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_graph_request","Provide control and action trial IDs"),true);
+        return true;
+    }
+    const auto first=s->tests->Get(a["control"].get<std::string>());
+    const auto second=s->tests->Get(a["action"].get<std::string>());
+    if(!first.value("ok",false)||!second.value("ok",false)||
+       !first.contains("run")||!second.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "trial_not_found","Both trials must already exist"),true);
+        return true;
+    }
+    const auto pair=s->tests->Compare(a["control"].get<std::string>(),
+                                     a["action"].get<std::string>());
+    json evaluated=nullptr;
+    if(a.contains("report_id")) {
+        const auto report=s->tests->GetReport(a["report_id"].get<std::string>());
+        if(!report.value("ok",false)||!report.contains("report")||
+           !report["report"].is_object()) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "report_not_found","Existing report required"),true);return true;
+        }
+        const auto& data=report["report"];
+        if(!data.contains("trials")||!data["trials"].is_array()||
+           data["trials"].size()!=2||!data["trials"][0].is_object()||
+           !data["trials"][1].is_object()||
+           data["trials"][0].value("id",std::string())!=a["control"]||
+           data["trials"][1].value("id",std::string())!=a["action"]||
+           !data.contains("hypothesis_tests")||
+           !data["hypothesis_tests"].is_object()||
+           !data["hypothesis_tests"].contains("results")||
+           !data["hypothesis_tests"]["results"].is_array()) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "graph_report_pair_mismatch","Report must reference this trial pair"),true);return true;
+        }
+        json predictions=json::array();
+        for(const auto& row:data["hypothesis_tests"]["results"]) {
+            if(!row.is_object()||!row.contains("id")||!row.contains("read")||
+               !row.contains("control")||!row.contains("action")) {
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                    "invalid_graph_report","Malformed archived predictions"),true);return true;
+            }
+            predictions.push_back({{"id",row["id"]},{"read",row["read"]},
+                {"control",row["control"]},{"action",row["action"]}});
+        }
+        std::string err;
+        if(!cortex::test::predictions::Validate(predictions,
+                 first["run"]["before"].size(),err)) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_graph_predictions",err),true);return true;
+        }
+        evaluated=cortex::test::predictions::Evaluate(predictions,
+             first["run"],second["run"],pair);
+    }
+    const auto graph=cortex::test::graph::Build(
+        first["run"],second["run"],pair,json::array(),evaluated);
+    response=LocalToolResponse(MessageId(m),graph,!graph.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_generate_prepare"){
+    if(!a.is_object()||a.size()!=3||
+       !a.contains("report_id")||!a["report_id"].is_string()||
+       !a.contains("objective")||!a["objective"].is_string()||
+       a["objective"].get_ref<const std::string&>().empty()||
+       a["objective"].get_ref<const std::string&>().size()>160||
+       !a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_generate_prepare_request",
+            "Persistent journal write needs a report, question and explicit permission"),true);
+        return true;
+    }
+    const auto result=s->tests->GeneratePrepare(
+        a["report_id"].get<std::string>(),
+        a["objective"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_generate"){
+    if(!a.is_object()||a.size()!=2||
+       !a.contains("report_id")||!a["report_id"].is_string()||
+       !a.contains("objective")||!a["objective"].is_string()||
+       a["objective"].get_ref<const std::string&>().empty()||
+       a["objective"].get_ref<const std::string&>().size()>160){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_generate_request",
+            "Provide a report_id and a bounded question (maximum 160 bytes)"),true);
+        return true;
+    }
+    const auto result=s->tests->Generate(
+        a["report_id"].get<std::string>(),
+        a["objective"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_choose"){
+    if(!a.is_object() || !a.contains("report_id") ||
+       !a["report_id"].is_string() || !a.contains("candidates") ||
+       !a["candidates"].is_array() || a["candidates"].empty() ||
+       a["candidates"].size()>8 || a.size()>3 ||
+       (a.contains("previous_ids") &&
+        (!a["previous_ids"].is_array() || a["previous_ids"].size()>16))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_experiment_request","Choose a report and 1-8 bounded candidate experiments"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="report_id" && it.key()!="candidates" &&
+           it.key()!="previous_ids") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_experiment_request","Unsupported chooser field"),true);
+            return true;
+        }
+    auto result=s->tests->Choose(a["report_id"].get<std::string>(),
+        a["candidates"],a.value("previous_ids",json::array()));
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_investigation_summary"||
+   name=="cortex_test_investigation_report"||
+   name=="cortex_test_catalog_save"){
+    const bool persist=name!="cortex_test_investigation_summary";
+    if(!a.is_object()||a.size()!=(persist?2:1)||
+       !a.contains("id")||!a["id"].is_string()||
+       (persist&&(!a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_investigation_request",
+            "Provide a step ID; persistent writes require explicit permission"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="id"&&!(persist&&it.key()=="mutation_permission")) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_investigation_request","Unsupported field"),true);return true;
+        }
+    const auto id=a["id"].get<std::string>();
+    const auto out=name=="cortex_test_investigation_summary"?
+        s->tests->InvestigationSummary(id):
+        name=="cortex_test_investigation_report"?
+        s->tests->InvestigationSave(id):s->tests->CatalogSave(id);
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_catalog_list"){
+    if(!a.is_object()||a.size()>1 ||
+       (a.contains("program")&&
+        (!a["program"].is_string()||
+         a["program"].get_ref<const std::string&>().size()>260))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_catalog_request","Optional program filter is a path string"),true);
+        return true;
+    }
+    const auto out=s->tests->CatalogList(a.value("program",std::string()));
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_step_next"||name=="cortex_test_step_continue"){
+    const bool persist=name=="cortex_test_step_continue";
+    if(!a.is_object() ||
+       a.size()!=(persist?4:3) ||
+       !a.contains("id")||!a["id"].is_string() ||
+       !a.contains("expected_revision")||
+       !a["expected_revision"].is_number_integer() ||
+       !a.contains("candidates")||!a["candidates"].is_array() ||
+       a["candidates"].empty()||a["candidates"].size()>8 ||
+       (persist && (!a.contains("mutation_permission") ||
+        !a["mutation_permission"].is_boolean() ||
+        !a["mutation_permission"].get<bool>()))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_next_request",
+            "Completed step ID, revision and bounded candidates required"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="id" && it.key()!="expected_revision" &&
+           it.key()!="candidates" &&
+           !(persist&&it.key()=="mutation_permission")) {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_step_next_request","Unsupported continuation field"),true);
+            return true;
+        }
+    const auto id=a["id"].get<std::string>();
+    const auto revision=a["expected_revision"].get<int64_t>();
+    const auto out=persist?s->tests->StepContinue(id,a["candidates"],revision)
+                          :s->tests->StepNext(id,a["candidates"],revision);
+    response=LocalToolResponse(MessageId(m),out,!out.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_step_prepare"){
+    if(!a.is_object() || a.size()<3 || a.size()>4 ||
+       !a.contains("report_id") || !a["report_id"].is_string() ||
+       !a.contains("candidates") || !a["candidates"].is_array() ||
+       a["candidates"].empty() || a["candidates"].size()>8 ||
+       (a.contains("previous_ids") &&
+        (!a["previous_ids"].is_array()||a["previous_ids"].size()>16))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_request","Prepare a report and bounded candidate plans"),true);return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="report_id" && it.key()!="candidates" &&
+           it.key()!="previous_ids" && it.key()!="mutation_permission") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_step_request","Unsupported step field"),true);return true;
+        }
+    if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "mutation_permission_required","Writing an investigation step requires permission"),true);
+        return true;
+    }
+    const auto result=s->tests->StepPrepare(a["report_id"].get<std::string>(),
+        a["candidates"],a.value("previous_ids",json::array()));
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_step_get"){
+    if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_id","Provide a step ID"),true);return true;
+    }
+    const auto result=s->tests->StepGet(a["id"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_step_record"){
+    if(!a.is_object()||a.size()!=5||!a.contains("id")||!a["id"].is_string()||
+       !a.contains("test_id")||!a["test_id"].is_string()||
+       !a.contains("arm")||!a["arm"].is_string()||
+       !a.contains("expected_revision")||
+       !a["expected_revision"].is_number_integer()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_step_record_request","Supply ID, arm, trial ID and revision"),true);
+        return true;
+    }
+    if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "mutation_permission_required","Saving step evidence requires permission"),true);
+        return true;
+    }
+    const auto result=s->tests->StepRecord(a["id"].get<std::string>(),
+        a["arm"].get<std::string>(),a["test_id"].get<std::string>(),
+        a["expected_revision"].get<int64_t>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_report_get"){
+    if(!a.is_object()||a.size()!=1||!a.contains("id")||!a["id"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_id","Provide report ID"),true);return true;
+    }
+    auto result=s->tests->GetReport(a["id"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_test_report"){
+    if(!a.is_object()||!a.contains("mutation_permission")||
+       !a["mutation_permission"].is_boolean()||!a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("mutation_permission_required","Persisting a report requires permission"),true);return true;
+    }
+    if(!a.contains("ids")||!a["ids"].is_array()||a["ids"].empty()||a["ids"].size()>8){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Select 1 to 8 completed trials"),true);return true;
+    }
+    if(a.size()>4||(a.contains("title")&&
+       (!a["title"].is_string()||a["title"].get_ref<const std::string&>().size()>100))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_title","Title must be at most 100 characters"),true);return true;
+    }
+    if(a.contains("hypotheses") &&
+       (!a["hypotheses"].is_array() || a["hypotheses"].empty())){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_hypotheses","Supply 1 to 8 predictions or omit hypotheses"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="ids" && it.key()!="title" &&
+           it.key()!="mutation_permission" && it.key()!="hypotheses"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_report_request","Unsupported investigation field"),true);
+            return true;
+        }
+    std::vector<std::string> ids;
+    for(const auto& id:a["ids"]){
+        if(!id.is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_report_trial_ids","Trial ids must be strings"),true);return true;}
+        ids.push_back(id.get<std::string>());
+    }
+    json output;std::string error;
+    if(!s->tests->Report(ids,a.value("title",std::string("Cortex investigation")),
+                         output,error,a.value("hypotheses",json::array()))){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;
+    }
+    response=LocalToolResponse(MessageId(m),output);return true;
+}
+if(name=="cortex_test_compare"){
+    if(!a.is_object()||a.size()!=2||!a.contains("first")||!a.contains("second")||
+       !a["first"].is_string()||!a["second"].is_string()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_test_pair","Provide two completed trial IDs"),true);
+        return true;
+    }
+    auto comparison=s->tests->Compare(a["first"].get<std::string>(),a["second"].get<std::string>());
+    response=LocalToolResponse(MessageId(m),comparison,!comparison.value("ok",false));return true;
+}
+// Read-only context lookup for instruction pointers genuinely recorded by a
+// bounded experiment. A hardware data watchpoint's address is NOT code.
+// The caller must select the original live PID and process generation: never
+// silently reinterpret archived IPs in a restarted process.
+if(name=="cortex_test_code_candidates"){
+    if(!a.is_object()||a.size()!=4||!a.contains("control")||
+       !a["control"].is_string()||!a.contains("action")||
+       !a["action"].is_string()||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_candidate_request","Specify two trial IDs and the exact live target generation"),true);
+        return true;
+    }
+    const std::string firstId=a["control"].get<std::string>();
+    const std::string secondId=a["action"].get<std::string>();
+    if(!cortex::test::SafeRunId(firstId)||!cortex::test::SafeRunId(secondId)||
+       firstId==secondId){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_trial_pair","Distinct archived trial IDs required"),true);return true;
+    }
+    const auto c=s->tests->Get(firstId),b=s->tests->Get(secondId);
+    if(!c.value("ok",false)||!b.value("ok",false)||
+       !c.contains("run")||!b.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "trial_not_found","Both archived trials must exist"),true);return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    const auto session=runtime->sessions->Active();
+    if(generation==0||generation!=runtime->target.generation||
+       !session||!session->Alive()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_or_exited_target","Original process generation required"),true);return true;
+    }
+    const json target=TargetJson(runtime->target,true);
+    if(!c["run"].is_object()||!b["run"].is_object()||
+       !c["run"].contains("target")||!b["run"].contains("target")||
+       !cortex::test::code_context::SameTarget(c["run"]["target"],target)||
+       !cortex::test::code_context::SameTarget(b["run"]["target"],target)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","IP observations are from another process lifetime"),true);return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty()||modules.size()>2048){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot resolve live module offsets"),true);return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    cortex::test::code_context::UnwindQuery unwind;
+    if(runtime->target.architecture==cortex::target::Architecture::X64) {
+        unwind=[session](const std::string& ipText,const json& module)->json {
+            uint64_t ip=0,base=0;
+            if(!cortex::test::code_context::HexAddress(ipText,ip)||
+               !module.is_object()||!module.contains("base")||
+               !module["base"].is_string()||
+               !cortex::test::code_context::HexAddress(
+                   module["base"].get<std::string>(),base)||
+               !module.contains("size")||!module["size"].is_number_unsigned())
+                return {{"status","unavailable"}};
+            const cortex::test::pe_unwind::ReadAt reader=
+                [session](uint64_t at,size_t bytes,std::vector<uint8_t>& out)->bool {
+                    if(!session->Alive()||bytes>1024)return false;
+                    out.resize(bytes);
+                    size_t received=0;
+                    if(!session->ReadMemory(at,out.data(),bytes,&received)||
+                       received!=bytes){out.clear();return false;}
+                    return true;
+                };
+            return cortex::test::pe_unwind::Find(
+                base,module["size"].get<uint64_t>(),ip,reader);
+        };
+    }
+    auto first=cortex::test::code_context::Build(
+        c["run"],target,snapshot,8,{}, {},unwind);
+    auto second=cortex::test::code_context::Build(
+        b["run"],target,snapshot,8,{}, {},unwind);
+    auto emptyIfNoEvents=[&](json& value,const json& run) {
+        if(!value.value("ok",false) &&
+           value.value("error",std::string())=="no_recorded_instruction_events" &&
+           run.contains("code_evidence")&&run["code_evidence"].is_object()&&
+           run["code_evidence"].value("status",std::string())=="observed")
+            value={{"ok",true},{"target",target},{"locations",json::array()}};
+    };
+    emptyIfNoEvents(first,c["run"]);
+    emptyIfNoEvents(second,b["run"]);
+    if(!first.value("ok",false)||!second.value("ok",false)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "code_evidence_unavailable","Both trials require valid debugger logging snapshots"),true);return true;
+    }
+    if(!session->Alive()||runtime->target.generation!=generation){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Live process changed during resolution"),true);return true;
+    }
+    const auto pair=s->tests->Compare(firstId,secondId);
+    const auto result=cortex::test::code_candidates::Build(first,second,pair);
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));
+    return true;
+}
+if(name=="cortex_test_code_context"){
+    if(!a.is_object() || !a.contains("test_id") ||
+       !a["test_id"].is_string() ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation") ||
+       a.size()>7 ||
+       (a.contains("max_locations") &&
+        (!a["max_locations"].is_number_integer() ||
+         a["max_locations"].get<int64_t>()<1 ||
+         a["max_locations"].get<int64_t>()>8)) ||
+       (a.contains("symbols") && !a["symbols"].is_boolean()) ||
+       (a.contains("disassemble") && !a["disassemble"].is_boolean()) ||
+       (a.contains("unwind") && !a["unwind"].is_boolean())) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_context_request","Supply trial ID, original target, process generation and optional bounded lookups"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="test_id" && it.key()!="_cortex_target" &&
+           it.key()!="_cortex_generation" && it.key()!="max_locations" &&
+           it.key()!="symbols" && it.key()!="disassemble" &&
+           it.key()!="unwind"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_code_context_request","Unrecognized code context field"),true);
+            return true;
+        }
+    const std::string testId=a["test_id"].get<std::string>();
+    if(!cortex::test::SafeRunId(testId)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_test_id","Expected an existing trial ID"),true);
+        return true;
+    }
+    const auto recorded=s->tests->Get(testId);
+    if(!recorded.value("ok",false) || !recorded.contains("run")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","No archived or live trial with this ID"),true);
+        return true;
+    }
+    std::string errCode,errorMessage;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,errCode,errorMessage);
+    if(!runtime || !ValidateGeneration(runtime,a,errCode,errorMessage)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(errCode,errorMessage),true);
+        return true;
+    }
+    const uint64_t selectedGeneration=UnsignedArg(a,"_cortex_generation");
+    if(selectedGeneration==0 || runtime->target.generation!=selectedGeneration){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the exact original process generation"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","The original process is no longer alive"),true);
+        return true;
+    }
+    const json liveTarget=TargetJson(runtime->target,true);
+    if(!recorded["run"].is_object() ||
+       !recorded["run"].contains("target") ||
+       !cortex::test::code_context::SameTarget(recorded["run"]["target"],liveTarget)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","A recorded IP cannot be mapped into another process lifetime"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto loadedModules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    json moduleSnapshot=json::array();
+    for(const auto& entry:loadedModules){
+        if(moduleSnapshot.size()>=2048)break;
+        moduleSnapshot.push_back({
+            {"name",entry.name},{"path",entry.path},
+            {"base",entry.base},{"size",entry.size}
+        });
+    }
+    // A debugger may already be attached while the injected runtime's
+    // named-pipe transport is not connected yet. Connecting to an EXISTING
+    // payload is read-only; unlike EnsureReady it never injects code.
+    std::string connectionError;
+    const bool canQuerySymbols=runtime->payload && modulesError.empty() &&
+        a.value("symbols",true) &&
+        (runtime->payload->Ready() ||
+         runtime->payload->TryConnectExisting(&connectionError));
+    cortex::test::code_context::Query symbolQuery,disassemblyQuery;
+    if(canQuerySymbols){
+        symbolQuery=[payload=runtime->payload.get()](const std::string& address)->json{
+            json value;std::string reason;
+            if(!payload->CallTool("symbols_resolve",{{"address",address}},value,&reason))
+                return json::object();
+            return value.value("result",json::object());
+        };
+    }
+    if(a.value("disassemble",true) && modulesError.empty()){
+        // Use Cortex's EXISTING out-of-process disassembler rather than
+        // injecting a runtime merely to decode a few observed bytes.
+        disassemblyQuery=[runtime](const std::string& address)->json{
+            uint64_t ip=0;
+            if(!cortex::test::code_context::HexAddress(address,ip))
+                return {{"ok",false}};
+            cortex::services::DisassemblyService service(*runtime->sessions);
+            std::vector<cortex::services::DisassemblyInstruction> decoded;
+            std::string reason;
+            if(!service.Decode(ip,3,decoded,&reason))
+                return {{"ok",false},{"error",reason}};
+            json rows=json::array();
+            static constexpr char digits[]="0123456789abcdef";
+            for(const auto& item:decoded){
+                std::string bytes;
+                bytes.reserve(item.bytes.size()*2);
+                for(uint8_t value:item.bytes){
+                    bytes.push_back(digits[value>>4]);
+                    bytes.push_back(digits[value&15]);
+                }
+                rows.push_back({{"address",cortex::test::code_context::Hex(item.address)},
+                    {"mnemonic",item.mnemonic},{"bytes",bytes},{"text",item.text}});
+            }
+            return {{"ok",true},{"instructions",std::move(rows)},
+                    {"source","host_external_memory"}};
+        };
+    }
+    cortex::test::code_context::UnwindQuery unwindQuery;
+    if(a.value("unwind",true) && modulesError.empty()){
+        if(runtime->target.architecture!=cortex::target::Architecture::X64){
+            unwindQuery=[](const std::string&,const json&)->json{
+                return {{"status","unavailable"},{"reason","not_amd64_pe32plus"}};
+            };
+        }else{
+            // Use live PE .pdata exception metadata via bounded external
+            // session reads. This is not a function prologue heuristic.
+            unwindQuery=[session](const std::string& address,const json& module)->json{
+                uint64_t ip=0,base=0;
+                if(!cortex::test::code_context::HexAddress(address,ip) ||
+                   !module.is_object() || !module.contains("base") ||
+                   !module["base"].is_string() ||
+                   !cortex::test::code_context::HexAddress(
+                       module["base"].get<std::string>(),base) ||
+                   !module.contains("size") || !module["size"].is_number_unsigned())
+                    return {{"status","unavailable"},{"reason","invalid_module_location"}};
+                const cortex::test::pe_unwind::ReadAt reader=
+                    [session](uint64_t at,size_t size,std::vector<uint8_t>& bytes)->bool{
+                        if(!session->Alive()||size>1024)return false;
+                        bytes.resize(size);
+                        size_t got=0;
+                        if(!session->ReadMemory(at,bytes.data(),size,&got) || got!=size){
+                            bytes.clear();return false;
+                        }
+                        return true;
+                    };
+                return cortex::test::pe_unwind::Find(
+                    base,module["size"].get<uint64_t>(),ip,reader);
+            };
+        }
+    }
+    json result=cortex::test::code_context::Build(
+        recorded["run"],liveTarget,moduleSnapshot,
+        static_cast<size_t>(a.value("max_locations",4)),
+        symbolQuery,disassemblyQuery,unwindQuery);
+    // A PID may disappear between module enumeration and read-only RPCs.
+    // Never hand off context as current when that generation has exited.
+    if(!session->Alive() ||
+       runtime->target.generation!=selectedGeneration){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during code lookup"),true);
+        return true;
+    }
+    if(!modulesError.empty() && result.value("ok",false)){
+        result["module_snapshot"]={{"status","unavailable"},{"reason",modulesError}};
+    }
+    if(!result.value("ok",false)){
+        const std::string reason=result.value("error",std::string("code_context_unavailable"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    response=LocalToolResponse(MessageId(m),result);
+    return true;
+}
+// Save only host-measured debugger IP -> module/RVA observations, tied to a
+// full SHA-256 fingerprint of the live module's on-disk binary. This does not
+// make a claim true or turn an unwind region into a source-level function.
+if(name=="cortex_test_code_link"){
+    if(!a.is_object() || a.size()<6 || a.size()>7 ||
+       !a.contains("test_id") || !a["test_id"].is_string() ||
+       !a.contains("knowledge_id") || !a["knowledge_id"].is_string() ||
+       !a.contains("expected_revision") || !a["expected_revision"].is_number_integer() ||
+       !a.contains("mutation_permission") || !a["mutation_permission"].is_boolean() ||
+       !a["mutation_permission"].get<bool>() ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation") ||
+       (a.contains("max_locations") &&
+        (!a["max_locations"].is_number_integer() ||
+         a["max_locations"].get<int64_t>()<1 ||
+         a["max_locations"].get<int64_t>()>4))) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_link_request","Expected completed trial, knowledge ID, revision, original target generation and mutation permission"),true);
+        return true;
+    }
+    for(auto it=a.begin();it!=a.end();++it)
+        if(it.key()!="test_id" && it.key()!="knowledge_id" &&
+           it.key()!="expected_revision" && it.key()!="mutation_permission" &&
+           it.key()!="_cortex_target" && it.key()!="_cortex_generation" &&
+           it.key()!="max_locations") {
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "invalid_code_link_request","Unrecognized code link argument"),true);
+            return true;
+        }
+    const auto revision=a["expected_revision"].get<int64_t>();
+    const std::string testId=a["test_id"].get<std::string>();
+    const std::string knowledgeId=a["knowledge_id"].get<std::string>();
+    if(revision<1 || revision>1000000 ||
+       !cortex::test::SafeRunId(testId) ||
+       !project::knowledge::ValidId(knowledgeId)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_link_request","Invalid trial ID, knowledge ID or revision"),true);
+        return true;
+    }
+    const auto recorded=s->tests->Get(testId);
+    if(!recorded.value("ok",false) || !recorded.contains("run")) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","No archived completed trial with this ID"),true);
+        return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime || !ValidateGeneration(runtime,a,code,message)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    if(generation==0 || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the original generation of the observed trial"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","Target is no longer alive"),true);
+        return true;
+    }
+    const json target=TargetJson(runtime->target,true);
+    if(!recorded["run"].is_object() ||
+       !recorded["run"].contains("target") ||
+       !cortex::test::code_context::SameTarget(recorded["run"]["target"],target)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_target_identity_mismatch","Cannot link an IP from another process lifetime"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty() || modules.size()>2048) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot identify modules for the original trial"),true);
+        return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    const auto context=cortex::test::code_context::Build(
+        recorded["run"],target,snapshot,
+        static_cast<size_t>(a.value("max_locations",4)));
+    if(!context.value("ok",false)) {
+        const std::string reason=context.value("error",std::string("no_completed_code_observations"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    const auto capture=cortex::test::code_knowledge::Capture(
+        context,cortex::test::file_version::Hash);
+    if(!capture.value("ok",false)) {
+        const std::string reason=capture.value("error",std::string("code_module_version_unavailable"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(reason,reason),true);
+        return true;
+    }
+    if(!session->Alive() || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during fingerprinting"),true);
+        return true;
+    }
+    json saved;
+    std::string callError;
+    if(!runtime->payload->CallRouteExisting("POST","/project/knowledge/code_references",
+            {{"id",knowledgeId},{"expected_revision",revision},
+             {"code_references",capture["references"]}},saved,&callError)) {
+        const std::string failure=callError.empty()?"knowledge_code_save_failed":callError;
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            failure=="revision_conflict"?"knowledge_revision_conflict":failure,failure),true);
+        return true;
+    }
+    const auto item=saved.value("result",json::object()).value("record",json(nullptr));
+    if(!item.is_object() || !item.contains("revision") ||
+       !item["revision"].is_number_integer() ||
+       item["revision"].get<int64_t>()!=revision+1 ||
+       !item.contains("code_references") ||
+       !item["code_references"].is_array()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_code_save_invalid","Knowledge update returned an invalid record"),true);
+        return true;
+    }
+    RecordEvent(s,"knowledge.code_linked",runtime,
+        {{"id",knowledgeId},{"test_id",testId},{"revision",item["revision"]}});
+    response=LocalToolResponse(MessageId(m),{
+        {"ok",true},{"id",knowledgeId},{"linked_test",testId},
+        {"revision",item["revision"]},{"claim_status",item.value("status",std::string())},
+        {"added",capture["references"].size()},
+        {"code_reference_count",item["code_references"].size()},
+        {"semantic_verified",false},
+        {"notice","Saved module/RVA and on-disk binary version; behavior is not verified."}
+    });
+    return true;
+}
+// Read-only check after reconnect/restart. Only the CURRENT live module list
+// supplies a base; no stale absolute instruction pointer is ever reused.
+if(name=="cortex_knowledge_code_check"){
+    if(!a.is_object() || a.size()!=3 ||
+       !a.contains("knowledge_id") || !a["knowledge_id"].is_string() ||
+       !project::knowledge::ValidId(a["knowledge_id"].get<std::string>()) ||
+       !a.contains("_cortex_target") || !a.contains("_cortex_generation")) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_code_check_request","Select an existing claim and the current target generation"),true);
+        return true;
+    }
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime || !ValidateGeneration(runtime,a,code,message)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const uint64_t generation=UnsignedArg(a,"_cortex_generation");
+    if(generation==0 || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "stale_target_generation","Select the current process generation"),true);
+        return true;
+    }
+    const auto session=runtime->sessions->Active();
+    if(!session || !session->Alive()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited","Current process is no longer alive"),true);
+        return true;
+    }
+    const std::string id=a["knowledge_id"].get<std::string>();
+    json loaded;std::string callError;
+    if(!runtime->payload->CallRouteExisting("GET","/project/knowledge/"+id,
+            json::object(),loaded,&callError)) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_read_failed",callError.empty()?"Could not fetch existing claim":callError),true);
+        return true;
+    }
+    const json claim=loaded.value("result",json::object()).value("record",json(nullptr));
+    if(!claim.is_object()) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_not_found","No knowledge record with this ID"),true);
+        return true;
+    }
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty() || modules.size()>2048) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "module_snapshot_unavailable","Cannot list modules in the current target"),true);
+        return true;
+    }
+    json snapshot=json::array();
+    for(const auto& mod:modules)
+        snapshot.push_back({{"name",mod.name},{"path",mod.path},
+                            {"base",mod.base},{"size",mod.size}});
+    json result=cortex::test::code_knowledge::Revalidate(
+        claim.value("code_references",json::array()),snapshot,
+        cortex::test::file_version::Hash);
+    if(!session->Alive() || generation!=runtime->target.generation) {
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "target_exited_or_changed","Process changed during code revalidation"),true);
+        return true;
+    }
+    if(!result.value("ok",false)) {
+        const std::string failure=result.value("error",std::string("invalid_code_references"));
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(failure,failure),true);
+        return true;
+    }
+    result["id"]=id;
+    result["revision"]=claim.value("revision",0);
+    result["target"]=TargetJson(runtime->target,true);
+    response=LocalToolResponse(MessageId(m),result);
+    return true;
+}
+// Link a real completed trial to a pre-existing hypothesis. This avoids
+// accepting free-form evidence references without checking the local result
+// file, selected process lifetime and optimistic knowledge revision.
+if(name=="cortex_test_link"){
+    if(!a.is_object()||a.size()!=6||
+       !a.contains("test_id")||!a["test_id"].is_string()||
+       !a.contains("knowledge_id")||!a["knowledge_id"].is_string()||
+       !a.contains("expected_revision")||!a["expected_revision"].is_number_integer()||
+       !a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||
+       !a["mutation_permission"].get<bool>()||
+       !a.contains("_cortex_target")||!a.contains("_cortex_generation")){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_link_request","Expected trial ID, knowledge ID, revision, target, generation and mutation permission"),true);
+        return true;
+    }
+    const auto revision=a["expected_revision"].get<int64_t>();
+    if(revision<1||revision>1000000){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_expected_revision","Revision must be between 1 and 1000000"),true);
+        return true;
+    }
+    const std::string testId=a["test_id"].get<std::string>();
+    const std::string knowledgeId=a["knowledge_id"].get<std::string>();
+    if(!project::knowledge::ValidId(knowledgeId)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "invalid_knowledge_id","Use the ID of an existing project knowledge record"),true);
+        return true;
+    }
+    const auto trial=s->tests->Get(testId);
+    if(!trial.value("ok",false)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "test_not_found","Cortex has no recorded trial with this ID"),true);
+        return true;
+    }
+    std::string code,message;
+    const auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);
+        return true;
+    }
+    const auto target=TargetJson(runtime->target,true);
+    json loaded;
+    std::string callError;
+    const auto path="/project/knowledge/"+knowledgeId;
+    if(!runtime->payload->CallRouteExisting("GET",path,json::object(),loaded,&callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_read_failed",callError.empty()?"Could not fetch knowledge record":callError),true);
+        return true;
+    }
+    const json record=loaded.value("result",json::object()).value("record",json(nullptr));
+    json update;
+    if(!cortex::test::knowledge::PrepareLink(record,trial["run"],target,
+            static_cast<int>(revision),update,callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(callError,callError),true);
+        return true;
+    }
+    json saved;
+    if(!runtime->payload->CallRouteExisting("POST","/project/knowledge",update,saved,&callError)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            callError=="revision_conflict"?"knowledge_revision_conflict":"knowledge_write_failed",
+            callError.empty()?"Knowledge record was not saved":callError),true);
+        return true;
+    }
+    const json item=saved.value("result",json::object()).value("record",json(nullptr));
+    if(!item.is_object()||!item.value("revision",0)){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure(
+            "knowledge_save_invalid","Target returned an invalid knowledge update"),true);
+        return true;
+    }
+    RecordEvent(s,"knowledge.evidence_linked",runtime,{
+        {"id",knowledgeId},{"test_id",testId},{"revision",item["revision"]}});
+    response=LocalToolResponse(MessageId(m),{
+        {"ok",true},{"id",knowledgeId},{"linked_test",testId},
+        {"revision",item["revision"]},{"claim_status",item["status"]},
+        {"evidence_count",item["evidence"].size()},{"semantic_verified",false},
+        {"notice","A recorded observation does not validate the claim's semantic meaning."}
+    });
+    return true;
+}
+if(name=="cortex_test_run"){
+    cortex::test::Plan plan;std::string error;
+    if(!cortex::test::ParsePlan(a,plan,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    std::string code,message;auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;}
+    const auto target=runtime->target;const auto session=runtime->sessions->Active();
+    if(!session||!session->Alive()){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_exited","Target exited"),true);return true;}
+    if(!plan.breakpoints.empty()) {
+        std::lock_guard<std::mutex> guard(runtime->debuggerMutex);
+        if(!runtime->debugger || !runtime->debugger->Ready() ||
+           !runtime->debugger->Supports(DebugCapability::BreakpointLog)){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "breakpoint_debugger_unavailable","Attach the debugger and configure log-only breakpoints before starting a test"),true);
+            return true;
+        }
+        std::string debuggerError;
+        const auto available=runtime->debugger->Breakpoints(&debuggerError);
+        if(!debuggerError.empty()){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                "breakpoint_list_failed",debuggerError),true);
+            return true;
+        }
+        for(const auto& spec:plan.breakpoints){
+            const int selected=spec.get<int>();
+            const auto found=std::find_if(available.begin(),available.end(),
+                [selected](const DebugBreakpointInfo& bp){return bp.id==selected;});
+            if(found==available.end() || found->pauseOnHit){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(
+                    "breakpoint_not_logging","Only existing action=log breakpoints may be observed"),true);
+                return true;
+            }
+        }
+    }
+    const HWND window=cortex::test::TestWindow(target.processId);
+    if(!window){response=LocalToolResponse(MessageId(m),LocalToolFailure("test_window_unavailable","Expected exactly one visible unowned target window"),true);return true;}
+    std::vector<int> keys;for(const auto& step:plan.steps)if(step.contains("vk"))keys.push_back(step["vk"].get<int>());
+    bool mouseRequested=false;for(const auto& step:plan.steps)
+        if(step.contains("mouse_click"))mouseRequested=true;
+    if(!s->launcher->BeginTest(target.processId,target.generation,keys,error,mouseRequested)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    auto* launcher=s->launcher.get();
+    cortex::test::Context context;
+    context.target=TargetJson(target,true);
+    context.alive=[launcher,target]{return launcher->IsCurrent(target.processId,target.generation);};
+    context.read=[session](const json& spec){return cortex::test::ReadSample(session,spec);};
+    if(!plan.breakpoints.empty()){
+        context.breakpoint=[runtime,launcher,target](int id,uint64_t since,size_t limit)->json{
+            if(!launcher->IsCurrent(target.processId,target.generation))
+                return {{"ok",false},{"error","test_target_changed"}};
+            std::lock_guard<std::mutex> guard(runtime->debuggerMutex);
+            auto* debug=runtime->debugger.get();
+            if(!debug||!debug->Ready()||!debug->Supports(DebugCapability::BreakpointLog))
+                return {{"ok",false},{"error","breakpoint_debugger_unavailable"}};
+            std::string error;
+            const auto bps=debug->Breakpoints(&error);
+            if(!error.empty())return {{"ok",false},{"error",error}};
+            const auto match=std::find_if(bps.begin(),bps.end(),
+                [id](const DebugBreakpointInfo& bp){return bp.id==id;});
+            if(match==bps.end()||match->pauseOnHit)
+                return {{"ok",false},{"error","breakpoint_not_logging"}};
+            const auto hits=debug->BreakpointLog(id,since,limit==0?500:limit,&error);
+            if(!error.empty())return {{"ok",false},{"error",error}};
+            json entries=json::array();
+            if(limit!=0)for(const auto& hit:hits){
+                entries.push_back({{"seq",hit.seq},{"thread_id",hit.threadId},
+                    {"timestamp_raw_ms",hit.timestampMs},
+                    {"instruction",HexRegisterValue(hit.instruction)}});
+            }
+            return {{"ok",true},{"id",id},{"kind",match->kind},
+                {"address",HexRegisterValue(match->address)},
+                {"backend",std::string(debug->Name())},{"hit_count",match->hitCount},
+                {"coverage_complete",match->totalThreads==0 ||
+                    match->appliedThreads>=match->totalThreads},
+                {"last_seq",hits.empty()?uint64_t{0}:hits.back().seq},
+                {"entries",std::move(entries)}};
+        };
+    }
+    context.key=[launcher,target,window](int key,bool down){return launcher->IsCurrent(target.processId,target.generation) && cortex::test::PostKey(window,target.processId,key,down);};
+    context.mouse=[launcher,target,window](int x,int y,const std::string& button,bool down){
+        return launcher->IsCurrent(target.processId,target.generation) &&
+               cortex::test::PostMouse(window,target.processId,x,y,button,down);
+    };
+    context.release=[launcher,target]{launcher->EndTest(target.processId,target.generation);};
+    json out;
+    if(!s->tests->Start(plan,std::move(context),out,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+    RecordEvent(s,"test.started",runtime,{{"id",out["id"]}});
+    response=LocalToolResponse(MessageId(m),out);return true;
+}
+if(name=="cortex_launch_status"){
+    if(!s->launcher){response=LocalToolResponse(MessageId(m),{{"ok",true},{"configured",false},{"profiles",json::array()}});return true;}
+    std::string profile;
+    if(a.contains("profile")){if(!a["profile"].is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_profile","profile must be a string"),true);return true;}profile=a["profile"].get<std::string>();}
+    json result=s->launcher->Status(profile);
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
+if(name=="cortex_launch"||name=="cortex_restart"||name=="cortex_stop"){
+    if(!s->launcher){response=LocalToolResponse(MessageId(m),LocalToolFailure("launch_not_configured","Pass --launch-config to Cortex MCP at startup"),true);return true;}
+    if(!a.contains("mutation_permission")||!a["mutation_permission"].is_boolean()||!a["mutation_permission"].get<bool>()){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("mutation_permission_required","Starting and stopping a program requires mutation_permission=true and a configured profile"),true);return true;
+    }
+    if(!a.contains("profile")||!a["profile"].is_string()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_profile","A configured profile name is required"),true);return true;}
+    for(auto it=a.begin();it!=a.end();++it){
+        if(it.key()!="profile"&&it.key()!="pid"&&it.key()!="generation"&&it.key()!="mutation_permission"&&it.key()!="attach"&&it.key()!="wait_ms"){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure("unexpected_launch_argument",it.key()),true);return true;}
+    }
+    const std::string profile=a["profile"].get<std::string>();
+    const bool attach=a.contains("attach")&&a["attach"].is_boolean()&&a["attach"].get<bool>();
+    if(a.contains("attach")&&!a["attach"].is_boolean()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_attach","attach must be boolean"),true);return true;}
+    const auto policy=s->launcher->Status(profile);
+    if(attach&&(!policy.value("ok",false)||!policy["profile"].value("allow_attach",false))){response=LocalToolResponse(MessageId(m),LocalToolFailure("launch_attach_not_allowed","Enable allow_attach in the startup profile"),true);return true;}
+    json result;std::string error;
+    if(name=="cortex_launch"||name=="cortex_restart"){
+        if(name=="cortex_restart"){
+            if(!a.contains("pid")||!a["pid"].is_number_integer()||UnsignedArg(a,"pid")==0||
+               !a.contains("generation")||!a["generation"].is_number_integer()||
+               UnsignedArg(a,"generation")==0){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_restart_identity","Require previous PID and process generation"),true);return true;
+            }
+            if(!s->launcher->Restart(profile,UnsignedArg(a,"pid"),UnsignedArg(a,"generation"),result,error)){
+                response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;
+            }
+            RecordEvent(s,"process.restarted",nullptr,{{"profile",profile},{"previous_pid",UnsignedArg(a,"pid")},
+                {"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+            if(PruneDeadRuntimes(s))EmitToolsChanged(s);
+        }else{
+            if(!s->launcher->Start(profile,result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+            RecordEvent(s,"process.launched",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)},{"generation",result.value("generation",uint64_t{0})}});
+        }
+        if(attach){
+            const uint64_t pid=result.at("pid").get<uint64_t>();
+            const uint64_t generation=result.at("generation").get<uint64_t>();
+            const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(std::clamp<uint64_t>(UnsignedArg(a,"wait_ms",5000),100,10000));
+            std::optional<TargetDescriptor> target;
+            while(std::chrono::steady_clock::now()<until && s->launcher->IsCurrent(pid,generation)){
+                for(const auto& t:s->catalog->Targets())if(t.processId==pid&&t.generation==generation){target=t;break;}
+                if(target&&cortex::test::TestWindow(pid))break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+            std::string code,message;
+            if(target&&s->launcher->IsCurrent(pid,generation)&&cortex::test::TestWindow(pid)){
+                std::lock_guard<std::mutex> lock(s->targetMutationMutex);
+                auto runtime=CreateRuntime(*s->catalog,*target,s->runtimeDirectory,s->allowWrites,/*allowInjection: the operator-owned launch profile already granted allow_attach (checked above); write authority is NOT granted by it*/true,code,message);
+                if(runtime&&PrimeRuntime(s,runtime,message)){
+                    {std::lock_guard<std::mutex> lock(s->runtimeMutex);s->runtimes.push_back(runtime);}
+                    result["attached"]=true;result["target"]=TargetJson(*target,true);
+                    RecordEvent(s,"target.attached",runtime,{{"launch_profile",profile}});EmitToolsChanged(s);
+                } else {result["attached"]=false;result["attach_error"]=message.empty()?code:message;}
+            }else{result["attached"]=false;result["attach_error"]="launch_readiness_timeout";}
+            // Do not silently kill the application on bootstrap failure.
+            result["ok"]=result.value("attached",false);
+        }
+    }else{
+        if(!a.contains("pid")||!a["pid"].is_number_integer()||UnsignedArg(a,"pid")==0){
+            response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_pid","Provide the launched process PID"),true);return true;
+        }
+        if(!s->launcher->Stop(profile,UnsignedArg(a,"pid"),result,error)){response=LocalToolResponse(MessageId(m),LocalToolFailure(error,error),true);return true;}
+        RecordEvent(s,"process.stopped",nullptr,{{"profile",profile},{"pid",result.value("pid",0u)}});
+    }
+    response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
+}
 if(name=="cortex_targets"){response=LocalToolResponse(MessageId(m),TargetList(RuntimeSnapshot(s)));return true;}
 if(name=="cortex_processes"){std::string c,x;auto r=ProcessList(s,a,c,x);response=c.empty()?LocalToolResponse(MessageId(m),r):LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
 if(name=="cortex_operations"){json rows=json::array();for(const auto&o:s->operations.List(static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",128),1,512))))rows.push_back(OperationJson(o));response=LocalToolResponse(MessageId(m),{{"ok",true},{"count",rows.size()},{"operations",rows}});return true;}
 if(name=="cortex_operation_cancel"){uint64_t op=UnsignedArg(a,"operation_id");std::string e;if(!op||!s->operations.RequestCancel(op,&e)){response=LocalToolResponse(MessageId(m),LocalToolFailure(e.empty()?"invalid_operation_id":e,e.empty()?"operation_id must identify a running operation":e),true);return true;}json id;{std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end())id=it->second;}if(!id.is_null())BroadcastCancel(s,id);RecordEvent(s,"operation.cancel_requested",nullptr,{{"operation_id",op}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"operation_id",op},{"state","cancel_requested"}});return true;}
-if(name=="cortex_attach"){std::lock_guard<std::mutex>ml(s->targetMutationMutex);bool hp=a.contains("pid"),hn=a.contains("process");if(hp==hn){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_attach_selector","Provide exactly one of pid or process"),true);return true;}TargetSelector sel;if(hp){auto p=UnsignedArg(a,"pid");if(!p){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_pid","pid must be positive"),true);return true;}sel.pid=p;}else{if(!a["process"].is_string()||a["process"].get<std::string>().empty()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_process","process must be non-empty"),true);return true;}sel.process=a["process"].get<std::string>();}std::string er;auto target=ResolveUniqueTarget(sel,s->catalog->Targets(),er);if(!target){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_not_found",er),true);return true;}for(auto&r:RuntimeSnapshot(s))if(r->target.id==target->id&&(!r->target.generation||!target->generation||r->target.generation==target->generation)){response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","already_attached"},{"target",TargetJson(r->target,true)}});return true;}std::string c,x;auto r=CreateRuntime(*s->catalog,*target,s->runtimeDirectory,s->allowWrites,c,x);if(!r){response=LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}if(!PrimeRuntime(s,r,x)){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_protocol_init_failed",x),true);return true;}{std::lock_guard<std::mutex>l(s->runtimeMutex);s->runtimes.erase(std::remove_if(s->runtimes.begin(),s->runtimes.end(),[&](auto&old){return old&&old->target.id==r->target.id&&old->target.generation!=r->target.generation;}),s->runtimes.end());s->runtimes.push_back(r);}RecordEvent(s,"target.attached",r,{{"debugger_backend",r->debuggerBackend}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","attached"},{"target",TargetJson(r->target,true)},{"debugger_backend",r->debuggerBackend},{"count",RuntimeSnapshot(s).size()}});EmitToolsChanged(s);return true;}
+if(name=="cortex_attach"){std::lock_guard<std::mutex>ml(s->targetMutationMutex);bool hp=a.contains("pid"),hn=a.contains("process");if(hp==hn){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_attach_selector","Provide exactly one of pid or process"),true);return true;}TargetSelector sel;if(hp){auto p=UnsignedArg(a,"pid");if(!p){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_pid","pid must be positive"),true);return true;}sel.pid=p;}else{if(!a["process"].is_string()||a["process"].get<std::string>().empty()){response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_process","process must be non-empty"),true);return true;}sel.process=a["process"].get<std::string>();}std::string er;auto target=ResolveUniqueTarget(sel,s->catalog->Targets(),er);if(!target){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_not_found",er),true);return true;}for(auto&r:RuntimeSnapshot(s))if(r->target.id==target->id&&(!r->target.generation||!target->generation||r->target.generation==target->generation)){response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","already_attached"},{"target",TargetJson(r->target,true)}});return true;}std::string c,x;auto r=CreateRuntime(*s->catalog,*target,s->runtimeDirectory,s->allowWrites,s->allowWrites,c,x);if(!r){response=LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}if(!PrimeRuntime(s,r,x)){response=LocalToolResponse(MessageId(m),LocalToolFailure("target_protocol_init_failed",x),true);return true;}{std::lock_guard<std::mutex>l(s->runtimeMutex);s->runtimes.erase(std::remove_if(s->runtimes.begin(),s->runtimes.end(),[&](auto&old){return old&&old->target.id==r->target.id&&old->target.generation!=r->target.generation;}),s->runtimes.end());s->runtimes.push_back(r);}RecordEvent(s,"target.attached",r,{{"debugger_backend",r->debuggerBackend}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"status","attached"},{"target",TargetJson(r->target,true)},{"debugger_backend",r->debuggerBackend},{"count",RuntimeSnapshot(s).size()}});EmitToolsChanged(s);return true;}
 
 std::string c,x;auto r=ResolveRuntime(RuntimeSnapshot(s),a,c,x);if(!r||!ValidateGeneration(r,a,c,x)){response=LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
 if(name=="cortex_capabilities"){response=LocalToolResponse(MessageId(m),{{"ok",true},{"capabilities",CapabilityDocument(*r)}});return true;}
@@ -304,5 +1418,9 @@ void Watchdog(const std::shared_ptr<RunState>&s){while(s->watchdogRunning.load()
 
 } // namespace
 
-int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;state->allowWrites=options.allowWrites;g_runState=state;cortex::security::SetDenialDirectory(runtimeDirectory);{std::ostringstream activityId;activityId<<std::hex<<GetCurrentProcessId()<<'-'<<GetTickCount64();state->activitySessionId=activityId.str();}auto available=catalog.Targets();for(const auto&selector:options.targets){auto target=ResolveUniqueTarget(selector,available,error);if(!target){std::cerr<<"cortex mcp: "<<error<<'\n';return 3;}std::string c,x;auto runtime=CreateRuntime(catalog,*target,runtimeDirectory,options.allowWrites,c,x);if(!runtime){std::cerr<<"cortex mcp: target setup failed: "<<(x.empty()?c:x)<<'\n';return 4;}state->runtimes.push_back(runtime);RecordEvent(state,"target.attached",runtime,{{"startup",true},{"debugger_backend",runtime->debuggerBackend}});}PublishActivity(state,{{"kind","session"},{"phase","started"},{"summary","AI/MCP session started"}});state->watchdogRunning=true;state->watchdog=std::thread([state]{Watchdog(state);});std::ios::sync_with_stdio(false);std::cin.tie(nullptr);std::string line;while(std::getline(std::cin,line)){if(line.empty())continue;if(line.size()>kMaxStdioMessageBytes){WriteOutput(state,TransportError(nullptr,"message_too_large","MCP stdio message exceeds 4 MiB"));continue;}json m;try{m=json::parse(line);}catch(const std::exception&e){WriteOutput(state,{{"jsonrpc","2.0"},{"id",nullptr},{"error",{{"code",-32700},{"message",e.what()}}}});continue;}if(IsNotification(m)){json r;bool has=false;std::string e;if(!ForwardOne(state,m,r,has,&e))std::cerr<<"cortex mcp: notification forwarding failed: "<<e<<'\n';else if(has)WriteOutput(state,r);continue;}if(!ReserveWorker(state)){WriteOutput(state,TransportError(MessageId(m),"too_many_requests","Cortex MCP concurrency limit reached"));continue;}try{std::thread([m,state]{ForwardObserved(m,state);ReleaseWorker(state);}).detach();}catch(const std::exception&e){ReleaseWorker(state);WriteOutput(state,TransportError(MessageId(m),"worker_start_failed",e.what()));}}
+int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;state->allowWrites=options.allowWrites;state->allowState=options.allowState;g_allowState=options.allowState;g_runState=state;cortex::security::SetDenialDirectory(runtimeDirectory);{    std::vector<cortex::launch::Profile> profiles;    if(!options.launchConfigPath.empty()){        try{            std::ifstream file(std::filesystem::u8path(options.launchConfigPath));            if(!file){std::cerr<<"cortex mcp: could not read --launch-config\n";return 2;}            const json config=json::parse(file);            if(!cortex::launch::ParseProfiles(config,profiles,error)){                std::cerr<<"cortex mcp: "<<error<<"\n";return 2;            }        }catch(const std::exception& e){std::cerr<<"cortex mcp: invalid --launch-config: "<<e.what()<<"\n";return 2;}    }    state->launcher=std::make_unique<cortex::launch::Manager>(std::move(profiles));}{
+    const auto root=options.testResults.empty() ? cortex::services::UserDataDirectory(std::filesystem::u8path(runtimeDirectory))/"tests"
+        : std::filesystem::absolute(std::filesystem::u8path(options.testResults));
+    state->tests=std::make_unique<cortex::test::Runner>(root,std::to_string(GetCurrentProcessId()));
+}{std::ostringstream activityId;activityId<<std::hex<<GetCurrentProcessId()<<'-'<<GetTickCount64();state->activitySessionId=activityId.str();}auto available=catalog.Targets();for(const auto&selector:options.targets){auto target=ResolveUniqueTarget(selector,available,error);if(!target){std::cerr<<"cortex mcp: "<<error<<'\n';return 3;}std::string c,x;auto runtime=CreateRuntime(catalog,*target,runtimeDirectory,options.allowWrites,options.allowWrites,c,x);if(!runtime){std::cerr<<"cortex mcp: target setup failed: "<<(x.empty()?c:x)<<'\n';return 4;}state->runtimes.push_back(runtime);RecordEvent(state,"target.attached",runtime,{{"startup",true},{"debugger_backend",runtime->debuggerBackend}});}PublishActivity(state,{{"kind","session"},{"phase","started"},{"summary","AI/MCP session started"}});state->watchdogRunning=true;state->watchdog=std::thread([state]{Watchdog(state);});std::ios::sync_with_stdio(false);std::cin.tie(nullptr);std::string line;while(std::getline(std::cin,line)){if(line.empty())continue;if(line.size()>kMaxStdioMessageBytes){WriteOutput(state,TransportError(nullptr,"message_too_large","MCP stdio message exceeds 4 MiB"));continue;}json m;try{m=json::parse(line);}catch(const std::exception&e){WriteOutput(state,{{"jsonrpc","2.0"},{"id",nullptr},{"error",{{"code",-32700},{"message",e.what()}}}});continue;}if(IsNotification(m)){json r;bool has=false;std::string e;if(!ForwardOne(state,m,r,has,&e))std::cerr<<"cortex mcp: notification forwarding failed: "<<e<<'\n';else if(has)WriteOutput(state,r);continue;}if(!ReserveWorker(state)){WriteOutput(state,TransportError(MessageId(m),"too_many_requests","Cortex MCP concurrency limit reached"));continue;}try{std::thread([m,state]{ForwardObserved(m,state);ReleaseWorker(state);}).detach();}catch(const std::exception&e){ReleaseWorker(state);WriteOutput(state,TransportError(MessageId(m),"worker_start_failed",e.what()));}}
 WaitWorkers(state);state->watchdogRunning=false;if(state->watchdog.joinable())state->watchdog.join();for(auto&r:RuntimeSnapshot(state))if(r&&r->debugger){std::lock_guard<std::mutex>l(r->debuggerMutex);DetachLogged(r);}PublishActivity(state,{{"kind","session"},{"phase","ended"},{"summary","AI/MCP session ended"}});return 0;}
