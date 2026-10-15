@@ -48,12 +48,13 @@ jobs:
         run: >-
           cmake -S . -B build/e2e-${{ matrix.arch }} -G Ninja
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="${{ matrix.arch == 'x86' && '-O0 -g0 -DNDEBUG' || '-O2 -g -DNDEBUG' }}"
           -DBUILD_TESTING=ON
           -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
       - name: Build complete Cortex tree
         shell: msys2 {0}
-        run: cmake --build build/e2e-${{ matrix.arch }} --parallel 2
+        run: cmake --build build/e2e-${{ matrix.arch }} --parallel ${{ matrix.arch == 'x86' && '1' || '2' }}
 
       - name: Build instrumented fake mod
         shell: msys2 {0}

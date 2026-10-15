@@ -317,6 +317,7 @@ jobs:
         run: >-
           cmake -S . -B build/p3-probe-${{ matrix.arch }} -G Ninja
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="${{ matrix.arch == 'x86' && '-O0 -g0 -DNDEBUG' || '-O2 -g -DNDEBUG' }}"
           -DBUILD_TESTING=OFF
           -DCORTEX_BUILD_LEGACY_COMPAT=ON
 
@@ -325,7 +326,7 @@ jobs:
         run: >-
           cmake --build build/p3-probe-${{ matrix.arch }}
           --target cortex_host
-          --parallel 2
+          --parallel ${{ matrix.arch == 'x86' && '1' || '2' }}
 
   # ---- P3 Runtime Validation (was .github/workflows/p3-runtime-validation.yml)
   p3-runtime-validation:

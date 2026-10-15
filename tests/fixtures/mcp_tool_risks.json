@@ -518,6 +518,42 @@
    "risk": "observe"
   },
   {
+   "name": "project_knowledge_get",
+   "method": "GET",
+   "path": "/project/knowledge/{id}",
+   "risk": "observe"
+  },
+  {
+   "name": "project_knowledge_graph",
+   "method": "POST",
+   "path": "/project/knowledge/graph",
+   "risk": "analyze"
+  },
+  {
+   "name": "project_knowledge_list",
+   "method": "GET",
+   "path": "/project/knowledge",
+   "risk": "observe"
+  },
+  {
+   "name": "project_knowledge_put",
+   "method": "POST",
+   "path": "/project/knowledge",
+   "risk": "control"
+  },
+  {
+   "name": "project_knowledge_query",
+   "method": "POST",
+   "path": "/project/knowledge/query",
+   "risk": "analyze"
+  },
+  {
+   "name": "project_knowledge_verify",
+   "method": "POST",
+   "path": "/project/knowledge/{id}/verify",
+   "risk": "control"
+  },
+  {
    "name": "project_note_add",
    "method": "POST",
    "path": "/project/note",

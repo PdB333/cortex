@@ -1,7 +1,12 @@
 #include "routes.h"
 #include "../process/address.h"
 #include "../project/project.h"
+#include "../project/knowledge_query.h"
+#include "../project/knowledge_graph.h"
 #include "../overlay/overlay.h"
+#include "../memory/memory.h"
+#include <algorithm>
+#include <cctype>
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -49,6 +54,185 @@ int64_t ParseSignedOffset(const json& j) {
 } // namespace
 
 void RegisterProjectRoutes(httplib::Server& svr) {
+
+    // Read-only typed knowledge graph, computed from the same persistent
+    // project records as the inspector and MCP query. These are assertions.
+    svr.Post("/project/knowledge/graph", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json request=json::parse(req.body);
+            json output;std::string error;
+            if(!project::knowledge::graph::Build(
+                   project::GetKnowledge(),request,output,error)) {
+                res.status=400;
+                res.set_content(json{{"ok",false},{"error",error}}.dump(),
+                                "application/json");
+                return;
+            }
+            res.set_content(output.dump(),"application/json");
+        }catch(const std::exception&) {
+            res.status=400;
+            res.set_content(json{{"ok",false},{"error","invalid_graph_query"}}.dump(),
+                            "application/json");
+        }
+    });
+
+    // Read-only compact knowledge search is independent of the full project dump.
+    svr.Post("/project/knowledge/query", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json input = json::parse(req.body);
+            json result;
+            std::string error;
+            if (!project::knowledge::Query(project::GetKnowledge(), input, result, error)) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(result.dump(), "application/json");
+        } catch (const std::exception&) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", "invalid_query"}}.dump(), "application/json");
+        }
+    });
+
+    // Investigation knowledge. Assertions are always client claims. Only the
+    // verification route can attach a server-observed byte invariant result.
+    svr.Get("/project/knowledge", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(json{{"ok", true}, {"records", project::GetKnowledge()}}.dump(),
+                        "application/json");
+    });
+
+    svr.Get(R"(/project/knowledge/([^/]+))", [](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = DecodePathSegment(req.matches[1]);
+        const json record = project::FindKnowledge(id);
+        res.status = record.is_null() ? 404 : 200;
+        res.set_content(json{{"ok", !record.is_null()}, {"record", record}}.dump(),
+                        "application/json");
+    });
+
+    svr.Post("/project/knowledge", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json input = json::parse(req.body);
+            json stored;
+            std::string error;
+            if (!project::PutKnowledge(input, stored, error)) {
+                res.status = error == "revision_conflict" ? 409 :
+                             error == "persistence_failed" ? 500 : 400;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(json{{"ok", true}, {"record", stored}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    // Internal endpoint for the host to persist measured debugger IP -> module
+    // references. Not advertised as a generic MCP mutation tool. The public
+    // project_knowledge_put rejects code_references as a client assertion.
+    svr.Post("/project/knowledge/code_references", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const json input = json::parse(req.body);
+            if (!input.is_object() || input.size() != 3 ||
+                !input.contains("id") || !input["id"].is_string() ||
+                !input.contains("expected_revision") ||
+                !input["expected_revision"].is_number_integer() ||
+                !input.contains("code_references")) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", "invalid_code_reference_request"}}.dump(),
+                                "application/json");
+                return;
+            }
+            const int64_t revision = input["expected_revision"].get<int64_t>();
+            if (revision < 1 || revision > 1000000) {
+                res.status = 400;
+                res.set_content(json{{"ok", false}, {"error", "invalid_expected_revision"}}.dump(),
+                                "application/json");
+                return;
+            }
+            json stored;
+            std::string error;
+            if (!project::AppendKnowledgeCodeReferences(input["id"].get<std::string>(),
+                    static_cast<int>(revision), input["code_references"], stored, error)) {
+                res.status = error == "revision_conflict" ? 409 :
+                             error == "knowledge_not_found" ? 404 :
+                             error == "persistence_failed" ? 500 : 400;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(json{{"ok", true}, {"record", std::move(stored)}}.dump(),
+                            "application/json");
+        } catch (const std::exception&) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", "invalid_code_reference_request"}}.dump(),
+                            "application/json");
+        }
+    });
+
+    svr.Post(R"(/project/knowledge/([^/]+)/verify)", [](const httplib::Request& req, httplib::Response& res) {
+        try {
+            const std::string id = DecodePathSegment(req.matches[1]);
+            const json before = project::FindKnowledge(id);
+            if (before.is_null()) {
+                res.status = 404;
+                res.set_content(json{{"ok", false}, {"error", "knowledge_not_found"}}.dump(),
+                                "application/json");
+                return;
+            }
+            const int revision = before.value("revision", 0);
+            const json checks = before.value("checks", json::array());
+            json results = json::array();
+            // This verifier deliberately supports only byte invariants. A
+            // passing invariant does not prove the human-language hypothesis.
+            bool passed = !checks.empty();
+            for (const auto& check : checks) {
+                const std::string addressText = check.at("address").get<std::string>();
+                const std::string hex = check.at("expected_hex").get<std::string>();
+                const size_t length = hex.size() / 2;
+                uintptr_t address = 0;
+                bool readOk = false;
+                std::string actual;
+                try {
+                    address = process::ResolveAddress(addressText);
+                    std::vector<uint8_t> bytes;
+                    // ResolveAddress may yield zero for an unknown module; a
+                    // missing region is recorded as a failure, not a match.
+                    if (address && memory::ReadBytes(address, length, bytes) && bytes.size() == length) {
+                        readOk = true;
+                        const char digits[] = "0123456789abcdef";
+                        for (const uint8_t byte : bytes) {
+                            actual += digits[byte >> 4];
+                            actual += digits[byte & 15];
+                        }
+                    }
+                } catch (const std::exception&) {}
+                std::string expected = hex;
+                std::transform(expected.begin(), expected.end(), expected.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                const bool match = readOk && actual == expected;
+                passed = passed && match;
+                results.push_back({{"address", addressText}, {"passed", match},
+                                   {"readable", readOk}});
+            }
+            const json verification = {
+                {"status", checks.empty() ? "not_applicable" : passed ? "passed" : "failed"},
+                {"scope", "byte_invariant"},
+                {"results", results}
+            };
+            json updated;
+            std::string error;
+            if (!project::RecordKnowledgeVerification(id, revision, verification, updated, error)) {
+                res.status = error == "revision_conflict" ? 409 : 500;
+                res.set_content(json{{"ok", false}, {"error", error}}.dump(), "application/json");
+                return;
+            }
+            res.set_content(json{{"ok", true}, {"record", updated}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content(json{{"ok", false}, {"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
     svr.Get("/project", [](const httplib::Request&, httplib::Response& res) {
         res.set_content(project::GetAll().dump(2), "application/json");
         overlay::LogApiCall("GET /project");

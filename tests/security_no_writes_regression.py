@@ -404,6 +404,10 @@ def main():
                 ok = True  # its steps are classified one by one as primitives
             else:
                 ok = bool(meta.get("host_control") or meta.get("read_only"))
+                # A host tool that writes (sends input, persists knowledge or journals) must make the
+                # caller declare it: mutation_permission required in its schema.
+                if meta.get("effect") in ("target_input", "cortex_state"):
+                    ok = ok and "mutation_permission" in (tool.get("inputSchema") or {}).get("required", [])
             if not ok:
                 unclassified.append("%s (%s)" % (tool.get("name"), meta.get("risk")))
         check(not unclassified, "every listed tool has a risk classification"

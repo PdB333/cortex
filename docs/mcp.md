@@ -269,6 +269,8 @@ A tool with no explicit risk classification is refused (`tool_not_classified`), 
 
 **`cortex_operation_cancel` needs no write authority, on purpose.** It only sets a cancellation flag on an operation that is already running, and that operation passed the authority and intent checks when it started. A cancelled semantic execution rolls back its own transaction, so cancelling returns the target toward its earlier state; it cannot start a change, widen one, or reach a tool the caller could not already call. Requiring authority would only stop a read-only session from cancelling a long observation. It is classified `host_control` in `tools/list`, and the regression test requires every listed tool to carry a class.
 
+**Host tools of the agent test layer** (`cortex_launch`, `cortex_restart`, `cortex_stop`, `cortex_test_*`, `cortex_knowledge_*`). Each is listed with a class: `read_only`, or `host_control` with an `effect` (`target_input`: sends keys or clicks to the program; `cortex_state`: writes Cortex's own journals, reports or knowledge; `trial`: stops a running trial). Launch, restart, stop and input are bounded by the operator-owned `--launch-config` profile (`allow_attach`, `allow_stop`, `allow_reset`, `allow_input`, `allow_mouse`, `test_keys`, run budgets), which the agent cannot change; that profile is the authority for those actions, and `--allow-writes` is not additionally required. The tools that write journals, reports or knowledge (`cortex_test_report`, `cortex_test_step_*`, `cortex_test_catalog_save`, `cortex_test_link`, `cortex_test_code_link`, `cortex_test_investigation_report`, `cortex_test_generate_prepare`) require `mutation_permission=true`, which is the caller's own declaration: **they are not yet behind `--allow-writes`.** They write only under Cortex's own data directory, not into the target, but the content they store comes from the client. By contrast the runtime primitives `project_knowledge_put` and `project_knowledge_verify` are control operations and do need `--allow-writes`.
+
 **Known limit.** The runtime's pipe token is a file (`cortex.mcp.<pid>.token`) readable by the Windows user that runs Cortex. A client that has a shell or file access as that user can read it and speak to the pipe directly, outside every rule above. These controls hold for an agent whose only access to Cortex is its MCP tool calls.
 
 ## AI activity in the desktop
@@ -282,3 +284,61 @@ A tool with no explicit risk classification is refused (`tool_not_classified`), 
 ## Compatibility
 
 The injected runtime can still expose loopback REST and HTTP `/mcp` compatibility surfaces for diagnostics and older integrations; they are off unless `http_api_enabled=true` is set in `cortex.ini`. The normal unified-product path is `cortex.exe mcp` over stdio and native IPC.
+## Investigation knowledge ledger (experimental)
+
+The new revisioned knowledge ledger is distinct from the existing unstructured `re_facts`.
+It provides a small persistent model for hypotheses, events, functions, fields,
+objects and relationships, with source references, related IDs, and byte-invariant
+checks. It does **not** infer semantics or prove that a claim about game behavior
+is correct. Agent-supplied evidence references are untrusted until independently
+corroborated. In particular an agent cannot assign a `verified` status.
+
+These primitive tools are available with `--tools all`:
+
+- `project_knowledge_list` and `project_knowledge_get`: read the stored ledger.
+- `project_knowledge_put`: save a proposed record. This changes Cortex project
+  state and uses the normal permission contract. Updating an existing record
+  requires `expected_revision` to match its current revision, preventing an
+  agent from silently overwriting a later human correction.
+- `project_knowledge_verify`: read only the declared byte invariants from the
+  currently attached process, record the actual `passed`/`failed` result,
+  and increment the revision. This does not authorize target mutation and,
+  because it persists the result, the MCP operation requires control permission.
+
+Example record submitted via `project_knowledge_put`:
+
+```json
+{
+  "id": "Player.health",
+  "kind": "field",
+  "statement": "Candidate health field at Game.exe+0x148",
+  "status": "hypothesis",
+  "evidence": [
+    {"source": "scan", "reference": "scan-12", "detail": "Candidate during damage"}
+  ],
+  "links": ["Player"],
+  "checks": [
+    {"address": "Game.exe+0x148", "expected_hex": "0000c842"}
+  ]
+}
+```
+
+A check only establishes whether those bytes currently match. Values change,
+so failures can also mean the observation was made at the wrong moment. More
+sophisticated behavior experiments and human approvals will build on this
+ledger rather than being claimed by the initial implementation.
+
+### Compact query and investigation resume (experimental)
+
+The project_knowledge_query primitive can search claims without returning the
+entire project or complete evidence/history to the agent. It is read-only and
+does not require MCP mutation permission.
+
+- text: case-insensitive ASCII substring of ID, statement, kind or notes.
+- kind and status: exact filters.
+- resume=true: prioritizes stale records, failed checks and open hypotheses.
+- limit: 1-20 (default 10); offset: deterministic pagination.
+
+Results contain a compact statement, status, revision, evidence/relationship
+counts and the last byte-check status. Retrieve a full record with
+project_knowledge_get before trusting or acting on its contents.
