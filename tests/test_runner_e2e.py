@@ -44,7 +44,7 @@ def main():
         tmp=pathlib.Path(temp);manifest=tmp/'target.json';config=tmp/'launch.json'
         config.write_text(json.dumps({'profiles':[{'name':'fixture','executable':str(target),'arguments':['--e2e-manifest',str(manifest)],'allow_stop':True,'allow_reset':True,'allow_attach':True,'allow_input':True,'allow_mouse':True,'test_keys':[32],'max_runs':2,'max_tests':13}]}))
         try:
-            client=Mcp(exe,['--tools','all','--launch-config',str(config),'--test-results',str(evidence)],root)
+            client=Mcp(exe,['--tools','all','--allow-state','--launch-config',str(config),'--test-results',str(evidence)],root)
             guide=client.data('cortex_agent_guide')['guide'];assert 'not a universal' in guide;checks.append('built_in_guide')
             started=client.data('cortex_launch',profile='fixture',attach=True,mutation_permission=True)
             pid=started['pid'];assert started['attached'];generation=started['generation'];checks.append('launch_auto_attach')
@@ -664,7 +664,7 @@ def main():
             checks.append('restart_respects_run_budget')
             client.data('cortex_stop',profile='fixture',pid=pid,mutation_permission=True);pid=0
             client.close();client=None
-            client=Mcp(exe,['--test-results',str(evidence)],root)
+            client=Mcp(exe,['--allow-state','--test-results',str(evidence)],root)
             archived=client.data('cortex_test_get',id=saved);assert archived['archived'] and archived['run']['outcome']=='passed';checks.append('report_reloaded_new_agent')
             generated_reopened=client.data('cortex_test_step_get',id=generated_step_id)
             assert generated_reopened['step']['status']=='awaiting_control' and \

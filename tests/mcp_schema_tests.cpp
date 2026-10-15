@@ -151,12 +151,12 @@ int main() {
           "knowledge reads remain observational");
     const auto knowledgePutRisk = api::mcp_contract::ClassifyTool(
         "project_knowledge_put", "POST", "/project/knowledge");
-    check(knowledgePutRisk == api::mcp_contract::ToolRisk::Control,
-          "knowledge claim persistence requires control permission");
+    check(knowledgePutRisk == api::mcp_contract::ToolRisk::State,
+          "knowledge claim persistence is a state write: it needs the person's --allow-state");
     const auto knowledgeVerifyRisk = api::mcp_contract::ClassifyTool(
         "project_knowledge_verify", "POST", "/project/knowledge/{id}/verify");
-    check(knowledgeVerifyRisk == api::mcp_contract::ToolRisk::Control,
-          "knowledge verification persists an audit result and requires control permission");
+    check(knowledgeVerifyRisk == api::mcp_contract::ToolRisk::State,
+          "knowledge verification persists an audit result: a state write that needs --allow-state");
     check(api::mcp_contract::RequiresMutationPermission(knowledgeVerifyRisk),
           "knowledge verification requires MCP permission");
 
