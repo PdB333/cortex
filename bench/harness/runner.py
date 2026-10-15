@@ -121,6 +121,8 @@ def server_command(config, stage, target, args):
                                               "--tools", config["server"]["profile"]]
         if stage.get("writes_allowed"):
             command.append("--allow-writes")
+        elif stage.get("state_allowed"):
+            command.append("--allow-state")   # may save notes/facts/knowledge; cannot change the target
         return command, {}
     if not args.ce_repo:
         raise SystemExit("configuration %s needs --ce-repo (the pinned Cheat Engine bridge checkout)" % config["name"])

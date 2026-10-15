@@ -25,7 +25,7 @@ README, documentation or code claims a result before it is measured.
 | A  | Cheat Engine MCP bridge, pinned. No memory beyond the conversation. |
 | B  | A plus a structured notes file kept between sessions (`notes_read` / `notes_write`), with no automatic checking. |
 | C  | Cortex primitives: the exact list in `configs/cortex_tool_lists.json`, key `C`. |
-| D0 | Cortex compact profile as shipped after the write-authority fix: 30 semantic tools + 11 host tools (`D0`). |
+| D0 | Cortex compact profile as shipped after the write-authority fix: 30 semantic tools + 42 host tools = 72 tools (`D0`). The host tools include the agent test layer added to `main` on 2026-10-13/14 (launch profiles, `cortex_test_*`, `cortex_knowledge_*`); `main` had 11 host tools when this benchmark was designed. |
 | D0′ | D0 plus the `re_*` tools and `actions_rollback` (`D0prime`). |
 | D1 | D0 plus facts with executable assertions and statuses. **Not built.** Built only after the first D0 results and on an explicit decision; it will get its own registration. |
 
@@ -37,11 +37,12 @@ exactly what the model sees; the proxy filters the server's list to it.
 
 C excludes `input_*` (replaced by `bench_trigger`), `prompt_*` (asks a person), `re_*` (that is D0′),
 `project_*`, `session_*` and `actions_*` (persistence and rollback: memory is a separate axis from raw access).
-The composition of C (137 tools: 11 host tools + 126 primitives) was confirmed by the user on 2026-10-07.
+The composition of C (137 tools: the 11 host tools of v1.0.0 + 126 primitives) was confirmed by the user on 2026-10-07 and is kept as confirmed: the host tools added later belong to D0, not C.
 
 ### Pins
 
-- Cortex: commit **PENDING** (to be the commit of the last green Windows CI after the security fix). The tool
+- Cortex: commit **PENDING** (the head of the security branch once its Windows CI is green; at the time of writing
+  `22a55f6b1d96cda08491dd14fe2d7b5c406c3656`, which is `main` of 2026-10-14 plus the write-authority fix). The tool
   lists in `configs/cortex_tool_lists.json` are regenerated at that commit by `tools/make_tool_lists.py`, which
   records the commit and the SHA-256 of `cortex.exe`. Any later change to the tools or their classification
   invalidates results already obtained and is announced before it is made.
@@ -174,8 +175,10 @@ the positioning becomes "supervised and safe runtime tooling for agents".
 
 ## 9. Authority in the runs
 
-Writes are authorized (`cortex.exe mcp --allow-writes`) only on tasks whose file says `writes_allowed`, and never
-on task 10. The runtime is loaded into the target by the harness beforehand (the person's action), so a
+Authority has three levels (see `docs/mcp.md`). Writes to the target (`cortex.exe mcp --allow-writes`) are authorized
+only on tasks whose file says `writes_allowed`, and never on task 10. Task 9a runs with `--allow-state`: the agent may
+save its own notes, facts and knowledge so that a configuration's memory can be exercised, but it cannot change the
+target; configurations that have no tool to save anything (A, C) are unaffected, B keeps its notes file. The runtime is loaded into the target by the harness beforehand (the person's action), so a
 configuration never needs write authority just to attach. The target's control channel (loopback, token) is
 used only by the harness; the agent can trigger events only through `bench_trigger`.
 

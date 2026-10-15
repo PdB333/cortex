@@ -23,6 +23,11 @@ from mcpclient import McpClient  # noqa: E402
 #   re_*       Cortex's reverse-engineering helpers (that is D0')
 #   project_*, session_*, actions_*   persistence and rollback (memory is a separate axis)
 C_EXCLUDED_PREFIXES = ("input_", "prompt_", "re_", "project_", "session_", "actions_")
+# The 11 host tools of v1.0.0. C was confirmed as "host tools + primitives" at that size (137 tools); the agent
+# test layer added later (cortex_launch, cortex_test_*, cortex_knowledge_*, cortex_agent_guide) belongs to D0.
+C_HOST_TOOLS = ("cortex_attach", "cortex_capabilities", "cortex_crash_report", "cortex_debugger_backend",
+                "cortex_detach", "cortex_events", "cortex_hooks", "cortex_operation_cancel", "cortex_operations",
+                "cortex_processes", "cortex_targets")
 
 
 def list_tools(runner, cortex, profile, pid):
@@ -60,7 +65,8 @@ def main():
     assert compact_names == sorted(host + semantic) or set(compact_names) <= set(host + semantic), \
         "compact profile is not host + semantic tools"
 
-    c_tools = host + [n for n in primitives if not n.startswith(C_EXCLUDED_PREFIXES)]
+    assert set(C_HOST_TOOLS) <= set(host), "a v1.0.0 host tool disappeared"
+    c_tools = list(C_HOST_TOOLS) + [n for n in primitives if not n.startswith(C_EXCLUDED_PREFIXES)]
     d0_tools = compact_names
     d0p_tools = sorted(set(compact_names) | {n for n in primitives if n.startswith("re_")} | {"actions_rollback"})
 

@@ -104,7 +104,8 @@
     "max_tool_calls": 100,
     "max_wall_s": 2400,
     "max_turns": 60
-   }
+   },
+   "state_allowed": true
   },
   {
    "name": "revalidate",
@@ -221,7 +222,8 @@
     "max_tool_calls": 100,
     "max_wall_s": 2400,
     "max_turns": 60
-   }
+   },
+   "state_allowed": true
   }
  ]
 }
