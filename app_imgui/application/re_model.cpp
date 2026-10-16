@@ -56,6 +56,9 @@ bool ReModel::Call(const std::string& tool, json arguments,
         if (error) *error = "mutation_permission_required";
         return false;
     }
+    // See RuntimeModelBase::Call: only a mutating call (switch on) raises the
+    // shared authority; the per-frame sync in desktop_ui.cpp is what lowers it.
+    if (mutation) payload_.SetWritesAuthority(true);
     if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
     if (mutation) arguments["mutation_permission"] = true;
 

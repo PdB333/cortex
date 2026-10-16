@@ -5,6 +5,7 @@ on:
     branches:
       - next/lightweight-imgui-ui
       - test/imgui-full-migration
+      - main
     paths:
       - "app_imgui/**"
       - "core/target/**"
@@ -20,15 +21,8 @@ on:
       - "resources/windows/**"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-ui.yml"
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "app_imgui/**"
-      - "core/target/**"
-      - "core/services/**"
-      - "core/api/mcp_pipe_protocol.h"
-      - "runtime_helper/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/imgui-ui.yml"
   workflow_dispatch:
 
 concurrency:
@@ -87,7 +81,7 @@ jobs:
           }
 
           $version = Invoke-CortexCli @("--version")
-          if ($version -notmatch "1\.0\.0") { throw "Unexpected version output: $version" }
+          if ($version -notmatch "1\.0\.1") { throw "Unexpected version output: $version" }
 
           $help = Invoke-CortexCli @("--help")
           if ($help -notmatch "cortex mcp") { throw "MCP command missing from help" }
@@ -220,7 +214,7 @@ jobs:
             $psi.RedirectStandardInput = $true
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
-            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath)) {
+            foreach ($arg in @("mcp","--transport","native","--tools","all","--token-file",$tokenPath,"--allow-writes")) {
               [void]$psi.ArgumentList.Add($arg)
             }
             $mcp = [System.Diagnostics.Process]::Start($psi)
@@ -246,6 +240,7 @@ jobs:
                   label = "ImGui prompt E2E"
                   current_value = "before"
                   target_value = "after"
+                  mutation_permission = $true
                 }
               }
             } | ConvertTo-Json -Compress -Depth 8

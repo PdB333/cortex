@@ -103,12 +103,6 @@ inline std::string StablePlanId(const std::string& wanted, const json& arguments
     return out.str();
 }
 
-inline double EvidenceConfidence(const json& observations) {
-    if (!observations.is_array() || observations.empty()) return 0.20;
-    const double value = 0.20 + static_cast<double>(observations.size()) * 0.10;
-    return (std::min)(0.90, value);
-}
-
 inline json PlanFor(const std::string& wanted, const json& arguments) {
     for (const auto& tool : Catalog()) {
         if (tool.value("name", std::string()) != wanted) continue;
@@ -158,8 +152,6 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
         json result = {
             {"status", execute ? "execution_requested" : "plan_ready"},
             {"plan_id", StablePlanId(wanted, arguments)},
-            {"confidence", 1.0},
-            {"evidence_confidence", EvidenceConfidence(observations)},
             {"summary", execute
                 ? "Validated semantic execution request. The server will execute only the explicit allowlisted primitive steps and will roll back transactional mutations on cancellation, timeout, or failure."
                 : "Semantic orchestration plan generated. Execute the listed primitive tools, attach their outputs as evidence, and validate before persisting conclusions."},
@@ -182,18 +174,12 @@ inline json PlanFor(const std::string& wanted, const json& arguments) {
                 {"rollback_required_for_mutations", true},
                 {"evidence_required_for_confirmation", true}
             }},
-            {"evidence_model", {
-                {"states", json::array({"observed", "candidate", "hypothesis", "confirmed", "rejected", "inconclusive"})},
-                {"confidence_source", "evidence_only"}
-            }},
+            // Cortex does not rank, score or interpret anything here: it runs the
+            // steps the caller wrote and returns their raw outputs. Conclusions,
+            // confidence and hypotheses are the caller's to draw.
             {"result_contract", {
-                {"status", "candidate_found|confirmed|not_found|inconclusive|failed|cancelled|timed_out"},
-                {"confidence", "0.0..1.0"},
-                {"evidence", "array"},
-                {"candidates", "array"},
-                {"alternative_hypotheses", "array"},
-                {"tested_hypotheses", "array"},
-                {"recommended_next_tool", "string|null"},
+                {"status", "plan_ready|completed|failed|cancelled|timed_out"},
+                {"evidence", "array of {step, tool, risk, arguments, output}, the raw primitive outputs"},
                 {"reversible_actions", "array"}
             }},
             {"rules", json::array({

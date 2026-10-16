@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -16,38 +17,77 @@ using json = nlohmann::json;
 enum class ToolRisk {
     Observe,
     Analyze,
+    // Writes Cortex's own records (project notes, saved addresses and pointer paths, knowledge, facts) and
+    // nothing in the target. Needs the person's --allow-state (or --allow-writes), not target authority.
+    State,
     Control,
     Mutate,
-    NativeCall
+    NativeCall,
+    // No rule names this tool. It is refused whatever authority the caller holds.
+    Unclassified
 };
 
 inline const char* RiskName(ToolRisk risk) {
     switch (risk) {
         case ToolRisk::Observe: return "observe";
         case ToolRisk::Analyze: return "analyze";
+        case ToolRisk::State: return "state";
         case ToolRisk::Control: return "control";
         case ToolRisk::Mutate: return "mutate";
         case ToolRisk::NativeCall: return "native_call";
+        case ToolRisk::Unclassified: return "unclassified";
     }
     return "analyze";
 }
 
 inline bool RequiresMutationPermission(ToolRisk risk) {
-    return risk == ToolRisk::Control || risk == ToolRisk::Mutate || risk == ToolRisk::NativeCall;
+    return risk == ToolRisk::State || risk == ToolRisk::Control || risk == ToolRisk::Mutate ||
+           risk == ToolRisk::NativeCall || risk == ToolRisk::Unclassified;
 }
 
 inline bool StartsWith(const std::string& value, const std::string& prefix) {
     return value.rfind(prefix, 0) == 0;
 }
 
+// Non-GET tools that only write Cortex's own records. Anything that can also reach the target stays Control.
+inline const std::set<std::string>& StateTools() {
+    static const std::set<std::string> names = {
+        "project_knowledge_put", "project_knowledge_verify", "project_address_set", "project_address_delete",
+        "project_pointer_path_set", "project_pointer_path_delete", "project_note_add", "project_note_delete",
+        "re_session_fact_set", "re_session_fact_delete", "re_object_delete"};
+    return names;
+}
+
+// Non-GET tools that read or analyze without changing the target. This list is
+// the only way a POST/DELETE tool reaches `Analyze`: a tool that no rule below
+// and no entry here names is `Unclassified` and is refused, so a route added
+// later stays unreachable from MCP until someone classifies it on purpose.
+inline const std::set<std::string>& ExplicitAnalyzeTools() {
+    static const std::set<std::string> names = {
+        "session_export", "session_diff", "ocr", "memory_read",
+        "memory_read_batch", "scan_new", "scan_next", "scan_delete",
+        "scan_aob", "scan_pointers", "scan_pointer_path", "scan_strings",
+        "scan_intersect", "scan_code_caves", "analysis_functions", "analysis_cfg",
+        "analysis_xrefs", "analysis_vtable", "analysis_structure", "analysis_scan_patches",
+        "dissect_snapshot", "dissect_delete", "dissect_diff", "batch_run",
+        "snapshot_create", "snapshot_diff", "snapshot_last_change", "ghidra_export"};
+    return names;
+}
+
 inline ToolRisk ClassifyTool(const std::string& name,
                              const std::string& method,
                              const std::string& path) {
+    // A prompt puts a request in front of the person at the screen, so every
+    // prompt tool needs authority, including the status poll that follows one.
+    if (StartsWith(name, "prompt_")) return ToolRisk::Control;
+
     // GET routes are observational even when their names share a subsystem
     // prefix with the mutating/control half of that subsystem.
     if (method == "GET") return ToolRisk::Observe;
 
     if (StartsWith(path, "/call/") || StartsWith(name, "call_")) return ToolRisk::NativeCall;
+
+    if (StateTools().count(name)) return ToolRisk::State;
 
     // POST is sometimes used for structured analysis requests. Keep those
     // callable in inspect mode unless their arguments can change runtime or
@@ -78,7 +118,8 @@ inline ToolRisk ClassifyTool(const std::string& name,
         return ToolRisk::Control;
     }
 
-    return ToolRisk::Analyze;
+    if (ExplicitAnalyzeTools().count(name)) return ToolRisk::Analyze;
+    return ToolRisk::Unclassified;
 }
 
 inline bool IsUnreserved(unsigned char c) {
@@ -97,6 +138,74 @@ inline std::string PercentEncode(const std::string& value) {
 
 inline std::string ScalarToString(const json& value) {
     return value.is_string() ? value.get<std::string>() : value.dump();
+}
+
+// ---------------------------------------------------------------------------
+// batch_run is an envelope: its `ops` can write memory, freeze values and patch
+// code. Its risk is therefore decided from the operations it contains, with an
+// explicit allowlist. An operation that is not listed here is refused, whatever
+// permission the caller holds, so a new op added to /batch/run stays unreachable
+// from MCP until someone classifies it on purpose.
+inline const std::set<std::string>& BatchReadOnlyOps() {
+    static const std::set<std::string> ops = {
+        "memory_read", "aob_scan", "string_scan", "disasm", "analysis_xrefs",
+        "analysis_vtable", "struct_read", "dissect_snapshot", "dissect_diff"};
+    return ops;
+}
+
+inline const std::set<std::string>& BatchMutatingOps() {
+    static const std::set<std::string> ops = {
+        "memory_write", "freeze_add", "freeze_remove", "patch_apply", "patch_nop",
+        "patch_revert", "struct_write"};
+    return ops;
+}
+
+struct BatchVerdict {
+    bool ok = true;
+    bool mutating = false;
+    std::string error;
+};
+
+inline BatchVerdict ClassifyBatchRun(const json& arguments) {
+    BatchVerdict verdict;
+    if (!arguments.is_object() || !arguments.contains("ops") || !arguments["ops"].is_array()) {
+        verdict.ok = false;
+        verdict.error = "batch_ops_required";
+        return verdict;
+    }
+    for (const auto& step : arguments["ops"]) {
+        // The op name must be a literal string: a reference that resolves to a
+        // name later would be classified before it is known.
+        if (!step.is_object() || !step.contains("op") || !step["op"].is_string()) {
+            verdict.ok = false;
+            verdict.error = "batch_op_not_literal";
+            return verdict;
+        }
+        const std::string op = step["op"].get<std::string>();
+        if (BatchMutatingOps().count(op)) verdict.mutating = true;
+        else if (!BatchReadOnlyOps().count(op)) {
+            verdict.ok = false;
+            verdict.error = "batch_op_not_allowlisted:" + op;
+            return verdict;
+        }
+    }
+    return verdict;
+}
+
+// The risk of one concrete call. The tool name gives a floor; some arguments
+// raise it.
+inline ToolRisk EffectiveRisk(const std::string& name, ToolRisk risk, const json& arguments) {
+    if (!arguments.is_object()) return risk;
+    if (name == "struct_infer" && arguments.value("define", false) && risk < ToolRisk::Control)
+        return ToolRisk::Control;
+    // Suspending every other thread of the target is a control operation.
+    if (StartsWith(name, "scan_") && arguments.value("pause_process", false) && risk < ToolRisk::Control)
+        return ToolRisk::Control;
+    if (name == "batch_run") {
+        const auto verdict = ClassifyBatchRun(arguments);
+        if (verdict.ok && verdict.mutating && risk < ToolRisk::Mutate) return ToolRisk::Mutate;
+    }
+    return risk;
 }
 
 inline std::vector<std::string> PathParameters(const std::string& path) {

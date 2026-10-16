@@ -6,7 +6,7 @@ For a screenshot-based walkthrough, see [Illustrated UI walkthrough](ui-walkthro
 
 ## 1. Get a testable build
 
-Use the `cortex-v1.0.0-windows-portable.zip` release asset or, for a branch build, the `cortex-imgui-preview-windows-portable` artifact of the latest green **Lightweight ImGui UI** workflow run.
+Use the `cortex-v1.0.1-windows-portable.zip` release asset or, for a branch build, the `cortex-imgui-preview-windows-portable` artifact of the latest green **Lightweight ImGui UI** workflow run.
 
 Extract the entire archive and keep its directory structure intact. Cortex needs the `runtime/x64` and `runtime/x86` folders beside `cortex.exe`: one runtime per architecture, because Windows cannot load a 64-bit DLL into a 32-bit game or the reverse. Cortex picks the right one for each target. No Qt or other runtime has to be installed.
 
@@ -83,7 +83,7 @@ Project names and pointer paths resolve too. A resolved location opens in the Me
 
 ## 8. Write permission
 
-**Writes allowed** is an explicit safety permission, enforced by the application for every state-changing call.
+**Writes allowed** is an explicit safety permission. The desktop applies it to every state-changing call it makes, and the runtime refuses a state-changing call that arrives without it. An AI client connected through `cortex.exe mcp` has no such switch: only `--allow-writes` on its command line, chosen by you, lets it change the target. In a client configuration that is `"args": ["mcp"]` for read-only and `"args": ["mcp", "--allow-writes"]` when the agent may write.
 
 ### Read-only
 

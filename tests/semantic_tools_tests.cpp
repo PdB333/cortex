@@ -197,7 +197,15 @@ int main(int argc, char** argv) {
 
         Check(arguments == originalArguments, name + ": PlanFor must not mutate input");
         Check(plan.value("status", std::string()) == "plan_ready", name + ": planning must return plan_ready");
-        Check(plan.value("confidence", 0.0) == 1.0, name + ": planning confidence must be 1.0");
+        // Cortex computes no confidence, evidence score or hypothesis list; a constant
+        // would mislead the agent reading it.
+        Check(!plan.contains("confidence") && !plan.contains("evidence_confidence"),
+              name + ": the plan must not carry a confidence it does not compute");
+        Check(!plan["result_contract"].contains("confidence") &&
+                  !plan["result_contract"].contains("candidates") &&
+                  !plan["result_contract"].contains("alternative_hypotheses") &&
+                  !plan["result_contract"].contains("tested_hypotheses"),
+              name + ": the result contract must not promise fields that are never filled");
         Check(plan.value("primitive_sequence", json::array()) == tool.at("_primitives"),
               name + ": primitive sequence differs from catalog declaration");
         Check(plan["execution_policy"].value("server_side_execution", false),
@@ -207,7 +215,7 @@ int main(int argc, char** argv) {
         Check(plan["execution_policy"].value("rollback_required_for_mutations", false),
               name + ": mutation rollback policy missing");
         Check(plan["result_contract"].value("status", std::string()) ==
-                  "candidate_found|confirmed|not_found|inconclusive|failed|cancelled|timed_out",
+                  "plan_ready|completed|failed|cancelled|timed_out",
               name + ": result status vocabulary changed unexpectedly");
 
         json executeArguments = arguments;

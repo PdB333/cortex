@@ -25,8 +25,12 @@ public:
     explicit SuspendedThread(HANDLE thread) : thread_(thread) {
         suspended_ = thread_ && SuspendThread(thread_) != static_cast<DWORD>(-1);
     }
-    ~SuspendedThread() {
+    ~SuspendedThread() { Resume(); }
+    // Resume now, while the handle is still open. Resuming through a closed handle fails
+    // silently and leaves the thread suspended for good.
+    void Resume() {
         if (suspended_) ResumeThread(thread_);
+        suspended_ = false;
     }
     bool Ok() const { return suspended_; }
 
@@ -189,6 +193,7 @@ bool ReadTargetThreadRegisters(const TargetDescriptor& target,
 
     if (!ok && error && error->empty())
         *error = "get_thread_context_failed:" + std::to_string(GetLastError());
+    suspended.Resume();   // before CloseHandle: the guard's destructor would run too late
     CloseHandle(thread);
     return ok;
 #elif defined(__linux__)

@@ -225,6 +225,6 @@ A tab is hidden while the same content is open as a full workspace; the panel th
 
 ## Write permission model
 
-Cortex keeps observation and state changes distinct. Attaching and exploring stay read-only until **Writes allowed** is switched on. The application models enforce the permission for every mutating call, independently of which buttons the UI enables, and the runtime checks the `mutation_permission` flag on its side.
+Cortex keeps observation and state changes distinct. Attaching and exploring stay read-only until **Writes allowed** is switched on. The application models enforce the permission for every mutating call, independently of which buttons the UI enables, and the runtime refuses a state-changing call unless the desktop (or, for `cortex.exe mcp`, the `--allow-writes` flag) has granted write authority; `mutation_permission` on the call alone is not enough.
 
 For a first-session walkthrough, see [Getting started](getting-started.md).

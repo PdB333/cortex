@@ -39,6 +39,14 @@ bool RuntimeModelBase::Call(const std::string& tool, json arguments, json& resul
         if (error) *error = "mutation_permission_required";
         return false;
     }
+    // The runtime enforces the same switch on its side. The person's Writes
+    // allowed state reaches the payload once per frame (desktop_ui.cpp), and
+    // that is the only place that lowers it: a read-only call passes
+    // mutationAllowed = false whatever the switch says, so it must not touch the
+    // shared authority, or it would revoke it for the debugger's direct calls
+    // made later in the same frame. A mutating call got here with the switch on,
+    // so raising is consistent; `mutation_permission` below only declares intent.
+    if (mutation) payload_.SetWritesAuthority(true);
     if (!EnsureRuntime(mutation, mutationAllowed, error)) return false;
     if (mutation) arguments["mutation_permission"] = true;
 

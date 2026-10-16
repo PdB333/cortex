@@ -54,7 +54,12 @@ public:
     std::map<std::string, json> toolResults;   // tool -> route result
     std::function<json(const std::string&, const std::string&, const json&)> routeHandler;
 
+    bool writesAuthority = false;
+    std::vector<bool> authorityPerCall;   // the authority in force when each tool was called
+
     bool Ready() const override { return connected; }
+
+    void SetWritesAuthority(bool allowed) override { writesAuthority = allowed; }
 
     bool TryConnectExisting(std::string* error) override {
         if (error) error->clear();
@@ -80,6 +85,7 @@ public:
     bool CallTool(const std::string& name, const json& arguments, json& output,
                   std::string* error) override {
         if (error) error->clear();
+        authorityPerCall.push_back(writesAuthority);
         calls.push_back({name, arguments});
         const auto found = toolResults.find(name);
         output = {{"status", 200},
@@ -368,6 +374,54 @@ nop 5
         check(error == "mutation_permission_required", "write gate reports mutation_permission_required");
         check(transport.injections == 0, "write gate never injects the runtime");
         check(transport.calls.empty(), "write gate sends no tool call");
+    }
+
+    // The runtime enforces the person's switch on its side: every call carries
+    // the Writes allowed state as write authority, and `mutation_permission`
+    // on the call only declares intent.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        WatchesModel watches(transport);
+        std::string error;
+        check(watches.AddWatch("0x1000", "i32", "hp", true, &error), "AddWatch with writes allowed succeeds");
+        bool addCarried = false;
+        for (size_t i = 0; i < transport.calls.size(); ++i)
+            if (transport.calls[i].name == "watch_add") addCarried = transport.authorityPerCall[i];
+        check(addCarried, "a call made with writes allowed carries write authority");
+        const auto* call = transport.Last("watch_add");
+        check(call && call->arguments.value("mutation_permission", false),
+              "the same call also declares mutation_permission");
+        check(watches.Refresh(&error), "a read-only refresh works");
+    }
+
+    // The person's switch reaches the payload once per frame (desktop_ui.cpp) and
+    // that is where it is lowered. A read-only call passes mutationAllowed = false
+    // whatever the switch says, so it must leave the authority alone: lowering it
+    // revoked the debugger's own breakpoint calls made later in the same frame
+    // ("find what accesses" recorded nothing).
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        transport.writesAuthority = true;
+        WatchesModel readOnly(transport);
+        std::string error;
+        readOnly.Refresh(&error);
+        check(transport.writesAuthority, "a read-only call does not lower the authority the person set");
+        check(!transport.authorityPerCall.empty() && transport.authorityPerCall.back(),
+              "a read-only call runs with the authority the person set");
+    }
+
+    // With the switch off nothing raises it: a mutating call is refused before it
+    // reaches the payload, and reads leave the default (no authority) as it is.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        WatchesModel watches(transport);
+        std::string error;
+        check(!watches.AddWatch("0x1000", "i32", "hp", false, &error), "AddWatch with writes off is refused");
+        watches.Refresh(&error);
+        check(!transport.writesAuthority, "with the switch off no call raises the authority");
     }
 
     // Read-only refresh never injects: it only connects to a loaded runtime.

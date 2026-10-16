@@ -1041,6 +1041,9 @@ void DrawApp(AppState& app) {
         // cannot answer, so the calls are refused up front instead of
         // freezing this window until they time out.
         app.payload.SetSuspended(app.ui.targetPaused);
+        // The runtime only changes the target while the person has Writes allowed
+        // on; the desktop is the authority for its own calls.
+        app.payload.SetWritesAuthority(app.ui.mutationAllowed);
         app.debuggerModel.SetTargetPaused(app.ui.targetPaused);
     }
 
@@ -1185,7 +1188,7 @@ void DrawApp(AppState& app) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::TextDisabled("Cortex v1.0.0");
+            ImGui::TextDisabled("Cortex v1.0.1");
             ImGui::Separator();
             if (ImGui::MenuItem("Diagnostics"))
                 app.workspaces.Select("diagnostics");

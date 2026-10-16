@@ -14,20 +14,15 @@ on:
       - "core/prompt/**"
       - "runtime_helper/**"
       - "tests/gui/**"
+      - "tests/security_no_writes_regression.py"
+      - "tests/fixtures/mcp_tool_risks.json"
+      - "core/security/**"
+      - "mcp_bridge/**"
+      - "test_target/**"
       - "CMakeLists.txt"
       - ".github/workflows/imgui-gui-tests.yml"
+  # No path filter: every pull request runs this, whatever its source branch.
   pull_request:
-    paths:
-      - "app_imgui/**"
-      - "host/debugger/**"
-      - "core/target/**"
-      - "core/services/**"
-      - "core/api/**"
-      - "core/prompt/**"
-      - "runtime_helper/**"
-      - "tests/gui/**"
-      - "CMakeLists.txt"
-      - ".github/workflows/imgui-gui-tests.yml"
   workflow_dispatch:
 
 permissions:
@@ -256,6 +251,35 @@ jobs:
           } finally {
             $env:PATH = $oldPath
           }
+
+      - name: Without --allow-writes no MCP call changes a target
+        shell: pwsh
+        run: |
+          # Calls every listed tool, always claiming mutation_permission, and
+          # requires the target's state hash to be unchanged. See
+          # tests/security_no_writes_regression.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          python tests/security_no_writes_regression.py `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x64.exe"
+          if ($LASTEXITCODE -ne 0) { $failed += "x64" }
+          python tests/security_no_writes_regression.py `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x86.exe"
+          if ($LASTEXITCODE -ne 0) { $failed += "x86" }
+          if ($failed.Count -gt 0) { throw "write-authority regression failed on: $($failed -join ', ')" }
+
+      - name: Which tool stalls the target? (diagnostic, only after a failure)
+        if: failure()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Calls each tool on its own fresh target, so a stall or exit has exactly one suspect.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/security_no_writes_regression.py --isolate `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x64.exe"
 
       - name: Inject a 32-bit target from the command line
         shell: pwsh

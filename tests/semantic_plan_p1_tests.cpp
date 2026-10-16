@@ -42,19 +42,9 @@ int main() {
     Check(policy.value("rollback_required_for_mutations", false), "future mutations require rollback");
     Check(policy.value("evidence_required_for_confirmation", false), "confirmation requires evidence");
 
-    const auto evidenceModel = first.value("evidence_model", json::object());
-    Check(evidenceModel.value("confidence_source", std::string()) == "evidence_only",
-          "confidence source is explicitly evidence-based");
-
-    const double emptyConfidence = first.value("evidence_confidence", -1.0);
-    const json observed = api::semantic::PlanFor(
-        "capture_runtime_state",
-        {{"objective", "Observe a labelled transition"},
-         {"observations", json::array({{{"label", "before"}}, {{"label", "after"}}})}});
-    Check(observed.value("evidence_confidence", -1.0) > emptyConfidence,
-          "additional observations raise evidence confidence");
-    Check(observed.value("evidence_confidence", 2.0) <= 0.90,
-          "evidence confidence is capped below certainty");
+    // Cortex computes no confidence, so none is reported.
+    Check(!first.contains("confidence") && !first.contains("evidence_confidence"),
+          "the plan carries no confidence it does not compute");
 
     const json execute = api::semantic::PlanFor(
         "capture_runtime_state", {{"objective", "Observe"}, {"execute", true}});
