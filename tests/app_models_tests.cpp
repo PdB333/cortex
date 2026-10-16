@@ -393,13 +393,35 @@ nop 5
         check(call && call->arguments.value("mutation_permission", false),
               "the same call also declares mutation_permission");
         check(watches.Refresh(&error), "a read-only refresh works");
+    }
+
+    // The person's switch reaches the payload once per frame (desktop_ui.cpp) and
+    // that is where it is lowered. A read-only call passes mutationAllowed = false
+    // whatever the switch says, so it must leave the authority alone: lowering it
+    // revoked the debugger's own breakpoint calls made later in the same frame
+    // ("find what accesses" recorded nothing).
+    {
+        FakeTransport transport;
+        transport.loaded = true;
         transport.writesAuthority = true;
-        transport.calls.clear();
-        transport.authorityPerCall.clear();
         WatchesModel readOnly(transport);
+        std::string error;
         readOnly.Refresh(&error);
-        const bool refreshAuthority = !transport.authorityPerCall.empty() && transport.authorityPerCall.back();
-        check(!refreshAuthority, "a call made with writes not allowed carries no write authority");
+        check(transport.writesAuthority, "a read-only call does not lower the authority the person set");
+        check(!transport.authorityPerCall.empty() && transport.authorityPerCall.back(),
+              "a read-only call runs with the authority the person set");
+    }
+
+    // With the switch off nothing raises it: a mutating call is refused before it
+    // reaches the payload, and reads leave the default (no authority) as it is.
+    {
+        FakeTransport transport;
+        transport.loaded = true;
+        WatchesModel watches(transport);
+        std::string error;
+        check(!watches.AddWatch("0x1000", "i32", "hp", false, &error), "AddWatch with writes off is refused");
+        watches.Refresh(&error);
+        check(!transport.writesAuthority, "with the switch off no call raises the authority");
     }
 
     // Read-only refresh never injects: it only connects to a loaded runtime.
