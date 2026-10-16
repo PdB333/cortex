@@ -128,6 +128,9 @@ void ProjectWorkspace::Draw(UiContext& context) {
         ClearAddressForm();
         ClearPointerForm();
         ClearNoteForm();
+        knowledgeFocus_.fill(0);
+        knowledgeDepth_ = 1;
+        selectedKnowledgeId_.clear();
         if (context.payload && context.payload->Ready()) Refresh(context);
     }
 
@@ -344,6 +347,111 @@ void ProjectWorkspace::Draw(UiContext& context) {
                     context.status = "Delete pointer path failed: " + error;
                 else
                     context.status = "Pointer path deleted";
+            }
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Knowledge graph")) {
+            HintText("Persisted claims and typed links. NOT a proven causal graph.");
+            ImGui::SetNextItemWidth(Px(235));
+            ImGui::InputTextWithHint("##KnowledgeFocus","Focus knowledge ID (optional)",
+                                     knowledgeFocus_.data(),knowledgeFocus_.size());
+            FlowSameLine(Px(110));
+            ImGui::SetNextItemWidth(Px(110));
+            ImGui::SliderInt("Depth", &knowledgeDepth_, 0, 2);
+            FlowSameLine(ButtonWidth("Load graph"));
+            if(ImGui::Button("Load graph")) {
+                std::string error;
+                if(!context.projectModel->RefreshKnowledgeGraph(
+                        knowledgeFocus_.data(),knowledgeDepth_,32,&error))
+                    context.status = "Knowledge graph unavailable: " + error;
+                else
+                    context.status = "Read-only knowledge graph refreshed";
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("All records")) {
+                knowledgeFocus_.fill(0);
+                knowledgeDepth_ = 1;
+                selectedKnowledgeId_.clear();
+                std::string error;
+                if(!context.projectModel->RefreshKnowledgeGraph("",1,32,&error))
+                    context.status = "Knowledge graph unavailable: " + error;
+                else
+                    context.status = "Knowledge graph overview refreshed";
+            }
+
+            if (!context.projectModel->KnowledgeGraphLoaded()) {
+                HintText("Load a bounded neighborhood from the active project runtime.");
+            } else {
+                const auto& nodes=context.projectModel->KnowledgeNodes();
+                const auto& edges=context.projectModel->KnowledgeRelations();
+                ImGui::Text("%zu claims, %zu directed relations",nodes.size(),edges.size());
+                ImGui::TextUnformatted("Node status is a saved claim, not an independently verified explanation.");
+                ImGui::Spacing();
+                if(BeginDataTable("ProjectKnowledgeNodes",5,
+                     ImGuiTableFlags_RowBg |
+                     ImGuiTableFlags_BordersInnerH |
+                     ImGuiTableFlags_Resizable |
+                     ImGuiTableFlags_ScrollY,
+                     ImVec2(0,Px(218)))) {
+                    ImGui::TableSetupColumn("ID",ImGuiTableColumnFlags_WidthStretch,0.24f);
+                    ImGui::TableSetupColumn("Kind",ImGuiTableColumnFlags_WidthFixed,Px(95));
+                    ImGui::TableSetupColumn("Status",ImGuiTableColumnFlags_WidthFixed,Px(100));
+                    ImGui::TableSetupColumn("Evidence",ImGuiTableColumnFlags_WidthFixed,Px(80));
+                    ImGui::TableSetupColumn("Claim (untrusted)",ImGuiTableColumnFlags_WidthStretch,0.43f);
+                    ImGui::TableHeadersRow();
+                    for(const auto& row:nodes) {
+                        ImGui::PushID(row.id.c_str());
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        if(ImGui::Selectable(row.id.c_str(),
+                               selectedKnowledgeId_==row.id,
+                               ImGuiSelectableFlags_AllowDoubleClick)) {
+                            selectedKnowledgeId_=row.id;
+                            if(ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                                Copy(knowledgeFocus_.data(),knowledgeFocus_.size(),row.id);
+                        }
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::TextUnformatted(row.kind.c_str());
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::TextUnformatted(row.status.c_str());
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("%d",row.evidenceCount);
+                        ImGui::TableSetColumnIndex(4);
+                        ImGui::TextUnformatted(row.statement.c_str());
+                        ImGui::PopID();
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::Spacing();
+                ImGui::TextUnformatted("Typed relations (client assertions)");
+                if(BeginDataTable("ProjectKnowledgeRelations",4,
+                     ImGuiTableFlags_RowBg |
+                     ImGuiTableFlags_BordersInnerH |
+                     ImGuiTableFlags_Resizable |
+                     ImGuiTableFlags_ScrollY,
+                     ImGui::GetContentRegionAvail())) {
+                    ImGui::TableSetupColumn("From",ImGuiTableColumnFlags_WidthStretch,0.29f);
+                    ImGui::TableSetupColumn("Relation",ImGuiTableColumnFlags_WidthStretch,0.2f);
+                    ImGui::TableSetupColumn("To",ImGuiTableColumnFlags_WidthStretch,0.29f);
+                    ImGui::TableSetupColumn("Evidence ref (asserted)",
+                                           ImGuiTableColumnFlags_WidthStretch,0.22f);
+                    ImGui::TableHeadersRow();
+                    for(const auto& edge:edges) {
+                        ImGui::PushID(&edge);
+                        ImGui::TableNextRow();
+                        ImGui::TableSetColumnIndex(0);
+                        ImGui::TextUnformatted(edge.from.c_str());
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::TextUnformatted(edge.type.c_str());
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::TextUnformatted(edge.to.c_str());
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::TextUnformatted(edge.reference.empty() ? "-" : edge.reference.c_str());
+                        ImGui::PopID();
+                    }
+                    ImGui::EndTable();
+                }
             }
             ImGui::EndTabItem();
         }

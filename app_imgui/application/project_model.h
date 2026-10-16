@@ -30,6 +30,25 @@ struct ProjectNote {
     std::string tagsJson = "[]";
 };
 
+struct ProjectKnowledgeNode {
+    std::string id;
+    std::string kind;
+    std::string statement;
+    std::string status;
+    std::string origin;
+    int revision = 0;
+    int evidenceCount = 0;
+};
+
+struct ProjectKnowledgeRelation {
+    std::string from;
+    std::string to;
+    std::string type;
+    std::string reference;
+    std::string origin;
+    bool causalVerified = false;
+};
+
 class ProjectModel : public RuntimeModelBase {
 public:
     explicit ProjectModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
@@ -40,6 +59,12 @@ public:
     const std::vector<ProjectAddress>& Addresses() const { return addresses_; }
     const std::vector<ProjectPointerPath>& PointerPaths() const { return pointerPaths_; }
     const std::vector<ProjectNote>& Notes() const { return notes_; }
+    // Read-only project knowledge graph. Graph assertions remain unverified.
+    bool RefreshKnowledgeGraph(const std::string& focus, int depth, int limit,
+                               std::string* error = nullptr);
+    const std::vector<ProjectKnowledgeNode>& KnowledgeNodes() const { return knowledgeNodes_; }
+    const std::vector<ProjectKnowledgeRelation>& KnowledgeRelations() const { return knowledgeRelations_; }
+    bool KnowledgeGraphLoaded() const { return knowledgeGraphLoaded_; }
 
     bool SetAddress(const std::string& name, const std::string& address,
                     const std::string& type, const std::string& notes,
@@ -67,6 +92,9 @@ private:
     std::vector<ProjectAddress> addresses_;
     std::vector<ProjectPointerPath> pointerPaths_;
     std::vector<ProjectNote> notes_;
+    std::vector<ProjectKnowledgeNode> knowledgeNodes_;
+    std::vector<ProjectKnowledgeRelation> knowledgeRelations_;
+    bool knowledgeGraphLoaded_ = false;
 };
 
 } // namespace cortex::application

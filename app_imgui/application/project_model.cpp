@@ -30,6 +30,9 @@ void ProjectModel::Reset() {
     addresses_.clear();
     pointerPaths_.clear();
     notes_.clear();
+    knowledgeNodes_.clear();
+    knowledgeRelations_.clear();
+    knowledgeGraphLoaded_ = false;
 }
 
 
@@ -93,6 +96,82 @@ bool ProjectModel::Refresh(std::string* error) {
     std::sort(pointerPaths_.begin(), pointerPaths_.end(),
               [](const auto& a, const auto& b) { return a.name < b.name; });
     return true;
+}
+
+// Uses the same project Knowledge Engine as the agent, not a second UI-only
+// graph. A project relation is a client assertion and MUST remain labelled so.
+bool ProjectModel::RefreshKnowledgeGraph(const std::string& focus, int depth,
+                                         int limit, std::string* error) {
+    if(focus.size()>128||depth<0||depth>2||limit<1||limit>32) {
+        if(error)*error="invalid_knowledge_graph_query";
+        return false;
+    }
+    json input={{"depth",depth},{"limit",limit}};
+    if(!focus.empty())input["focus"]=focus;
+    json result;
+    if(!Call("project_knowledge_graph",std::move(input),result,false,false,error))
+        return false;
+    try {
+        if(!result.is_object()||!result.value("ok",false)||
+           !result.contains("nodes")||!result["nodes"].is_array()||
+           !result.contains("edges")||!result["edges"].is_array()||
+           result["nodes"].size()>32||result["edges"].size()>128 ||
+           result.value("semantic_verified",true) != false) {
+            if(error)*error="untrusted_knowledge_graph_response";
+            return false;
+        }
+        std::vector<ProjectKnowledgeNode> nodes;
+        std::vector<ProjectKnowledgeRelation> relations;
+        for(const auto& value:result["nodes"]) {
+            if(!value.is_object())continue;
+            const auto read=[](const json& row,const char* key,size_t max)->std::string {
+                const auto i=row.find(key);
+                if(i==row.end()||!i->is_string())return {};
+                const auto text=i->get<std::string>();
+                return text.size()>max ? text.substr(0,max) : text;
+            };
+            ProjectKnowledgeNode node;
+            node.id=read(value,"id",128);
+            node.kind=read(value,"kind",32);
+            node.status=read(value,"status",16);
+            node.statement=read(value,"statement_excerpt",180);
+            node.origin=read(value,"origin",32);
+            if(node.id.empty()||node.origin!="client_assertion")continue;
+            if(value.contains("revision")&&value["revision"].is_number_integer())
+                node.revision=std::clamp(value["revision"].get<int>(),0,1000000);
+            if(value.contains("evidence_count")&&value["evidence_count"].is_number_integer())
+                node.evidenceCount=std::clamp(value["evidence_count"].get<int>(),0,32);
+            nodes.push_back(std::move(node));
+        }
+        for(const auto& value:result["edges"]) {
+            if(!value.is_object())continue;
+            const auto read=[](const json& row,const char* key,size_t max)->std::string {
+                const auto i=row.find(key);
+                if(i==row.end()||!i->is_string())return {};
+                const auto text=i->get<std::string>();
+                return text.size()>max ? text.substr(0,max) : text;
+            };
+            ProjectKnowledgeRelation edge;
+            edge.from=read(value,"from",128);
+            edge.to=read(value,"to",128);
+            edge.type=read(value,"type",32);
+            edge.reference=read(value,"reference",128);
+            edge.origin=read(value,"origin",32);
+            edge.causalVerified=value.contains("causal_verified")&&
+                value["causal_verified"].is_boolean()&&
+                value["causal_verified"].get<bool>();
+            if(edge.from.empty()||edge.to.empty()||edge.origin!="client_assertion"||
+               edge.causalVerified)continue;
+            relations.push_back(std::move(edge));
+        }
+        knowledgeNodes_=std::move(nodes);
+        knowledgeRelations_=std::move(relations);
+        knowledgeGraphLoaded_=true;
+        return true;
+    } catch(const std::exception&) {
+        if(error)*error="invalid_knowledge_graph_data";
+        return false;
+    }
 }
 
 bool ProjectModel::SetAddress(const std::string& rawName, const std::string& rawAddress,
