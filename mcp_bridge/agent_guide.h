@@ -262,11 +262,12 @@ inline nlohmann::json CortexTestTools() {
         const std::string toolName=name;
         const bool declaresPermission=properties.is_object()&&properties.contains("mutation_permission");
         json meta;
-        if(declaresPermission)
+        if(toolName=="cortex_test_cancel") meta={{"host_control",true},{"effect","trial"}};
+        else if(declaresPermission) {
             meta={{"host_control",true},{"mutation_permission_required",true},
                   {"effect",toolName=="cortex_test_run"?"target_input":"cortex_state"}};
-        if(declaresPermission&&toolName!="cortex_test_run") meta["authority"]="state";
-        else if(toolName=="cortex_test_cancel") meta={{"host_control",true},{"effect","trial"}};
+            if(toolName!="cortex_test_run") meta["authority"]="state";
+        }
         else meta={{"read_only",true}};
         return json{{"name",name},{"description",description},{"inputSchema",{
             {"type","object"},{"properties",properties},{"required",required},{"additionalProperties",false}}},
