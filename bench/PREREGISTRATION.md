@@ -41,11 +41,18 @@ The composition of C (137 tools: the 11 host tools of v1.0.0 + 126 primitives) w
 
 ### Pins
 
-- Cortex: commit **PENDING** (the head of the security branch once its Windows CI is green; at the time of writing
-  `22a55f6b1d96cda08491dd14fe2d7b5c406c3656`, which is `main` of 2026-10-14 plus the write-authority fix). The tool
-  lists in `configs/cortex_tool_lists.json` are regenerated at that commit by `tools/make_tool_lists.py`, which
-  records the commit and the SHA-256 of `cortex.exe`. Any later change to the tools or their classification
-  invalidates results already obtained and is announced before it is made.
+- Cortex: commit **`29c2ea314b043d6d0317a8de6d6bbbf145df159e`** (branch `security/mcp-write-authority`: `main` of
+  2026-10-14, `d525f07`, plus the write-authority fix and the `--allow-state` tier). Pinned on 2026-10-16 after all
+  six Windows workflows were green on exactly that commit (contracts, full-windows-build, imgui-gui-tests, imgui-ui,
+  unified-host, e2e-windows; run ids 38761867337, 38761862491, 38761872185, 38761877055, 38761883245, 38761887736),
+  including the step "Without --allow-writes no MCP call changes a target" on x64 and x86 with no `--skip-tool`
+  (251 tools, 348 calls, 113 refused; target state hash unchanged: x64 `2bf2711387b88b89`, x86 `b56fc9cb4e76775a`).
+  The tool lists in `configs/cortex_tool_lists.json` were regenerated at that commit by `tools/make_tool_lists.py`
+  (251 tools: 42 host, 30 semantic, 179 primitives; C 137, D0 72, D0′ 93) and are identical, name for name and class
+  for class, to those generated at `22a55f6`; only tests changed between the two commits. The file records the
+  commit and the SHA-256 of the `cortex.exe` it was generated from (a Wine build used only for listing tools). Any
+  later change to the tools or their classification invalidates results already obtained and is announced before
+  it is made.
 - Cheat Engine MCP baseline: `miscusi-peek/cheatengine-mcp-bridge`, commit
   **`6bd7ce90479250a9b4b75e7944df9c105ecb2572`** (bridge 12.0.0, 175 tools), read directly from a checkout and
   documented tool by tool in `CE_BASELINE.md`. Before the baseline is trusted, its failures are reviewed: if they
@@ -177,8 +184,13 @@ the positioning becomes "supervised and safe runtime tooling for agents".
 
 Authority has three levels (see `docs/mcp.md`). Writes to the target (`cortex.exe mcp --allow-writes`) are authorized
 only on tasks whose file says `writes_allowed`, and never on task 10. Task 9a runs with `--allow-state`: the agent may
-save its own notes, facts and knowledge so that a configuration's memory can be exercised, but it cannot change the
-target; configurations that have no tool to save anything (A, C) are unaffected, B keeps its notes file. The runtime is loaded into the target by the harness beforehand (the person's action), so a
+save Cortex's own records, but it cannot change the target. What each configuration can actually save is fixed by its
+tool list (checked on `configs/cortex_tool_lists.json`): A and C have no tool that saves anything and are unaffected;
+B keeps its notes file; **D0 has no tool that creates a knowledge claim or a note** (`project_knowledge_put`,
+`project_note_add` and the other `project_*` writers are primitives, absent from the compact profile): it can persist
+test-catalogue entries, reports and links from a test to an existing knowledge record through the `cortex_test_*`
+host tools, and it can read `cortex_knowledge_graph` / `cortex_knowledge_code_check`; D0′ adds `re_session_fact_set` /
+`re_session_fact_delete` / `re_object_delete`. Whether this is the memory D0 should have for task 9a is open item 5. The runtime is loaded into the target by the harness beforehand (the person's action), so a
 configuration never needs write authority just to attach. The target's control channel (loopback, token) is
 used only by the harness; the agent can trigger events only through `bench_trigger`.
 
@@ -208,3 +220,8 @@ Whether D1 gets built, the blind game, ablations of D1, and any positioning chan
    `agent/agents.md` and `agent/semantic-tools.md`. Which of these, trimmed to what length, is given to the model
    in each configuration is decided and registered before the pilot (the pilot's job includes checking that the
    baseline's failures are not just poor guidance).
+5. D0's memory for task 9a. With the shipped compact profile D0 cannot create a knowledge claim or a note (see section 9);
+   it can only keep test-catalogue entries, reports and links to existing knowledge. Either D0 is measured as shipped
+   (and 9a then measures that route), or `project_knowledge_put` / `project_note_add` are added to D0 (and D0 stops being
+   the shipped profile). This changes what the comparison means, so it is decided by the user and registered before
+   the pilot; nothing has been changed here.
