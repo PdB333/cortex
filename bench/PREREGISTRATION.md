@@ -41,18 +41,20 @@ The composition of C (137 tools: the 11 host tools of v1.0.0 + 126 primitives) w
 
 ### Pins
 
-- Cortex: commit **`29c2ea314b043d6d0317a8de6d6bbbf145df159e`** (branch `security/mcp-write-authority`: `main` of
-  2026-10-14, `d525f07`, plus the write-authority fix and the `--allow-state` tier). Pinned on 2026-10-16 after all
-  six Windows workflows were green on exactly that commit (contracts, full-windows-build, imgui-gui-tests, imgui-ui,
-  unified-host, e2e-windows; run ids 38761867337, 38761862491, 38761872185, 38761877055, 38761883245, 38761887736),
-  including the step "Without --allow-writes no MCP call changes a target" on x64 and x86 with no `--skip-tool`
-  (251 tools, 348 calls, 113 refused; target state hash unchanged: x64 `2bf2711387b88b89`, x86 `b56fc9cb4e76775a`).
-  The tool lists in `configs/cortex_tool_lists.json` were regenerated at that commit by `tools/make_tool_lists.py`
-  (251 tools: 42 host, 30 semantic, 179 primitives; C 137, D0 72, D0′ 93) and are identical, name for name and class
-  for class, to those generated at `22a55f6`; only tests changed between the two commits. The file records the
-  commit and the SHA-256 of the `cortex.exe` it was generated from (a Wine build used only for listing tools). Any
-  later change to the tools or their classification invalidates results already obtained and is announced before
-  it is made.
+- Cortex: commit **`fee9c60500b2cde82a99932325a2b3f3cf42f10a`** (branch `security/mcp-write-authority`, release v1.0.1,
+  pull request #42: `main` of 2026-10-14, `d525f07`, plus the write-authority fix, the `--allow-state` tier and the
+  version bump). Pinned on 2026-10-16 after all seven Windows workflows were green on exactly that commit (contracts,
+  full-windows-build, imgui-gui-tests, imgui-ui, unified-host, e2e-windows, publish-release run by hand; run ids
+  38889601276, 38889597401, 38889604204, 38889591893, 38889607204, 38889609759, 38889594655), including the step
+  "Without --allow-writes no MCP call changes a target" on x64 and x86 with no `--skip-tool` (251 tools, 348 calls,
+  113 refused; target state hash unchanged: x64 `422b2c886ff27cfd`, x86 `848f9ca4848caa2e`). The tool lists in
+  `configs/cortex_tool_lists.json` were regenerated at that commit by `tools/make_tool_lists.py` (251 tools: 42 host,
+  30 semantic, 179 primitives; C 137, D0 72, D0' 93) and are identical, name for name and class for class, to those
+  generated at `22a55f6` and `29c2ea3`; between those commits only tests, the version string (1.0.1) and the
+  `tools/list` label of `cortex_test_run` (`read_only` corrected to `host_control` / `target_input`) changed. The file
+  records the commit and the SHA-256 of the `cortex.exe` it was generated from (a Wine build used only for listing
+  tools). Any later change to the tools or their classification invalidates results already obtained and is
+  announced before it is made.
 - Cheat Engine MCP baseline: `miscusi-peek/cheatengine-mcp-bridge`, commit
   **`6bd7ce90479250a9b4b75e7944df9c105ecb2572`** (bridge 12.0.0, 175 tools), read directly from a checkout and
   documented tool by tool in `CE_BASELINE.md`. Before the baseline is trusted, its failures are reviewed: if they
