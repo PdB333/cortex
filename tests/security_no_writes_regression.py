@@ -413,6 +413,18 @@ def main():
                 unclassified.append("%s (%s)" % (tool.get("name"), meta.get("risk")))
         check(not unclassified, "every listed tool has a risk classification"
               + ("" if not unclassified else ": " + ", ".join(unclassified)))
+
+        # The label must also be the right one: a host tool that sends input to the program, persists
+        # records or stops a trial must say so, not just carry some label.
+        expected_effects = {"cortex_test_run": "target_input", "cortex_test_cancel": "trial",
+                            "cortex_test_catalog_save": "cortex_state", "cortex_test_link": "cortex_state",
+                            "cortex_test_report": "cortex_state"}
+        by_name = {t.get("name"): (t.get("_cortex") or {}) for t in tools}
+        wrong = ["%s (expected %s, listed %s)" % (n, e, by_name[n].get("effect") or ("read_only" if by_name[n].get("read_only") else None))
+                 for n, e in expected_effects.items()
+                 if n in by_name and (by_name[n].get("effect") != e or by_name[n].get("read_only"))]
+        check(not wrong, "host tools that act on the program or on Cortex's records are labelled with their effect"
+              + ("" if not wrong else ": " + ", ".join(wrong)))
         tools = [t for t in tools if (t.get("_cortex") or {}).get("risk") != "unclassified"]
 
         before = read_hash(hash_file)

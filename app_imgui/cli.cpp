@@ -78,7 +78,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
         return 0;
     }
     if (command == "--version" || command == "version") {
-        std::puts("cortex 1.0.0");
+        std::puts("cortex 1.0.1");
         return 0;
     }
 #if CORTEX_WITH_TEST_MODES

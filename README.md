@@ -35,7 +35,7 @@
 
 ## Quick start
 
-1. Download **`cortex-v1.0.0-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive.
+1. Download **`cortex-v1.0.1-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive.
 2. Run **`cortex.exe`**, click **Select process** and attach to your target.
 3. Find a value in **Memory › Value scan** (*First scan*, change it in the target, *Next scan*).
 4. Double-click a result to keep it in **Addresses**, then right-click it to open it in the Memory viewer, Disassembler, Debugger or RE.
