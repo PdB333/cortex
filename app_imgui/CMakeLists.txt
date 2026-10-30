@@ -288,10 +288,12 @@ if(BUILD_TESTING)
         application/context_model.cpp
         ../core/context/investigation_context.cpp
         ../core/context/context_api.cpp
+        ../core/services/value_scanner.cpp
     )
     target_include_directories(cortex_app_models_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../host/debugger
     )
     target_link_libraries(cortex_app_models_tests PRIVATE nlohmann_json::nlohmann_json)
     if(MINGW)

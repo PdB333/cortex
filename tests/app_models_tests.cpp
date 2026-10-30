@@ -566,6 +566,8 @@ nop 5
             const context::CallerInfo desktop{context::Caller::Desktop, "desktop"};
             if (method == "POST" && path == "/context/select")
                 return context::api::SelectAddress(shared, desktop, body.dump()).body;
+            if (method == "POST" && path == "/context/share")
+                return context::api::ShareState(shared, desktop, body.dump()).body;
             if (method == "GET" && path.rfind("/context?", 0) == 0) {
                 uint64_t expected = 0;
                 const auto at = path.find("expected_generation=");
@@ -612,6 +614,46 @@ nop 5
               "a stale generation is refused");
         check(!model.SelectAddress(0x401234, "x", {}, 9000, &error) && error == "stale_target_generation",
               "a stale selection is refused");
+        // The desktop's scan results and debugger state, which the runtime
+        // cannot see by itself, reach the agent through the same context.
+        cortex::services::ScanState scan;
+        scan.type = cortex::services::ScanDataType::Int32;
+        scan.valueSize = 4;
+        scan.count = 3;
+        scan.addresses = {0x401000, 0x401010, 0x401020};
+        scan.values = {0x64, 0, 0, 0, 0x5a, 0, 0, 0, 0x01, 0, 0, 0};
+        cortex::services::ScanQuery query;
+        query.value = "100";
+        const json summary = InvestigationContextModel::ScanSummary(scan, query, 2);
+        check(summary["result_count"] == 3 && summary["results"].size() == 2 && summary["results_truncated"] == true &&
+              summary["results"][0]["value"] == "64000000" && summary["value_type"] == "4 Bytes" &&
+              summary["compare"] == "Exact value" && summary["value"] == "100",
+              "scan summary is bounded and carries values as hex bytes");
+        check(model.Share("scan", summary, 9001, &error), "desktop shares its scan");
+        const size_t routesAfterShare = transport.routes.size();
+        check(model.Share("scan", summary, 9001, &error) && transport.routes.size() == routesAfterShare,
+              "an unchanged share is not sent again");
+        const json shared_state = context::api::GetContext(shared, 10, 0, 9001, 0).body["data"]["shared_state"];
+        check(shared_state["scan"]["data"]["results"][0]["location"]["expression"] == "fixture.exe+0x1000" &&
+              shared_state["scan"]["provenance"]["source"] == "desktop",
+              "agent reads the person's scan results as module+RVA");
+
+        DebugBreakpointInfo breakpoint;
+        breakpoint.id = 4;
+        breakpoint.kind = "hw_write";
+        breakpoint.address = 0x401000;
+        breakpoint.hitCount = 2;
+        DebugPausedThread paused;
+        paused.threadId = 88;
+        paused.breakpointId = 4;
+        const json debuggerState = InvestigationContextModel::DebuggerSummary("windows", {breakpoint}, {paused});
+        check(debuggerState["breakpoints"][0]["hit_count"] == 2 && debuggerState["paused_threads"][0]["thread_id"] == 88,
+              "debugger summary carries hit counters and paused threads");
+        check(model.Share("debugger", debuggerState, 9001, &error), "desktop shares its debugger state");
+        check(!model.Share("debugger", InvestigationContextModel::DebuggerSummary("windows", {}, {}), 9000, &error) &&
+                  error == "stale_target_generation",
+              "debugger state of another process is refused");
+
         model.Reset();
         check(model.Entries().empty() && model.Pid() == 0, "context model reset");
     }

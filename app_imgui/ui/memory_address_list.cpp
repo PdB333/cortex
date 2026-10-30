@@ -627,7 +627,7 @@ void MemoryWorkspace::PublishHotkeys(UiContext& context) {
 void MemoryWorkspace::Tick(UiContext& context) {
     PollScan(context);
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
-    const std::string targetId = session ? session->Target().id : std::string();
+    const std::string targetId = session ? TargetKey(session->Target()) : std::string();
     if (targetId != activeTargetId_) ResetForTarget(context, targetId);
     for (auto& entry : addresses_)
         if (!entry.uid) entry.uid = nextUid_++;

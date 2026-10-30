@@ -70,6 +70,13 @@ struct AccessFinderRequest {
     bool instruction = false;
 };
 
+// Identifies one process lifetime: the target id plus its generation. A
+// workspace that keeps per-target state compares keys, not ids, so a reused
+// PID (same id, new generation) resets it like any other new process.
+inline std::string TargetKey(const target::TargetDescriptor& target) {
+    return target.id + "@" + std::to_string(target.generation);
+}
+
 struct UiContext {
     target::SessionManager* sessions = nullptr;
     services::MemoryService* memory = nullptr;

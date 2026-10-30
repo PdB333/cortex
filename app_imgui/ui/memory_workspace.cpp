@@ -177,6 +177,12 @@ void MemoryWorkspace::PollScan(UiContext& context) {
     scanCancel_.reset();
     scanProgress_.reset();
 
+    const auto active = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+    if (!active || TargetKey(*active) != scanTargetKey_) {
+        context.status = "Scan result discarded: the target changed while it ran";
+        return;
+    }
+
     if (!task.state) {
         lastScanError_ = task.error;
         context.status = task.error == "scan_cancelled"
@@ -193,6 +199,17 @@ void MemoryWorkspace::PollScan(UiContext& context) {
     if (!scan_->Listed()) context.status += " - narrow them down with a next scan";
     if (scan_->limitReached) context.status += " - limit reached, other matches were not kept";
     if (!task.pauseError.empty()) context.status += " (the target could not be paused: " + task.pauseError + ")";
+    ShareScan(context);
+}
+
+void MemoryWorkspace::ShareScan(UiContext& context) {
+    // Agents read the person's scan through context_get. Only with a runtime
+    // already connected: sharing never loads it into the target.
+    if (!shareScans_ || !scan_ || !context.contextModel || !context.payload || !context.payload->Ready()) return;
+    std::string error;
+    if (!context.contextModel->Share("scan", application::InvestigationContextModel::ScanSummary(*scan_, scanQuery_),
+                                     scanTargetGeneration_, &error))
+        context.status += " (not shared with the investigation context: " + error + ")";
 }
 
 void MemoryWorkspace::StartScan(UiContext& context) {
@@ -219,6 +236,9 @@ void MemoryWorkspace::StartScan(UiContext& context) {
 
     const bool pause = pauseWhileScanning_;
     const uint64_t pid = session->Target().processId;
+    scanTargetKey_ = TargetKey(session->Target());
+    scanTargetGeneration_ = session->Target().generation;
+    scanQuery_ = query;
     auto previous = scan_;
     scanCancel_ = std::make_shared<std::atomic_bool>(false);
     scanProgress_ = std::make_shared<services::ScanProgress>();
@@ -703,6 +723,9 @@ void MemoryWorkspace::DrawScanOptions(UiContext& context) {
     ImGui::EndDisabled();
 
     ImGui::Checkbox("Pause the target while scanning", &pauseWhileScanning_);
+    ImGui::Checkbox("Share results with the investigation context", &shareScans_);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("When the Cortex runtime is connected, MCP agents can read the latest scan with context_get.");
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Suspends every thread of the target for the duration of each scan,\n"
                           "so values cannot change while they are read.");

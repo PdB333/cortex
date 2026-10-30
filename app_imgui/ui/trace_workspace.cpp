@@ -193,8 +193,8 @@ void TraceWorkspace::Draw(UiContext& context) {
         return;
     }
 
-    if (targetId_ != session->Target().id)
-        ResetForTarget(context, session->Target().id);
+    if (targetId_ != TargetKey(session->Target()))
+        ResetForTarget(context, TargetKey(session->Target()));
 
     if (threadId_ == 0 && context.debuggerModel)
         threadId_ = context.debuggerModel->CurrentThread();

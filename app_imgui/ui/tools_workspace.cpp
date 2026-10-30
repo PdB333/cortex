@@ -809,6 +809,11 @@ void ToolsWorkspace::PollPointerScan(UiContext& context) {
                   static_cast<unsigned long long>(pointers_.pointersIndexed), pointers_.milliseconds / 1000.0,
                   pointers_.truncated ? " - limit reached, shorter paths first" : "");
     pointerInfo_ = text;
+    // Paths are module-relative, so they stay usable on another process (the
+    // point of pointer maps), but they were found in the old one.
+    const auto active = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+    if (!active || TargetKey(*active) != pointerTargetKey_)
+        pointerInfo_ += " - found in a previous process: Rescan before trusting them here";
     context.status = pointerInfo_;
 }
 
@@ -869,6 +874,7 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
             auto cancel = pointerCancel_;
             auto progress = pointerProgress_;
             pointerRunning_ = true;
+            pointerTargetKey_ = TargetKey(session->Target());
             pointerInfo_ = "Indexing pointers...";
             pointerFuture_ = std::async(std::launch::async, [session, options, pending, cancel, progress]() {
                 std::string error;

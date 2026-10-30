@@ -122,8 +122,8 @@ void ProjectWorkspace::Draw(UiContext& context) {
         return;
     }
 
-    if (targetId_ != session->Target().id) {
-        targetId_ = session->Target().id;
+    if (targetId_ != TargetKey(session->Target())) {
+        targetId_ = TargetKey(session->Target());
         context.projectModel->Reset();
         ClearAddressForm();
         ClearPointerForm();

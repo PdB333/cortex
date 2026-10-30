@@ -1,8 +1,11 @@
 #pragma once
 
+#include "debug_provider.h"
 #include "services/runtime_transport.h"
+#include "services/value_scanner.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -48,6 +51,23 @@ public:
     bool SelectAddress(uint64_t address, const std::string& label, const std::string& note,
                        uint64_t expectedGeneration, std::string* error = nullptr);
 
+    // Shares desktop-side state that the runtime cannot see by itself: the
+    // value scanner's results or the external debugger's breakpoints.
+    // `expectedGeneration` is the generation of the target the state was
+    // produced on; a share for another process is refused by the runtime.
+    bool Share(const std::string& kind, const nlohmann::json& data, uint64_t expectedGeneration,
+               std::string* error = nullptr);
+
+    // What Share("scan") sends: the query, totals and at most `maxRows`
+    // listed results with their current and first-scan values (hex bytes).
+    static nlohmann::json ScanSummary(const services::ScanState& state, const services::ScanQuery& query,
+                                      size_t maxRows = 256);
+    // What Share("debugger") sends: breakpoints with hit counters and the
+    // paused threads.
+    static nlohmann::json DebuggerSummary(const std::string& backend,
+                                          const std::vector<DebugBreakpointInfo>& breakpoints,
+                                          const std::vector<DebugPausedThread>& paused, size_t maxRows = 128);
+
     // Reloads the context. Entries are replaced, not appended.
     bool Refresh(uint64_t expectedGeneration, std::string* error = nullptr);
 
@@ -69,6 +89,7 @@ private:
     uint64_t generation_ = 0;
     uint64_t droppedEntries_ = 0;
     std::string lastSelected_;
+    std::map<std::string, std::string> lastShared_;  // kind -> last payload sent
 };
 
 } // namespace cortex::application

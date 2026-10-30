@@ -664,6 +664,28 @@ bool AttachProcessId(AppState& app, uint64_t pid, const std::string& verb) {
     return false;
 }
 
+// The external debugger lives in this process, so agents see its
+// breakpoints, hit counters and paused threads only through the shared
+// investigation context. At most once a second, only with a connected
+// runtime, and only what changed (InvestigationContextModel::Share).
+void ShareDebuggerState(AppState& app) {
+    static std::chrono::steady_clock::time_point last;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(1)) return;
+    last = now;
+    if (!app.payload.Ready()) return;
+    const auto target = app.sessions.ActiveTarget();
+    if (!target) return;
+    const auto& breakpoints = app.debuggerModel.Breakpoints();
+    const auto& paused = app.debuggerModel.PausedThreads();
+    if (breakpoints.empty() && paused.empty() && app.debuggerModel.ProviderBackend().empty()) return;
+    std::string error;
+    app.contextModel.Share("debugger",
+                           cortex::application::InvestigationContextModel::DebuggerSummary(
+                               app.debuggerModel.ProviderBackend(), breakpoints, paused),
+                           target->generation, &error);
+}
+
 void TogglePauseTarget(AppState& app) {
     const auto session = app.sessions.Active();
     if (!session) {
@@ -1045,6 +1067,7 @@ void DrawApp(AppState& app) {
         // on; the desktop is the authority for its own calls.
         app.payload.SetWritesAuthority(app.ui.mutationAllowed);
         app.debuggerModel.SetTargetPaused(app.ui.targetPaused);
+        ShareDebuggerState(app);
     }
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();

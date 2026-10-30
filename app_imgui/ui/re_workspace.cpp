@@ -80,8 +80,8 @@ void ReWorkspace::Draw(UiContext& context) {
         return;
     }
 
-    if (targetId_ != session->Target().id)
-        ResetForTarget(context, session->Target().id);
+    if (targetId_ != TargetKey(session->Target()))
+        ResetForTarget(context, TargetKey(session->Target()));
 
     uint64_t navigationAddress = 0;
     if (context.ConsumeNavigation("re", navigationAddress)) {
