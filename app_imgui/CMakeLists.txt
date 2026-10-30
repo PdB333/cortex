@@ -312,6 +312,21 @@ if(BUILD_TESTING)
     add_test(NAME cortex_settings_store_tests COMMAND cortex_settings_store_tests)
     set_tests_properties(cortex_settings_store_tests PROPERTIES TIMEOUT 30)
 
+    # Baseline benchmarks (docs/cortex-2-roadmap.md, step 1.3). The CTest
+    # entry is the --quick correctness smoke; run the executable without
+    # arguments for the reference measurement.
+    add_executable(cortex_baseline_bench
+        ../tests/bench/cortex_baseline_bench.cpp
+        ../core/services/value_scanner.cpp
+        ../core/services/pointer_scanner.cpp
+    )
+    target_include_directories(cortex_baseline_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_baseline_bench PRIVATE Zydis nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_baseline_bench PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_baseline_bench_smoke COMMAND cortex_baseline_bench --quick)
+    set_tests_properties(cortex_baseline_bench_smoke PROPERTIES TIMEOUT 120)
 
     # Value scanner against an in-memory fake process.
     add_executable(cortex_value_scanner_tests

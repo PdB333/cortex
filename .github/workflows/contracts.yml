@@ -399,6 +399,15 @@ jobs:
       - name: Run portable target model test
         run: ./target_model_portable_tests
 
+      # The desktop frame loop, its workers and the debugger backend share one
+      # SessionManager; ThreadSanitizer fails this step on any data race.
+      - name: Session manager under ThreadSanitizer
+        run: >-
+          g++ -std=c++17 -g -O1 -Wall -Wextra -Werror -fsanitize=thread -pthread
+          -Icore tests/session_manager_tests.cpp core/target/session_manager.cpp
+          -o session_manager_tsan
+          && setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 ./session_manager_tsan
+
   # ---- P4 Target Model (was .github/workflows/p4-target-model.yml)
   p4-target-model:
     name: target-model-${{ matrix.arch }}

@@ -184,6 +184,19 @@ jobs:
         shell: msys2 {0}
         run: ctest --test-dir build/gui-release --output-on-failure
 
+      # Reference numbers for docs/cortex-2-roadmap.md (step 1.3). Shared
+      # runners are noisy: compare trends, not single runs.
+      - name: Record baseline benchmarks
+        shell: msys2 {0}
+        run: build/gui-release/cortex_baseline_bench.exe --json build/gui-release/cortex-baseline.json
+
+      - name: Upload baseline benchmarks
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-baseline-windows-x64
+          path: build/gui-release/cortex-baseline.json
+          if-no-files-found: error
+
       - name: Build x64 runtime and target
         shell: msys2 {0}
         run: |
