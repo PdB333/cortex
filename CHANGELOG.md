@@ -4,10 +4,20 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, step 1 (audit and foundations) and the first delivery of step 2 (one context for the desktop and agents). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 3 and step 4a (static artifact analysis). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **Static artifact analysis (step 4a).** A provider system in `core/artifacts/` identifies a file and reports its structure. It returns the SHA-256 and a separate status for static parsing, decompilation and live debugging. Providers:
+  - offline PE: sections, imports, exports, relocations, CodeView, TLS, exceptions, CLR header, certificate, overlay;
+  - Electron ASAR: file tree, `package.json`, nested entries.
+
+  It is reachable three ways:
+  - `cortex.exe inspect <file>`;
+  - the read-only MCP tools `cortex_artifact_inspect` / `_children` / `_read`, limited to the operator's `--artifact-root` directories;
+  - the new **Artifacts** workspace, which can record an inspected artifact in the investigation context.
+
+  Nothing is executed or loaded. See `docs/mcp.md`.
 - **Shared investigation context.** The runtime in each target now keeps one context that the desktop and MCP clients share. It holds:
   - pid and process generation;
   - modules and `module+RVA` locations;

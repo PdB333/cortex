@@ -383,6 +383,36 @@ The desktop's Project workspace refreshes its **Knowledge** and
   process is kept, because its paths are module-relative, but it is labelled
   so it gets rescanned.
 
+## Static artifact tools
+
+`cortex.exe mcp` has three read-only host tools that analyse files without a
+target process: `cortex_artifact_inspect`, `cortex_artifact_children` and
+`cortex_artifact_read`. They only reach files inside the directories the
+operator passes at start-up:
+
+```bash
+cortex.exe mcp --artifact-root D:\samples --artifact-root D:\builds
+```
+
+- With no `--artifact-root`, every call returns `artifact_roots_not_configured`.
+- A root that does not exist stops the host (exit code 2).
+- Paths are made canonical (`..` and links resolved) before the check, so an
+  escape returns `path_outside_artifact_roots`. An agent cannot add a root.
+- `child` names an entry inside a container; nested containers are joined
+  with `!` (`app.asar!vendor.asar!index.js`, at most 8 levels).
+- `cortex_artifact_read` returns at most 64 KiB per call (`offset`,
+  `length`, `encoding`: `hex` or `utf8`).
+- `max_entries` bounds long listings; truncation is reported.
+
+Every result uses the schema `cortex.artifact.v1`: identity (name, size,
+SHA-256), the provider and its version, and the status of three separate
+capabilities: `static`, `decompile` and `live`. Each is `validated`
+(against the fixture it names), `experimental` or `unavailable`. Today the
+providers are PE (static validated; `pe-dotnet` is detected, its metadata
+comes in step 4c) and Electron ASAR. Decompilation is unavailable for all
+of them. The same providers answer `cortex.exe inspect <file>` and the
+desktop's **Artifacts** workspace.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
