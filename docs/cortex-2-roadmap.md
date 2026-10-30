@@ -127,6 +127,7 @@ States:
 | Supervised multi-step journals, chooser, generator, catalog, investigation summary | functional (experimental status in docs) | `mcp_bridge/test_step.h`, `test_choose.h`, `test_generate.h`, `test_investigation.h` | — | `cortex_test_step_*`, `cortex_test_choose`, `cortex_test_generate*`, `cortex_test_catalog_*` | plan/generate/runner tests |
 | Code context (IP → module+RVA, optional disasm, x64 unwind range) and code links to knowledge (on-disk SHA-256) | functional | `mcp_bridge/test_code_*.h`, `pe_unwind.h` | — | `cortex_test_code_context`, `cortex_test_code_link`, `cortex_knowledge_code_check` | code context/knowledge/candidates tests |
 | Knowledge records (claims with status hypothesis/observed/refuted/stale, revisions, evidence, typed relations), query/resume, graph | functional (experimental) | `core/project/knowledge*.h`, `mcp_bridge/test_knowledge.h`, `test_evidence_graph.h` | Project (partial view) | `project_knowledge_*`, `cortex_knowledge_graph` | knowledge model/query/graph tests |
+| Shared investigation context (desktop + MCP), caller provenance, operation history | functional (step 2) | `core/context/`, `core/api/routes_context.cpp`, `app_imgui/application/context_model.*` | Project › Investigation context, address menu | `context_get`, `context_events`, `context_observation_add` | `cortex_investigation_context_tests`, app models, native stdio E2E |
 | Investigation orchestrator (question → plan → … → report states) | absent as one object | — | — | Pieces exist as journals | — |
 | AI Investigation workspace in the desktop | absent | AI Activity shows calls only | — | — | — |
 
@@ -136,7 +137,7 @@ States:
 |---|---|---|
 | `SessionManager` | **fixed in step 1** | Was unsynchronized but shared by the frame loop, background tasks and the debugger backend; see §5.1 |
 | `OperationManager` (typed operation state, cancel, timeout) | functional | Used for runtime operations; not yet the single contract for UI + MCP results (step 2.5) |
-| Event bus | partial | `core/events`: 2048-entry in-process ring, string type + JSON string payload, no target/generation in the envelope, no explicit gap signal (ids are contiguous, so a client *can* detect a gap, but the API does not report it). Only a handful of event types are published |
+| Event bus | functional (step 2) | `core/events`: 2048-entry ring with a typed catalog (`events::types`). Context events carry pid and generation. `events::Read` and `/ui/events` / `context_events` report `oldest_id`, `missed` and `gap`. Not yet published: `breakpoint.hit` (step 2, open item 5) |
 | Project persistence | functional, **hardened in step 1** | Atomic replace (`ReplaceFile`/`MoveFileEx` with write-through) and `.bak`; schema migration to v3. A damaged file is now quarantined (§5.3) |
 | Desktop settings / `cortex.ini` | **fixed in step 1** | Were rewritten in place with `trunc` (§5.2) |
 | Test-runner records | functional | tmp + `std::filesystem::rename` |
@@ -308,47 +309,54 @@ Each step lists:
 
 "Fixture" means `test_target/` (x86 and x64) unless stated otherwise.
 
-### Step 2: one engine for the UI, agents and CLI
+### Step 2: one engine for the UI, agents and CLI (first delivery done)
 
-- **Reuse:**
-  - `RuntimeTransport` / `RuntimeModelBase` / `PayloadClient`;
-  - `OperationManager`;
-  - `core/api` route contracts and `response_contract.h`;
-  - the target generation;
-  - `cortex_targets`.
-- **Gaps:**
-  - The desktop's `ValueScanner` results, pointer scans and debugger state are
-    invisible to MCP. Only what is saved to the project (inside the runtime)
-    is shared.
-  - The event envelope has no target/generation and no gap signal.
-  - There is no shared result contract between desktop models and MCP.
-- **Tasks:**
-  1. **Investigation context service** (`core/services/investigation_context.*`):
-     - per target+generation, it holds selected addresses, scan result
-       references, breakpoints, observations and provenance;
-     - the desktop owns it; it is published to the runtime project so MCP reads
-       one source of truth;
-     - first slice: "address selected in the UI is readable by
-       `cortex_context_get`".
-  2. **Typed events.** Extend `events::Event` with `target_id`, `generation`,
-     `source` (`ui|mcp|runtime`) and `seq`, and add `ProcessAttached/Detached`,
-     `ModuleLoaded/Unloaded`, `AddressSelected`, `BreakpointHit`,
-     `EvidenceCreated`, `KnowledgeUpdated` and `AgentAction*`. `Since` returns
-     `{events, first_available_id, gap}`. The existing types stay as they are.
-  3. **Per-operation target binding.** Every MCP call already carries
-     `_cortex_target`. Make the desktop models carry the target id+generation
-     they were started for, and refuse completion if the active target changed
-     (the PID-reuse test exists in `session_manager_tests`).
-  4. **Result contract.** Map `OperationSnapshot` and the route
-     `response_contract.h` into one `{status, error, cause, target, generation,
-     duration_ms, limits, data, evidence[], permissions_required, rollback}`
-     shape. Adopt it first in the scan and debugger models.
-- **Validation:**
-  - an app-models test (scripted transport): a UI selection is visible through
-    the MCP context tool;
-  - a multi-target E2E: two fixtures, switching the UI target does not redirect
-    an in-flight agent call.
-- **Depends on:** nothing.
+**Design decision.** The shared state lives **in the runtime**, inside the
+target. That is the only component the desktop and every `cortex.exe mcp`
+client already reach through the same authenticated pipe and route registry.
+Putting it in the desktop would have meant a second server for agents.
+Putting it in `cortex.exe mcp` would have hidden it from the desktop. The
+runtime's lifetime is exactly one process generation, so the context cannot
+outlive the process it describes.
+
+**Delivered:**
+
+| Brief item | Implementation | Test |
+|---|---|---|
+| 2.2 Shared investigation context | `core/context/investigation_context.*`. It holds identity (pid, generation, architecture, executable), modules, `module+RVA` location, the person's selections, observations with provenance, and a bounded operation history. Routes are `GET /context`, `GET /context/events`, `POST /context/observation` and `POST /context/select` (desktop only). The MCP tools are `context_get`, `context_events` and `context_observation_add` (state tier). The desktop has the address-menu action **Share with investigation context** and two Project tabs, **Knowledge** and **Investigation context** | `cortex_investigation_context_tests` (portable, TSan-clean), `cortex_app_models_tests` |
+| Caller provenance | `core/context/caller.h`: a thread-local `desktop` / `agent` label set by the pipe dispatcher from the authenticated envelope (`PayloadClient::SetDesktopChannel`), never from tool arguments. It labels provenance and grants nothing | same |
+| 2.3 Typed events | Type catalog in `core/events/events.h`: `runtime.started`, `module.loaded/unloaded`, `context.address_selected/observation_added`, `knowledge.updated`, `evidence.created` and `agent.action_requested/completed/failed`. `events::Read` reports `oldest_id`, `missed` and `gap`; `/ui/events` and `context_events` expose them | `cortex_events_tests` |
+| 2.4 Process isolation | `status` reports the runtime's `generation`. `PayloadClient::VerifyTarget` refuses a runtime with the same PID but another generation (`payload_target_generation_mismatch`). Every context route takes `expected_generation` and refuses a stale one with HTTP 409 before recording anything. The host already checked `_cortex_generation` | context tests, app models (stale refresh/select refused) |
+| 2.5 Result contract | `api::response::Operation` / `OperationResult` with `ok, status, error, cause, target, duration_ms, limits, data, evidence, permissions_required, rollback`. The context routes use it | context tests |
+| Agent actions visible to the person | `mcp_tools::RecordedDispatch` puts every primitive call (direct or semantic step) into the context history. An agent's state, control, mutate or native-call tool publishes `agent.action_*` with argument names only | runtime E2E on Windows (open) |
+
+**Validation against the step 2 criteria:**
+
+- *An address found in the UI is immediately readable by MCP.* This is shown
+  by `cortex_app_models_tests`, which runs the desktop model against the real
+  route semantics: the selection appears in `context_get` as `module+RVA`. A
+  live-target E2E is still to be written.
+- *A discovery saved by the agent appears in the project open in Cortex.*
+  The Project **Knowledge** tab lists `project_knowledge_put` records. It
+  refreshes on `knowledge.updated` and `evidence.created`. Agent observations
+  appear in **Investigation context** with their session.
+- *Isolation across disconnect and reattach.* Generation checks are tested at
+  the unit level; the two-fixture E2E is still open.
+
+**Still open in step 2:**
+
+1. Share desktop scan results and debugger state through the context. Today
+   only selections and observations are shared, and value-scanner state stays
+   in the desktop process.
+2. Bind desktop background operations to the target id+generation they
+   started on, and discard their result if the active target changed.
+3. Adopt the result contract in the scan and debugger models and in existing
+   routes, one at a time.
+4. Windows E2E on `cortex_test_target`: desktop selection → `context_get`
+   through `cortex.exe mcp`, then `context_observation_add` → desktop.
+   Include a two-target isolation check.
+5. A `breakpoint.hit` event. It cannot be published from the VEH or
+   debug-event path, which must not allocate, so it needs a drain thread.
 
 ### Step 3: manual mode
 

@@ -4,7 +4,31 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, step 1: audit and foundations. See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, step 1 (audit and foundations) and the first delivery of step 2 (one context for the desktop and agents). See `docs/cortex-2-roadmap.md`.
+
+### Added
+
+- **Shared investigation context.** The runtime in each target now keeps one context that the desktop and MCP clients share. It holds:
+  - pid and process generation;
+  - modules and `module+RVA` locations;
+  - the address the person selected;
+  - observations with their provenance;
+  - recent tool calls.
+
+  MCP tools: `context_get` and `context_events` (observe), and `context_observation_add` (state: `mutation_permission` plus `--allow-state` or `--allow-writes`). In the desktop, right-click an address and choose **Share with investigation context**; only the desktop can make a selection. The Project workspace gains **Knowledge** (the agent's `project_knowledge_put` records) and **Investigation context** tabs, refreshed when an agent writes. Records are caller assertions, never upgraded to facts. See `docs/mcp.md`.
+- **Typed events with gap reporting.** New types:
+  - `runtime.started`;
+  - `module.loaded` / `module.unloaded`;
+  - `context.address_selected` / `context.observation_added`;
+  - `knowledge.updated` and `evidence.created`;
+  - `agent.action_requested` / `agent.action_completed` / `agent.action_failed`, published for an agent's state-changing tools, with argument names only.
+
+  `/ui/events` and `context_events` report `oldest_id`, `missed` and `gap`, so a consumer knows when events were evicted.
+- **Common result contract** (`api::response::Operation`): `status`, `error`, `cause`, `target`, `duration_ms`, `limits`, `data`, `evidence`, `permissions_required` and `rollback`. The new context routes use it.
+
+### Security
+
+- **PID reuse.** `status` reports the runtime's process `generation`. The desktop and `cortex.exe mcp` now refuse a runtime with the right PID but another generation (`payload_target_generation_mismatch`). Context routes refuse a stale `expected_generation` with `stale_target_generation`.
 
 ### Fixed
 
@@ -16,6 +40,7 @@ Cortex 2.0, step 1: audit and foundations. See `docs/cortex-2-roadmap.md`.
 
 - `cortex_session_manager_tests` checks that snapshots outlive a detach, and that reads stay consistent while another thread attaches, detaches and prunes. The Ubuntu contracts job also runs it under ThreadSanitizer.
 - New `cortex_settings_store_tests` (atomic replace, round trip, `.ini` key preservation) and `cortex_project_store_{backup,damaged,fresh,locked}` (damaged project recovery).
+- New `cortex_investigation_context_tests` (portable, also under ThreadSanitizer in CI), `cortex_events_tests`, and investigation-context checks in `cortex_app_models_tests` and `tests/native_mcp_stdio_e2e.ps1`.
 - New `cortex_baseline_bench` (scanner, pointer scanner, reads, Zydis) with a `--quick` CTest smoke. The GUI release job uploads a Windows run as the `cortex-baseline-windows-x64` artifact.
 
 ## [v1.0.1] - 2026-10-16

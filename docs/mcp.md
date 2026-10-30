@@ -285,6 +285,71 @@ A tool with no explicit risk classification is refused (`tool_not_classified`), 
 
 `cortex.exe mcp` publishes session and tool-call lifecycle events (session started/ended, tool started/completed/failed) on a local per-user Windows mailslot. A running Cortex desktop shows them in the **AI Activity** tab of the bottom panel and in the header status, so the person at the screen can follow what an agent is doing. The events carry tool names and request ids, not tool arguments or results.
 
+## Shared investigation context
+
+The runtime in each target keeps one **investigation context**
+(`core/context/`). The desktop and every MCP client read and write the same
+object, so there is no second source of truth.
+
+| Tool | Risk | What it does |
+|---|---|---|
+| `context_get` | observe | Returns pid and process generation, modules, the address the person last selected in the desktop, observations with provenance, and the recent tool-call history. Query: `limit`, `since`, `expected_generation`. |
+| `context_events` | observe | Returns typed events after `since` with `latest_id`, `oldest_id`, `missed` and `gap`. With `gap: true`, events were evicted from the 2048-entry ring, so resynchronize with `context_get`. |
+| `context_observation_add` | state | Records a `statement` (`kind`: observation, correlation, hypothesis or note), optionally with an `address`, bounded `data` and up to 16 evidence references. It needs `mutation_permission` and `--allow-state` or `--allow-writes`. |
+
+**Selections come from the person only.** In the desktop, right-click any
+address and choose **Share with investigation context**. The selection goes
+through the desktop's private channel (`POST /context/select`). That route is
+not in the MCP manifest, and it refuses any caller but the desktop. An agent
+can therefore read the person's selection but cannot fake one.
+
+**Provenance comes from the transport.** The pipe dispatcher labels each
+request `desktop` or `agent` from the authenticated envelope. Tool arguments
+cannot set it. An agent's records carry its MCP session id. Every entry has a
+`status`:
+
+- `pointer_only` for a selection;
+- `client_assertion` for an observation.
+
+Neither is ever upgraded to a verified fact. Durable claims still belong in
+`project_knowledge_put`.
+
+**Results use the common contract** (`core/api/response_contract.h`):
+`ok`, `status`, `error`, `cause`, `target {pid, generation}`, `duration_ms`,
+`limits`, `data`, `evidence`, `permissions_required` and `rollback`.
+
+**Process isolation.** Every context route accepts `expected_generation`. A
+request pinned to another process lifetime (a reused PID) is refused with
+`stale_target_generation` (HTTP 409) before anything is recorded. `status`
+now reports the runtime's `generation`, and the desktop and `cortex.exe mcp`
+refuse a runtime whose generation differs from the target they attached to
+(`payload_target_generation_mismatch`).
+
+**Events.** The runtime publishes:
+
+- `runtime.started`;
+- `module.loaded` and `module.unloaded`, seen when the module list is
+  refreshed (each context route), not at load time;
+- `context.address_selected` and `context.observation_added`;
+- `knowledge.updated` and `evidence.created`, carrying identifiers only;
+- `agent.action_requested`, `agent.action_completed` and
+  `agent.action_failed` for an agent's state, control, mutate or
+  native-call tools. These carry argument names, never values.
+
+The desktop's Project workspace refreshes its **Knowledge** and
+**Investigation context** tabs when these events arrive.
+
+**Limits.**
+
+- The context lives in memory and dies with the process. That is the
+  lifetime of the generation it describes.
+- In the default `--tools compact` profile, `context_get` and
+  `context_events` are reachable as steps of `capture_runtime_state`.
+  Writing an observation needs `--tools all`, because semantic execution
+  only runs state tools with a rollback contract.
+- No breakpoint-hit event is published from the debugger's exception path
+  (it must not allocate there); hits stay in `debug_breakpoint_log`.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
