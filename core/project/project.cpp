@@ -2,6 +2,7 @@
 #include "knowledge.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
+#include "../events/events.h"
 
 #include <windows.h>
 #include <mutex>
@@ -125,6 +126,17 @@ std::string Quarantine(const std::string& path) {
         if (GetLastError() != ERROR_FILE_EXISTS) break;
     }
     return {};
+}
+
+// The desktop refreshes its project view on these; the record itself is
+// read back through project_knowledge_get, so only identifiers travel.
+void PublishKnowledgeEvent(const char* type, const json& record, const char* change) {
+    events::Publish(type, json{{"id", record.value("id", std::string())},
+                               {"revision", record.value("revision", 0)},
+                               {"status", record.value("status", std::string())},
+                               {"change", change},
+                               {"pid", GetCurrentProcessId()}}
+                              .dump());
 }
 
 void MigrateAndRepair(json& data) {
@@ -385,6 +397,7 @@ bool PutKnowledge(const json& input, json& stored, std::string& error) {
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::KnowledgeUpdated, stored, "put");
     return true;
 }
 
@@ -414,6 +427,7 @@ bool AppendKnowledgeCodeReferences(const std::string& id, int expectedRevision,
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::EvidenceCreated, stored, "code_references");
     return true;
 }
 
@@ -435,6 +449,7 @@ bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::EvidenceCreated, stored, "verification");
     return true;
 }
 

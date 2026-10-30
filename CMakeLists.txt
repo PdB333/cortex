@@ -173,6 +173,7 @@ set(CORTEX_API_ROUTE_SOURCES
     core/api/routes_batch.cpp
     core/api/routes_actions.cpp
     core/api/routes_events.cpp
+    core/api/routes_context.cpp
     core/api/routes_pointermap.cpp
     core/api/routes_trace.cpp
     core/api/routes_ghidra.cpp
@@ -226,6 +227,8 @@ add_library(core SHARED
     core/dissect/dissect.cpp
     core/action/action.cpp
     core/events/events.cpp
+    core/context/investigation_context.cpp
+    core/context/context_api.cpp
     core/api/native_routes.cpp
     core/api/mcp_tools.cpp
     core/api/mcp_pipe.cpp
@@ -519,11 +522,26 @@ if(BUILD_TESTING)
     foreach(scenario backup damaged fresh locked)
         add_test(NAME cortex_project_store_${scenario} COMMAND cortex_project_store_tests ${scenario})
     endforeach()
+
+    # Shared investigation context and its route semantics (portable).
+    add_executable(cortex_investigation_context_tests
+        tests/investigation_context_tests.cpp
+        core/context/investigation_context.cpp
+        core/context/context_api.cpp
+    )
+    target_include_directories(cortex_investigation_context_tests PRIVATE core)
+    target_link_libraries(cortex_investigation_context_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_investigation_context_tests COMMAND cortex_investigation_context_tests)
+
+    # Runtime event ring: bounded, contiguous ids, explicit gaps.
+    add_executable(cortex_events_tests tests/events_tests.cpp core/events/events.cpp)
+    target_include_directories(cortex_events_tests PRIVATE core)
+    add_test(NAME cortex_events_tests COMMAND cortex_events_tests)
 endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

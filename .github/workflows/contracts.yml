@@ -408,6 +408,17 @@ jobs:
           -o session_manager_tsan
           && setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 ./session_manager_tsan
 
+      # The shared investigation context is written by pipe workers serving
+      # the desktop and agents at once.
+      - name: Investigation context under ThreadSanitizer
+        run: >-
+          sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends nlohmann-json3-dev
+          && g++ -std=c++17 -g -O1 -Wall -Wextra -Werror -fsanitize=thread -pthread
+          -Icore tests/investigation_context_tests.cpp
+          core/context/investigation_context.cpp core/context/context_api.cpp
+          -o investigation_context_tsan
+          && setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 ./investigation_context_tsan
+
   # ---- P4 Target Model (was .github/workflows/p4-target-model.yml)
   p4-target-model:
     name: target-model-${{ matrix.arch }}

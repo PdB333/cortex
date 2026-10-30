@@ -92,6 +92,24 @@
    "risk": "native_call"
   },
   {
+   "name": "context_events",
+   "method": "GET",
+   "path": "/context/events",
+   "risk": "observe"
+  },
+  {
+   "name": "context_get",
+   "method": "GET",
+   "path": "/context",
+   "risk": "observe"
+  },
+  {
+   "name": "context_observation_add",
+   "method": "POST",
+   "path": "/context/observation",
+   "risk": "state"
+  },
+  {
    "name": "debug_breakpoint_add",
    "method": "POST",
    "path": "/debug/breakpoint",

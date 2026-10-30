@@ -292,6 +292,30 @@ json BuildToolsManifest() {
         j.push_back({{"name", "project_knowledge_verify"}, {"method", "POST"}, {"path", "/project/knowledge/{id}/verify"},
                      {"description", "Rerun bounded read-only byte invariants against the live process. A match validates bytes, not semantic claims."}});
 
+        j.push_back({{"name", "context_get"}, {"method", "GET"}, {"path", "/context"},
+                     {"description", "Shared investigation context of this process: pid and generation, modules, the address the person "
+                                     "selected in the Cortex desktop, observations recorded by the person or an agent (with provenance), "
+                                     "and recent tool calls. Records are caller assertions, not verified facts."},
+                     {"query", {{"limit", "optional, entries returned, 1-512, default 100"},
+                                {"since", "optional, only entries with a larger sequence"},
+                                {"expected_generation", "optional, refuse with stale_target_generation if the process changed"}}}});
+        j.push_back({{"name", "context_events"}, {"method", "GET"}, {"path", "/context/events"},
+                     {"description", "Typed runtime events after an id (module.loaded/unloaded, context.*, knowledge.updated, "
+                                     "evidence.created, agent.action_*). gap=true means events were evicted: resynchronize with context_get."},
+                     {"query", {{"since", "optional, last event id seen, default 0"},
+                                {"limit", "optional, 1-256, default 128"},
+                                {"expected_generation", "optional, refuse with stale_target_generation if the process changed"}}}});
+        j.push_back({{"name", "context_observation_add"}, {"method", "POST"}, {"path", "/context/observation"},
+                     {"description", "Record an observation, correlation, hypothesis or note in the shared investigation context so the "
+                                     "person sees it in Cortex. It is stored as a client assertion with your session as provenance; "
+                                     "it never upgrades to a verified fact. Writes only Cortex's own records."},
+                     {"body", {{"statement", "required, at most 2048 bytes"},
+                               {"kind", "optional: observation (default), correlation, hypothesis or note"},
+                               {"address", "optional, integer or hex string"},
+                               {"data", {{"type", "object"}, {"description", "optional structured data, at most 4096 serialized bytes"}}},
+                               {"evidence", {{"type", "array"}, {"description", "optional, up to 16 {source, reference} objects"}}},
+                               {"expected_generation", {{"type", "integer"}, {"minimum", 0}}}}}});
+
         j.push_back({{"name", "project_address_set"}, {"method", "POST"}, {"path", "/project/address"},
                       {"description", "Saves/overwrites a named address."},
                       {"body", {{"name", "required"}, {"address", "required"}, {"type", "optional"}, {"notes", "optional"}}}});
@@ -846,8 +870,17 @@ json BuildOpenApiDocument() {
 
 void RegisterStatusRoutes(httplib::Server& svr) {
     svr.Get("/status", [](const httplib::Request&, httplib::Response& res) {
-        json j{{"status", "ok"}, {"pid", GetCurrentProcessId()}, {"process_name", ProcessName()},
-               {"port", GetPort()}, {"uptime_ms", GetUptimeMs()}};
+        // generation is the process creation time, the value the desktop's
+        // target descriptor carries: a client verifies both pid and
+        // generation so a recycled PID cannot pass for its old target.
+        uint64_t generation = 0;
+        {
+            FILETIME creation{}, exitTime{}, kernel{}, user{};
+            if (GetProcessTimes(GetCurrentProcess(), &creation, &exitTime, &kernel, &user))
+                generation = (static_cast<uint64_t>(creation.dwHighDateTime) << 32) | creation.dwLowDateTime;
+        }
+        json j{{"status", "ok"}, {"pid", GetCurrentProcessId()}, {"generation", generation},
+               {"process_name", ProcessName()}, {"port", GetPort()}, {"uptime_ms", GetUptimeMs()}};
         res.set_content(j.dump(), "application/json");
         overlay::LogApiCall("GET /status");
     });

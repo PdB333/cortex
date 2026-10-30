@@ -40,6 +40,7 @@ void RegisterDissectRoutes(RouteRegistrar& svr);
 void RegisterBatchRoutes(RouteRegistrar& svr);
 void RegisterActionRoutes(RouteRegistrar& svr);
 void RegisterEventRoutes(RouteRegistrar& svr);
+void RegisterContextRoutes(RouteRegistrar& svr);
 void RegisterPointerMapRoutes(RouteRegistrar& svr);
 void RegisterTraceRoutes(RouteRegistrar& svr);
 void RegisterGhidraRoutes(RouteRegistrar& svr);

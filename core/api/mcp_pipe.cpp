@@ -4,6 +4,7 @@
 #include "mcp_protocol.h"
 #include "mcp_tools.h"
 #include "native_routes.h"
+#include "../context/caller.h"
 
 #include <windows.h>
 #include <nlohmann/json.hpp>
@@ -197,6 +198,7 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
             if (envelope.value("channel", std::string()) != "desktop") {
                 responsePayload = RpcErrorForEnvelope(envelope, -32601, "private_route_not_available").dump();
             } else {
+                context::ScopedCaller caller(context::Caller::Desktop, "desktop");
                 responsePayload = HandlePrivateRouteRequest(envelope["message"]).dump();
             }
         } else {
@@ -210,6 +212,13 @@ void ServeClient(const std::shared_ptr<Worker>& worker, const std::string& expec
                 authority.writesAllowed = envelope["writes_allowed"].get<bool>();
             if (envelope.contains("state_allowed") && envelope["state_allowed"].is_boolean())
                 authority.stateAllowed = envelope["state_allowed"].get<bool>();
+            // Provenance for the records this call creates. The desktop's
+            // adapter marks its envelopes; everything else is an agent.
+            // A label, not an authority: `authority` above decides.
+            const bool fromDesktop = envelope.value("channel", std::string()) == "desktop";
+            context::ScopedCaller caller(fromDesktop ? context::Caller::Desktop : context::Caller::Agent,
+                                         fromDesktop ? std::string("desktop")
+                                                     : envelope.value("session", std::string()));
             const auto result = mcp_tools::Handle(
                 envelope["message"],
                 profile,
