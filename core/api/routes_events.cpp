@@ -30,7 +30,8 @@ void RegisterEventRoutes(httplib::Server& svr) {
         if (limit > 256) limit = 256;
 
         json rows = json::array();
-        for (const auto& event : events::Since(since, limit)) {
+        const auto page = events::Read(since, limit);
+        for (const auto& event : page.events) {
             json data;
             try { data = json::parse(event.dataJson); }
             catch (...) { data = event.dataJson; }
@@ -39,7 +40,8 @@ void RegisterEventRoutes(httplib::Server& svr) {
                             {"type", event.type},
                             {"data", std::move(data)}});
         }
-        res.set_content(json{{"ok", true}, {"events", std::move(rows)}, {"latest_id", events::LatestId()}}.dump(),
+        res.set_content(json{{"ok", true}, {"events", std::move(rows)}, {"latest_id", page.latestId},
+                             {"oldest_id", page.oldestId}, {"missed", page.missed}, {"gap", page.gap}}.dump(),
                         "application/json");
     });
     svr.Get("/events", [](const httplib::Request& req, httplib::Response& res) {
