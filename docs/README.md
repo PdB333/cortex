@@ -11,6 +11,7 @@ This directory contains both user-facing documentation for the unified Cortex ap
 
 ## Product architecture
 
+- [Cortex 2.0 roadmap and audit](cortex-2-roadmap.md) — capability matrix of the current code, baseline benchmarks, step 1 fixes and the plan for the following steps.
 - [Unified application architecture](unified-app-architecture.md) — one-product `cortex.exe` architecture, runtime layering, MCP and instrumentation boundaries.
 - [Target model](p4-target-model.md) — common target/backend model used for Windows and future platform parity.
 

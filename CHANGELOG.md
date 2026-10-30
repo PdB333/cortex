@@ -2,6 +2,22 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [Unreleased]
+
+Cortex 2.0, step 1: audit and foundations. See `docs/cortex-2-roadmap.md`.
+
+### Fixed
+
+- **Session manager races.** The desktop frame loop, its background workers and the debugger backend share one `SessionManager`, which had no lock. Under ThreadSanitizer, the previous code showed data races and heap-use-after-free when sessions were attached or detached while another thread read them. All members are now synchronized. `ActiveTargetId()` returns a copy, and `ActiveTarget()` / `ActiveCapabilities()` return `std::optional` snapshots instead of pointers into a session a detach could free.
+- **Settings could be truncated.** `cortex-ui-settings.json` and the runtime `cortex.ini` were rewritten in place; a crash or full disk mid-write left a truncated file. Both are now written to a temporary file and replaced atomically (`services::WriteFileAtomically`).
+- **A damaged project file could be lost.** When `<process>.json` did not parse, the runtime fell back to `.bak` or to defaults, and the next saves rotated the damaged bytes away. With a good `.bak`, the first save destroyed that backup. Damaged files are now copied to `<file>.damaged-<stamp>` first. The damaged primary is no longer rotated over a good backup. If an unreadable file cannot be copied (locked, access denied), saves fail instead of replacing it. `project::LoadStatus()` (logged at start-up) reports where the project was loaded from.
+
+### Tests and CI
+
+- `cortex_session_manager_tests` checks that snapshots outlive a detach, and that reads stay consistent while another thread attaches, detaches and prunes. The Ubuntu contracts job also runs it under ThreadSanitizer.
+- New `cortex_settings_store_tests` (atomic replace, round trip, `.ini` key preservation) and `cortex_project_store_{backup,damaged,fresh,locked}` (damaged project recovery).
+- New `cortex_baseline_bench` (scanner, pointer scanner, reads, Zydis) with a `--quick` CTest smoke. The GUI release job uploads a Windows run as the `cortex-baseline-windows-x64` artifact.
+
 ## [v1.0.1] - 2026-10-16
 
 Security release. It also publishes the agent test layer that was merged into `main` after v1.0.0 (launch profiles, bounded input trials, a persistent knowledge graph; pull requests #17 to #39).
