@@ -154,8 +154,14 @@ def main():
             start = as_int(row["address"])
             if start + int(row.get("size", 0)) == trap_ip:
                 writer = row
-        check(writer is not None and "[" in writer.get("text", "") and writer.get("mnemonic", "").startswith("mov"),
-              "the writing instruction is the store just before the trap address", writer)
+        # A write trap reports the next instruction, so the writer ends at the
+        # trap address. Its destination is the health field (+0x04); compilers
+        # emit a plain store (mov) or a read-modify-write (sub/add) for it.
+        operands = writer.get("text", "").split(None, 1)[1] if writer and " " in writer.get("text", "") else ""
+        destination = operands.split(",", 1)[0]
+        check(writer is not None and "[" in destination and "+0x04" in destination.replace("+4]", "+0x04]") and
+              writer.get("mnemonic", "") in ("mov", "sub", "add"),
+              "the writing instruction ends at the trap address and writes the health field", writer)
         error, cfg = call("analysis_cfg", {"address": hex(damage_function)})
         check(not error and len(cfg.get("blocks", [])) >= 1, "CFG of the function", cfg)
 

@@ -58,7 +58,9 @@ and armor goes 25 → 22 → 19 …
    4. Switch back to **Read-only** when done.
 
    A hardware write trap stops on the instruction *after* the store, so the
-   reported address is the one following the `mov [...]` that wrote health.
+   reported address is the one following the instruction that wrote health
+   (`mov [...]`, or `sub [...]` when the compiler folds the subtraction into
+   the store).
 6. **Navigate the code.** Double-click that instruction, or right-click it
    and choose **Disassemble**. The **Disassembler** shows the function with
    its exported name, as `module+RVA`, and its **CFG**.
@@ -92,8 +94,9 @@ needed. The script checks that:
 - a `hw_write` breakpoint in log mode logs a hit whose instruction pointer lies
   in `CortexDemoApplyDamage`;
 - `symbols_module` places the hit in the program's module, and in the
-  `disasm` of the function the instruction ending at the trap address is a
-  `mov` to memory, the store that wrote health. `analysis_cfg` returns the
+  `disasm` of the function the instruction ending at the trap address writes
+  the health field (`+0x04`). Depending on the compiler this is a `mov`
+  store or a read-modify-write `sub` (seen with MSYS2 GCC on Windows). `analysis_cfg` returns the
   function's blocks;
 - a pointer path from the exported global (`+4`) resolves to the scanned
   address, and the named address and a knowledge record (status `observed`,
