@@ -86,6 +86,14 @@ bool InvestigationContextModel::SelectAddress(uint64_t address, const std::strin
     return true;
 }
 
+bool InvestigationContextModel::Observe(const std::string& statement, const json& data, const json& evidence,
+                                        uint64_t expectedGeneration, std::string* error) {
+    json body = {{"statement", statement}, {"kind", "observation"}, {"data", data}, {"evidence", evidence}};
+    if (expectedGeneration) body["expected_generation"] = expectedGeneration;
+    json result;
+    return Route("POST", "/context/observation", body, result, error);
+}
+
 std::string HexBytes(const uint8_t* data, size_t size);
 
 bool InvestigationContextModel::Share(const std::string& kind, const json& data, uint64_t expectedGeneration,

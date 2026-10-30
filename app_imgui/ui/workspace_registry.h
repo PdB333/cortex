@@ -140,7 +140,7 @@ public:
                 break;
             case WorkspacePreset::ReverseEngineering:
                 OpenMany({"re", "disassembly", "patches", "memory-browser", "tools", "modules", "project", "symbols",
-                          "structures", "pointermaps", "snapshots", "instrumentation", "runtime"});
+                          "structures", "pointermaps", "snapshots", "instrumentation", "runtime", "artifacts"});
                 break;
             case WorkspacePreset::Trace:
                 OpenMany({"disassembly", "debugger", "trace", "memory-browser", "watches"});
@@ -282,7 +282,7 @@ public:
                 DockMany(leftBottom, {"pointermaps", "snapshots", "modules"}, docked);
                 DockMany(center, {"re", "disassembly", "memory-browser", "tools"}, docked);
                 DockMany(rightTop, {"patches", "instrumentation"}, docked);
-                DockMany(rightBottom, {"runtime"}, docked);
+                DockMany(rightBottom, {"runtime", "artifacts"}, docked);
                 break;
             }
 

@@ -134,6 +134,7 @@ add_executable(cortex_imgui WIN32
     ui/overview_workspace.cpp
     ui/patches_workspace.cpp
     ui/project_workspace.cpp
+    ui/artifacts_workspace.cpp
     ui/symbols_workspace.cpp
     ui/structures_workspace.cpp
     ui/pointer_maps_workspace.cpp

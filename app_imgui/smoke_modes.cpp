@@ -13,6 +13,7 @@
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
 
+#include <filesystem>
 #include <fstream>
 
 namespace cortex::desktop {
@@ -277,7 +278,7 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
     "scripts", "input", "screenshots", "patches", "events", "trace", "tools",
-    "access-finder", "lua"
+    "access-finder", "lua", "artifacts"
 };
 
 
@@ -388,6 +389,31 @@ bool ExerciseEveryWorkspace(AppState& app, std::string& error) {
         }
     }
     return true;
+}
+
+// A real inspection through the Artifacts workspace: the suite's own
+// executable, which is a PE the providers must identify.
+bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) {
+        error = "module_path_failed";
+        return false;
+    }
+    executable.resize(length);
+    app.workspaces.CloseAll();
+    app.workspaces.Select("artifacts");
+    app.ui.commands.push_back("inspect_artifact " + std::filesystem::path(executable).u8string());
+    // Headless: the background runner is absent, so the inspection is inline.
+    if (!RenderGuiStable(app, error, true)) {
+        error = "artifacts_render:" + error;
+        return false;
+    }
+    if (app.ui.status.rfind("Inspected ", 0) != 0 || app.ui.status.find("(pe)") == std::string::npos) {
+        error = "artifacts_inspect:" + app.ui.status;
+        return false;
+    }
+    return RenderGuiStable(app, error, true);
 }
 
 bool ExerciseNavigationContract(AppState& app, std::string& error) {
@@ -1034,6 +1060,10 @@ int RunGuiWorkspaceSuite() {
     if (!ExerciseNavigationContract(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 5;
+    }
+    if (!ExerciseArtifactsWorkspace(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 6;
     }
 
     std::printf(

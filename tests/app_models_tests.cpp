@@ -568,6 +568,8 @@ nop 5
                 return context::api::SelectAddress(shared, desktop, body.dump()).body;
             if (method == "POST" && path == "/context/share")
                 return context::api::ShareState(shared, desktop, body.dump()).body;
+            if (method == "POST" && path == "/context/observation")
+                return context::api::AddObservation(shared, desktop, body.dump()).body;
             if (method == "GET" && path.rfind("/context?", 0) == 0) {
                 uint64_t expected = 0;
                 const auto at = path.find("expected_generation=");
@@ -653,6 +655,25 @@ nop 5
         check(!model.Share("debugger", InvestigationContextModel::DebuggerSummary("windows", {}, {}), 9000, &error) &&
                   error == "stale_target_generation",
               "debugger state of another process is refused");
+
+        // An artifact inspected in the Artifacts workspace, handed to agents.
+        const json artifact = {{"artifact", {{"name", "fixture.exe"}, {"sha256", std::string(64, 'a')}}}};
+        check(model.Observe("Inspected artifact fixture.exe", artifact,
+                            json::array({{{"source", "artifact"}, {"reference", "sha256:" + std::string(64, 'a')}}}), 9001,
+                            &error),
+              "desktop records an artifact observation");
+        check(transport.routes.back().path == "/context/observation" &&
+                  transport.routes.back().body.value("kind", std::string()) == "observation",
+              "artifact observation uses the observation route");
+        const json withArtifact = context::api::GetContext(shared, 100, 0, 9001, 0).body;
+        bool seen = false;
+        for (const auto& entry : withArtifact["data"]["entries"])
+            if (entry.value("statement", std::string()) == "Inspected artifact fixture.exe" &&
+                entry.value("provenance", json::object()).value("source", std::string()) == "desktop")
+                seen = true;
+        check(seen, "agents read the artifact observation with desktop provenance");
+        check(!model.Observe("stale", artifact, json::array(), 9000, &error) && error == "stale_target_generation",
+              "artifact observation for another process is refused");
 
         model.Reset();
         check(model.Entries().empty() && model.Pid() == 0, "context model reset");

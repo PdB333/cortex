@@ -51,6 +51,12 @@ public:
     bool SelectAddress(uint64_t address, const std::string& label, const std::string& note,
                        uint64_t expectedGeneration, std::string* error = nullptr);
 
+    // Records an observation the person makes from the desktop (for example
+    // an artifact they inspected). `evidence` holds {source, reference}
+    // objects. The record says what the person saw, never that it is true.
+    bool Observe(const std::string& statement, const nlohmann::json& data, const nlohmann::json& evidence,
+                 uint64_t expectedGeneration, std::string* error = nullptr);
+
     // Shares desktop-side state that the runtime cannot see by itself: the
     // value scanner's results or the external debugger's breakpoints.
     // `expectedGeneration` is the generation of the target the state was
