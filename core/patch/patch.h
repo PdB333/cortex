@@ -49,8 +49,19 @@ int Detour(uintptr_t address, uintptr_t target, int jmpSize, std::string& outErr
 bool CreateTrampoline(uintptr_t address, uintptr_t target, size_t minimumOverwrite,
                       TrampolineInfo& out, std::string& outError);
 
-// Restores the original bytes at a patch's address and removes it from the
-// registry. Returns false if `id` doesn't exist.
+// Why a revert was refused. A revert only writes the original bytes back
+// when doing so cannot corrupt the target: the patched bytes must still be
+// in place (not rewritten by the program, another tool or a reloaded
+// module), and no newer patch may cover any of them (revert that one first).
+enum class RevertResult { Reverted, UnknownPatch, TargetChanged, OverlapsNewerPatch, WriteFailed };
+const char* RevertResultName(RevertResult result);  // stable error code, "" for Reverted
+
+// Restores the original bytes and removes the patch. On any refusal the
+// target and the registry are left unchanged. `detail` names the newer
+// overlapping patch id or the reason the bytes did not match.
+RevertResult RevertChecked(int id, std::string* detail = nullptr);
+
+// RevertChecked(id) == Reverted.
 bool Revert(int id);
 
 std::vector<PatchInfo> List();

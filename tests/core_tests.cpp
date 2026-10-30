@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <cstring>
+#include <string>
 
 namespace {
 int g_failures = 0;
@@ -212,7 +213,59 @@ void TestTargetedTimeline() {
 }
 }
 
+// A revert writes the original bytes back only when that cannot corrupt
+// the target: the patched bytes must still be there and no newer patch may
+// cover them.
+void TestCheckedPatchRevert() {
+    auto* page = static_cast<uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    Expect(page != nullptr, "patch test page");
+    if (!page) return;
+    for (int i = 0; i < 32; ++i) page[i] = static_cast<uint8_t>(0x10 + i);
+    const auto address = reinterpret_cast<uintptr_t>(page);
+
+    // Normal apply and revert.
+    int id = patch::Apply(address, {0xAA, 0xBB}, "plain");
+    Expect(id > 0 && page[0] == 0xAA && page[1] == 0xBB, "patch applied");
+    Expect(patch::RevertChecked(id) == patch::RevertResult::Reverted && page[0] == 0x10 && page[1] == 0x11,
+           "unchanged patch reverts to the original bytes");
+    Expect(patch::RevertChecked(id) == patch::RevertResult::UnknownPatch, "a reverted patch is gone");
+
+    // Something else rewrote the patched bytes: refuse, change nothing.
+    id = patch::Apply(address + 4, {0xCC, 0xCC, 0xCC}, "rewritten");
+    page[5] = 0x77;
+    std::string detail;
+    Expect(patch::RevertChecked(id, &detail) == patch::RevertResult::TargetChanged && !detail.empty(),
+           "a revert over bytes changed since the patch is refused");
+    Expect(page[4] == 0xCC && page[5] == 0x77 && page[6] == 0xCC, "the refused revert wrote nothing");
+    Expect(!patch::Revert(id), "the legacy Revert reports the refusal");
+    bool listed = false;
+    for (const auto& info : patch::List()) listed = listed || info.id == id;
+    Expect(listed, "a refused revert keeps the patch registered");
+    page[5] = 0xCC;  // the program restored our bytes: now it can revert
+    Expect(patch::RevertChecked(id) == patch::RevertResult::Reverted && page[4] == 0x14 && page[6] == 0x16,
+           "revert succeeds once the patched bytes are back");
+
+    // Overlapping patches revert newest first.
+    const int older = patch::Apply(address + 8, {0x01, 0x02, 0x03, 0x04}, "older");
+    const int newer = patch::Apply(address + 10, {0xF0, 0xF1}, "newer");
+    Expect(patch::RevertChecked(older, &detail) == patch::RevertResult::OverlapsNewerPatch &&
+               detail == std::to_string(newer),
+           "an older patch under a newer one is not reverted first");
+    Expect(page[10] == 0xF0, "the refused overlapping revert wrote nothing");
+    Expect(patch::RevertChecked(newer) == patch::RevertResult::Reverted && page[10] == 0x03 && page[11] == 0x04,
+           "the newer patch restores the older patch's bytes");
+    Expect(patch::RevertChecked(older) == patch::RevertResult::Reverted && page[8] == 0x18 && page[11] == 0x1B,
+           "then the older one restores the original bytes");
+
+    // A patch whose memory is gone (module unloaded) cannot be reverted.
+    id = patch::Apply(address + 20, {0x90}, "unmapped");
+    VirtualFree(page, 0, MEM_RELEASE);
+    Expect(patch::RevertChecked(id) == patch::RevertResult::TargetChanged,
+           "a patch in memory that no longer exists is refused");
+}
+
 int main() {
+    TestCheckedPatchRevert();
     TestExact64BitScan();
     TestLargeRegionIsNotSkipped();
     TestGlobalAobScanIncludesPrivateMemory();
