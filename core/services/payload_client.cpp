@@ -384,6 +384,17 @@ bool PayloadClient::VerifyTarget(const target::TargetDescriptor& target, std::st
         SetError(error, "payload_target_mismatch:" + std::to_string(pid));
         return false;
     }
+    // Same PID, other process: the old target exited and the PID was reused
+    // by a process that also has a runtime. Runtimes older than this check
+    // report no generation and are accepted on the PID alone.
+    const auto generation = routeResult.find("generation");
+    if (generation != routeResult.end() && generation->is_number_unsigned()) {
+        const uint64_t runtimeGeneration = generation->get<uint64_t>();
+        if (!GenerationsCompatible(target.generation, runtimeGeneration)) {
+            SetError(error, "payload_target_generation_mismatch");
+            return false;
+        }
+    }
 
     std::lock_guard<std::mutex> lock(mutex_);
     verifiedProcessId_ = pid;
@@ -521,6 +532,7 @@ bool PayloadClient::RoundTrip(const json& message,
         {"message", message}
     };
     if (channel && *channel) envelope["channel"] = channel;
+    else if (desktopChannel_.load(std::memory_order_relaxed)) envelope["channel"] = "desktop";
     if (!transportProtocolVersion.empty())
         envelope["protocolVersion"] = transportProtocolVersion;
 
