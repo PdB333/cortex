@@ -24,7 +24,13 @@ Cortex 2.0, step 1 (audit and foundations) and the first delivery of step 2 (one
   - `agent.action_requested` / `agent.action_completed` / `agent.action_failed`, published for an agent's state-changing tools, with argument names only.
 
   `/ui/events` and `context_events` report `oldest_id`, `missed` and `gap`, so a consumer knows when events were evicted.
-- **Common result contract** (`api::response::Operation`): `status`, `error`, `cause`, `target`, `duration_ms`, `limits`, `data`, `evidence`, `permissions_required` and `rollback`. The new context routes use it.
+- **Desktop state shared with agents.** Each finished value scan (query, count, up to 256 results) and the external debugger's breakpoints, hit counters and paused threads reach `context_get` under `shared_state`, through a desktop-only route. The memory workspace has a switch to stop sharing scans.
+- **`breakpoint.hit` events** for the runtime and desktop debuggers, derived from hit counters when state is refreshed (never from the exception path).
+- **Common result contract** (`api::response::Operation`): `status`, `error`, `cause`, `target`, `duration_ms`, `limits`, `data`, `evidence`, `permissions_required` and `rollback`. The new context routes use it, and `scan_new`, `scan_next` and `debug_breakpoint_add` gain its fields without changing the ones they already returned.
+
+### Fixed
+
+- **A reused PID kept the previous process's state in the desktop.** The Memory, Project, RE and Trace workspaces compared target ids only, and a reused PID has the same id. They now compare id + generation. A value scan finishing after the target changed is discarded instead of shown for the new process; a pointer scan from a previous process is labelled so it gets rescanned.
 
 ### Security
 
@@ -40,6 +46,7 @@ Cortex 2.0, step 1 (audit and foundations) and the first delivery of step 2 (one
 
 - `cortex_session_manager_tests` checks that snapshots outlive a detach, and that reads stay consistent while another thread attaches, detaches and prunes. The Ubuntu contracts job also runs it under ThreadSanitizer.
 - New `cortex_settings_store_tests` (atomic replace, round trip, `.ini` key preservation) and `cortex_project_store_{backup,damaged,fresh,locked}` (damaged project recovery).
+- New `tests/context_isolation_e2e.py`: two injected targets on one `cortex.exe mcp`. It checks identity, no cross-talk, stale generations, detach/reattach, a target killed and agent action events. It runs in the GUI suite workflow for x64 and x86.
 - New `cortex_investigation_context_tests` (portable, also under ThreadSanitizer in CI), `cortex_events_tests`, and investigation-context checks in `cortex_app_models_tests` and `tests/native_mcp_stdio_e2e.ps1`.
 - New `cortex_baseline_bench` (scanner, pointer scanner, reads, Zydis) with a `--quick` CTest smoke. The GUI release job uploads a Windows run as the `cortex-baseline-windows-x64` artifact.
 

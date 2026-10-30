@@ -303,6 +303,21 @@ through the desktop's private channel (`POST /context/select`). That route is
 not in the MCP manifest, and it refuses any caller but the desktop. An agent
 can therefore read the person's selection but cannot fake one.
 
+**Desktop state reaches agents too.** The value scanner and the external
+debugger run in the desktop process, outside the runtime. The desktop
+shares their state through `POST /context/share`, which is desktop-only and
+not an MCP tool:
+
+- the latest scan: query, result count and up to 256 listed results with
+  their values as hex bytes. The memory workspace has a **Share results with
+  the investigation context** switch, on by default;
+- the debugger's breakpoints (with hit counters) and paused threads, at most
+  once a second when they change.
+
+`context_get` returns both under `shared_state`, with every address given its
+`module+RVA` location. A share is pinned to the generation of the process
+that produced it.
+
 **Provenance comes from the transport.** The pipe dispatcher labels each
 request `desktop` or `agent` from the authenticated envelope. Tool arguments
 cannot set it. An agent's records carry its MCP session id. Every entry has a
@@ -317,6 +332,11 @@ Neither is ever upgraded to a verified fact. Durable claims still belong in
 **Results use the common contract** (`core/api/response_contract.h`):
 `ok`, `status`, `error`, `cause`, `target {pid, generation}`, `duration_ms`,
 `limits`, `data`, `evidence`, `permissions_required` and `rollback`.
+`scan_new`, `scan_next` and `debug_breakpoint_add` carry the same fields
+through `response::Annotate`. Their own fields are unchanged; only missing
+contract fields are added. For example, `debug_breakpoint_add` returns
+`permissions_required: ["control"]` and a `rollback` naming
+`debug_breakpoint_delete`.
 
 **Process isolation.** Every context route accepts `expected_generation`. A
 request pinned to another process lifetime (a reused PID) is refused with
@@ -331,6 +351,13 @@ refuse a runtime whose generation differs from the target they attached to
 - `module.loaded` and `module.unloaded`, seen when the module list is
   refreshed (each context route), not at load time;
 - `context.address_selected` and `context.observation_added`;
+- `context.state_shared` when the desktop shares a scan or debugger state;
+- `breakpoint.hit` with `debugger` (`runtime` for the in-process VEH
+  debugger, `desktop` for the external one), `id`, `address`, `location`,
+  `hits` and `new_hits`. Counters are compared when the state is refreshed
+  (each context route, each desktop share), never from the exception path.
+  One event can therefore stand for several hits, and the first refresh is
+  the baseline;
 - `knowledge.updated` and `evidence.created`, carrying identifiers only;
 - `agent.action_requested`, `agent.action_completed` and
   `agent.action_failed` for an agent's state, control, mutate or
@@ -347,8 +374,14 @@ The desktop's Project workspace refreshes its **Knowledge** and
   `context_events` are reachable as steps of `capture_runtime_state`.
   Writing an observation needs `--tools all`, because semantic execution
   only runs state tools with a rollback contract.
-- No breakpoint-hit event is published from the debugger's exception path
-  (it must not allocate there); hits stay in `debug_breakpoint_log`.
+- Module and breakpoint events are observed at refresh time, not at the
+  moment they happen.
+- Long desktop operations that run in the background block target switching
+  until they finish. The value scan, which keeps the UI live, is bound to the
+  process it started on: a result that finishes after the target changed
+  (including a reused PID) is discarded. A pointer scan from a previous
+  process is kept, because its paths are module-relative, but it is labelled
+  so it gets rescanned.
 
 ## Server metadata
 

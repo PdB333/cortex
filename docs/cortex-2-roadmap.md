@@ -137,7 +137,7 @@ States:
 |---|---|---|
 | `SessionManager` | **fixed in step 1** | Was unsynchronized but shared by the frame loop, background tasks and the debugger backend; see §5.1 |
 | `OperationManager` (typed operation state, cancel, timeout) | functional | Used for runtime operations; not yet the single contract for UI + MCP results (step 2.5) |
-| Event bus | functional (step 2) | `core/events`: 2048-entry ring with a typed catalog (`events::types`). Context events carry pid and generation. `events::Read` and `/ui/events` / `context_events` report `oldest_id`, `missed` and `gap`. Not yet published: `breakpoint.hit` (step 2, open item 5) |
+| Event bus | functional (step 2) | `core/events`: 2048-entry ring with a typed catalog (`events::types`). Context events carry pid and generation. `events::Read` and `/ui/events` / `context_events` report `oldest_id`, `missed` and `gap`. `breakpoint.hit` is derived from hit counters at refresh time, never from the exception path |
 | Project persistence | functional, **hardened in step 1** | Atomic replace (`ReplaceFile`/`MoveFileEx` with write-through) and `.bak`; schema migration to v3. A damaged file is now quarantined (§5.3) |
 | Desktop settings / `cortex.ini` | **fixed in step 1** | Were rewritten in place with `trunc` (§5.2) |
 | Test-runner records | functional | tmp + `std::filesystem::rename` |
@@ -309,7 +309,7 @@ Each step lists:
 
 "Fixture" means `test_target/` (x86 and x64) unless stated otherwise.
 
-### Step 2: one engine for the UI, agents and CLI (first delivery done)
+### Step 2: one engine for the UI, agents and CLI (done)
 
 **Design decision.** The shared state lives **in the runtime**, inside the
 target. That is the only component the desktop and every `cortex.exe mcp`
@@ -330,33 +330,41 @@ outlive the process it describes.
 | 2.5 Result contract | `api::response::Operation` / `OperationResult` with `ok, status, error, cause, target, duration_ms, limits, data, evidence, permissions_required, rollback`. The context routes use it | context tests |
 | Agent actions visible to the person | `mcp_tools::RecordedDispatch` puts every primitive call (direct or semantic step) into the context history. An agent's state, control, mutate or native-call tool publishes `agent.action_*` with argument names only | runtime E2E on Windows (open) |
 
+**Completed in the second delivery:**
+
+| Item | Implementation | Test |
+|---|---|---|
+| 2.1 Desktop scan and debugger state shared | `POST /context/share` (desktop only, bounded: 256 rows, 64 KiB). The memory workspace shares each finished scan (switch, on by default). The frame loop shares breakpoints, hit counters and paused threads at most once a second when they change. They appear in `context_get` as `shared_state`, with `module+RVA` | context tests, app models |
+| 2.3 `breakpoint.hit` | `InvestigationContext::UpdateBreakpointHits`: counter deltas for the runtime's VEH breakpoints (each context route) and the desktop's external debugger (each share). Never published from the exception path. The first poll is the baseline; a breakpoint added later counts from zero | context tests |
+| 2.4 Desktop operations bound to their target | `ui::TargetKey` (id + generation) replaces id-only change detection in the Memory, Project, RE and Trace workspaces, so a reused PID resets them. A value scan finishing after the target changed is discarded; a pointer scan from a previous process is labelled for rescanning. Other long operations already block target switching while they run | GUI workspace suite; scan binding by code review |
+| 2.5 Contract in existing routes | `response::Annotate` adds `status, target, duration_ms, limits, evidence, permissions_required, rollback` to `scan_new`, `scan_next` and `debug_breakpoint_add`, without changing any field they already return | context tests (`Annotate`), MCP schema/authority suites |
+| Isolation E2E | `tests/context_isolation_e2e.py`: two injected targets on one `cortex.exe mcp`. It checks identity, no cross-talk, stale generations refused by the host and by the runtime, nothing recorded by a refused call, `agent.action_*` events without argument values, history provenance, detach/reattach, and one target killed. It runs in the GUI suite workflow for x64 and x86 | run here on live runtimes (Wine, x64) |
+
 **Validation against the step 2 criteria:**
 
-- *An address found in the UI is immediately readable by MCP.* This is shown
-  by `cortex_app_models_tests`, which runs the desktop model against the real
-  route semantics: the selection appears in `context_get` as `module+RVA`. A
-  live-target E2E is still to be written.
+- *An address found in the UI is immediately readable by MCP.*
+  `cortex_app_models_tests` drives the desktop model against the real route
+  semantics. The person's selection, scan results and debugger state are read
+  back as an agent reads them, with `module+RVA`.
 - *A discovery saved by the agent appears in the project open in Cortex.*
-  The Project **Knowledge** tab lists `project_knowledge_put` records. It
-  refreshes on `knowledge.updated` and `evidence.created`. Agent observations
-  appear in **Investigation context** with their session.
-- *Isolation across disconnect and reattach.* Generation checks are tested at
-  the unit level; the two-fixture E2E is still open.
+  The Project **Knowledge** tab lists `project_knowledge_put` records and
+  refreshes on `knowledge.updated` / `evidence.created`. Agent observations
+  appear in **Investigation context** with their session. On live runtimes,
+  `context_isolation_e2e.py` shows the observation in `context_get` with
+  agent provenance.
+- *Multi-process operations stay isolated, including across disconnect and
+  reattach.* `context_isolation_e2e.py` passes against two live runtimes.
 
-**Still open in step 2:**
+**Verification environment.** The E2E ran on live runtimes injected under
+Wine (x64). Windows CI runs it for x64 and x86 in the GUI suite workflow; it
+had not run there when this was written.
 
-1. Share desktop scan results and debugger state through the context. Today
-   only selections and observations are shared, and value-scanner state stays
-   in the desktop process.
-2. Bind desktop background operations to the target id+generation they
-   started on, and discard their result if the active target changed.
-3. Adopt the result contract in the scan and debugger models and in existing
-   routes, one at a time.
-4. Windows E2E on `cortex_test_target`: desktop selection → `context_get`
-   through `cortex.exe mcp`, then `context_observation_add` → desktop.
-   Include a two-target isolation check.
-5. A `breakpoint.hit` event. It cannot be published from the VEH or
-   debug-event path, which must not allocate, so it needs a drain thread.
+**Deliberately left as is:**
+
+- `context_observation_add` is not available from the compact profile:
+  semantic execution only runs state tools that have a rollback contract.
+- Older routes keep their own shapes plus the added contract fields; a
+  breaking migration needs a protocol version bump.
 
 ### Step 3: manual mode
 
