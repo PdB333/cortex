@@ -65,7 +65,8 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
         "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
         "  cortex analyze <directory>     Analyze a crash directory\n"
-        "  cortex symbolize [options]     Resolve PE symbols offline\n",
+        "  cortex symbolize [options]     Resolve PE symbols offline\n"
+        "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR)\n",
         out);
 }
 
@@ -109,6 +110,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
     if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
+    if (command == "inspect") return ForwardCli(CortexInspectMain, "cortex inspect", args, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
     if (command == "analyze" || command == "analyse") {

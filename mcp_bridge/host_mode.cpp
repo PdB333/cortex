@@ -26,6 +26,7 @@
 #include "target/module_provider.h"
 #include "target/session_manager.h"
 #include "../host/debugger/veh_debug_provider.h"
+#include "artifact_tools.h"
 #include "../host/debugger/windows_debug_provider.h"
 
 #include <nlohmann/json.hpp>
@@ -60,7 +61,7 @@ constexpr std::size_t kMaxStdioMessageBytes = 4u * 1024u * 1024u;
 constexpr std::size_t kMaxConcurrentRequests = 64;
 
 struct TargetSelector { std::optional<uint64_t> pid; std::string process; };
-struct Options { std::vector<TargetSelector> targets; std::string toolProfile = "compact", launchConfigPath, testResults; bool help = false; bool allowWrites = false; bool allowState = false; };
+struct Options { std::vector<TargetSelector> targets; std::vector<std::string> artifactRoots; std::string toolProfile = "compact", launchConfigPath, testResults; bool help = false; bool allowWrites = false; bool allowState = false; };
 
 struct TargetRuntime {
     TargetDescriptor target;
@@ -92,6 +93,8 @@ struct RunState {
     std::string runtimeDirectory, toolProfile;
     bool allowWrites = false;
     bool allowState = false;
+    std::vector<std::filesystem::path> artifactRoots;  // --artifact-root, canonical; empty = no file access
+    
     std::unique_ptr<cortex::launch::Manager> launcher;
     std::unique_ptr<cortex::test::Runner> tests;
 
@@ -126,7 +129,9 @@ void PrintUsage(std::ostream& stream) {
            << "state-changing calls (a call must still carry mutation_permission). Only the person who starts\n"
            << "the server can set it; the AI client cannot. Refused calls are logged to cortex_denied_mutations.jsonl.\n"
            << "--allow-state lets the agent save knowledge, notes and journals (Cortex's own records) without letting it\n"
-           << "change the target. --allow-writes includes it.\n";
+           << "change the target. --allow-writes includes it.\n"
+           << "--artifact-root <dir> (repeatable) lets the agent inspect files under <dir> with the read-only\n"
+           << "cortex_artifact_* tools. Without it, those tools refuse every path.\n";
 }
 
 bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
@@ -139,6 +144,7 @@ bool ParseOptions(int argc, char** argv, Options& options, std::string& error) {
         if (a=="--process"&&i+1<argc) { TargetSelector s;s.process=argv[++i]?argv[i]:""; if(s.process.empty()){error="--process requires a non-empty process name";return false;} options.targets.push_back(std::move(s)); continue; }
         if (a=="--tools"&&i+1<argc) { options.toolProfile=argv[++i]?argv[i]:""; if(options.toolProfile!="compact"&&options.toolProfile!="all"){error="--tools must be compact or all";return false;} continue; }
         if (a=="--launch-config"&&i+1<argc) { options.launchConfigPath=argv[++i]?argv[i]:""; if(options.launchConfigPath.empty()){error="--launch-config requires a JSON file";return false;} continue; }
+        if (a=="--artifact-root"&&i+1<argc) { std::string v=argv[++i]?argv[i]:""; if(v.empty()){error="--artifact-root requires a directory";return false;} options.artifactRoots.push_back(std::move(v)); continue; }
         if (a=="--test-results"&&i+1<argc) {options.testResults=argv[++i]?argv[i]:"";if(options.testResults.empty()){error="--test-results requires a directory";return false;}continue;}
         error="unknown or incomplete argument: "+a; return false;
     }
@@ -265,6 +271,7 @@ json LocalTools(bool requireTarget=false){json t=json::array({
 for (const auto& tool : CortexTestTools()) t.push_back(tool);
 const json selector={{"oneOf",json::array({{{"type","integer"}},{{"type","string"}}})},{"description","Attached target PID, id, or unique process name."}};
 for(size_t index:{size_t{2},size_t{4},size_t{5},size_t{8},size_t{9},size_t{10}}){auto&schema=t[index]["inputSchema"];if(!schema.contains("properties")||!schema["properties"].is_object())schema["properties"]=json::object();schema["properties"]["_cortex_target"]=selector;schema["properties"]["_cortex_generation"]={{"type","integer"},{"minimum",1},{"description","Optional process-lifetime generation from cortex_targets."}};if(requireTarget)schema["required"]=json::array({"_cortex_target"});}
+for(auto&tool:mcp_bridge::artifacts::ToolDefinitions())t.push_back(std::move(tool));
 return t;}
 
 void PatchHandshake(json&r,size_t count){if(!r.is_object()||!r.contains("result")||!r["result"].is_object())return;auto&x=r["result"];if(!x.contains("capabilities")||!x["capabilities"].is_object())x["capabilities"]=json::object();x["capabilities"]["tools"]["listChanged"]=true;if(x.contains("instructions")&&x["instructions"].is_string()){auto s=x["instructions"].get<std::string>();s+=CortexAgentGuide();s+=" Dynamic targets: cortex_processes/cortex_attach/cortex_detach/cortex_targets. Use _cortex_generation to protect long AI workflows against PID reuse.";if(count==0)s+=" No target is attached yet.";x["instructions"]=s;}}
@@ -1390,6 +1397,7 @@ if(name=="cortex_launch"||name=="cortex_restart"||name=="cortex_stop"){
     response=LocalToolResponse(MessageId(m),result,!result.value("ok",false));return true;
 }
 if(name=="cortex_targets"){response=LocalToolResponse(MessageId(m),TargetList(RuntimeSnapshot(s)));return true;}
+if(mcp_bridge::artifacts::IsTool(name)){json r=mcp_bridge::artifacts::Handle(name,a,s->artifactRoots);const bool failed=!r.value("ok",false);response=LocalToolResponse(MessageId(m),std::move(r),failed);return true;}
 if(name=="cortex_processes"){std::string c,x;auto r=ProcessList(s,a,c,x);response=c.empty()?LocalToolResponse(MessageId(m),r):LocalToolResponse(MessageId(m),LocalToolFailure(c,x),true);return true;}
 if(name=="cortex_operations"){json rows=json::array();for(const auto&o:s->operations.List(static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(a,"limit",128),1,512))))rows.push_back(OperationJson(o));response=LocalToolResponse(MessageId(m),{{"ok",true},{"count",rows.size()},{"operations",rows}});return true;}
 if(name=="cortex_operation_cancel"){uint64_t op=UnsignedArg(a,"operation_id");std::string e;if(!op||!s->operations.RequestCancel(op,&e)){response=LocalToolResponse(MessageId(m),LocalToolFailure(e.empty()?"invalid_operation_id":e,e.empty()?"operation_id must identify a running operation":e),true);return true;}json id;{std::lock_guard<std::mutex>l(s->operationRouteMutex);auto it=s->operationRequestIds.find(op);if(it!=s->operationRequestIds.end())id=it->second;}if(!id.is_null())BroadcastCancel(s,id);RecordEvent(s,"operation.cancel_requested",nullptr,{{"operation_id",op}});response=LocalToolResponse(MessageId(m),{{"ok",true},{"operation_id",op},{"state","cancel_requested"}});return true;}
@@ -1418,7 +1426,7 @@ void Watchdog(const std::shared_ptr<RunState>&s){while(s->watchdogRunning.load()
 
 } // namespace
 
-int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;state->allowWrites=options.allowWrites;state->allowState=options.allowState;g_allowState=options.allowState;g_runState=state;cortex::security::SetDenialDirectory(runtimeDirectory);{    std::vector<cortex::launch::Profile> profiles;    if(!options.launchConfigPath.empty()){        try{            std::ifstream file(std::filesystem::u8path(options.launchConfigPath));            if(!file){std::cerr<<"cortex mcp: could not read --launch-config\n";return 2;}            const json config=json::parse(file);            if(!cortex::launch::ParseProfiles(config,profiles,error)){                std::cerr<<"cortex mcp: "<<error<<"\n";return 2;            }        }catch(const std::exception& e){std::cerr<<"cortex mcp: invalid --launch-config: "<<e.what()<<"\n";return 2;}    }    state->launcher=std::make_unique<cortex::launch::Manager>(std::move(profiles));}{
+int RunFullMcpHost(int argc,char**argv,const std::string&runtimeDirectory){Options options;std::string error;if(!ParseOptions(argc,argv,options,error)){std::cerr<<"cortex mcp: "<<error<<'\n';PrintUsage(std::cerr);return 2;}if(options.help){PrintUsage(std::cout);return 0;}cortex::target::Catalog catalog;if(!catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>())){std::cerr<<"cortex mcp: local backend unavailable\n";return 3;}auto state=std::make_shared<RunState>();state->catalog=&catalog;state->runtimeDirectory=runtimeDirectory;state->toolProfile=options.toolProfile;state->allowWrites=options.allowWrites;state->allowState=options.allowState;{std::vector<std::string> problems;state->artifactRoots=mcp_bridge::artifacts::CanonicalRoots(options.artifactRoots,problems);if(!problems.empty()){for(const auto&p:problems)std::cerr<<"cortex mcp: "<<p<<'\n';return 2;}}g_allowState=options.allowState;g_runState=state;cortex::security::SetDenialDirectory(runtimeDirectory);{    std::vector<cortex::launch::Profile> profiles;    if(!options.launchConfigPath.empty()){        try{            std::ifstream file(std::filesystem::u8path(options.launchConfigPath));            if(!file){std::cerr<<"cortex mcp: could not read --launch-config\n";return 2;}            const json config=json::parse(file);            if(!cortex::launch::ParseProfiles(config,profiles,error)){                std::cerr<<"cortex mcp: "<<error<<"\n";return 2;            }        }catch(const std::exception& e){std::cerr<<"cortex mcp: invalid --launch-config: "<<e.what()<<"\n";return 2;}    }    state->launcher=std::make_unique<cortex::launch::Manager>(std::move(profiles));}{
     const auto root=options.testResults.empty() ? cortex::services::UserDataDirectory(std::filesystem::u8path(runtimeDirectory))/"tests"
         : std::filesystem::absolute(std::filesystem::u8path(options.testResults));
     state->tests=std::make_unique<cortex::test::Runner>(root,std::to_string(GetCurrentProcessId()));

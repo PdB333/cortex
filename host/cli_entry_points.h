@@ -10,3 +10,4 @@ int CortexMcpMain(int argc, char** argv);        // mcp_bridge/main.cpp
 int CortexDiagnoseMain(int argc, char** argv);   // tools/diagnostics_host/main.cpp
 int CortexSymbolizeMain(int argc, char** argv);  // tools/symbolize_main.cpp
 int CortexProbeMain(int argc, char** argv);      // host/probe_cli.cpp
+int CortexInspectMain(int argc, char** argv);    // tools/inspect_main.cpp

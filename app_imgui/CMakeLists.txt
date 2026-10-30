@@ -167,6 +167,11 @@ add_executable(cortex_imgui WIN32
     ../mcp_bridge/host_mode.cpp
     ../tools/diagnostics_host/main.cpp
     ../tools/symbolize_main.cpp
+    ../tools/inspect_main.cpp
+    ../core/artifacts/artifact.cpp
+    ../core/artifacts/pe_provider.cpp
+    ../core/artifacts/asar_provider.cpp
+    ../core/artifacts/registry_default.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

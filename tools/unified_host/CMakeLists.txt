@@ -56,6 +56,10 @@ add_executable(cortex_host
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
+    ${CORTEX_ROOT}/core/artifacts/artifact.cpp
+    ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp
