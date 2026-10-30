@@ -140,6 +140,29 @@ void MemoryBrowserWorkspace::Refresh(UiContext& context, bool force) {
     }
     bytes_ = std::move(fresh);
     pageValid_ = std::move(valid);
+    UpdateCaptureDiff();
+}
+
+void MemoryBrowserWorkspace::Capture(UiContext& context) {
+    Refresh(context, true);
+    capture_ = bytes_;
+    captureValid_ = pageValid_;
+    captureBase_ = base_;
+    compareCapture_ = true;
+    UpdateCaptureDiff();
+    context.status = "Captured " + Hex(base_) + " - " + Hex(base_ + kWindow - 1) +
+                     ": changes are highlighted until the next capture";
+}
+
+void MemoryBrowserWorkspace::UpdateCaptureDiff() {
+    captureRuns_.clear();
+    captureChanged_.clear();
+    captureTruncated_ = false;
+    if (!compareCapture_ || capture_.empty() || captureBase_ != base_ || bytes_.size() != capture_.size()) return;
+    captureRuns_ = services::DiffRuns(capture_, bytes_, captureValid_, pageValid_, kPage, 4096, &captureTruncated_);
+    captureChanged_.assign(kWindow, 0);
+    for (const auto& run : captureRuns_)
+        for (uint64_t i = 0; i < run.length; ++i) captureChanged_[run.offset + i] = 1;
 }
 
 bool MemoryBrowserWorkspace::Readable(uint64_t address, size_t size) const {
@@ -318,6 +341,38 @@ void MemoryBrowserWorkspace::DrawToolbar(UiContext& context) {
         pendingNibble_ = -1;
         if (hasSelection_) selected_ -= selected_ % CellSize();
     }
+    FlowSameLine(ButtonWidth("Capture"));
+    if (ImGui::Button("Capture")) Capture(context);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Keep a copy of this 64 KB window; every byte that differs from it stays highlighted.");
+    if (!capture_.empty()) {
+        FlowSameLine(CheckboxWidth("Compare with capture"));
+        if (ImGui::Checkbox("Compare with capture", &compareCapture_)) UpdateCaptureDiff();
+        if (compareCapture_) {
+            if (captureBase_ != base_) {
+                FlowSameLine(ButtonWidth("Back to capture"));
+                if (ImGui::Button("Back to capture")) GoTo(captureBase_ + kWindow / 2, false);
+            } else {
+                FlowSameLine(Px(240));
+                ImGui::TextDisabled("%llu byte(s) in %zu run(s) changed%s",
+                                    static_cast<unsigned long long>(services::ChangedBytes(captureRuns_)),
+                                    captureRuns_.size(), captureTruncated_ ? " (first 4096 runs)" : "");
+                FlowSameLine(ButtonWidth("Next change"));
+                ImGui::BeginDisabled(captureRuns_.empty());
+                if (ImGui::Button("Next change")) {
+                    const uint64_t from = hasSelection_ && selected_ >= base_ ? selected_ - base_ : 0;
+                    const size_t next = services::NextRun(captureRuns_, from);
+                    if (next < captureRuns_.size()) {
+                        selected_ = base_ + captureRuns_[next].offset;
+                        hasSelection_ = true;
+                        scrollToSelection_ = true;
+                        std::snprintf(address_, sizeof(address_), "%s", Hex(selected_).c_str());
+                    }
+                }
+                ImGui::EndDisabled();
+            }
+        }
+    }
     FlowSameLine(CheckboxWidth("Live") + Px(90));
     ImGui::Checkbox("Live", &liveRefresh_);
     ImGui::SameLine();
@@ -424,11 +479,16 @@ void MemoryBrowserWorkspace::DrawHex(UiContext& context, float width, float heig
                 if (changedAt_.size() == kWindow)
                     for (size_t i = 0; i < cell; ++i)
                         changed |= now - changedAt_[address - base_ + i] < std::chrono::milliseconds(1200);
+                bool sinceCapture = false;
+                if (captureChanged_.size() == kWindow)
+                    for (size_t i = 0; i < cell && address - base_ + i < kWindow; ++i)
+                        sinceCapture |= captureChanged_[address - base_ + i] != 0;
                 const bool readable = Readable(address, cell);
                 const bool selected = hasSelection_ && selected_ >= address && selected_ < address + cell;
                 ImGui::PushID(static_cast<int>(c));
                 if (!readable) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                 else if (changed) ImGui::PushStyleColor(ImGuiCol_Text, ChangedValueColor());
+                else if (sinceCapture) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.62f, 0.25f, 1.0f));
                 const std::string shown = selected && pendingNibble_ >= 0
                     ? std::string(1, "0123456789ABCDEF"[pendingNibble_]) + "_" : text;
                 if (ImGui::Selectable(shown.c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick,
@@ -446,7 +506,7 @@ void MemoryBrowserWorkspace::DrawHex(UiContext& context, float width, float heig
                         openEdit_ = true;
                     }
                 }
-                if (!readable || changed) ImGui::PopStyleColor();
+                if (!readable || changed || sinceCapture) ImGui::PopStyleColor();
                 if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
                     selected_ = address;
                     hasSelection_ = true;
@@ -638,8 +698,13 @@ void MemoryBrowserWorkspace::Draw(UiContext& context) {
         HintText("Select a process to browse memory.");
         return;
     }
-    if (session->Target().id != targetId_) {
-        targetId_ = session->Target().id;
+    if (TargetKey(session->Target()) != targetId_) {
+        targetId_ = TargetKey(session->Target());
+        capture_.clear();
+        captureValid_.clear();
+        captureRuns_.clear();
+        captureChanged_.clear();
+        compareCapture_ = false;
         hasSelection_ = false;
         regions_.clear();
         modules_.clear();

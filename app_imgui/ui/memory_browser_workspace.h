@@ -1,6 +1,7 @@
 #pragma once
 
 #include "workspace.h"
+#include "services/byte_diff.h"
 #include "services/value_scanner.h"
 #include "target/module_provider.h"
 #include "target/session.h"
@@ -80,6 +81,19 @@ private:
     uint64_t editAddress_ = 0;
     char editValue_[256] = "";
     std::string findInfo_;
+
+    // A capture of the window to compare later states with: unlike the
+    // 1.2 s change flash, its differences stay highlighted until a new
+    // capture, so a before/after an action can be read at leisure.
+    void Capture(UiContext& context);
+    void UpdateCaptureDiff();
+    std::vector<uint8_t> capture_;
+    std::vector<uint8_t> captureValid_;
+    uint64_t captureBase_ = 0;
+    bool compareCapture_ = false;
+    std::vector<services::ByteRun> captureRuns_;
+    std::vector<uint8_t> captureChanged_;  // one flag per window byte
+    bool captureTruncated_ = false;
 };
 
 } // namespace cortex::ui

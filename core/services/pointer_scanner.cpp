@@ -335,6 +335,55 @@ size_t PointerScanner::Rescan(const target::SessionPtr& session, PointerScanResu
     return result.paths.size();
 }
 
+PointerValidationSummary PointerScanner::Validate(const target::SessionPtr& session, PointerScanResult& result,
+                                                 uint64_t expectedTarget,
+                                                 const std::vector<PointerModule>& currentModules,
+                                                 uint64_t generation) {
+    PointerValidationSummary summary;
+    for (auto& path : result.paths) {
+        uint64_t address = 0;
+        const bool matched = Resolve(session, result, path, currentModules, address) && address == expectedTarget;
+        auto same = std::find_if(path.checks.begin(), path.checks.end(), [generation](const PointerPathCheck& check) {
+            return generation != 0 && check.generation == generation;
+        });
+        if (same != path.checks.end()) path.checks.erase(same);
+        path.checks.push_back({generation, matched});
+        if (path.checks.size() > kMaxPathChecks)
+            path.checks.erase(path.checks.begin(), path.checks.end() - static_cast<std::ptrdiff_t>(kMaxPathChecks));
+        switch (Status(result, path)) {
+            case PointerPathStatus::Stable: ++summary.stable; break;
+            case PointerPathStatus::Candidate: ++summary.candidate; break;
+            case PointerPathStatus::Invalidated: ++summary.invalidated; break;
+        }
+    }
+    return summary;
+}
+
+PointerPathStatus PointerScanner::Status(const PointerScanResult& result, const PointerPath& path) {
+    // Distinct, known processes the path led to the target in: the scan's
+    // (it found the path) and each check's. A generation of 0 cannot prove a
+    // process differs from another, so it never counts; a scan of unknown
+    // generation therefore needs two checks in two known processes.
+    std::vector<uint64_t> confirmed;
+    if (result.scanGeneration) confirmed.push_back(result.scanGeneration);
+    for (const auto& check : path.checks) {
+        if (!check.matched) return PointerPathStatus::Invalidated;
+        if (check.generation != 0 &&
+            std::find(confirmed.begin(), confirmed.end(), check.generation) == confirmed.end())
+            confirmed.push_back(check.generation);
+    }
+    return confirmed.size() >= 2 ? PointerPathStatus::Stable : PointerPathStatus::Candidate;
+}
+
+const char* PointerScanner::StatusName(PointerPathStatus status) {
+    switch (status) {
+        case PointerPathStatus::Stable: return "stable";
+        case PointerPathStatus::Invalidated: return "invalidated";
+        case PointerPathStatus::Candidate: break;
+    }
+    return "candidate";
+}
+
 std::string PointerScanner::Format(const PointerScanResult& result, const PointerPath& path) {
     char buffer[40] = {};
     std::string text = path.module < result.modules.size() ? result.modules[path.module].name : std::string("?");
@@ -351,15 +400,22 @@ bool PointerScanner::Save(const std::string& file, const PointerScanResult& resu
     try {
         json document;
         document["format"] = "cortex-pointer-scan";
-        document["version"] = 1;
+        document["version"] = 2;  // v2: scan_generation and per-path checks
+        document["scan_generation"] = result.scanGeneration;
         document["target"] = result.target;
         document["pointer_size"] = result.pointerSize;
         document["modules"] = json::array();
         for (const auto& module : result.modules)
             document["modules"].push_back({{"name", module.name}, {"base", module.base}, {"size", module.size}});
         document["paths"] = json::array();
-        for (const auto& path : result.paths)
-            document["paths"].push_back({{"m", path.module}, {"b", path.baseOffset}, {"o", path.offsets}});
+        for (const auto& path : result.paths) {
+            json row = {{"m", path.module}, {"b", path.baseOffset}, {"o", path.offsets}};
+            if (!path.checks.empty()) {
+                row["c"] = json::array();
+                for (const auto& check : path.checks) row["c"].push_back({check.generation, check.matched});
+            }
+            document["paths"].push_back(std::move(row));
+        }
         std::ofstream output(std::filesystem::u8path(file), std::ios::trunc);
         if (!output) {
             if (error) *error = "Cannot write " + file;
@@ -388,6 +444,7 @@ bool PointerScanner::Load(const std::string& file, PointerScanResult& result, st
         PointerScanResult loaded;
         loaded.target = document.value("target", uint64_t{0});
         loaded.pointerSize = document.value("pointer_size", 8u);
+        loaded.scanGeneration = document.value("scan_generation", uint64_t{0});
         for (const auto& module : document.at("modules"))
             loaded.modules.push_back({module.value("name", std::string()), module.value("base", uint64_t{0}),
                                       module.value("size", uint64_t{0})});
@@ -396,6 +453,13 @@ bool PointerScanner::Load(const std::string& file, PointerScanResult& result, st
             path.module = entry.value("m", 0u);
             path.baseOffset = entry.value("b", uint64_t{0});
             path.offsets = entry.value("o", std::vector<uint32_t>());
+            for (const auto& check : entry.value("c", json::array())) {
+                if (!check.is_array() || check.size() != 2 || !check[0].is_number_unsigned() || !check[1].is_boolean())
+                    continue;
+                path.checks.push_back({check[0].get<uint64_t>(), check[1].get<bool>()});
+            }
+            if (path.checks.size() > kMaxPathChecks)
+                path.checks.erase(path.checks.begin(), path.checks.end() - static_cast<std::ptrdiff_t>(kMaxPathChecks));
             if (path.module < loaded.modules.size() && !path.offsets.empty()) loaded.paths.push_back(std::move(path));
         }
         result = std::move(loaded);
