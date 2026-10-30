@@ -402,32 +402,90 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
 - **A "Find what writes" shortcut directly in the scan result row.** The
   shared address menu is already one right-click away from every result; no
   new code path was needed.
-### Step 4: static analysis
+### Step 4: static analysis on an artifact-provider architecture
 
-- **Reuse:** Zydis, `analysis::*`, `mcp_bridge/pe_unwind.h`,
-  `test_file_version.h` (SHA-256), symbols.
-- **Gaps:**
-  - an offline PE model (file, not image);
-  - a function list from `.pdata`, exports and symbols before heuristics;
-  - an xref index;
-  - an interactive CFG with trace coverage;
-  - per-instruction comments and renames;
-  - pseudocode (provider-backed).
-- **Tasks:**
-  1. `core/services/pe_file.*`, a portable, bounds-checked parser over bytes:
-     headers, sections, imports, exports, relocations, debug directory
-     (CodeView GUID/age), TLS, exception directory and SHA-256. It is
-     fuzz-tested and kept separate from the loaded-image view.
-  2. A function catalog with provenance per entry (`pdata`, `export`, `symbol`,
-     `call_target`, `heuristic`), never presented as certain.
-  3. An xref index built in the background with `OperationManager` progress.
-  4. A CFG view with block coverage from traces, computed off the render thread.
-  5. An annotation model keyed by `module+RVA` + binary hash.
-  6. A pseudocode view interface, filled in step 8.
-- **Validation:** a PE fixture with known imports, exports, functions and
-  relocations (built in CI from `test_target` with symbols); golden JSON.
+Extended for multi-runtime support (§8). The offline PE model planned here
+becomes the first provider of a general **artifact provider** system rather
+than a one-off parser. That way .NET, JavaScript, Electron and every later
+runtime plug into the same detection, identity, evidence, UI and MCP path.
+
+- **Reuse:**
+  - Zydis and `analysis::*` (CFG and xrefs on bytes);
+  - `mcp_bridge/pe_unwind.h` (`.pdata`);
+  - `test_file_version.h` (SHA-256);
+  - symbols;
+  - the investigation context and knowledge store (step 2/5);
+  - the launch-profile pattern (operator-owned configuration outside MCP)
+    for file roots.
+- **4a. Provider foundation and native PE:**
+  1. `core/artifacts/`: an `ArtifactProvider` interface (detect, parse,
+     list children, read child) and a registry. Every result carries the
+     artifact identity (path, size, SHA-256, format, provider and version)
+     and per-capability status (`static`, `decompile`, `live`). Each
+     capability is separately `validated` or `experimental` against a named
+     fixture.
+  2. An offline PE provider over file bytes: headers, sections, imports,
+     exports, relocations, debug directory (CodeView GUID/age, PDB path),
+     TLS, exception directory and the CLR header. It is bounds-checked and
+     fuzz-tested, and kept separate from the loaded-image view.
+  3. Container providers, so nested artifacts are reached in one walk:
+     ZIP (JAR, APK, NuGet, wheels) and ASAR.
+  4. Access:
+     - CLI `cortex.exe inspect <file> [--json]`;
+     - MCP host tools `cortex_artifact_inspect` / `cortex_artifact_children` /
+       `cortex_artifact_read`, read-only and limited to the roots the
+       operator passes with `--artifact-root`. An agent cannot widen them;
+     - desktop: an **Artifacts** workspace.
+- **4b. JavaScript/TypeScript and Electron, static:**
+  - a JS/TS tokenizer that knows strings, templates, regexes and comments;
+  - extraction of ES module `import`/`export`, CommonJS `require`, and
+    dynamic `import()` with literal specifiers, plus a module graph;
+  - detection of minified and bundled code (webpack/esbuild/rollup runtime
+    signatures);
+  - source maps: inline or `sourceMappingURL`, VLQ decoding, and mapping back
+    to original files;
+  - Electron: the ASAR provider (header, file table, unpacked entries,
+    integrity hash when present), `package.json` `main`, `BrowserWindow`
+    `preload` and `webPreferences` extraction, and the IPC channels named in
+    `ipcMain`/`ipcRenderer`/`contextBridge` calls. A static channel list is
+    labelled as such, never as observed traffic.
+- **4c. .NET, static:**
+  - CLR header, metadata root and streams (`#~`, `#Strings`, `#US`, `#GUID`,
+    `#Blob`);
+  - tables `Module`, `TypeRef`, `TypeDef`, `Field`, `MethodDef`, `Param`,
+    `MemberRef`, `AssemblyRef`, `Assembly` and `ManifestResource`;
+  - method bodies (tiny and fat headers) and a CIL disassembler (opcode
+    table, operand tokens resolved against the tables);
+  - assembly references graph.
+- **4d. Native static analysis as planned before:**
+  - a function catalog with per-entry provenance (`pdata`, `export`,
+    `symbol`, `call_target`, `heuristic`);
+  - an xref index built in the background with `OperationManager` progress;
+  - a CFG view with block coverage from traces, computed off the render
+    thread;
+  - annotations keyed by artifact SHA-256 + `module+RVA` (or + metadata token
+    for .NET, + source location for JS);
+  - a pseudocode view interface, filled by providers in step 8.
+- **Validation:** golden-JSON fixtures, built or committed in the repo:
+  - the test target with symbols (PE);
+  - a small .NET assembly compiled in CI (`dotnet build`, C# with known
+    types, methods and IL);
+  - a JS project with ESM, CJS, a bundle and a source map;
+  - an ASAR packed by `@electron/asar` in CI;
+  - fuzzing of every binary parser.
 
 ### Step 5: evidence and knowledge
+
+- **Multi-runtime addition:**
+  - evidence subjects become artifact-aware: SHA-256 + format + location,
+    where the location is `module+RVA`, a .NET metadata token, a JS
+    file:line:column through its source map, a JVM class/method or a Wasm
+    function index;
+  - typed cross-runtime relations, for example
+    `js_function -calls-> native_export`,
+    `il2cpp_method -compiled_to-> module+RVA` and
+    `ipc_channel -handled_by-> js_function`. Each keeps its provenance and
+    its evidence class (static, decompiled or observed).
 
 - **Reuse:**
   - knowledge records (status, revisions, evidence, typed relations);
@@ -449,6 +507,17 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
 
 ### Step 6: investigation orchestrator
 
+- **Multi-runtime addition:** cross-runtime workflows over the same
+  journal, for example:
+  - "Electron IPC to native addon": the renderer call, the main-process
+    handler, then the `.node` PE export, then a breakpoint;
+  - ".NET method to JIT code": the metadata token, the runtime method
+    address, then a native trace;
+  - "IL2CPP method to native": `global-metadata.dat` method, then its RVA in
+    `GameAssembly.dll`, then a breakpoint.
+
+  Each hop records which capability produced it.
+
 - **Reuse:**
   - the `cortex_test_step_*` journals, which already implement the
     plan → control → action → report loop with revisions and human approval;
@@ -464,6 +533,17 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
 
 ### Step 7: AI investigation workspace
 
+- **Multi-runtime addition:**
+  - the Artifacts workspace (4a) gains per-format views: module graph and
+    source-mapped code for JS, the ASAR tree and IPC list for Electron, a
+    type/method tree with CIL and decompiled C# for .NET, classes for the
+    JVM, functions and imports for Wasm;
+  - a process tree for multi-process targets (Electron
+    main/renderer/GPU/utility).
+
+  Everything is reachable from the same address/selection menus and shared
+  with agents through the investigation context.
+
 - **Reuse:** AI Activity model, workspace registry, address context menu,
   background tasks.
 - **Gap:**
@@ -474,6 +554,25 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
 - **Rule:** no API key in Cortex; the AI side is any MCP client.
 
 ### Step 8: Ghidra and the `AnalysisProvider` interface
+
+- **Multi-runtime addition (external engines, all optional, invoked as
+  processes, never linked):**
+  - **ILSpy** (`ilspycmd`, MIT) for C# decompilation;
+  - **Vineflower** (Apache-2.0) or **CFR** (MIT) for Java;
+  - **Ghidra** for native code, and for IL2CPP correlation helpers.
+
+  Live-runtime providers:
+  - **CDP** (Chrome DevTools Protocol, WebSocket) for Node.js and Electron
+    main/renderer/preload: scripts, breakpoints, console, and the IPC
+    observed through `Runtime.evaluate`-free hooks set with `Debugger`
+    breakpoints only;
+  - **.NET live**: a CLR-aware provider. First it reads managed state from
+    dumps and live processes through the CLR's data access layer; managed
+    breakpoints come after that is validated;
+  - **JDWP** for the JVM;
+  - **DAP/debugpy** for Python.
+
+  Each provider declares and is validated per capability.
 
 - **Reuse:** the `ghidra_export`/`ghidra_import_symbols` routes and the existing
   Jython script.
@@ -495,6 +594,13 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
 
 ### Step 9: quality
 
+- **Multi-runtime addition:**
+  - fuzz every new parser (PE, CLR metadata, ZIP, ASAR, source maps, class
+    files, Wasm, PyInstaller CArchive, `global-metadata.dat`);
+  - an E2E per live provider against an owned fixture (a Node/Electron app
+    launched through a launch profile with `--inspect`/`--remote-debugging-port`,
+    a .NET console app, a JVM app with JDWP, a Python app with debugpy).
+
 - **Tasks:**
   - move the ad hoc `contracts.yml` builds into CMake/CTest;
   - fuzz the PE parser and the JSON loaders;
@@ -511,7 +617,92 @@ Wine for **x64 and x86**, twice in a row (rerun-safe through
   `.github/` contains workflows only.
 - A release only after explicit approval.
 
-## 7. Risks and open questions
+## 8. Multi-runtime support (added requirement)
+
+Cortex must analyze more than native Windows C/C++ binaries. This section
+places that work in the remaining steps; completed steps are not reopened.
+What they built is reused:
+- the investigation context and caller provenance (step 2) carry any
+  runtime's selections and observations;
+- the evidence/knowledge store and result contract (steps 2 and 5) are
+  runtime-neutral;
+- the launch profiles (operator-owned) are how a live runtime is started
+  with its debug interface.
+
+### 8.1 Principles
+
+- **One provider system, not separate tools.** Artifact providers handle
+  static work on files; target backends and debug providers handle live
+  processes (the existing `target::Backend` / `DebugProvider` shapes,
+  extended). The GUI, CLI and MCP reach all of them through the same
+  registry.
+- **Three capabilities, validated separately.** Static parsing, decompilation
+  and live debugging are separate capabilities, each `validated` only against
+  a named fixture in CI. A provider that parses .NET metadata does not
+  thereby claim C# decompilation or managed debugging.
+- **The native engine stays first-class.** The memory scanner, debugger and
+  runtime injection are unchanged; managed and scripting providers sit
+  beside them. Native correlation (a JS native addon, a JIT-compiled method,
+  IL2CPP code) always ends in the native engine's `module+RVA`.
+- **Security unchanged.**
+  - Every file and process response is untrusted data: parsers are
+    bounds-checked and fuzzed.
+  - MCP file access is limited to operator-given roots.
+  - Live debug interfaces are reached only on localhost, for processes the
+    operator started through a launch profile or explicitly attached, and
+    only with the existing write authority for anything that changes the
+    target.
+  - No bypass of protections. If an Electron app disables inspection with
+    its fuses, or a .NET app is obfuscated or signed against tampering,
+    Cortex reports it and does not circumvent it.
+
+### 8.2 Order and placement
+
+| Priority | Technology | Static (step 4) | Decompile (step 8) | Live (step 8, E2E step 9) |
+|---|---|---|---|---|
+| 1 | **JavaScript / TypeScript** | Tokenizer, ESM/CJS imports and exports, module graph, bundle/minifier detection, source maps (4b) | Source-map recovery of original files; no decompiler needed | CDP for Node.js: scripts, breakpoints, call frames, console |
+| 1 | **Electron** | ASAR provider, `package.json` main, preload and `webPreferences`, static IPC channel list (4b) | as JS | CDP for main/renderer/preload, the process tree, IPC observed via breakpoints on `ipcMain`/`ipcRenderer` handlers, native addon (`.node` = PE) correlation to the native engine |
+| 1 | **.NET / C#** | CLR metadata tables, CIL disassembly, assembly graph (4c) | ILSpy (`ilspycmd`) provider, mapped back to metadata tokens | Managed state read from dumps and live processes first; managed breakpoints after that is validated; JIT address to native engine correlation |
+| 2 | **Python** | `.py` imports/defs, `.pyc` header and marshal reading, PyInstaller CArchive/PYZ extraction, dependency list | Bytecode disassembly (`dis`-equivalent for supported versions); source decompilers only where a licensed, maintained one exists | DAP through debugpy for processes started with it |
+| 2 | **Unity / IL2CPP** | UnityFS bundle headers and asset listing, `global-metadata.dat` (types, methods, strings), managed assemblies through the .NET provider | .NET provider for Mono builds | IL2CPP method to `GameAssembly.dll` RVA, then the native engine (breakpoints, traces) |
+| 3 | **Java / JVM** | JAR (ZIP provider), class file parser (constant pool, fields, methods, attributes), bytecode disassembly | Vineflower/CFR provider | JDWP |
+| 3 | **WebAssembly** | Module parser (sections, types, imports/exports, functions, data), disassembler | Text format output | Through CDP for Wasm running in Chromium/Node |
+| later | **Android APK, ELF, Mach-O, other platforms** | ZIP + DEX provider; ELF and Mach-O providers beside PE | external engines | new target backends (Linux runtime parity already planned) |
+
+Priority 1 is implemented in step 4 (static) and step 8 (decompile and
+live), before priority 2 starts. Priority 2 and 3 follow once priority 1 is
+validated in CI. The "later" row is planned, not scheduled.
+
+### 8.3 Validation fixtures (to build with each provider)
+
+| Technology | Fixture |
+|---|---|
+| JS | A repo-local project: ESM and CJS modules, a webpack/esbuild bundle and its source map, built in CI with pinned versions |
+| Electron | A minimal app (main, preload, renderer, two IPC channels, one native addon), packed into an ASAR in CI and launched through a launch profile |
+| .NET | A C# console app and a class library (`dotnet build`, pinned SDK) with known types, generics, properties, events and IL patterns |
+| Python | A script plus a PyInstaller one-file build of it (pinned PyInstaller) |
+| Unity | A tiny Unity-independent `global-metadata.dat` fixture generated from a known IL2CPP output, plus a UnityFS header fixture; a full Unity build is optional |
+| JVM | A `javac`-built JAR with known classes |
+| Wasm | A `.wat`-assembled module with imports, exports, globals and a data segment |
+
+### 8.4 Agents across runtimes
+
+The agent works through the same MCP surface:
+- artifact tools (read-only, operator roots);
+- the investigation context, now carrying artifact-located selections and
+  observations;
+- knowledge records whose evidence names the capability that produced them.
+
+A cross-runtime chain is a sequence of linked records, for example:
+1. JS renderer call;
+2. `ipcMain` handler;
+3. native addon export `module+RVA`;
+4. breakpoint hit.
+
+Each link is labelled static, decompiled or observed. A static link never
+becomes "observed" without a live capability producing it.
+
+## 9. Risks and open questions
 
 - **Generation 0 is a wildcard.** `SessionManager::Attach` treats an unknown
   process generation as "same process". If `GetProcessTimes` fails, a recycled
