@@ -4,6 +4,7 @@
 #include "../context/context_api.h"
 #include "../context/investigation_context.h"
 #include "../events/events.h"
+#include "../debugger/debugger.h"
 #include "../process/modules.h"
 
 #include <windows.h>
@@ -56,13 +57,19 @@ context::InvestigationContext& Context() {
     return context::Global();
 }
 
-// Module changes are published when the list is looked at (each context
-// route), not at the loader's own notification.
+// Module changes and breakpoint hits are published when they are looked at
+// (each context route), never from the loader notification or the
+// debugger's exception path, which must not allocate or take locks.
 void RefreshModules(context::InvestigationContext& shared) {
     std::vector<context::Module> modules;
     for (const auto& module : process::ListModules())
         modules.push_back({module.name, static_cast<uint64_t>(module.base), static_cast<uint64_t>(module.size)});
     shared.UpdateModules(std::move(modules));
+
+    std::vector<context::BreakpointCount> counts;
+    for (const auto& breakpoint : dbg::ListBreakpoints())
+        counts.push_back({std::to_string(breakpoint.id), static_cast<uint64_t>(breakpoint.address), breakpoint.hitCount});
+    shared.UpdateBreakpointHits("runtime", counts);
 }
 
 void Send(httplib::Response& res, const context::api::Reply& reply) {
@@ -135,6 +142,13 @@ void RegisterContextRoutes(httplib::Server& svr) {
         auto& shared = Context();
         RefreshModules(shared);
         Send(res, context::api::AddObservation(shared, context::CurrentCaller(), req.body));
+    });
+
+    // The desktop's own scan results or debugger state (desktop only).
+    svr.Post("/context/share", [](const httplib::Request& req, httplib::Response& res) {
+        auto& shared = Context();
+        RefreshModules(shared);
+        Send(res, context::api::ShareState(shared, context::CurrentCaller(), req.body));
     });
 
     // The person selected an address in the desktop. Refused unless the

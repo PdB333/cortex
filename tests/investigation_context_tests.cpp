@@ -6,6 +6,7 @@
 #include "context/caller.h"
 #include "context/context_api.h"
 #include "context/investigation_context.h"
+#include "api/response_contract.h"
 
 #include <iostream>
 #include <string>
@@ -271,6 +272,111 @@ void TestConcurrentWriters() {
     (void)clock;
 }
 
+void TestSharedDesktopState() {
+    InvestigationContext shared;
+    std::vector<Published> events;
+    uint64_t clock = 10;
+    Prepare(shared, events, clock);
+
+    const json scan = {{"kind", "scan"},
+                       {"expected_generation", kGeneration},
+                       {"data", {{"value_type", "i32"}, {"compare", "exact"}, {"value", "100"}, {"result_count", 2},
+                                 {"results", {{{"address", "0x140001000"}, {"value", "64000000"}},
+                                              {{"address", 5368717312ull}, {"value", "64000000"}}}}}}};
+    auto reply = context::api::ShareState(shared, kDesktop, scan.dump());
+    CHECK(reply.status == 200);
+    CHECK(events.back().type == "context.state_shared" && events.back().data["kind"] == "scan" &&
+          events.back().data["rows"] == 2);
+    json state = shared.Snapshot()["shared_state"];
+    CHECK(state["scan"]["data"]["results"][0]["location"]["expression"] == "game.exe+0x1000");
+    CHECK(state["scan"]["data"]["results"][1]["address"] == "0x140002000");  // normalized
+    CHECK(state["scan"]["provenance"]["source"] == "desktop" && state["scan"]["status"] == "desktop_state");
+
+    // The newest share of a kind replaces the previous one.
+    json next = scan;
+    next["data"]["results"] = json::array({{{"address", "0x140001000"}, {"value", "5a000000"}}});
+    CHECK(context::api::ShareState(shared, kDesktop, next.dump()).status == 200);
+    state = shared.Snapshot()["shared_state"];
+    CHECK(state["scan"]["data"]["results"].size() == 1 && state["scan"]["sequence"] == 2);
+
+    // Only the desktop shares its own state; bounded; validated.
+    CHECK(context::api::ShareState(shared, kAgent, scan.dump()).status == 403);
+    CHECK(context::api::ShareState(shared, kDesktop, R"({"kind":"memory","data":{}})").status == 400);
+    CHECK(context::api::ShareState(shared, kDesktop, R"({"kind":"scan","data":{"results":[{"address":"x"}]}})").status == 400);
+    json many = {{"kind", "scan"}, {"data", {{"results", json::array()}}}};
+    for (int i = 0; i < 257; ++i) many["data"]["results"].push_back({{"address", 0x1000 + i}});
+    CHECK(context::api::ShareState(shared, kDesktop, many.dump()).status == 400);
+    json stale = scan;
+    stale["expected_generation"] = kGeneration + 1;
+    CHECK(context::api::ShareState(shared, kDesktop, stale.dump()).status == 409);
+
+    // Debugger state: the first share is the hit baseline, then increases
+    // become breakpoint.hit events; a breakpoint added later counts from 0.
+    auto debuggerShare = [&](uint64_t hitsA, bool withB) {
+        json data = {{"backend", "windows"},
+                     {"breakpoints", {{{"id", 1}, {"kind", "hw_write"}, {"address", "0x140001000"}, {"hit_count", hitsA}}}}};
+        if (withB) data["breakpoints"].push_back({{"id", 2}, {"kind", "software"}, {"address", "0x140001100"}, {"hit_count", 3}});
+        return context::api::ShareState(shared, kDesktop, json{{"kind", "debugger"}, {"data", data}}.dump());
+    };
+    events.clear();
+    CHECK(debuggerShare(5, false).status == 200);
+    size_t hits = 0;
+    for (const auto& event : events) hits += event.type == "breakpoint.hit";
+    CHECK(hits == 0);
+    events.clear();
+    CHECK(debuggerShare(9, true).status == 200);
+    json hitA, hitB;
+    for (const auto& event : events) {
+        if (event.type != "breakpoint.hit") continue;
+        if (event.data["id"] == "1") hitA = event.data;
+        if (event.data["id"] == "2") hitB = event.data;
+    }
+    CHECK(hitA["new_hits"] == 4 && hitA["hits"] == 9 && hitA["debugger"] == "desktop");
+    CHECK(hitA["location"]["expression"] == "game.exe+0x1000");
+    CHECK(hitB["new_hits"] == 3);
+    events.clear();
+    CHECK(debuggerShare(9, true).status == 200);
+    for (const auto& event : events) CHECK(event.type != "breakpoint.hit");
+}
+
+void TestBreakpointHitPolling() {
+    InvestigationContext shared;
+    std::vector<Published> events;
+    uint64_t clock = 1;
+    Prepare(shared, events, clock);
+    CHECK(shared.UpdateBreakpointHits("runtime", {{"3", 0x140001000ull, 10}}) == 0);  // baseline
+    CHECK(shared.UpdateBreakpointHits("runtime", {{"3", 0x140001000ull, 10}}) == 0);
+    CHECK(shared.UpdateBreakpointHits("runtime", {{"3", 0x140001000ull, 12}, {"4", 0x140001004ull, 1}}) == 2);
+    CHECK(events.back().data["pid"] == 4242);
+    // Removed, then re-added under the same id: counts from zero again.
+    CHECK(shared.UpdateBreakpointHits("runtime", {}) == 0);
+    CHECK(shared.UpdateBreakpointHits("runtime", {{"3", 0x140001000ull, 2}}) == 1);
+    CHECK(events.back().data["new_hits"] == 2);
+    // A counter that went down (breakpoint replaced) publishes nothing.
+    CHECK(shared.UpdateBreakpointHits("runtime", {{"3", 0x140001000ull, 1}}) == 0);
+    // Debuggers are independent.
+    CHECK(shared.UpdateBreakpointHits("desktop", {{"3", 0x140001000ull, 50}}) == 0);
+}
+
+void TestAnnotateLegacyResult() {
+    api::response::Operation meta;
+    meta.target = {{"pid", 1}, {"generation", 2}};
+    meta.durationMs = 7;
+    meta.permissionsRequired = json::array({"control"});
+    meta.rollback = {{"tool", "debug_breakpoint_delete"}};
+    json ok = {{"ok", true}, {"id", 3}, {"limits", "route-owned"}};
+    api::response::Annotate(ok, meta);
+    CHECK(ok["status"] == "completed" && ok["id"] == 3 && ok["target"]["generation"] == 2);
+    CHECK(ok["limits"] == "route-owned");  // never overwritten
+    CHECK(ok["duration_ms"] == 7 && ok["permissions_required"][0] == "control" && ok["rollback"]["tool"] == "debug_breakpoint_delete");
+    json failed = {{"ok", false}, {"error", "scan_not_found"}};
+    api::response::Annotate(failed, meta);
+    CHECK(failed["status"] == "failed" && failed["error"] == "scan_not_found");
+    json withStatus = {{"ok", false}, {"status", "cancelled"}};
+    api::response::Annotate(withStatus, meta);
+    CHECK(withStatus["status"] == "cancelled");
+}
+
 } // namespace
 
 int main() {
@@ -281,6 +387,9 @@ int main() {
     TestGenerationIsolation();
     TestBoundsAndHistory();
     TestConcurrentWriters();
+    TestSharedDesktopState();
+    TestBreakpointHitPolling();
+    TestAnnotateLegacyResult();
     if (failures) {
         std::cerr << failures << " investigation context check(s) failed" << std::endl;
         return 1;

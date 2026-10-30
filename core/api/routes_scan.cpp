@@ -1,6 +1,10 @@
 #include "routes.h"
 #include "../memory/scan.h"
 #include "../overlay/overlay.h"
+#include "../context/investigation_context.h"
+#include "response_contract.h"
+
+#include <chrono>
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -29,6 +33,16 @@ json ScanResultToJson(const memscan::ScanResult& r) {
     return out;
 }
 
+uint64_t ElapsedMs(std::chrono::steady_clock::time_point started) {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - started).count());
+}
+
+// Scans read the target; pausing it is a control operation (mcp_contract).
+json ScanPermissions(bool pauseProcess) {
+    return pauseProcess ? json::array({"control"}) : json::array();
+}
+
 std::optional<std::string> OptScalar(const json& body, const char* key) {
     if (!body.contains(key) || body.at(key).is_null()) return std::nullopt;
     const json& value = body.at(key);
@@ -46,6 +60,7 @@ std::optional<uintptr_t> OptAddress(const json& body, const char* key) {
 
 void RegisterScanRoutes(httplib::Server& svr) {
     svr.Post("/scan/new", [](const httplib::Request& req, httplib::Response& res) {
+        const auto started = std::chrono::steady_clock::now();
         try {
             json body = json::parse(req.body);
             std::string type = body.at("type").get<std::string>();
@@ -74,6 +89,13 @@ void RegisterScanRoutes(httplib::Server& svr) {
             } else {
                 out["error"] = (type == "all" && !value.has_value()) ? "all_requires_value" : "unknown_type";
             }
+            response::Operation meta;
+            meta.target = context::Global().TargetJson();
+            meta.durationMs = ElapsedMs(started);
+            meta.limits = {{"results_truncated", truncated}};
+            meta.permissionsRequired = ScanPermissions(options.pauseProcess);
+            if (id >= 0) meta.evidence = json::array({"scan:" + std::to_string(id)});
+            response::Annotate(out, meta);
             res.set_content(out.dump(), "application/json");
             overlay::LogApiCall("POST /scan/new " + type + (value.has_value() ? " =" + *value : " (unknown)"));
         } catch (const std::exception& e) {
@@ -83,6 +105,7 @@ void RegisterScanRoutes(httplib::Server& svr) {
     });
 
     svr.Post("/scan/next", [](const httplib::Request& req, httplib::Response& res) {
+        const auto started = std::chrono::steady_clock::now();
         try {
             json body = json::parse(req.body);
             int id = body.at("scan_id").get<int>();
@@ -103,6 +126,12 @@ void RegisterScanRoutes(httplib::Server& svr) {
             json out;
             out["ok"] = ok;
             if (ok) out["count"] = count; else out["error"] = "scan_not_found";
+            response::Operation meta;
+            meta.target = context::Global().TargetJson();
+            meta.durationMs = ElapsedMs(started);
+            meta.permissionsRequired = ScanPermissions(pauseProcess);
+            if (ok) meta.evidence = json::array({"scan:" + std::to_string(id)});
+            response::Annotate(out, meta);
             res.set_content(out.dump(), "application/json");
             overlay::LogApiCall("POST /scan/next #" + std::to_string(id) + " " + filterStr);
         } catch (const std::exception& e) {

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -33,6 +34,13 @@ struct Module {
     uint64_t size = 0;
 };
 
+// A breakpoint's lifetime hit counter, as its debugger reports it.
+struct BreakpointCount {
+    std::string id;       // unique per debugger, e.g. "runtime:3", "desktop:7"
+    uint64_t address = 0;
+    uint64_t hits = 0;
+};
+
 struct Limits {
     size_t maxEntries = 512;    // selections + observations kept
     size_t maxHistory = 256;    // operation history rows kept
@@ -40,6 +48,8 @@ struct Limits {
     size_t maxText = 2048;
     size_t maxDataBytes = 4096; // serialized size of an observation's data
     size_t maxEvidence = 16;
+    size_t maxSharedRows = 256;
+    size_t maxSharedBytes = 64 * 1024;
 };
 
 // The shared investigation state of one target process (roadmap step 2.2).
@@ -90,6 +100,23 @@ public:
     // input: {"statement", "kind"?, "address"?, "data"?, "evidence"?: [{"source","reference"}]}
     json AddObservation(const CallerInfo& caller, const json& input);
 
+    // The desktop shares its own state, which lives outside the runtime: the
+    // value scanner's current results ("scan") or the external debugger's
+    // breakpoints and paused threads ("debugger"). The newest share of each
+    // kind replaces the previous one. Every `address` in data.results /
+    // data.breakpoints is validated and given its module+RVA location.
+    // data is bounded (maxSharedBytes serialized, maxSharedRows rows).
+    json ShareState(const CallerInfo& caller, const std::string& kind, const json& data);
+
+    // Publishes breakpoint.hit for every breakpoint of `debugger` whose
+    // counter grew since the last update ({id, address, location, hits,
+    // new_hits}). Hits are seen when counters are polled, not as they
+    // happen: one event can stand for many hits. The first update of a
+    // debugger is the baseline (hits from before are not reported); a
+    // breakpoint first listed later counts from zero. Breakpoints that are
+    // no longer listed are forgotten. Returns the number of events published.
+    size_t UpdateBreakpointHits(const std::string& debugger, const std::vector<BreakpointCount>& counts);
+
     // Records one completed tool call (name, risk, status, duration).
     void RecordOperation(const CallerInfo& caller, const std::string& tool, const std::string& risk,
                          const std::string& status, uint64_t durationMs);
@@ -119,6 +146,10 @@ private:
     bool modulesKnown_ = false;
     std::deque<json> entries_;
     std::deque<json> history_;
+    json shared_ = json::object();  // kind -> newest share
+    std::map<std::string, uint64_t> breakpointHits_;  // "debugger|id" -> last counter
+    std::map<std::string, bool> debuggersPolled_;
+    uint64_t nextShare_ = 1;
     uint64_t nextEntry_ = 1;
     uint64_t nextOperation_ = 1;
     uint64_t droppedEntries_ = 0;

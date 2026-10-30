@@ -75,6 +75,23 @@ inline json OperationResult(const Operation& operation) {
     return result;
 }
 
+// Migrates a legacy route result to the contract without breaking clients:
+// fields the route already sets (ok, error, its own data keys) are kept as
+// they are; only the missing contract fields are added. status is derived
+// from ok when the route did not set one.
+inline void Annotate(json& body, const Operation& meta) {
+    if (!body.is_object()) return;
+    if (!body.contains("status"))
+        body["status"] = body.value("ok", false) ? "completed" : (meta.status == "completed" ? "failed" : meta.status);
+    if (!body.contains("target")) body["target"] = meta.target;
+    if (!body.contains("duration_ms")) body["duration_ms"] = meta.durationMs;
+    if (!body.contains("limits")) body["limits"] = meta.limits;
+    if (!body.contains("evidence")) body["evidence"] = meta.evidence;
+    if (!body.contains("permissions_required")) body["permissions_required"] = meta.permissionsRequired;
+    if (!body.contains("rollback")) body["rollback"] = meta.rollback;
+    if (!body.value("ok", false) && !meta.cause.empty() && !body.contains("cause")) body["cause"] = meta.cause;
+}
+
 inline Operation Refused(const std::string& code, const std::string& cause, json target = json::object()) {
     Operation operation;
     operation.status = "refused";

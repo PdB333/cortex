@@ -29,6 +29,10 @@ Reply AddObservation(InvestigationContext& shared, const CallerInfo& caller, con
 // POST /context/select (desktop channel only).
 Reply SelectAddress(InvestigationContext& shared, const CallerInfo& caller, const std::string& body);
 
+// POST /context/share {"kind": "scan"|"debugger", "data": {...}}
+// (desktop channel only): state that lives in the desktop process.
+Reply ShareState(InvestigationContext& shared, const CallerInfo& caller, const std::string& body);
+
 // The refusal every context route returns for a request pinned to another
 // process lifetime.
 Reply StaleGeneration(const InvestigationContext& shared);

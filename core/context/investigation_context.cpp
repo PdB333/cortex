@@ -266,6 +266,79 @@ json InvestigationContext::AddObservation(const CallerInfo& caller, const json& 
     return OperationResult(operation);
 }
 
+json InvestigationContext::ShareState(const CallerInfo& caller, const std::string& kind, const json& data) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const json target = {{"pid", identity_.pid}, {"generation", identity_.generation}};
+    const char* rowsKey = kind == "scan" ? "results" : kind == "debugger" ? "breakpoints" : nullptr;
+    if (!rowsKey) return OperationResult(Invalid("invalid_kind", "kind is scan or debugger", target));
+    if (!data.is_object()) return OperationResult(Invalid("invalid_data", "data must be an object", target));
+    if (data.dump().size() > limits_.maxSharedBytes)
+        return OperationResult(Invalid("data_too_large", "data exceeds " + std::to_string(limits_.maxSharedBytes) +
+                                                             " serialized bytes", target));
+    json stored = data;
+    json rows = data.value(rowsKey, json::array());
+    if (!rows.is_array() || rows.size() > limits_.maxSharedRows)
+        return OperationResult(Invalid("invalid_rows", std::string(rowsKey) + " is an array of at most " +
+                                                           std::to_string(limits_.maxSharedRows) + " objects", target));
+    for (auto& row : rows) {
+        uint64_t address = 0;
+        if (!row.is_object() || !ParseAddress(row.value("address", json()), address))
+            return OperationResult(Invalid("invalid_address", std::string("every ") + rowsKey +
+                                                                  " row needs an integer or hex address", target));
+        row["address"] = Hex(address);
+        row["location"] = LocateLocked(address);
+    }
+    stored[rowsKey] = std::move(rows);
+
+    const uint64_t now = Now();
+    json share = {{"kind", kind},
+                  {"sequence", nextShare_++},
+                  {"data", std::move(stored)},
+                  {"status", "desktop_state"},
+                  {"provenance", Provenance(caller, now)}};
+    shared_[kind] = share;
+    Publish("context.state_shared", {{"kind", kind},
+                                     {"sequence", share["sequence"]},
+                                     {"rows", share["data"][rowsKey].size()},
+                                     {"source", CallerName(caller.caller)}});
+
+    Operation operation;
+    operation.target = target;
+    operation.data = {{"share", {{"kind", kind}, {"sequence", share["sequence"]}}}};
+    operation.limits = {{"max_rows", limits_.maxSharedRows}, {"max_bytes", limits_.maxSharedBytes}};
+    return OperationResult(operation);
+}
+
+size_t InvestigationContext::UpdateBreakpointHits(const std::string& debugger,
+                                                  const std::vector<BreakpointCount>& counts) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool baseline = !debuggersPolled_[debugger];
+    debuggersPolled_[debugger] = true;
+    const std::string prefix = debugger + "|";
+    std::map<std::string, uint64_t> seen;
+    size_t published = 0;
+    for (const auto& count : counts) {
+        const std::string key = prefix + count.id;
+        seen[key] = count.hits;
+        const auto previous = breakpointHits_.find(key);
+        const bool known = previous != breakpointHits_.end();
+        if (baseline) continue;
+        const uint64_t before = known ? previous->second : 0;
+        if (count.hits <= before) continue;  // unchanged, or the counter was reset
+        Publish("breakpoint.hit", {{"debugger", debugger},
+                                   {"id", count.id},
+                                   {"address", Hex(count.address)},
+                                   {"location", LocateLocked(count.address)},
+                                   {"hits", count.hits},
+                                   {"new_hits", count.hits - before}});
+        ++published;
+    }
+    for (auto it = breakpointHits_.lower_bound(prefix); it != breakpointHits_.end() && it->first.rfind(prefix, 0) == 0;)
+        it = seen.count(it->first) ? std::next(it) : breakpointHits_.erase(it);
+    for (const auto& [key, hits] : seen) breakpointHits_[key] = hits;
+    return published;
+}
+
 void InvestigationContext::RecordOperation(const CallerInfo& caller, const std::string& tool, const std::string& risk,
                                            const std::string& status, uint64_t durationMs) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -316,6 +389,7 @@ json InvestigationContext::Snapshot(size_t limit, uint64_t sinceEntry) const {
                         {"executable_path", identity_.executablePath}}},
             {"modules", std::move(modules)},
             {"selections", std::move(selections)},
+            {"shared_state", shared_},
             {"entries", std::move(entries)},
             {"entries_truncated", truncated},
             {"latest_entry", nextEntry_ - 1},
@@ -332,6 +406,10 @@ void InvestigationContext::Clear() {
     history_.clear();
     modules_.clear();
     modulesKnown_ = false;
+    shared_ = json::object();
+    breakpointHits_.clear();
+    debuggersPolled_.clear();
+    nextShare_ = 1;
     nextEntry_ = 1;
     nextOperation_ = 1;
     droppedEntries_ = 0;

@@ -107,4 +107,34 @@ Reply SelectAddress(InvestigationContext& shared, const CallerInfo& caller, cons
     return Make(shared.SelectAddress(caller, address, label.get<std::string>(), note.get<std::string>()));
 }
 
+Reply ShareState(InvestigationContext& shared, const CallerInfo& caller, const std::string& text) {
+    if (caller.caller != Caller::Desktop)
+        return Make(OperationResult(Refused("desktop_channel_required", "desktop state is shared by the desktop only",
+                                            shared.TargetJson())));
+    json body;
+    if (!ParseObject(text, body)) return Failed(shared, "invalid_json_body", "body must be a JSON object");
+    uint64_t expected = 0;
+    if (!ExpectedGeneration(body, expected))
+        return Failed(shared, "invalid_expected_generation", "expected_generation must be an unsigned integer");
+    if (!shared.GenerationMatches(expected)) return StaleGeneration(shared);
+    const json kind = body.value("kind", json());
+    if (!kind.is_string()) return Failed(shared, "invalid_kind", "kind is scan or debugger");
+    Reply reply = Make(shared.ShareState(caller, kind.get<std::string>(), body.value("data", json())));
+    // The desktop's external debugger reports hit counters with its state.
+    if (reply.status == 200 && kind == "debugger") {
+        std::vector<BreakpointCount> counts;
+        for (const auto& row : body["data"].value("breakpoints", json::array())) {
+            uint64_t address = 0;
+            if (!ParseAddress(row.value("address", json()), address)) continue;
+            const json id = row.value("id", json());
+            const json hits = row.value("hit_count", json());
+            if (!hits.is_number_unsigned() && !hits.is_number_integer()) continue;
+            counts.push_back({id.is_string() ? id.get<std::string>() : id.dump(), address,
+                              static_cast<uint64_t>(std::max<int64_t>(0, hits.get<int64_t>()))});
+        }
+        shared.UpdateBreakpointHits("desktop", counts);
+    }
+    return reply;
+}
+
 } // namespace context::api

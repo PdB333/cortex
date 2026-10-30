@@ -3,6 +3,8 @@
 #include "../debugger/debugger.h"
 #include "../overlay/overlay.h"
 #include "../action/action.h"
+#include "../context/investigation_context.h"
+#include "response_contract.h"
 
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -143,6 +145,16 @@ void RegisterDebugRoutes(httplib::Server& svr) {
             json out;
             out["ok"] = id >= 0;
             if (id >= 0) out["id"] = id; else out["error"] = "add_breakpoint_failed";
+            response::Operation meta;
+            meta.target = context::Global().TargetJson();
+            meta.limits = {{"size", size}, {"process_global", processGlobal}};
+            meta.permissionsRequired = json::array({"control"});
+            if (id >= 0) {
+                meta.evidence = json::array({"breakpoint:" + std::to_string(id)});
+                meta.rollback = {{"tool", "debug_breakpoint_delete"}, {"_path", {{"id", id}}},
+                                 {"journal", "actions_rollback"}};
+            }
+            response::Annotate(out, meta);
             res.set_content(out.dump(), "application/json");
             overlay::LogApiCall("POST /debug/breakpoint " + kindStr + " @ " + HexAddr(address));
         } catch (const std::exception& e) {
