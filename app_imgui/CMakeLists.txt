@@ -124,6 +124,7 @@ add_executable(cortex_imgui WIN32
     application/input_model.cpp
     application/screenshot_model.cpp
     application/runtime_events_model.cpp
+    application/context_model.cpp
     ui/bottom_panel_workspace.cpp
     ui/addresses_workspace.cpp
     ui/memory_workspace.cpp
@@ -284,6 +285,9 @@ if(BUILD_TESTING)
         application/snapshots_model.cpp
         application/symbols_model.cpp
         application/watches_model.cpp
+        application/context_model.cpp
+        ../core/context/investigation_context.cpp
+        ../core/context/context_api.cpp
     )
     target_include_directories(cortex_app_models_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

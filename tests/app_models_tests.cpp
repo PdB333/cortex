@@ -2,6 +2,7 @@
 // runtime transport so they need no target process, pipe or Windows API.
 
 #include "application/actions_model.h"
+#include "application/context_model.h"
 #include "application/cheat_table.h"
 #include "application/hotkeys.h"
 #include "application/patches_model.h"
@@ -11,6 +12,8 @@
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
 #include "services/runtime_transport.h"
+#include "context/context_api.h"
+#include "context/investigation_context.h"
 
 #include <nlohmann/json.hpp>
 
@@ -547,6 +550,70 @@ nop 5
         check(!actions.Clear(false, &error), "clear requires write permission");
         check(!transport.Called("actions_rollback") && !transport.Called("actions_clear"),
               "denied rollback and clear send nothing");
+    }
+
+    // Investigation context: the desktop's model against the runtime's real
+    // route semantics (context_api). The person's selection is what an agent
+    // reads, and an agent's observation is what the desktop shows.
+    {
+        context::InvestigationContext shared;
+        shared.SetIdentity({777, 9001, "x64", "fixture.exe", ""});
+        shared.UpdateModules({{"fixture.exe", 0x400000, 0x10000}});
+
+        FakeTransport transport;
+        transport.routeHandler = [&shared](const std::string& method, const std::string& path, const json& body) {
+            // The private channel is the desktop's, as mcp_pipe marks it.
+            const context::CallerInfo desktop{context::Caller::Desktop, "desktop"};
+            if (method == "POST" && path == "/context/select")
+                return context::api::SelectAddress(shared, desktop, body.dump()).body;
+            if (method == "GET" && path.rfind("/context?", 0) == 0) {
+                uint64_t expected = 0;
+                const auto at = path.find("expected_generation=");
+                if (at != std::string::npos) expected = std::stoull(path.substr(at + 20));
+                return context::api::GetContext(shared, 200, 0, expected, 0).body;
+            }
+            return json{{"ok", false}, {"error", "unexpected_route"}};
+        };
+        InvestigationContextModel model(transport);
+
+        std::string error;
+        check(!model.SelectAddress(0x401234, "health", {}, 9001, &error) && error == "runtime_not_connected",
+              "context selection never loads the runtime");
+        check(transport.injections == 0 && transport.routes.empty(), "no route without a runtime");
+
+        transport.loaded = transport.connected = true;
+        check(model.SelectAddress(0x401234, "health", "from the scan", 9001, &error), "desktop selects an address");
+        check(!transport.routes.empty() && transport.routes.back().path == "/context/select" &&
+              transport.routes.back().body.value("address", std::string()) == "0x401234" &&
+              transport.routes.back().body.value("expected_generation", uint64_t{0}) == 9001,
+              "selection carries the address and the target generation");
+        check(!model.LastSelectedEntry().empty(), "selection entry id kept");
+
+        // What an MCP client reads with context_get.
+        const json agentView = context::api::GetContext(shared, 100, 0, 9001, 0).body;
+        check(agentView["data"]["selections"]["desktop"]["location"]["expression"] == "fixture.exe+0x1234",
+              "agent sees the person's selection as module+RVA");
+
+        // The agent records an observation through context_observation_add.
+        const context::CallerInfo agent{context::Caller::Agent, "mcp-1"};
+        check(context::api::AddObservation(shared, agent,
+                  R"({"statement":"decrements on hit","kind":"correlation","address":"0x401234"})").status == 200,
+              "agent records an observation");
+        check(model.Refresh(9001, &error), "desktop refreshes the context");
+        check(model.Pid() == 777 && model.Generation() == 9001, "context identity");
+        check(model.Entries().size() == 2 && model.Entries()[0].kind == "selection" &&
+              model.Entries()[0].source == "desktop" && model.Entries()[1].source == "agent" &&
+              model.Entries()[1].session == "mcp-1" && model.Entries()[1].status == "client_assertion" &&
+              model.Entries()[1].location == "fixture.exe+0x1234" && model.Entries()[1].text == "decrements on hit",
+              "desktop shows the agent's observation with its provenance");
+
+        // A desktop still showing a process whose PID was reused.
+        check(!model.Refresh(9000, &error) && error == "stale_target_generation",
+              "a stale generation is refused");
+        check(!model.SelectAddress(0x401234, "x", {}, 9000, &error) && error == "stale_target_generation",
+              "a stale selection is refused");
+        model.Reset();
+        check(model.Entries().empty() && model.Pid() == 0, "context model reset");
     }
 
     if (failures) {

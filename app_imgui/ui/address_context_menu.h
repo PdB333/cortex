@@ -102,6 +102,26 @@ inline void DrawAddressContextActions(
         ImGui::EndMenu();
     }
 
+    // The person points an agent at this address: it becomes the desktop's
+    // current selection in the investigation context MCP clients read
+    // (context_get). It records Cortex's own state only, so it needs a
+    // connected runtime but not Writes allowed, and never loads the runtime.
+    {
+        const bool shareDisabled = !context.contextModel || !runtimeConnected;
+        ImGui::BeginDisabled(shareDisabled);
+        if (ImGui::MenuItem("Share with investigation context")) {
+            const auto target = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+            std::string error;
+            if (context.contextModel->SelectAddress(address, label, {}, target ? target->generation : 0, &error))
+                context.status = "Shared " + addressText + " with the investigation context";
+            else
+                context.status = "Share failed: " + error;
+        }
+        ImGui::EndDisabled();
+        if (shareDisabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Connect the Cortex runtime first (Project > Connect existing runtime).");
+    }
+
     if (ImGui::BeginMenu("Monitor")) {
         const bool watchDisabled =
             !context.watchesModel || !runtimeMutation;

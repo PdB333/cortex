@@ -167,6 +167,7 @@ struct AppState {
     cortex::application::InputModel inputModel;
     cortex::application::ScreenshotModel screenshotModel;
     cortex::application::RuntimeEventsModel runtimeEventsModel;
+    cortex::application::InvestigationContextModel contextModel;
     cortex::application::PatchesModel patchesModel;
     cortex::application::PromptModel promptModel;
     cortex::ui::UiContext ui;
@@ -221,9 +222,12 @@ struct AppState {
           inputModel(payload),
           screenshotModel(payload),
           runtimeEventsModel(payload),
+          contextModel(payload),
           patchesModel(payload),
           promptModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
+        // Records this desktop creates in the runtime are the person's.
+        payload.SetDesktopChannel(true);
 
         ui.sessions = &sessions;
         ui.memory = &memory;
@@ -249,6 +253,7 @@ struct AppState {
         ui.inputModel = &inputModel;
         ui.screenshotModel = &screenshotModel;
         ui.runtimeEventsModel = &runtimeEventsModel;
+        ui.contextModel = &contextModel;
         ui.patchesModel = &patchesModel;
         ui.nativeRenderDevice = NativeRenderDevice();
 
@@ -309,6 +314,7 @@ struct AppState {
         inputModel.Reset();
         screenshotModel.Reset();
         runtimeEventsModel.Reset();
+        contextModel.Reset();
         patchesModel.Reset();
         promptModel.Reset();
         ui.mutationAllowed = false;

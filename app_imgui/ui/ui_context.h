@@ -5,6 +5,7 @@
 
 #include "application/actions_model.h"
 #include "application/address_expression.h"
+#include "application/context_model.h"
 #include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
 #include "application/input_model.h"
@@ -94,6 +95,7 @@ struct UiContext {
     application::InputModel* inputModel = nullptr;
     application::ScreenshotModel* screenshotModel = nullptr;
     application::RuntimeEventsModel* runtimeEventsModel = nullptr;
+    application::InvestigationContextModel* contextModel = nullptr;
     application::PatchesModel* patchesModel = nullptr;
     void* nativeRenderDevice = nullptr;
 
