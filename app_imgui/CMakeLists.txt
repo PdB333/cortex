@@ -296,6 +296,23 @@ if(BUILD_TESTING)
     add_test(NAME cortex_app_models_tests COMMAND cortex_app_models_tests)
     set_tests_properties(cortex_app_models_tests PROPERTIES TIMEOUT 30)
 
+    # Desktop settings and cortex.ini persistence (atomic replace, round trip).
+    add_executable(cortex_settings_store_tests
+        ../tests/settings_store_tests.cpp
+        application/settings.cpp
+    )
+    target_include_directories(cortex_settings_store_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_settings_store_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_settings_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_settings_store_tests COMMAND cortex_settings_store_tests)
+    set_tests_properties(cortex_settings_store_tests PROPERTIES TIMEOUT 30)
+
+
     # Value scanner against an in-memory fake process.
     add_executable(cortex_value_scanner_tests
         ../tests/value_scanner_tests.cpp

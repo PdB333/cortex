@@ -107,12 +107,12 @@ bool UpdateIni(const std::filesystem::path& path,
     for (const auto& item : managed)
         if (!written[item.first]) lines.push_back(item.first + "=" + item.second);
 
-    std::ofstream output(path, std::ios::trunc);
-    if (!output) {
+    std::string text;
+    for (const auto& line : lines) text += line + '\n';
+    if (!services::WriteFileAtomically(path, text)) {
         if (error) *error = "unable_to_write_runtime_config:" + path.u8string();
         return false;
     }
-    for (const auto& line : lines) output << line << '\n';
     return true;
 }
 
@@ -259,12 +259,10 @@ bool SettingsStore::Save(std::string* error) const {
             {"autoAttachEnabled", values_.autoAttachEnabled},
             {"autoAttachProcesses", values_.autoAttachProcesses}
         };
-        std::ofstream output(path_, std::ios::trunc);
-        if (!output) {
+        if (!services::WriteFileAtomically(path_, document.dump(2) + '\n')) {
             if (error) *error = "unable_to_write_settings";
             return false;
         }
-        output << document.dump(2) << '\n';
         return true;
     } catch (const std::exception& ex) {
         if (error) *error = std::string("settings_save_failed:") + ex.what();
