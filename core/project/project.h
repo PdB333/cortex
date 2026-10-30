@@ -18,6 +18,15 @@ using json = nlohmann::json;
 // and crash-safety over batching).
 void Init(const std::string& directory = {});
 
+// How Init found the project: {"path", "source", "quarantined",
+// "saves_blocked", "schema_version"}. source is "primary", "backup" (the
+// primary did not parse), "new" (no file) or "defaults_after_damage" (no
+// readable file). Damaged files are copied to `<file>.damaged-<stamp>` before
+// anything can overwrite them; "quarantined" lists those copies. If an
+// unreadable primary could not be copied, every save fails ("saves_blocked")
+// rather than replace it.
+json LoadStatus();
+
 json GetAll();
 
 bool SetAddress(const std::string& name, uintptr_t address, const std::string& type, const std::string& notes);

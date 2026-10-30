@@ -498,11 +498,32 @@ if(BUILD_TESTING)
     )
     target_include_directories(cortex_session_manager_tests PRIVATE core)
     add_test(NAME cortex_session_manager_tests COMMAND cortex_session_manager_tests)
+
+    # Project file recovery: one process per scenario because project::Init
+    # runs once.
+    add_executable(cortex_project_store_tests
+        tests/project_store_tests.cpp
+        core/project/project.cpp
+        core/memory/memory.cpp
+        core/memory/provenance.cpp
+        core/process/modules.cpp
+        core/events/events.cpp
+    )
+    target_include_directories(cortex_project_store_tests PRIVATE core)
+    target_compile_definitions(cortex_project_store_tests PRIVATE
+        _WIN32_WINNT=0x0601
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    target_link_libraries(cortex_project_store_tests PRIVATE nlohmann_json::nlohmann_json)
+    foreach(scenario backup damaged fresh locked)
+        add_test(NAME cortex_project_store_${scenario} COMMAND cortex_project_store_tests ${scenario})
+    endforeach()
 endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

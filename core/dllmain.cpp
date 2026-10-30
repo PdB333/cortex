@@ -163,7 +163,7 @@ namespace {
         }
 
         project::Init(cfg.project_directory);
-        dbglog::Line("project::Init done");
+        dbglog::Line("project::Init done: %s", project::LoadStatus().dump().c_str());
 
         structs::Init();
         dbglog::Line("structs::Init done");
