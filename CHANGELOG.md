@@ -26,10 +26,14 @@ Cortex 2.0, step 1 (audit and foundations) and the first delivery of step 2 (one
   `/ui/events` and `context_events` report `oldest_id`, `missed` and `gap`, so a consumer knows when events were evicted.
 - **Desktop state shared with agents.** Each finished value scan (query, count, up to 256 results) and the external debugger's breakpoints, hit counters and paused threads reach `context_get` under `shared_state`, through a desktop-only route. The memory workspace has a switch to stop sharing scans.
 - **`breakpoint.hit` events** for the runtime and desktop debuggers, derived from hit counters when state is refreshed (never from the exception path).
+- **Pointer path stability.** The pointer scanner records, per process generation, whether each path led to the value (`Validate here` in the desktop). Paths are `stable` once confirmed in two processes, `invalidated` after one miss, `candidate` otherwise. Unlike Rescan, nothing is dropped. The history is saved (pointer-scan file v2; v1 still loads).
+- **Memory viewer capture comparison.** **Capture**, **Compare with capture** and **Next change**: differences from a capture stay highlighted until the next one.
+- **Demonstration actor in the test program** and `docs/demo-manual.md`. The scripted version, `tests/manual_demo_e2e.py`, runs in CI for x64 and x86.
 - **Common result contract** (`api::response::Operation`): `status`, `error`, `cause`, `target`, `duration_ms`, `limits`, `data`, `evidence`, `permissions_required` and `rollback`. The new context routes use it, and `scan_new`, `scan_next` and `debug_breakpoint_add` gain its fields without changing the ones they already returned.
 
 ### Fixed
 
+- **A patch revert could corrupt the target.** `patch::Revert` restored the original bytes without checking that the patched bytes were still in place, that no newer patch covered them, or that the write succeeded. `patch::RevertChecked` refuses with `patch_target_changed`, `patch_overlaps_newer` or `patch_write_failed`, and leaves the target and the registry untouched. `DELETE /patch/{id}` and `batch_run`'s `patch_revert` return these codes; there is no force option.
 - **A reused PID kept the previous process's state in the desktop.** The Memory, Project, RE and Trace workspaces compared target ids only, and a reused PID has the same id. They now compare id + generation. A value scan finishing after the target changed is discarded instead of shown for the new process; a pointer scan from a previous process is labelled so it gets rescanned.
 
 ### Security

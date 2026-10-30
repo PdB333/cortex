@@ -7,6 +7,7 @@ This directory contains both user-facing documentation for the unified Cortex ap
 - [Getting started](getting-started.md) — download/extract the release, attach a target, scan, use Addresses, understand write permission and run the manual validation checklist.
 - [Illustrated UI walkthrough](ui-walkthrough.md) — step-by-step guide with real Cortex screenshots: target selection, value scan, Addresses, Memory viewer, Disassembler, Debugger, RE and Settings.
 - [French illustrated walkthrough](ui-walkthrough-fr.md) — French translation.
+- [Demonstration A: manual reverse engineering](demo-manual.md) — find a value, watch it, find what writes it, navigate the code and keep it across sessions, on Cortex's test program.
 - [Cortex UI guide](ui-guide.md) — complete workspace map, address context menu, shortcuts, Settings and write-permission behavior.
 
 ## Product architecture

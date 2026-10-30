@@ -366,33 +366,42 @@ had not run there when this was written.
 - Older routes keep their own shapes plus the added contract fields; a
   breaking migration needs a protocol version bump.
 
-### Step 3: manual mode
+### Step 3: manual mode (done)
 
-- **Reuse:** almost everything in §3.1 is already functional; the matrix shows
-  the scanner and debugger are complete.
-- **Gaps:**
-  - pointer path classification across sessions (stable / candidate /
-    invalidated);
-  - a memory-viewer diff between two captures;
-  - a one-action jump from a value to the instruction that writes it (it exists
-    as several menus: shorten the path);
-  - rollback refusal when a patched region changed incompatibly (verify it
-    exists, then test it).
-- **Tasks:**
-  1. Pointer path status with `PointerScanner::Rescan` across target
-     generations.
-  2. Viewer diff using snapshots.
-  3. A "Find what writes" action from the scan results row, using a HW data
-     breakpoint, then open the instruction in the disassembler.
-  4. An E2E demo script on `test_target` x86 and x64:
-     - scan the value;
-     - watch it;
-     - find what writes it;
-     - navigate to the code;
-     - save it to the project.
-- **Validation:** the demo script in CI (both bitnesses), with screenshots in
-  `docs/images`.
+**Verified as already functional.** Nothing was re-implemented:
 
+- **3.1 scanner** (§3.1): every type, comparison, AOB, threads, cancel,
+  progress, partial reads;
+- **3.4 debugger**: SW/HW breakpoints, hit counters, logs, registers, threads,
+  steps, capabilities per backend;
+- **3.5 editing**: patches, freezes, Auto Assembler;
+- **3.6 navigation**: the shared address menu already goes from a value to
+  "Find out what writes to this address", and from a hit to the
+  disassembler.
+
+**Real gaps closed:**
+
+| Brief item | Gap | Implementation | Test |
+|---|---|---|---|
+| Validation fixture | The test program changed scalar globals only | `CortexDemoActor` in `test_target/main.cpp`. It is heap-allocated (found by scanning), reached from the exported `g_cortex_demo_actor` (a pointer path exists) and written only by `CortexDemoApplyDamage` (one responsible instruction). It is triggered by **D** or by a `<manifest>.damage` file | `tests/manual_demo_e2e.py` |
+| 3.5 Reversible patches | `patch::Revert` wrote the original bytes blindly: it did not check the patched bytes were still there, ignored newer overlapping patches and ignored write failures | `patch::RevertChecked`, which refuses with `patch_target_changed` (bytes rewritten or memory gone), `patch_overlaps_newer:<id>` or `patch_write_failed`. The target and the registry are left untouched. `DELETE /patch/{id}` and `batch patch_revert` report the code (409/404/500). There is deliberately no force option | `cortex_core_tests` (5 cases) |
+| 3.3 Pointer paths | Paths could only be filtered by `Rescan`, which drops them; nothing distinguished stable, candidate and invalidated | `PointerScanner::Validate` records a check per process generation without dropping anything. `Status` returns `stable` (target reached in ≥2 distinct known generations), `candidate` or `invalidated` (one miss). The scan records its own generation. File format v2 keeps the history; v1 still loads. Desktop: **Validate here** and a **Status** column | `cortex_memory_tools_tests` |
+| 3.2 Memory viewer | Only a 1.2 s change flash, no comparison between two captures | **Capture**, **Compare with capture** (differences stay highlighted), a changed-bytes counter and **Next change**. `services::DiffRuns` skips pages unreadable in either capture. The viewer now resets on a reused PID too | `cortex_memory_tools_tests` (`TestByteDiff`) |
+
+**Validation (the step 3 criterion).** `tests/manual_demo_e2e.py` runs the
+full chain on the fixture: find the value, watch it, find the instruction
+that writes it, navigate the code, save. It passed on live runtimes under
+Wine for **x64 and x86**, twice in a row (rerun-safe through
+`expected_revision`). CI runs it for both architectures in the GUI suite.
+`docs/demo-manual.md` is the desktop version of the same workflow.
+
+**Not done and why:**
+
+- **New visual demo assets** (screenshots of the steps). These need a real
+  Windows desktop session, so they are left to step 10.
+- **A "Find what writes" shortcut directly in the scan result row.** The
+  shared address menu is already one right-click away from every result; no
+  new code path was needed.
 ### Step 4: static analysis
 
 - **Reuse:** Zydis, `analysis::*`, `mcp_bridge/pe_unwind.h`,
