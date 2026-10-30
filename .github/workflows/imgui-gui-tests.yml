@@ -16,6 +16,7 @@ on:
       - "tests/gui/**"
       - "tests/security_no_writes_regression.py"
       - "tests/context_isolation_e2e.py"
+      - "tests/manual_demo_e2e.py"
       - "tests/fixtures/mcp_tool_risks.json"
       - "core/security/**"
       - "mcp_bridge/**"
@@ -299,6 +300,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "context isolation E2E failed on: $($failed -join ', ')" }
+
+      - name: Manual workflow demo (scan, watch, find what writes, navigate, save)
+        shell: pwsh
+        run: |
+          # docs/demo-manual.md, scripted. Breakpoints need --allow-writes.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/manual_demo_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "manual workflow demo failed on: $($failed -join ', ')" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()

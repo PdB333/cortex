@@ -181,7 +181,7 @@ json BuildToolsManifest() {
                       {"body", {{"min_size", "optional, default 16: minimum size in bytes"}, {"module", "optional: restricts to this module, otherwise all executable memory"}}}});
 
         j.push_back({{"name", "disasm"}, {"method", "GET"}, {"path", "/disasm"},
-                      {"description", "Disassembles x86-32 code starting at an address (Intel syntax)."},
+                      {"description", "Disassembles code of the runtime's bitness (x86 or x64) starting at an address (Intel syntax)."},
                       {"query", {{"address", "required: start address"}, {"count", "optional, default 20, max 500: number of instructions"}}}});
 
         j.push_back({{"name", "debug_breakpoint_add"}, {"method", "POST"}, {"path", "/debug/breakpoint"},

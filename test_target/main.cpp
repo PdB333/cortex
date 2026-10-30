@@ -53,6 +53,32 @@ extern "C" __declspec(dllexport) __declspec(noinline) uintptr_t __cdecl CortexNa
     return static_cast<uintptr_t>(++g_cortex_hw_value);
 }
 
+// Demonstration structure for the manual workflow (docs/demo-manual.md):
+// heap-allocated, so its address moves between runs and is found by
+// scanning, reached from an exported global so a pointer path exists, and
+// changed only by CortexDemoApplyDamage so a write breakpoint has one
+// responsible instruction to find.
+struct CortexDemoActor {
+    uint32_t magic = 0x52544341;  // "ACTR"
+    int32_t health = 100;
+    int32_t armor = 25;
+    uint32_t hits = 0;
+    float position[3] = {12.5f, 0.0f, -3.25f};
+};
+
+extern "C" __declspec(dllexport) CortexDemoActor* volatile g_cortex_demo_actor = nullptr;
+
+// The one function that writes the actor's health. Armor absorbs a third
+// of the damage until it is gone.
+extern "C" __declspec(dllexport) __declspec(noinline) void __cdecl CortexDemoApplyDamage(
+        CortexDemoActor* actor, int32_t amount) {
+    volatile CortexDemoActor* target = actor;
+    const int32_t absorbed = target->armor > 0 ? (amount / 3 < target->armor ? amount / 3 : target->armor) : 0;
+    target->armor = target->armor - absorbed;
+    target->health = target->health - (amount - absorbed);
+    target->hits = target->hits + 1;
+}
+
 struct CortexFakeObject {
     uintptr_t primaryVtable = 0;
     uintptr_t secondaryVtable = 0;
@@ -213,6 +239,7 @@ void WriteManifest(const E2EControl& control, HWND window) {
     if (!control.enabled) return;
     char modulePath[MAX_PATH]{};
     GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    const uintptr_t imageBase = reinterpret_cast<uintptr_t>(GetModuleHandleA(nullptr));
 
     std::ofstream file(control.manifestPath, std::ios::binary | std::ios::trunc);
     file << "{\n"
@@ -240,6 +267,12 @@ void WriteManifest(const E2EControl& control, HWND window) {
          << "  \"fake_object\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_fake_object) << "\",\n"
          << "  \"fake_object_size\": " << std::dec << sizeof(g_cortex_fake_object) << ",\n"
          << "  \"fake_state\": \"0x" << std::hex << reinterpret_cast<uintptr_t>(&g_cortex_fake_object.state) << "\",\n"
+         << "  \"demo_actor\": \"0x" << reinterpret_cast<uintptr_t>(g_cortex_demo_actor) << "\",\n"
+         << "  \"demo_actor_health\": \"0x" << reinterpret_cast<uintptr_t>(&g_cortex_demo_actor->health) << "\",\n"
+         << "  \"demo_actor_global_rva\": \"0x"
+         << (reinterpret_cast<uintptr_t>(&g_cortex_demo_actor) - imageBase) << "\",\n"
+         << "  \"demo_apply_damage\": \"0x" << reinterpret_cast<uintptr_t>(&CortexDemoApplyDamage) << "\",\n"
+         << "  \"demo_damage_file\": \"" << EscapeJson(control.manifestPath + ".damage") << "\",\n"
          << std::dec
          << "  \"main_thread_id\": " << GetCurrentThreadId() << ",\n"
          << "  \"crash_event\": \"" << EscapeJson(control.crashEventName) << "\",\n"
@@ -308,6 +341,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam
     switch (message) {
         case WM_KEYDOWN:
             if (g_cortex_e2e_input && wparam == VK_SPACE) { ++g_cortex_test_value; return 0; }
+            if (wparam == 'D' && g_cortex_demo_actor) { CortexDemoApplyDamage(g_cortex_demo_actor, 9); return 0; }
             break;
         case WM_LBUTTONDOWN:
             if (g_cortex_e2e_input) { ++g_cortex_test_clicks; return 0; }
@@ -357,6 +391,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
     ShowWindow(window, show);
 
     InitializeFakeObject();
+    g_cortex_demo_actor = new CortexDemoActor();
     E2EControl e2e;
     if (!InitializeE2E(arguments, e2e)) return 3;
     WriteManifest(e2e, window);
@@ -386,6 +421,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int show) {
             ResetEvent(e2e.hwThreadEvent);
             HANDLE writer = CreateThread(nullptr, 0, CortexHwWriterThread, nullptr, 0, nullptr);
             if (writer) CloseHandle(writer);
+        }
+        // The scripted demo's "action": a file beside the manifest stands for
+        // the person pressing D, so the workflow runs without input injection.
+        if (e2e.enabled) {
+            const std::string damageFile = e2e.manifestPath + ".damage";
+            if (GetFileAttributesA(damageFile.c_str()) != INVALID_FILE_ATTRIBUTES && DeleteFileA(damageFile.c_str()))
+                CortexDemoApplyDamage(g_cortex_demo_actor, 9);
         }
         if (e2e.enabled && GetTickCount64() - lastHashWrite >= 200) {
             lastHashWrite = GetTickCount64();
