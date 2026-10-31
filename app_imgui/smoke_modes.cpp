@@ -413,7 +413,34 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
         error = "artifacts_inspect:" + app.ui.status;
         return false;
     }
-    return RenderGuiStable(app, error, true);
+    if (!RenderGuiStable(app, error, true)) return false;
+
+    // A generated script with an inline source map and an IPC call: the
+    // Electron and Source position tabs are drawn, and the position maps.
+    const auto script = std::filesystem::temp_directory_path() /
+                        ("cortex-gui-suite-" + std::to_string(GetCurrentProcessId()) + ".js");
+    {
+        // {"version":3,"sources":["suite.ts"],"names":[],"mappings":"AAAA;AACA","sourcesContent":["first\nsecond"]}
+        std::ofstream out(script, std::ios::binary);
+        out << "const { ipcRenderer } = require('electron');\nipcRenderer.invoke('suite:ping');\n"
+               "//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbInN1aXRlLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQUFBO0FBQ0EiLCJzb3VyY2VzQ29udGVudCI6WyJmaXJzdFxuc2Vjb25kIl19\n";
+    }
+    app.ui.commands.push_back("inspect_artifact " + script.u8string());
+    bool ok = RenderGuiStable(app, error, true) && app.ui.status.find("(javascript)") != std::string::npos;
+    if (!ok && error.empty()) error = "artifacts_script:" + app.ui.status;
+    for (const char* tab : {"Electron", "Source position", "Structure"}) {
+        if (!ok) break;
+        app.ui.commands.push_back(std::string("artifact_tab ") + tab);
+        ok = RenderGuiStable(app, error, true);
+    }
+    if (ok) {
+        app.ui.commands.push_back("artifact_position 2:5");
+        ok = RenderGuiStable(app, error, true) && app.ui.status == "Mapped to suite.ts:2:1";
+        if (!ok && error.empty()) error = "artifacts_position:" + app.ui.status;
+    }
+    std::error_code ignored;
+    std::filesystem::remove(script, ignored);
+    return ok;
 }
 
 bool ExerciseNavigationContract(AppState& app, std::string& error) {

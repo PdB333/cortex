@@ -114,6 +114,9 @@ def main():
     parser.add_argument("--cortex", required=True)
     parser.add_argument("--target", required=True, help="a PE fixture (the e2e test target)")
     parser.add_argument("--runner", default="", help="e.g. wine")
+    parser.add_argument("--electron-asar", default="",
+                        help="Electron fixture archive (default: tests/fixtures/electron-app.asar; CI passes one "
+                             "freshly packed by @electron/asar)")
     arguments = parser.parse_args()
     runner = shlex.split(arguments.runner)
     cortex = os.path.abspath(arguments.cortex)
@@ -164,7 +167,8 @@ def main():
         server = Mcp(runner + [cortex, "mcp", "--tools", "all"], bundle)
         server.initialize()
         tools = {t["name"]: t for t in (server.request("tools/list", {}) or {}).get("result", {}).get("tools", [])}
-        names = ("cortex_artifact_inspect", "cortex_artifact_children", "cortex_artifact_read")
+        names = ("cortex_artifact_inspect", "cortex_artifact_children", "cortex_artifact_read",
+                 "cortex_artifact_source_position")
         check(all(name in tools for name in names), "tools/list has the artifact tools")
         check(all(tools.get(name, {}).get("_cortex", {}).get("read_only") is True for name in names),
               "artifact tools are marked read-only")
@@ -202,6 +206,52 @@ def main():
                                      {"path": windows_path(runner, os.path.join(root, "..", "outside", "secret.bin"))})
         check(failed and result.get("error") == "path_outside_artifact_roots", "'..' escape refused")
         server.close()
+
+        # 5b. The Electron fixture: module graph, IPC, integrity, source maps.
+        here = os.path.dirname(os.path.abspath(__file__))
+        electron_source = arguments.electron_asar or os.path.join(here, "fixtures", "electron-app.asar")
+        electron = os.path.join(root, "electron-app.asar")
+        shutil.copyfile(electron_source, electron)
+        server = Mcp(runner + [cortex, "mcp", "--tools", "all", "--artifact-root", windows_path(runner, root)], bundle)
+        server.initialize()
+        failed, result = server.call("cortex_artifact_inspect", {"path": windows_path(runner, electron)})
+        data = result.get("data", {})
+        integrity = data.get("integrity", {})
+        check(not failed and integrity.get("matched") == data.get("files_with_integrity") and
+              integrity.get("matched", 0) > 0 and not integrity.get("mismatches"),
+              "ASAR integrity records match the file bytes")
+        app = data.get("electron", {})
+        channels = {row.get("channel"): row for row in app.get("ipc", {}).get("channels", [])}
+        check(set(channels) == {"settings:get", "settings:set", "log:write", "app:ready"},
+              "IPC channels found statically")
+        check(channels.get("settings:get", {}).get("handled_in_main") is True and
+              channels.get("settings:get", {}).get("called_from_renderer") is True, "handler and caller paired")
+        windows = app.get("windows", [])
+        check(len(windows) == 1 and windows[0].get("preload", {}).get("resolved") == "preload.js" and
+              windows[0].get("web_preferences", {}).get("contextIsolation") is True,
+              "BrowserWindow options and preload resolved")
+        check(app.get("processes", {}).get("renderer") == ["renderer/bundle.js"], "renderer script from the HTML page")
+        failed, result = server.call("cortex_artifact_inspect",
+                                     {"path": windows_path(runner, electron), "child": "renderer/bundle.js"})
+        check(not failed and result.get("format") == "javascript" and
+              result.get("data", {}).get("bundle", {}).get("minified") is True, "bundle inspected as minified JS")
+        failed, result = server.call("cortex_artifact_source_position",
+                                     {"path": windows_path(runner, electron), "child": "renderer/bundle.js",
+                                      "line": 1, "column": 97})
+        original = result.get("original") or {}
+        check(not failed and original.get("source") == "../src/math.ts" and original.get("line") == 2 and
+              original.get("name") == "value" and "value < min" in original.get("line_text", ""),
+              "bundle position mapped to src/math.ts:2 through the sibling map")
+        server.close()
+        position = subprocess.run(runner + [cortex, "inspect", windows_path(runner, electron), "--child",
+                                            "renderer/bundle.js", "--position", "1:171"],
+                                  cwd=bundle, capture_output=True, text=True, timeout=120)
+        try:
+            mapped = json.loads(position.stdout).get("original") or {}
+        except ValueError:
+            mapped = {}
+        check(mapped.get("source") == "../src/renderer.ts" and mapped.get("line") == 15,
+              "cortex.exe inspect --position maps the same way")
 
         # 6. invalid root
         bad = subprocess.run(runner + [cortex, "mcp", "--artifact-root", windows_path(runner, os.path.join(workdir, "missing"))],

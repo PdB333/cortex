@@ -20,13 +20,20 @@ public:
     const char* Id() const override { return "artifacts"; }
     const char* Title() const override { return "Artifacts"; }
     void Draw(UiContext& context) override;
-    // "inspect_artifact <path>": inspects a file without the dialog.
+    // "inspect_artifact <path>": inspects a file without the dialog;
+    // "artifact_tab <name>" selects a result tab; "artifact_position L:C"
+    // maps a generated position through the script's source map.
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
     void Inspect(UiContext& context, const std::string& path, const std::string& child);
     void DrawResult(UiContext& context);
     void DrawChildren(UiContext& context);
+    void DrawElectron(const nlohmann::json& data);
+    void DrawModules(const nlohmann::json& modules);
+    void DrawSourcePosition(UiContext& context);
+    void LookupPosition(UiContext& context);
+    int TabFlags(const char* name) const;  // ImGuiTabItemFlags
 
     std::array<char, 1024> path_ = {};
     std::array<char, 512> child_ = {};
@@ -37,6 +44,10 @@ private:
     std::string inspectedPath_;
     std::string inspectedChild_;
     std::array<char, 128> childFilter_ = {};
+    int positionLine_ = 1;
+    int positionColumn_ = 1;
+    nlohmann::json position_;  // last source position answer
+    std::string selectTab_;    // "artifact_tab <name>": selected on the next frame
 };
 
 } // namespace cortex::ui

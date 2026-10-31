@@ -18,6 +18,7 @@ on:
       - "tests/context_isolation_e2e.py"
       - "tests/manual_demo_e2e.py"
       - "tests/artifact_mcp_e2e.py"
+      - "tests/fixtures/**"
       - "core/artifacts/**"
       - "tests/fixtures/mcp_tool_risks.json"
       - "core/security/**"
@@ -320,14 +321,20 @@ jobs:
       - name: Static artifact analysis (inspect CLI and MCP artifact tools)
         shell: pwsh
         run: |
-          # No target process: PE fixtures and generated ASARs inside a
+          # No target process: PE fixtures, generated ASARs and the Electron
+          # fixture app, freshly packed by the real @electron/asar, inside a
           # temporary --artifact-root. See tests/artifact_mcp_e2e.py.
+          npm install --prefix "$env:RUNNER_TEMP/asar" --no-audit --no-fund @electron/asar@4.3.1
+          if ($LASTEXITCODE -ne 0) { throw "npm install @electron/asar failed" }
+          node tests/fixtures/make_electron_fixture.mjs "$env:RUNNER_TEMP/asar/node_modules" --asar-only "$env:RUNNER_TEMP/electron-app.asar"
+          if ($LASTEXITCODE -ne 0) { throw "packing the Electron fixture failed" }
           $bundle = (Resolve-Path "stage/Cortex").Path
           $failed = @()
           foreach ($arch in @("x64", "x86")) {
             python tests/artifact_mcp_e2e.py `
               --cortex "$bundle/cortex.exe" `
-              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+              --target "$bundle/e2e/cortex_test_target_$arch.exe" `
+              --electron-asar "$env:RUNNER_TEMP/electron-app.asar"
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "artifact E2E failed on: $($failed -join ', ')" }
