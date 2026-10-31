@@ -327,6 +327,8 @@ add_executable(cortex_host
     core/artifacts/dotnet_metadata.cpp
     core/artifacts/cil.cpp
     core/artifacts/dotnet_provider.cpp
+    core/artifacts/native_code.cpp
+    core/artifacts/annotations.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
     host/diagnostics/external_host.cpp
@@ -608,6 +610,28 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_dotnet_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_dotnet_tests COMMAND cortex_dotnet_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dotnet)
 
+    add_executable(cortex_native_code_tests
+        tests/native_code_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+    )
+    target_include_directories(cortex_native_code_tests PRIVATE core)
+    target_link_libraries(cortex_native_code_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_native_code_tests COMMAND cortex_native_code_tests $<TARGET_FILE:cortex_test_target>)
+
     add_executable(cortex_artifact_tools_tests
         tests/artifact_tools_tests.cpp
         core/artifacts/artifact.cpp
@@ -623,9 +647,11 @@ if(BUILD_TESTING)
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
     )
     target_include_directories(cortex_artifact_tools_tests PRIVATE core)
-    target_link_libraries(cortex_artifact_tools_tests PRIVATE nlohmann_json::nlohmann_json)
+    target_link_libraries(cortex_artifact_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_artifact_tools_tests COMMAND cortex_artifact_tools_tests $<TARGET_FILE:cortex_test_target>)
 
     # Runtime event ring: bounded, contiguous ids, explicit gaps.
@@ -636,7 +662,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

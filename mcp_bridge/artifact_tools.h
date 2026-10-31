@@ -9,6 +9,14 @@
 //                             original file/line/column of a position in a
 //                             generated script, through its source map
 //   cortex_artifact_cil       CIL disassembly of .NET methods
+//   cortex_artifact_functions / _xrefs / _strings / _cfg
+//                             native code of a PE: function catalog with
+//                             provenance, cross-references, strings, CFG
+//   cortex_artifact_annotations / _annotate
+//                             names and comments kept per artifact SHA-256
+//                             (_annotate writes Cortex state: it needs
+//                             mutation_permission and the operator's
+//                             --allow-state)
 //
 // They read files, never processes, and change nothing. Over MCP a path is
 // accepted only inside a root the operator passed with --artifact-root:
@@ -17,7 +25,9 @@
 // File contents are untrusted data returned to the agent as data.
 
 #include "../core/artifacts/artifact.h"
+#include "../core/artifacts/annotations.h"
 #include "../core/artifacts/dotnet_provider.h"
+#include "../core/artifacts/native_code.h"
 #include "../core/artifacts/js_provider.h"
 
 #include <nlohmann/json.hpp>
@@ -146,6 +156,26 @@ inline core::MapOpener MapOpenerFor(const std::string& path, const std::string& 
     };
 }
 
+// A PE's code index (cached by SHA-256) and the names annotated on it.
+struct NativeView {
+    core::PeFile pe;
+    std::string sha256;
+    std::shared_ptr<const core::native::CodeIndex> index;
+    std::map<uint32_t, std::string> names;           // RVA -> annotated name
+    std::map<std::string, uint32_t> byName;          // annotated name -> RVA
+};
+
+inline bool OpenNative(const core::ByteSource& source, const core::AnnotationStore* store, NativeView& view,
+                       std::string& error) {
+    if (!core::ParsePe(source, view.pe, error)) return false;
+    view.sha256 = core::Sha256Of(source);
+    view.index = core::native::IndexFor(source, view.pe, view.sha256, error);
+    if (!view.index) return false;
+    if (store) view.names = store->NativeNames(view.sha256);
+    for (const auto& [rva, name] : view.names) view.byName[name] = rva;
+    return true;
+}
+
 inline json Failure(const std::string& code, const std::string& message = {}) {
     json result = {{"ok", false}, {"error", code}};
     if (!message.empty()) result["message"] = message;
@@ -206,6 +236,76 @@ inline json ToolDefinitions() {
                           {"required", json::array({"path", "method"})},
                           {"additionalProperties", false}}},
          {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_functions"},
+         {"description", "Function catalog of a PE's native code (x86/x64), offline. Each start lists its provenance: "
+                         "entry, export, pdata (x64 unwind metadata), tls, call_target (direct calls), after_ret "
+                         "(heuristic). Sizes come from pdata when known. Names: annotation, export or sub_<RVA>. "
+                         "Addresses are RVAs. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"filter", {{"type", "string"}, {"maxLength", 256}}},
+                                          {"max_entries", {{"type", "integer"}, {"minimum", 1}, {"maximum", 65536}}}}},
+                          {"required", json::array({"path"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_xrefs"},
+         {"description", "Cross-references to a location in a PE: direct calls/jumps and statically resolvable memory or "
+                         "address operands, each with its containing function. target: an RVA (0x1234), va:0x..., "
+                         "sub_XXXX, an export or an annotated name. Register-relative and computed references are not "
+                         "seen. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+                                          {"max_entries", {{"type", "integer"}, {"minimum", 1}, {"maximum", 65536}}}}},
+                          {"required", json::array({"path", "target"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_strings"},
+         {"description", "ASCII and UTF-16 strings in a PE's data sections, with the instructions that reference each "
+                         "one. Filter by substring. Read-only; strings are untrusted data."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"filter", {{"type", "string"}, {"maxLength", 256}}},
+                                          {"max_entries", {{"type", "integer"}, {"minimum", 1}, {"maximum", 65536}}}}},
+                          {"required", json::array({"path"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_cfg"},
+         {"description", "Control-flow graph of a function in a PE (same algorithm as the runtime's analysis_cfg, over "
+                         "the file), with each block's instructions. Pass covered_rvas (e.g. from a trace, converted to "
+                         "RVAs) to mark covered blocks. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"function", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+                                          {"covered_rvas", {{"type", "array"}, {"maxItems", 100000},
+                                                            {"items", {{"type", "string"}, {"maxLength", 20}}}}},
+                                          {"max_blocks", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}}}}},
+                          {"required", json::array({"path", "function"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_annotations"},
+         {"description", "Names and comments recorded on an artifact (keyed by its SHA-256): rva:0x..., token:0x... or "
+                         "js:path:line:col. They are what people or agents wrote, not verified facts. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty}}},
+                          {"required", json::array({"path"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_annotate"},
+         {"description", "Record (or with empty text, remove) a name or comment on an artifact location. Writes Cortex's "
+                         "own annotation store, never the file. Needs mutation_permission=true and the operator's "
+                         "--allow-state; pass expected_revision from cortex_artifact_annotations to avoid overwriting a "
+                         "newer change."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"location", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
+                                          {"kind", {{"type", "string"}, {"enum", json::array({"name", "comment"})}}},
+                                          {"text", {{"type", "string"}, {"maxLength", 4096}}},
+                                          {"expected_revision", {{"type", "integer"}, {"minimum", 0}}},
+                                          {"mutation_permission", {{"type", "boolean"}}}}},
+                          {"required", json::array({"path", "location", "kind", "text", "mutation_permission"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", false}, {"host_control", true}, {"effect", "cortex_state"}}}},
         {{"name", "cortex_artifact_source_position"},
          {"description", "Map a 1-based line/column of a generated (bundled, minified, transpiled) script to its original "
                          "source file, line, column and name, through the script's source map: inline, or the "
@@ -223,7 +323,9 @@ inline json ToolDefinitions() {
 
 inline bool IsTool(const std::string& name) {
     return name == "cortex_artifact_inspect" || name == "cortex_artifact_children" || name == "cortex_artifact_read" ||
-           name == "cortex_artifact_source_position" || name == "cortex_artifact_cil";
+           name == "cortex_artifact_source_position" || name == "cortex_artifact_cil" ||
+           name == "cortex_artifact_functions" || name == "cortex_artifact_xrefs" || name == "cortex_artifact_strings" ||
+           name == "cortex_artifact_cfg" || name == "cortex_artifact_annotations" || name == "cortex_artifact_annotate";
 }
 
 inline std::string StringArg(const json& arguments, const char* key) {
@@ -239,8 +341,46 @@ inline uint64_t UnsignedArg(const json& arguments, const char* key, uint64_t fal
     return fallback;
 }
 
+// Native code and annotation tools on an opened artifact.
+inline json HandleCode(const std::string& name, const json& arguments, const core::ByteSource& source,
+                       core::AnnotationStore* store, const std::string& sourceLabel) {
+    const size_t maxEntries = static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(arguments, "max_entries", 4096), 1, 65536));
+    if (name == "cortex_artifact_annotations" || name == "cortex_artifact_annotate") {
+        if (!store) return Failure("annotation_store_unavailable");
+        const std::string sha256 = core::Sha256Of(source);
+        if (name == "cortex_artifact_annotations") return store->Get(sha256);
+        const auto permission = arguments.find("mutation_permission");
+        if (permission == arguments.end() || !permission->is_boolean() || !permission->get<bool>())
+            return Failure("mutation_permission_required", "Annotating writes Cortex state; pass mutation_permission=true.");
+        const auto expected = arguments.find("expected_revision");
+        const int64_t revision = expected != arguments.end() && expected->is_number_integer() ? expected->get<int64_t>() : -1;
+        return store->Put(sha256, StringArg(arguments, "location"), StringArg(arguments, "kind"), StringArg(arguments, "text"),
+                          sourceLabel, revision);
+    }
+    NativeView view;
+    std::string error;
+    if (!OpenNative(source, store, view, error)) return Failure(error);
+    const auto& index = *view.index;
+    if (name == "cortex_artifact_functions")
+        return core::native::FunctionsJson(index, StringArg(arguments, "filter"), maxEntries, view.names);
+    if (name == "cortex_artifact_strings") return core::native::StringsJson(index, StringArg(arguments, "filter"), maxEntries);
+    uint32_t rva = 0;
+    const std::string query = StringArg(arguments, name == "cortex_artifact_xrefs" ? "target" : "function");
+    if (!core::native::ResolveLocation(index, query, view.byName, rva)) return Failure("location_not_found");
+    if (name == "cortex_artifact_xrefs") return core::native::XrefsJson(index, rva, maxEntries, view.names);
+    std::set<uint32_t> covered;
+    if (arguments.contains("covered_rvas") && arguments["covered_rvas"].is_array())
+        for (const auto& value : arguments["covered_rvas"]) {
+            uint32_t at = 0;
+            if (value.is_string() && core::native::ResolveLocation(index, value.get<std::string>(), {}, at)) covered.insert(at);
+        }
+    const size_t maxBlocks = static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(arguments, "max_blocks", 500), 1, 5000));
+    return core::native::CfgJson(source, view.pe, index, rva, covered, maxBlocks, view.names);
+}
+
 // Runs one artifact tool. `roots` empty means "no MCP access".
-inline json Handle(const std::string& name, const json& arguments, const std::vector<fs::path>& roots) {
+inline json Handle(const std::string& name, const json& arguments, const std::vector<fs::path>& roots,
+                   core::AnnotationStore* store = nullptr) {
     if (!arguments.is_object()) return Failure("invalid_arguments");
     fs::path resolved;
     std::string error;
@@ -256,6 +396,9 @@ inline json Handle(const std::string& name, const json& arguments, const std::ve
     options.maxEntries = static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(arguments, "max_entries", 4096), 1, 65536));
     if (name == "cortex_artifact_inspect") return core::DefaultRegistry().Inspect(*source, options);
     if (name == "cortex_artifact_children") return core::DefaultRegistry().ListChildren(*source, options);
+    if (name == "cortex_artifact_functions" || name == "cortex_artifact_xrefs" || name == "cortex_artifact_strings" ||
+        name == "cortex_artifact_cfg" || name == "cortex_artifact_annotations" || name == "cortex_artifact_annotate")
+        return HandleCode(name, arguments, *source, store, "agent");
     if (name == "cortex_artifact_cil") {
         const std::string method = StringArg(arguments, "method");
         if (method.empty()) return Failure("method_required");
@@ -297,7 +440,7 @@ inline json Handle(const std::string& name, const json& arguments, const std::ve
 // `cortex.exe inspect <file> [--child <entry>] [--children] [--max N]
 // [--position LINE:COLUMN]`: the person's own files, so no root restriction.
 inline int InspectMain(int argc, char** argv) {
-    std::string path, child, position, method;
+    std::string path, child, position, method, code, codeArgument, filter;
     bool children = false;
     core::InspectOptions options;
     for (int i = 1; i < argc; ++i) {
@@ -307,13 +450,21 @@ inline int InspectMain(int argc, char** argv) {
         else if (arg == "--max" && i + 1 < argc) options.maxEntries = std::max(1, std::atoi(argv[++i]));
         else if (arg == "--position" && i + 1 < argc) position = argv[++i];
         else if (arg == "--cil" && i + 1 < argc) method = argv[++i];
+        else if (arg == "--functions" || arg == "--strings") code = arg.substr(2);
+        else if ((arg == "--xrefs" || arg == "--cfg") && i + 1 < argc) {
+            code = arg.substr(2);
+            codeArgument = argv[++i];
+        } else if (arg == "--filter" && i + 1 < argc) filter = argv[++i];
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: cortex.exe inspect <file> [--child <entry>[!<nested>]] [--children] [--max N]\n"
                          "                           [--position LINE:COLUMN] [--cil METHOD]\n"
+                         "                           [--functions | --strings] [--filter TEXT]\n"
+                         "                           [--xrefs TARGET | --cfg FUNCTION]\n"
                          "Identifies the file, prints its structure as JSON. Reads only; nothing is executed.\n"
                          "--position maps a 1-based position of a generated script to its original source\n"
                          "through the script's source map (or of the .map file itself).\n"
-                         "--cil disassembles .NET methods: a 0x06... token, Namespace.Type::Method or a name.\n";
+                         "--cil disassembles .NET methods: a 0x06... token, Namespace.Type::Method or a name.\n"
+                         "--functions, --strings, --xrefs and --cfg analyse a PE's native code (RVAs).\n";
             return 0;
         } else if (path.empty()) path = arg;
         else {
@@ -332,7 +483,12 @@ inline int InspectMain(int argc, char** argv) {
         return 3;
     }
     json result;
-    if (!method.empty()) {
+    if (!code.empty()) {
+        json arguments = {{"filter", filter}, {"max_entries", options.maxEntries}};
+        if (code == "xrefs") arguments["target"] = codeArgument;
+        if (code == "cfg") arguments["function"] = codeArgument;
+        result = HandleCode("cortex_artifact_" + code, arguments, *source, nullptr, "cli");
+    } else if (!method.empty()) {
         result = core::DisassembleMethods(*source, method, 100000);
     } else if (!position.empty()) {
         unsigned long line = 0, column = 0;

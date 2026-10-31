@@ -182,6 +182,8 @@ add_executable(cortex_imgui WIN32
     ../core/artifacts/dotnet_metadata.cpp
     ../core/artifacts/cil.cpp
     ../core/artifacts/dotnet_provider.cpp
+    ../core/artifacts/native_code.cpp
+    ../core/artifacts/annotations.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

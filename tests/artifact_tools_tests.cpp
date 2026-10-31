@@ -158,10 +158,17 @@ int main(int argc, char** argv) {
 
     // The definitions agents see: read-only and path-required.
     const json definitions = tools::ToolDefinitions();
-    CHECK(definitions.size() == 5);
+    CHECK(definitions.size() == 11);
     for (const auto& tool : definitions) {
         CHECK(tools::IsTool(tool["name"]));
-        CHECK(tool["_cortex"]["read_only"] == true);
+        // Only the annotation writer changes anything, and only Cortex's own store.
+        if (tool["name"] == "cortex_artifact_annotate")
+            CHECK(tool["_cortex"]["read_only"] == false && tool["_cortex"]["host_control"] == true &&
+                  tool["_cortex"]["effect"] == "cortex_state" &&
+                  std::find(tool["inputSchema"]["required"].begin(), tool["inputSchema"]["required"].end(),
+                            "mutation_permission") != tool["inputSchema"]["required"].end());
+        else
+            CHECK(tool["_cortex"]["read_only"] == true);
         CHECK(tool["inputSchema"]["required"][0] == "path");
         CHECK(tool["inputSchema"]["additionalProperties"] == false);
     }

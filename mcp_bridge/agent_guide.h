@@ -418,6 +418,9 @@ inline nlohmann::json CortexTestTools() {
 // Host tools that write Cortex's own journals, reports or knowledge. They need the person's --allow-state
 // (or --allow-writes) on top of the caller's mutation_permission declaration.
 inline bool IsCortexStateTool(const std::string& name) {
+    // The artifact annotation tool (mcp_bridge/artifact_tools.h) writes
+    // Cortex's annotation store.
+    if(name=="cortex_artifact_annotate")return true;
     static const std::set<std::string> names=[]{
         std::set<std::string> result;
         for(const auto& tool:CortexTestTools())
