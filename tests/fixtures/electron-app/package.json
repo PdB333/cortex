@@ -1,0 +1,9 @@
+{
+  "name": "cortex-electron-fixture",
+  "version": "1.2.3",
+  "description": "Static-analysis fixture for Cortex (never run as an app in tests)",
+  "main": "main.js",
+  "dependencies": {
+    "electron-store": "^10.0.0"
+  }
+}
