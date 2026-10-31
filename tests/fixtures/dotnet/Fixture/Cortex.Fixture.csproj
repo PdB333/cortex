@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Static-analysis fixture for Cortex (step 4c). Never executed by the tests. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>Cortex.Fixture</AssemblyName>
+    <RootNamespace>Cortex.Fixture</RootNamespace>
+    <Version>1.4.2</Version>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <Optimize>true</Optimize>
+    <DebugType>portable</DebugType>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <PackageId>Cortex.Fixture</PackageId>
+    <Authors>Cortex</Authors>
+    <Description>Cortex static-analysis fixture</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="greeting.txt" LogicalName="Cortex.Fixture.greeting.txt" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,2684 @@
+{
+  "assembly": {
+    "name": "Cortex.Fixture",
+    "version": "1.4.2.0",
+    "culture": ""
+  },
+  "module": {
+    "name": "Cortex.Fixture.dll",
+    "mvid": "6dd048d5-1b3e-4979-950a-4b37e1ff0795"
+  },
+  "metadata_version": "v4.0.30319",
+  "assembly_refs": [
+    {
+      "name": "System.Runtime",
+      "version": "8.0.0.0"
+    },
+    {
+      "name": "System.Collections",
+      "version": "8.0.0.0"
+    }
+  ],
+  "type_refs": [
+    {
+      "token": "0x01000001",
+      "name": "System.Runtime.CompilerServices.CompilationRelaxationsAttribute"
+    },
+    {
+      "token": "0x01000002",
+      "name": "System.Runtime.CompilerServices.RuntimeCompatibilityAttribute"
+    },
+    {
+      "token": "0x01000003",
+      "name": "System.Diagnostics.DebuggableAttribute"
+    },
+    {
+      "token": "0x01000004",
+      "name": "System.Diagnostics.DebuggableAttribute/DebuggingModes"
+    },
+    {
+      "token": "0x01000005",
+      "name": "System.Runtime.Versioning.TargetFrameworkAttribute"
+    },
+    {
+      "token": "0x01000006",
+      "name": "System.Reflection.AssemblyCompanyAttribute"
+    },
+    {
+      "token": "0x01000007",
+      "name": "System.Reflection.AssemblyConfigurationAttribute"
+    },
+    {
+      "token": "0x01000008",
+      "name": "System.Reflection.AssemblyDescriptionAttribute"
+    },
+    {
+      "token": "0x01000009",
+      "name": "System.Reflection.AssemblyFileVersionAttribute"
+    },
+    {
+      "token": "0x0100000a",
+      "name": "System.Reflection.AssemblyInformationalVersionAttribute"
+    },
+    {
+      "token": "0x0100000b",
+      "name": "System.Reflection.AssemblyProductAttribute"
+    },
+    {
+      "token": "0x0100000c",
+      "name": "System.Reflection.AssemblyTitleAttribute"
+    },
+    {
+      "token": "0x0100000d",
+      "name": "System.Runtime.CompilerServices.RefSafetyRulesAttribute"
+    },
+    {
+      "token": "0x0100000e",
+      "name": "System.Enum"
+    },
+    {
+      "token": "0x0100000f",
+      "name": "System.Object"
+    },
+    {
+      "token": "0x01000010",
+      "name": "System.Collections.Generic.List`1"
+    },
+    {
+      "token": "0x01000011",
+      "name": "System.Runtime.CompilerServices.CompilerGeneratedAttribute"
+    },
+    {
+      "token": "0x01000012",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler"
+    },
+    {
+      "token": "0x01000013",
+      "name": "System.OverflowException"
+    },
+    {
+      "token": "0x01000014",
+      "name": "System.Collections.Generic.IList`1"
+    },
+    {
+      "token": "0x01000015",
+      "name": "System.ArgumentOutOfRangeException"
+    },
+    {
+      "token": "0x01000016",
+      "name": "System.Math"
+    },
+    {
+      "token": "0x01000017",
+      "name": "System.Collections.Generic.ICollection`1"
+    },
+    {
+      "token": "0x01000018",
+      "name": "System.Int32"
+    },
+    {
+      "token": "0x01000019",
+      "name": "System.String"
+    }
+  ],
+  "types": [
+    {
+      "token": "0x02000001",
+      "name": "<Module>",
+      "flags": 0,
+      "extends": null,
+      "fields": [],
+      "methods": []
+    },
+    {
+      "token": "0x02000002",
+      "name": "Cortex.Fixture.DamageKind",
+      "flags": 257,
+      "extends": "System.Enum",
+      "fields": [
+        {
+          "token": "0x04000001",
+          "name": "value__",
+          "flags": 1542,
+          "signature": "uint8"
+        },
+        {
+          "token": "0x04000002",
+          "name": "Physical",
+          "flags": 32854,
+          "signature": "Cortex.Fixture.DamageKind"
+        },
+        {
+          "token": "0x04000003",
+          "name": "Fire",
+          "flags": 32854,
+          "signature": "Cortex.Fixture.DamageKind"
+        },
+        {
+          "token": "0x04000004",
+          "name": "Poison",
+          "flags": 32854,
+          "signature": "Cortex.Fixture.DamageKind"
+        }
+      ],
+      "methods": []
+    },
+    {
+      "token": "0x02000003",
+      "name": "Cortex.Fixture.IDamageable",
+      "flags": 1048737,
+      "extends": null,
+      "fields": [],
+      "methods": [
+        {
+          "token": "0x06000001",
+          "name": "get_Health",
+          "flags": 3526,
+          "impl_flags": 0,
+          "rva": 0,
+          "signature": "int32 ()",
+          "parameters": []
+        },
+        {
+          "token": "0x06000002",
+          "name": "ApplyDamage",
+          "flags": 1478,
+          "impl_flags": 0,
+          "rva": 0,
+          "signature": "void (int32, Cortex.Fixture.DamageKind)",
+          "parameters": [
+            "amount",
+            "kind"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "0x02000004",
+      "name": "Cortex.Fixture.Actor",
+      "flags": 1057025,
+      "extends": "System.Object",
+      "fields": [
+        {
+          "token": "0x04000005",
+          "name": "MaxHealth",
+          "flags": 32854,
+          "signature": "int32"
+        },
+        {
+          "token": "0x04000006",
+          "name": "Created",
+          "flags": 22,
+          "signature": "int32"
+        },
+        {
+          "token": "0x04000007",
+          "name": "health",
+          "flags": 1,
+          "signature": "int32"
+        },
+        {
+          "token": "0x04000008",
+          "name": "log",
+          "flags": 33,
+          "signature": "System.Collections.Generic.List`1<string>"
+        },
+        {
+          "token": "0x04000009",
+          "name": "<Name>k__BackingField",
+          "flags": 33,
+          "signature": "string"
+        },
+        {
+          "token": "0x0400000a",
+          "name": "<Armor>k__BackingField",
+          "flags": 1,
+          "signature": "int32"
+        }
+      ],
+      "methods": [
+        {
+          "token": "0x06000003",
+          "name": ".ctor",
+          "flags": 6278,
+          "impl_flags": 0,
+          "rva": 8272,
+          "signature": "void (string)",
+          "parameters": [
+            "name"
+          ]
+        },
+        {
+          "token": "0x06000004",
+          "name": "get_Name",
+          "flags": 2182,
+          "impl_flags": 0,
+          "rva": 8326,
+          "signature": "string ()",
+          "parameters": []
+        },
+        {
+          "token": "0x06000005",
+          "name": "get_Health",
+          "flags": 2534,
+          "impl_flags": 0,
+          "rva": 8334,
+          "signature": "int32 ()",
+          "parameters": []
+        },
+        {
+          "token": "0x06000006",
+          "name": "get_Armor",
+          "flags": 2182,
+          "impl_flags": 0,
+          "rva": 8342,
+          "signature": "int32 ()",
+          "parameters": []
+        },
+        {
+          "token": "0x06000007",
+          "name": "set_Armor",
+          "flags": 2182,
+          "impl_flags": 0,
+          "rva": 8350,
+          "signature": "void (int32)",
+          "parameters": [
+            "value"
+          ]
+        },
+        {
+          "token": "0x06000008",
+          "name": "ApplyDamage",
+          "flags": 486,
+          "impl_flags": 0,
+          "rva": 8360,
+          "signature": "void (int32, Cortex.Fixture.DamageKind)",
+          "parameters": [
+            "amount",
+            "kind"
+          ]
+        },
+        {
+          "token": "0x06000009",
+          "name": "Heal",
+          "flags": 134,
+          "impl_flags": 0,
+          "rva": 8516,
+          "signature": "int32 (int32)",
+          "parameters": [
+            "amount"
+          ]
+        },
+        {
+          "token": "0x0600000a",
+          "name": "Pick",
+          "flags": 150,
+          "impl_flags": 0,
+          "rva": 8616,
+          "signature": "!!0 (System.Collections.Generic.IList`1<!!0>, int32)",
+          "parameters": [
+            "items",
+            "index"
+          ]
+        },
+        {
+          "token": "0x0600000b",
+          "name": "Classify",
+          "flags": 134,
+          "impl_flags": 0,
+          "rva": 8659,
+          "signature": "int64 (int32)",
+          "parameters": [
+            "code"
+          ]
+        },
+        {
+          "token": "0x0600000c",
+          "name": "Scale",
+          "flags": 134,
+          "impl_flags": 0,
+          "rva": 8703,
+          "signature": "float64 (float32)",
+          "parameters": [
+            "factor"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "0x02000005",
+      "name": "Cortex.Fixture.Native",
+      "flags": 1048961,
+      "extends": "System.Object",
+      "fields": [],
+      "methods": [
+        {
+          "token": "0x0600000d",
+          "name": "Ticks",
+          "flags": 8342,
+          "impl_flags": 128,
+          "rva": 0,
+          "signature": "uint64 ()",
+          "parameters": []
+        },
+        {
+          "token": "0x0600000e",
+          "name": "Describe",
+          "flags": 150,
+          "impl_flags": 0,
+          "rva": 8728,
+          "signature": "string (Cortex.Fixture.Actor)",
+          "parameters": [
+            "actor"
+          ]
+        }
+      ]
+    },
+    {
+      "token": "0x02000006",
+      "name": "Cortex.Fixture.Actor/Snapshot",
+      "flags": 1048834,
+      "extends": "System.Object",
+      "fields": [
+        {
+          "token": "0x0400000b",
+          "name": "Health",
+          "flags": 6,
+          "signature": "int32"
+        },
+        {
+          "token": "0x0400000c",
+          "name": "Recent",
+          "flags": 6,
+          "signature": "int32[]"
+        }
+      ],
+      "methods": [
+        {
+          "token": "0x0600000f",
+          "name": ".ctor",
+          "flags": 6278,
+          "impl_flags": 0,
+          "rva": 8776,
+          "signature": "void ()",
+          "parameters": []
+        }
+      ]
+    }
+  ],
+  "member_refs": [
+    {
+      "token": "0x0a000001",
+      "name": "System.Runtime.CompilerServices.CompilationRelaxationsAttribute::.ctor",
+      "signature": "void (int32)"
+    },
+    {
+      "token": "0x0a000002",
+      "name": "System.Runtime.CompilerServices.RuntimeCompatibilityAttribute::.ctor",
+      "signature": "void ()"
+    },
+    {
+      "token": "0x0a000003",
+      "name": "System.Diagnostics.DebuggableAttribute::.ctor",
+      "signature": "void (System.Diagnostics.DebuggableAttribute/DebuggingModes)"
+    },
+    {
+      "token": "0x0a000004",
+      "name": "System.Runtime.Versioning.TargetFrameworkAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000005",
+      "name": "System.Reflection.AssemblyCompanyAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000006",
+      "name": "System.Reflection.AssemblyConfigurationAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000007",
+      "name": "System.Reflection.AssemblyDescriptionAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000008",
+      "name": "System.Reflection.AssemblyFileVersionAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000009",
+      "name": "System.Reflection.AssemblyInformationalVersionAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a00000a",
+      "name": "System.Reflection.AssemblyProductAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a00000b",
+      "name": "System.Reflection.AssemblyTitleAttribute::.ctor",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a00000c",
+      "name": "System.Runtime.CompilerServices.RefSafetyRulesAttribute::.ctor",
+      "signature": "void (int32)"
+    },
+    {
+      "token": "0x0a00000d",
+      "name": "System.Runtime.CompilerServices.CompilerGeneratedAttribute::.ctor",
+      "signature": "void ()"
+    },
+    {
+      "token": "0x0a00000e",
+      "name": "System.Collections.Generic.List`1<string>::.ctor",
+      "signature": "void ()"
+    },
+    {
+      "token": "0x0a00000f",
+      "name": "System.Object::.ctor",
+      "signature": "void ()"
+    },
+    {
+      "token": "0x0a000010",
+      "name": "System.ArgumentOutOfRangeException::.ctor",
+      "signature": "void (string, string)"
+    },
+    {
+      "token": "0x0a000011",
+      "name": "System.Math::Max",
+      "signature": "int32 (int32, int32)"
+    },
+    {
+      "token": "0x0a000012",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::.ctor",
+      "signature": "void (int32, int32)"
+    },
+    {
+      "token": "0x0a000013",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendFormatted",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000014",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendLiteral",
+      "signature": "void (string)"
+    },
+    {
+      "token": "0x0a000015",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendFormatted",
+      "signature": "void (!!0)"
+    },
+    {
+      "token": "0x0a000016",
+      "name": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::ToStringAndClear",
+      "signature": "string ()"
+    },
+    {
+      "token": "0x0a000017",
+      "name": "System.Collections.Generic.List`1<string>::Add",
+      "signature": "void (!0)"
+    },
+    {
+      "token": "0x0a000018",
+      "name": "System.Math::Min",
+      "signature": "int32 (int32, int32)"
+    },
+    {
+      "token": "0x0a000019",
+      "name": "System.Collections.Generic.ICollection`1<!!0>::get_Count",
+      "signature": "int32 ()"
+    },
+    {
+      "token": "0x0a00001a",
+      "name": "System.Collections.Generic.IList`1<!!0>::get_Item",
+      "signature": "!0 (int32)"
+    },
+    {
+      "token": "0x0a00001b",
+      "name": "System.Int32::ToString",
+      "signature": "string ()"
+    },
+    {
+      "token": "0x0a00001c",
+      "name": "System.String::Concat",
+      "signature": "string (string, string, string, string)"
+    }
+  ],
+  "manifest_resources": [
+    {
+      "name": "Cortex.Fixture.greeting.txt",
+      "offset": 0,
+      "embedded": true
+    }
+  ],
+  "pinvoke": [
+    {
+      "method": "Cortex.Fixture.Native::Ticks",
+      "entry": "GetTickCount64",
+      "module": "kernel32.dll"
+    }
+  ],
+  "method_bodies": [
+    {
+      "token": "0x06000003",
+      "method": "Cortex.Fixture.Actor::.ctor",
+      "max_stack": 8,
+      "code_size": 53,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldc.i4.s",
+          "operand": "100"
+        },
+        {
+          "offset": 3,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 8,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 9,
+          "opcode": "newobj",
+          "operand": "System.Collections.Generic.List`1<string>::.ctor",
+          "token": "0x0a00000e"
+        },
+        {
+          "offset": 14,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::log",
+          "token": "0x04000008"
+        },
+        {
+          "offset": 19,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 20,
+          "opcode": "ldc.i4.s",
+          "operand": "25"
+        },
+        {
+          "offset": 22,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::<Armor>k__BackingField",
+          "token": "0x0400000a"
+        },
+        {
+          "offset": 27,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 28,
+          "opcode": "call",
+          "operand": "System.Object::.ctor",
+          "token": "0x0a00000f"
+        },
+        {
+          "offset": 33,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 34,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 35,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::<Name>k__BackingField",
+          "token": "0x04000009"
+        },
+        {
+          "offset": 40,
+          "opcode": "ldsfld",
+          "operand": "Cortex.Fixture.Actor::Created",
+          "token": "0x04000006"
+        },
+        {
+          "offset": 45,
+          "opcode": "ldc.i4.1"
+        },
+        {
+          "offset": 46,
+          "opcode": "add"
+        },
+        {
+          "offset": 47,
+          "opcode": "stsfld",
+          "operand": "Cortex.Fixture.Actor::Created",
+          "token": "0x04000006"
+        },
+        {
+          "offset": 52,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000004",
+      "method": "Cortex.Fixture.Actor::get_Name",
+      "max_stack": 8,
+      "code_size": 7,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::<Name>k__BackingField",
+          "token": "0x04000009"
+        },
+        {
+          "offset": 6,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000005",
+      "method": "Cortex.Fixture.Actor::get_Health",
+      "max_stack": 8,
+      "code_size": 7,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 6,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000006",
+      "method": "Cortex.Fixture.Actor::get_Armor",
+      "max_stack": 8,
+      "code_size": 7,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::<Armor>k__BackingField",
+          "token": "0x0400000a"
+        },
+        {
+          "offset": 6,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000007",
+      "method": "Cortex.Fixture.Actor::set_Armor",
+      "max_stack": 8,
+      "code_size": 8,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 2,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::<Armor>k__BackingField",
+          "token": "0x0400000a"
+        },
+        {
+          "offset": 7,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000008",
+      "method": "Cortex.Fixture.Actor::ApplyDamage",
+      "max_stack": 4,
+      "code_size": 142,
+      "init_locals": true,
+      "local_signature": "0x11000001",
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldc.i4.0"
+        },
+        {
+          "offset": 2,
+          "opcode": "bgt.s",
+          "operand": "IL_0014"
+        },
+        {
+          "offset": 4,
+          "opcode": "ldstr",
+          "operand": "\"amount\"",
+          "token": "0x70000001"
+        },
+        {
+          "offset": 9,
+          "opcode": "ldstr",
+          "operand": "\"damage must be positive\"",
+          "token": "0x7000000f"
+        },
+        {
+          "offset": 14,
+          "opcode": "newobj",
+          "operand": "System.ArgumentOutOfRangeException::.ctor",
+          "token": "0x0a000010"
+        },
+        {
+          "offset": 19,
+          "opcode": "throw"
+        },
+        {
+          "offset": 20,
+          "opcode": "ldarg.2"
+        },
+        {
+          "offset": 21,
+          "opcode": "ldc.i4.2"
+        },
+        {
+          "offset": 22,
+          "opcode": "beq.s",
+          "operand": "IL_001e"
+        },
+        {
+          "offset": 24,
+          "opcode": "ldarg.2"
+        },
+        {
+          "offset": 25,
+          "opcode": "ldc.i4.4"
+        },
+        {
+          "offset": 26,
+          "opcode": "beq.s",
+          "operand": "IL_0024"
+        },
+        {
+          "offset": 28,
+          "opcode": "br.s",
+          "operand": "IL_002a"
+        },
+        {
+          "offset": 30,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 31,
+          "opcode": "ldc.i4.2"
+        },
+        {
+          "offset": 32,
+          "opcode": "mul"
+        },
+        {
+          "offset": 33,
+          "opcode": "stloc.1"
+        },
+        {
+          "offset": 34,
+          "opcode": "br.s",
+          "operand": "IL_003b"
+        },
+        {
+          "offset": 36,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 37,
+          "opcode": "ldc.i4.2"
+        },
+        {
+          "offset": 38,
+          "opcode": "div"
+        },
+        {
+          "offset": 39,
+          "opcode": "stloc.1"
+        },
+        {
+          "offset": 40,
+          "opcode": "br.s",
+          "operand": "IL_003b"
+        },
+        {
+          "offset": 42,
+          "opcode": "ldc.i4.1"
+        },
+        {
+          "offset": 43,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 44,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 45,
+          "opcode": "call",
+          "operand": "Cortex.Fixture.Actor::get_Armor",
+          "token": "0x06000006"
+        },
+        {
+          "offset": 50,
+          "opcode": "ldc.i4.5"
+        },
+        {
+          "offset": 51,
+          "opcode": "div"
+        },
+        {
+          "offset": 52,
+          "opcode": "sub"
+        },
+        {
+          "offset": 53,
+          "opcode": "call",
+          "operand": "System.Math::Max",
+          "token": "0x0a000011"
+        },
+        {
+          "offset": 58,
+          "opcode": "stloc.1"
+        },
+        {
+          "offset": 59,
+          "opcode": "ldloc.1"
+        },
+        {
+          "offset": 60,
+          "opcode": "stloc.0"
+        },
+        {
+          "offset": 61,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 62,
+          "opcode": "ldc.i4.0"
+        },
+        {
+          "offset": 63,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 64,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 69,
+          "opcode": "ldloc.0"
+        },
+        {
+          "offset": 70,
+          "opcode": "sub"
+        },
+        {
+          "offset": 71,
+          "opcode": "call",
+          "operand": "System.Math::Max",
+          "token": "0x0a000011"
+        },
+        {
+          "offset": 76,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 81,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 82,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::log",
+          "token": "0x04000008"
+        },
+        {
+          "offset": 87,
+          "opcode": "ldloca.s",
+          "operand": "2"
+        },
+        {
+          "offset": 89,
+          "opcode": "ldc.i4.6"
+        },
+        {
+          "offset": 90,
+          "opcode": "ldc.i4.2"
+        },
+        {
+          "offset": 91,
+          "opcode": "call",
+          "operand": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::.ctor",
+          "token": "0x0a000012"
+        },
+        {
+          "offset": 96,
+          "opcode": "ldloca.s",
+          "operand": "2"
+        },
+        {
+          "offset": 98,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 99,
+          "opcode": "call",
+          "operand": "Cortex.Fixture.Actor::get_Name",
+          "token": "0x06000004"
+        },
+        {
+          "offset": 104,
+          "opcode": "call",
+          "operand": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendFormatted",
+          "token": "0x0a000013"
+        },
+        {
+          "offset": 109,
+          "opcode": "ldloca.s",
+          "operand": "2"
+        },
+        {
+          "offset": 111,
+          "opcode": "ldstr",
+          "operand": "\" took \"",
+          "token": "0x7000003f"
+        },
+        {
+          "offset": 116,
+          "opcode": "call",
+          "operand": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendLiteral",
+          "token": "0x0a000014"
+        },
+        {
+          "offset": 121,
+          "opcode": "ldloca.s",
+          "operand": "2"
+        },
+        {
+          "offset": 123,
+          "opcode": "ldloc.0"
+        },
+        {
+          "offset": 124,
+          "opcode": "call",
+          "operand": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::AppendFormatted<int32>",
+          "token": "0x2b000001"
+        },
+        {
+          "offset": 129,
+          "opcode": "ldloca.s",
+          "operand": "2"
+        },
+        {
+          "offset": 131,
+          "opcode": "call",
+          "operand": "System.Runtime.CompilerServices.DefaultInterpolatedStringHandler::ToStringAndClear",
+          "token": "0x0a000016"
+        },
+        {
+          "offset": 136,
+          "opcode": "callvirt",
+          "operand": "System.Collections.Generic.List`1<string>::Add",
+          "token": "0x0a000017"
+        },
+        {
+          "offset": 141,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x06000009",
+      "method": "Cortex.Fixture.Actor::Heal",
+      "max_stack": 4,
+      "code_size": 58,
+      "init_locals": true,
+      "local_signature": null,
+      "exception_clauses": [
+        {
+          "kind": "catch",
+          "try_offset": 0,
+          "try_length": 23,
+          "handler_offset": 23,
+          "handler_length": 11,
+          "catch_type": "System.OverflowException"
+        },
+        {
+          "kind": "finally",
+          "try_offset": 0,
+          "try_length": 34,
+          "handler_offset": 34,
+          "handler_length": 17,
+          "catch_type": null
+        }
+      ],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldc.i4.s",
+          "operand": "100"
+        },
+        {
+          "offset": 3,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 4,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 9,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 10,
+          "opcode": "add.ovf"
+        },
+        {
+          "offset": 11,
+          "opcode": "call",
+          "operand": "System.Math::Min",
+          "token": "0x0a000018"
+        },
+        {
+          "offset": 16,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 21,
+          "opcode": "leave.s",
+          "operand": "IL_0033"
+        },
+        {
+          "offset": 23,
+          "opcode": "pop"
+        },
+        {
+          "offset": 24,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 25,
+          "opcode": "ldc.i4.s",
+          "operand": "100"
+        },
+        {
+          "offset": 27,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 32,
+          "opcode": "leave.s",
+          "operand": "IL_0033"
+        },
+        {
+          "offset": 34,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 35,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::log",
+          "token": "0x04000008"
+        },
+        {
+          "offset": 40,
+          "opcode": "ldstr",
+          "operand": "\"healed\"",
+          "token": "0x7000004d"
+        },
+        {
+          "offset": 45,
+          "opcode": "callvirt",
+          "operand": "System.Collections.Generic.List`1<string>::Add",
+          "token": "0x0a000017"
+        },
+        {
+          "offset": 50,
+          "opcode": "endfinally"
+        },
+        {
+          "offset": 51,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 52,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 57,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x0600000a",
+      "method": "Cortex.Fixture.Actor::Pick",
+      "max_stack": 2,
+      "code_size": 31,
+      "init_locals": true,
+      "local_signature": "0x11000002",
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldc.i4.0"
+        },
+        {
+          "offset": 2,
+          "opcode": "blt.s",
+          "operand": "IL_000d"
+        },
+        {
+          "offset": 4,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 5,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 6,
+          "opcode": "callvirt",
+          "operand": "System.Collections.Generic.ICollection`1<!!0>::get_Count",
+          "token": "0x0a000019"
+        },
+        {
+          "offset": 11,
+          "opcode": "blt.s",
+          "operand": "IL_0017"
+        },
+        {
+          "offset": 13,
+          "opcode": "ldloca.s",
+          "operand": "0"
+        },
+        {
+          "offset": 15,
+          "opcode": "initobj",
+          "operand": "!!0",
+          "token": "0x1b000003"
+        },
+        {
+          "offset": 21,
+          "opcode": "ldloc.0"
+        },
+        {
+          "offset": 22,
+          "opcode": "ret"
+        },
+        {
+          "offset": 23,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 24,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 25,
+          "opcode": "callvirt",
+          "operand": "System.Collections.Generic.IList`1<!!0>::get_Item",
+          "token": "0x0a00001a"
+        },
+        {
+          "offset": 30,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x0600000b",
+      "method": "Cortex.Fixture.Actor::Classify",
+      "max_stack": 8,
+      "code_size": 43,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 1,
+          "opcode": "switch",
+          "operand": "(IL_0018, IL_001c, IL_0020, IL_0024)"
+        },
+        {
+          "offset": 22,
+          "opcode": "br.s",
+          "operand": "IL_0028"
+        },
+        {
+          "offset": 24,
+          "opcode": "ldc.i4.s",
+          "operand": "10"
+        },
+        {
+          "offset": 26,
+          "opcode": "conv.i8"
+        },
+        {
+          "offset": 27,
+          "opcode": "ret"
+        },
+        {
+          "offset": 28,
+          "opcode": "ldc.i4.s",
+          "operand": "20"
+        },
+        {
+          "offset": 30,
+          "opcode": "conv.i8"
+        },
+        {
+          "offset": 31,
+          "opcode": "ret"
+        },
+        {
+          "offset": 32,
+          "opcode": "ldc.i4.s",
+          "operand": "30"
+        },
+        {
+          "offset": 34,
+          "opcode": "conv.i8"
+        },
+        {
+          "offset": 35,
+          "opcode": "ret"
+        },
+        {
+          "offset": 36,
+          "opcode": "ldc.i4.s",
+          "operand": "40"
+        },
+        {
+          "offset": 38,
+          "opcode": "conv.i8"
+        },
+        {
+          "offset": 39,
+          "opcode": "ret"
+        },
+        {
+          "offset": 40,
+          "opcode": "ldc.i4.m1"
+        },
+        {
+          "offset": 41,
+          "opcode": "conv.i8"
+        },
+        {
+          "offset": 42,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x0600000c",
+      "method": "Cortex.Fixture.Actor::Scale",
+      "max_stack": 8,
+      "code_size": 21,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldfld",
+          "operand": "Cortex.Fixture.Actor::health",
+          "token": "0x04000007"
+        },
+        {
+          "offset": 6,
+          "opcode": "conv.r8"
+        },
+        {
+          "offset": 7,
+          "opcode": "ldarg.1"
+        },
+        {
+          "offset": 8,
+          "opcode": "conv.r8"
+        },
+        {
+          "offset": 9,
+          "opcode": "mul"
+        },
+        {
+          "offset": 10,
+          "opcode": "ldc.r8",
+          "operand": "0.5"
+        },
+        {
+          "offset": 19,
+          "opcode": "add"
+        },
+        {
+          "offset": 20,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x0600000e",
+      "method": "Cortex.Fixture.Native::Describe",
+      "max_stack": 4,
+      "code_size": 36,
+      "init_locals": true,
+      "local_signature": "0x11000003",
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldstr",
+          "operand": "\"Actor \"",
+          "token": "0x7000005b"
+        },
+        {
+          "offset": 5,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 6,
+          "opcode": "callvirt",
+          "operand": "Cortex.Fixture.Actor::get_Name",
+          "token": "0x06000004"
+        },
+        {
+          "offset": 11,
+          "opcode": "ldstr",
+          "operand": "\" at \"",
+          "token": "0x70000069"
+        },
+        {
+          "offset": 16,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 17,
+          "opcode": "callvirt",
+          "operand": "Cortex.Fixture.Actor::get_Health",
+          "token": "0x06000005"
+        },
+        {
+          "offset": 22,
+          "opcode": "stloc.0"
+        },
+        {
+          "offset": 23,
+          "opcode": "ldloca.s",
+          "operand": "0"
+        },
+        {
+          "offset": 25,
+          "opcode": "call",
+          "operand": "System.Int32::ToString",
+          "token": "0x0a00001b"
+        },
+        {
+          "offset": 30,
+          "opcode": "call",
+          "operand": "System.String::Concat",
+          "token": "0x0a00001c"
+        },
+        {
+          "offset": 35,
+          "opcode": "ret"
+        }
+      ]
+    },
+    {
+      "token": "0x0600000f",
+      "method": "Cortex.Fixture.Actor/Snapshot::.ctor",
+      "max_stack": 8,
+      "code_size": 19,
+      "init_locals": false,
+      "local_signature": null,
+      "exception_clauses": [],
+      "instructions": [
+        {
+          "offset": 0,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 1,
+          "opcode": "ldc.i4.4"
+        },
+        {
+          "offset": 2,
+          "opcode": "newarr",
+          "operand": "System.Int32",
+          "token": "0x01000018"
+        },
+        {
+          "offset": 7,
+          "opcode": "stfld",
+          "operand": "Cortex.Fixture.Actor/Snapshot::Recent",
+          "token": "0x0400000c"
+        },
+        {
+          "offset": 12,
+          "opcode": "ldarg.0"
+        },
+        {
+          "offset": 13,
+          "opcode": "call",
+          "operand": "System.Object::.ctor",
+          "token": "0x0a00000f"
+        },
+        {
+          "offset": 18,
+          "opcode": "ret"
+        }
+      ]
+    }
+  ],
+  "opcodes": [
+    {
+      "value": 0,
+      "name": "nop",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 1,
+      "name": "break",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 2,
+      "name": "ldarg.0",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 3,
+      "name": "ldarg.1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 4,
+      "name": "ldarg.2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 5,
+      "name": "ldarg.3",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 6,
+      "name": "ldloc.0",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 7,
+      "name": "ldloc.1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 8,
+      "name": "ldloc.2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 9,
+      "name": "ldloc.3",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 10,
+      "name": "stloc.0",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 11,
+      "name": "stloc.1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 12,
+      "name": "stloc.2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 13,
+      "name": "stloc.3",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 14,
+      "name": "ldarg.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 15,
+      "name": "ldarga.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 16,
+      "name": "starg.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 17,
+      "name": "ldloc.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 18,
+      "name": "ldloca.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 19,
+      "name": "stloc.s",
+      "operand": "ShortInlineVar"
+    },
+    {
+      "value": 20,
+      "name": "ldnull",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 21,
+      "name": "ldc.i4.m1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 22,
+      "name": "ldc.i4.0",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 23,
+      "name": "ldc.i4.1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 24,
+      "name": "ldc.i4.2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 25,
+      "name": "ldc.i4.3",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 26,
+      "name": "ldc.i4.4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 27,
+      "name": "ldc.i4.5",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 28,
+      "name": "ldc.i4.6",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 29,
+      "name": "ldc.i4.7",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 30,
+      "name": "ldc.i4.8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 31,
+      "name": "ldc.i4.s",
+      "operand": "ShortInlineI"
+    },
+    {
+      "value": 32,
+      "name": "ldc.i4",
+      "operand": "InlineI"
+    },
+    {
+      "value": 33,
+      "name": "ldc.i8",
+      "operand": "InlineI8"
+    },
+    {
+      "value": 34,
+      "name": "ldc.r4",
+      "operand": "ShortInlineR"
+    },
+    {
+      "value": 35,
+      "name": "ldc.r8",
+      "operand": "InlineR"
+    },
+    {
+      "value": 37,
+      "name": "dup",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 38,
+      "name": "pop",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 39,
+      "name": "jmp",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 40,
+      "name": "call",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 41,
+      "name": "calli",
+      "operand": "InlineSig"
+    },
+    {
+      "value": 42,
+      "name": "ret",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 43,
+      "name": "br.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 44,
+      "name": "brfalse.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 45,
+      "name": "brtrue.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 46,
+      "name": "beq.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 47,
+      "name": "bge.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 48,
+      "name": "bgt.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 49,
+      "name": "ble.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 50,
+      "name": "blt.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 51,
+      "name": "bne.un.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 52,
+      "name": "bge.un.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 53,
+      "name": "bgt.un.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 54,
+      "name": "ble.un.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 55,
+      "name": "blt.un.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 56,
+      "name": "br",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 57,
+      "name": "brfalse",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 58,
+      "name": "brtrue",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 59,
+      "name": "beq",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 60,
+      "name": "bge",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 61,
+      "name": "bgt",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 62,
+      "name": "ble",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 63,
+      "name": "blt",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 64,
+      "name": "bne.un",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 65,
+      "name": "bge.un",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 66,
+      "name": "bgt.un",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 67,
+      "name": "ble.un",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 68,
+      "name": "blt.un",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 69,
+      "name": "switch",
+      "operand": "InlineSwitch"
+    },
+    {
+      "value": 70,
+      "name": "ldind.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 71,
+      "name": "ldind.u1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 72,
+      "name": "ldind.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 73,
+      "name": "ldind.u2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 74,
+      "name": "ldind.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 75,
+      "name": "ldind.u4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 76,
+      "name": "ldind.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 77,
+      "name": "ldind.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 78,
+      "name": "ldind.r4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 79,
+      "name": "ldind.r8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 80,
+      "name": "ldind.ref",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 81,
+      "name": "stind.ref",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 82,
+      "name": "stind.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 83,
+      "name": "stind.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 84,
+      "name": "stind.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 85,
+      "name": "stind.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 86,
+      "name": "stind.r4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 87,
+      "name": "stind.r8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 88,
+      "name": "add",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 89,
+      "name": "sub",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 90,
+      "name": "mul",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 91,
+      "name": "div",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 92,
+      "name": "div.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 93,
+      "name": "rem",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 94,
+      "name": "rem.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 95,
+      "name": "and",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 96,
+      "name": "or",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 97,
+      "name": "xor",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 98,
+      "name": "shl",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 99,
+      "name": "shr",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 100,
+      "name": "shr.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 101,
+      "name": "neg",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 102,
+      "name": "not",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 103,
+      "name": "conv.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 104,
+      "name": "conv.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 105,
+      "name": "conv.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 106,
+      "name": "conv.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 107,
+      "name": "conv.r4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 108,
+      "name": "conv.r8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 109,
+      "name": "conv.u4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 110,
+      "name": "conv.u8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 111,
+      "name": "callvirt",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 112,
+      "name": "cpobj",
+      "operand": "InlineType"
+    },
+    {
+      "value": 113,
+      "name": "ldobj",
+      "operand": "InlineType"
+    },
+    {
+      "value": 114,
+      "name": "ldstr",
+      "operand": "InlineString"
+    },
+    {
+      "value": 115,
+      "name": "newobj",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 116,
+      "name": "castclass",
+      "operand": "InlineType"
+    },
+    {
+      "value": 117,
+      "name": "isinst",
+      "operand": "InlineType"
+    },
+    {
+      "value": 118,
+      "name": "conv.r.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 121,
+      "name": "unbox",
+      "operand": "InlineType"
+    },
+    {
+      "value": 122,
+      "name": "throw",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 123,
+      "name": "ldfld",
+      "operand": "InlineField"
+    },
+    {
+      "value": 124,
+      "name": "ldflda",
+      "operand": "InlineField"
+    },
+    {
+      "value": 125,
+      "name": "stfld",
+      "operand": "InlineField"
+    },
+    {
+      "value": 126,
+      "name": "ldsfld",
+      "operand": "InlineField"
+    },
+    {
+      "value": 127,
+      "name": "ldsflda",
+      "operand": "InlineField"
+    },
+    {
+      "value": 128,
+      "name": "stsfld",
+      "operand": "InlineField"
+    },
+    {
+      "value": 129,
+      "name": "stobj",
+      "operand": "InlineType"
+    },
+    {
+      "value": 130,
+      "name": "conv.ovf.i1.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 131,
+      "name": "conv.ovf.i2.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 132,
+      "name": "conv.ovf.i4.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 133,
+      "name": "conv.ovf.i8.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 134,
+      "name": "conv.ovf.u1.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 135,
+      "name": "conv.ovf.u2.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 136,
+      "name": "conv.ovf.u4.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 137,
+      "name": "conv.ovf.u8.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 138,
+      "name": "conv.ovf.i.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 139,
+      "name": "conv.ovf.u.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 140,
+      "name": "box",
+      "operand": "InlineType"
+    },
+    {
+      "value": 141,
+      "name": "newarr",
+      "operand": "InlineType"
+    },
+    {
+      "value": 142,
+      "name": "ldlen",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 143,
+      "name": "ldelema",
+      "operand": "InlineType"
+    },
+    {
+      "value": 144,
+      "name": "ldelem.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 145,
+      "name": "ldelem.u1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 146,
+      "name": "ldelem.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 147,
+      "name": "ldelem.u2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 148,
+      "name": "ldelem.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 149,
+      "name": "ldelem.u4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 150,
+      "name": "ldelem.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 151,
+      "name": "ldelem.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 152,
+      "name": "ldelem.r4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 153,
+      "name": "ldelem.r8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 154,
+      "name": "ldelem.ref",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 155,
+      "name": "stelem.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 156,
+      "name": "stelem.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 157,
+      "name": "stelem.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 158,
+      "name": "stelem.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 159,
+      "name": "stelem.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 160,
+      "name": "stelem.r4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 161,
+      "name": "stelem.r8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 162,
+      "name": "stelem.ref",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 163,
+      "name": "ldelem",
+      "operand": "InlineType"
+    },
+    {
+      "value": 164,
+      "name": "stelem",
+      "operand": "InlineType"
+    },
+    {
+      "value": 165,
+      "name": "unbox.any",
+      "operand": "InlineType"
+    },
+    {
+      "value": 179,
+      "name": "conv.ovf.i1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 180,
+      "name": "conv.ovf.u1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 181,
+      "name": "conv.ovf.i2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 182,
+      "name": "conv.ovf.u2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 183,
+      "name": "conv.ovf.i4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 184,
+      "name": "conv.ovf.u4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 185,
+      "name": "conv.ovf.i8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 186,
+      "name": "conv.ovf.u8",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 194,
+      "name": "refanyval",
+      "operand": "InlineType"
+    },
+    {
+      "value": 195,
+      "name": "ckfinite",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 198,
+      "name": "mkrefany",
+      "operand": "InlineType"
+    },
+    {
+      "value": 208,
+      "name": "ldtoken",
+      "operand": "InlineTok"
+    },
+    {
+      "value": 209,
+      "name": "conv.u2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 210,
+      "name": "conv.u1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 211,
+      "name": "conv.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 212,
+      "name": "conv.ovf.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 213,
+      "name": "conv.ovf.u",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 214,
+      "name": "add.ovf",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 215,
+      "name": "add.ovf.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 216,
+      "name": "mul.ovf",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 217,
+      "name": "mul.ovf.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 218,
+      "name": "sub.ovf",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 219,
+      "name": "sub.ovf.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 220,
+      "name": "endfinally",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 221,
+      "name": "leave",
+      "operand": "InlineBrTarget"
+    },
+    {
+      "value": 222,
+      "name": "leave.s",
+      "operand": "ShortInlineBrTarget"
+    },
+    {
+      "value": 223,
+      "name": "stind.i",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 224,
+      "name": "conv.u",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 248,
+      "name": "prefix7",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 249,
+      "name": "prefix6",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 250,
+      "name": "prefix5",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 251,
+      "name": "prefix4",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 252,
+      "name": "prefix3",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 253,
+      "name": "prefix2",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 254,
+      "name": "prefix1",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 255,
+      "name": "prefixref",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65024,
+      "name": "arglist",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65025,
+      "name": "ceq",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65026,
+      "name": "cgt",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65027,
+      "name": "cgt.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65028,
+      "name": "clt",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65029,
+      "name": "clt.un",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65030,
+      "name": "ldftn",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 65031,
+      "name": "ldvirtftn",
+      "operand": "InlineMethod"
+    },
+    {
+      "value": 65033,
+      "name": "ldarg",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65034,
+      "name": "ldarga",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65035,
+      "name": "starg",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65036,
+      "name": "ldloc",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65037,
+      "name": "ldloca",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65038,
+      "name": "stloc",
+      "operand": "InlineVar"
+    },
+    {
+      "value": 65039,
+      "name": "localloc",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65041,
+      "name": "endfilter",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65042,
+      "name": "unaligned.",
+      "operand": "ShortInlineI"
+    },
+    {
+      "value": 65043,
+      "name": "volatile.",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65044,
+      "name": "tail.",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65045,
+      "name": "initobj",
+      "operand": "InlineType"
+    },
+    {
+      "value": 65046,
+      "name": "constrained.",
+      "operand": "InlineType"
+    },
+    {
+      "value": 65047,
+      "name": "cpblk",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65048,
+      "name": "initblk",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65050,
+      "name": "rethrow",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65052,
+      "name": "sizeof",
+      "operand": "InlineType"
+    },
+    {
+      "value": 65053,
+      "name": "refanytype",
+      "operand": "InlineNone"
+    },
+    {
+      "value": 65054,
+      "name": "readonly.",
+      "operand": "InlineNone"
+    }
+  ]
+}
