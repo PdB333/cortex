@@ -541,6 +541,48 @@ CI packs a fresh archive on Windows before the E2E.
   Electron inspector) are `unavailable`. Live debugging is planned with CDP
   in step 8.
 
+#### Status of step 4c (delivered)
+
+The fixture is a C# library, `tests/fixtures/dotnet/Fixture`. It contains:
+- an enum, an interface, a sealed class and a nested class;
+- auto-properties, a `switch` that compiles to a CIL `switch`;
+- `try`/`catch`/`finally`, `checked` arithmetic, a generic method;
+- string interpolation, P/Invoke and an embedded resource.
+
+The .NET 8 SDK builds it. Every expected value comes from an oracle written
+in C# (`Oracle/Program.cs`), which uses `System.Reflection.Metadata` and the
+runtime's own `System.Reflection.Emit.OpCodes` table, never Cortex's code.
+`make_dotnet_fixture.py` produces:
+- the DLL;
+- the `dotnet pack` package;
+- `zip-cases.zip` from Python's `zipfile`;
+- the oracle's answers.
+
+CI rebuilds the DLL and reruns the oracle with the Windows runner's SDK, then
+compares Cortex with the fresh answers.
+
+| Item | Implementation | Test |
+|---|---|---|
+| Metadata | `dotnet_metadata.{h,cpp}`. It reads the CLR header, the metadata root and streams, and the `#~`/`#-` schema of all 45 tables (row sizes from the heap-size flags, simple and coded indexes). Tables are located correctly even when Cortex decodes only some of them. Heaps: `#Strings`, `#US` (UTF-16), `#GUID`, `#Blob`. It handles Ptr tables, nesting (`Outer/Inner`) and signatures (method, field, TypeSpec, MethodSpec, generics, arrays, custom modifiers), with depth limits | the assembly, module, references, TypeRefs, every type (flags, base, fields and methods with signatures and parameter names), MemberRefs, resources and P/Invoke are equal to the oracle's answers |
+| CIL | `cil.{h,cpp}`. It reads tiny and fat headers and small and fat exception sections, and covers the whole ECMA-335 opcode table. Branch targets, switch tables, constants, locals and arguments, strings from `#US` and tokens are resolved to names | the table is checked against `OpCodes`, field by field (226 opcodes). All 12 method bodies (header, clauses, every instruction and operand) are identical to the oracle. Truncated, unknown and oversized input end with a reason |
+| ZIP | `inflate.{h,cpp}` (raw DEFLATE after zlib's puff, CRC-32) and `zip_provider.{h,cpp}`. It covers the central directory, ZIP64, archives with a prefix, stored and deflated entries, and encrypted or unsupported methods (listed, not read). Unsafe names are flagged, expansion is capped at 64 MiB per entry and a high expansion ratio is warned about. Each entry's CRC is checked within 256 MiB. Recognised kinds: JAR (`MANIFEST.MF`), APK, NuGet (`.nuspec`) and wheel | Python `zipfile` cases (stored, deflate 1/9, binary, empty, UTF-8 name, comment); the `dotnet pack` package and the DLL inside it; a corrupted byte reported for that entry only; a 1000-byte prefix; a cut directory |
+| Provider | `dotnet` (a PE with a CLR header). It keeps the PE view and adds `data.dotnet` | `cortex_dotnet_tests`, 1500 fuzz rounds under ASan/UBSan |
+| Access | MCP `cortex_artifact_cil` (a token, `Type::Method` or a name), `inspect --cil`, and the **.NET** tab in the Artifacts workspace (types, members, CIL on double-click). `.nupkg`, `.jar`, `.apk` and `.whl` open as containers in the GUI, the CLI and MCP | `tests/dotnet_e2e.py` (CLI, MCP, the package entry); `--gui-workspace-suite` with `CORTEX_GUI_SUITE_DOTNET` |
+
+**Limits:**
+
+- CIL is disassembled, not decompiled: there is no C#. A decompiler provider
+  is planned for step 8 (`decompile`: `unavailable`).
+- No managed debugging. The native engine still attaches to a .NET process,
+  but there is no CLR-aware stepping or object inspection (`live`:
+  `unavailable`).
+- Custom attribute values, the `Constant` table values and the `.resources`
+  contents are not decoded yet; the tables are counted and located.
+- Mixed-mode (C++/CLI) and ReadyToRun images are read as metadata plus PE.
+  Their native code is the native engine's domain.
+- ZIP: only stored and deflate entries can be read (no deflate64, bzip2,
+  LZMA or zstd), and there is no encryption support.
+
 ### Step 5: evidence and knowledge
 
 - **Multi-runtime addition:**

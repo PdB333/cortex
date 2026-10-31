@@ -4,10 +4,15 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 3 and steps 4a–4b (static artifact analysis: PE, ASAR, JavaScript/TypeScript, Electron). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 3 and steps 4a–4c (static artifact analysis: PE, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **.NET assemblies and ZIP containers, static (step 4c).**
+  - The `dotnet` provider reads the CLR header, the metadata streams and all 45 table layouts. It reports the assembly, references, types, fields, methods with ilasm-style signatures, member references, resources and P/Invoke. Its CIL disassembler covers the full opcode table and exception clauses.
+  - The `zip` provider (with JAR, APK, NuGet and wheel recognition) uses a bounded DEFLATE decoder and checks CRC-32.
+  - New: the MCP tool `cortex_artifact_cil`, `cortex.exe inspect --cil`, and the Artifacts **.NET** tab.
+  - Validated against `System.Reflection.Metadata` and the runtime's `OpCodes` table on a C# fixture. CI rebuilds the fixture with the SDK.
 - **JavaScript, TypeScript and Electron, static (step 4b).** New providers:
   - `javascript`: a tokenizer that knows strings, templates, regexes and comments. It reports ESM, CommonJS and dynamic dependencies, exports, Electron IPC uses and `BrowserWindow` options, bundler signatures and minification;
   - `sourcemap`: VLQ decoding and position lookup. On an esbuild bundle it matches Node's `findEntry` on every column.

@@ -413,6 +413,18 @@ same container; the root rules apply to it too. The path may also be the
 `.map` itself. The same lookup is available as
 `cortex.exe inspect <file> [--child …] --position LINE:COLUMN`.
 
+`cortex_artifact_cil` takes `path`, optional `child` and `method`: a MethodDef
+token (`0x06000009`), `Namespace.Type::Method` (every overload) or a method
+name. It returns, for each match:
+- the header, max stack and locals signature;
+- the exception clauses;
+- the instructions, with branch targets as `IL_xxxx` and metadata tokens
+  resolved to names.
+
+This is CIL disassembly, not decompilation. A method without a body
+(abstract, P/Invoke) says so. The CLI equivalent is
+`cortex.exe inspect <file> --cil METHOD`.
+
 Every result uses the schema `cortex.artifact.v1`: identity (name, size,
 SHA-256), the provider and its version, and the status of three separate
 capabilities: `static`, `decompile` and `live`. Each is `validated`
@@ -426,6 +438,12 @@ providers are:
 - JavaScript/TypeScript: dependencies, exports, IPC uses, bundler signatures,
   minification, source map URL.
 - Source maps.
+- .NET assemblies (`dotnet`): the PE view plus the metadata. That covers the
+  assembly, references, types, fields, methods with signatures, member
+  references, resources, P/Invoke and table row counts.
+- ZIP containers (`zip`), recognised as `jar`, `apk`, `nupkg` or `wheel`. A
+  NuGet package's `lib/net8.0/x.dll` can be inspected and disassembled with
+  `child`.
 
 Static results say what the source names, not what runs. Decompilation is
 unavailable for all of them. The same providers answer `cortex.exe inspect <file>` and the
