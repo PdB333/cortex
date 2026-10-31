@@ -4,10 +4,21 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 3 and step 4a (static artifact analysis). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 3 and steps 4a–4b (static artifact analysis: PE, ASAR, JavaScript/TypeScript, Electron). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **JavaScript, TypeScript and Electron, static (step 4b).** New providers:
+  - `javascript`: a tokenizer that knows strings, templates, regexes and comments. It reports ESM, CommonJS and dynamic dependencies, exports, Electron IPC uses and `BrowserWindow` options, bundler signatures and minification;
+  - `sourcemap`: VLQ decoding and position lookup. On an esbuild bundle it matches Node's `findEntry` on every column.
+
+  ASAR archives now get:
+  - a per-file integrity check;
+  - the header SHA-256;
+  - a module graph;
+  - a static Electron view: main, preload and renderer files, IPC channels paired by handler and caller, `contextBridge` keys.
+
+  New: the read-only MCP tool `cortex_artifact_source_position`, `cortex.exe inspect --position`, and the **Electron**, **Modules** and **Source position** tabs in the Artifacts workspace. The validation fixture is a real Electron app, bundled by esbuild and packed by `@electron/asar`.
 - **Static artifact analysis (step 4a).** A provider system in `core/artifacts/` identifies a file and reports its structure. It returns the SHA-256 and a separate status for static parsing, decompilation and live debugging. Providers:
   - offline PE: sections, imports, exports, relocations, CodeView, TLS, exceptions, CLR header, certificate, overlay;
   - Electron ASAR: file tree, `package.json`, nested entries.

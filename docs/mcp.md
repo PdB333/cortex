@@ -404,13 +404,31 @@ cortex.exe mcp --artifact-root D:\samples --artifact-root D:\builds
   `length`, `encoding`: `hex` or `utf8`).
 - `max_entries` bounds long listings; truncation is reported.
 
+`cortex_artifact_source_position` takes `path`, optional `child`, and 1-based
+`line` and `column` of a generated script. It returns the original source,
+line, column and name, plus the original line's text when the map embeds its
+sources. The map is the script's inline `data:` URL or its `sourceMappingURL`
+file. That file is looked up beside the script, or beside the entry in the
+same container; the root rules apply to it too. The path may also be the
+`.map` itself. The same lookup is available as
+`cortex.exe inspect <file> [--child …] --position LINE:COLUMN`.
+
 Every result uses the schema `cortex.artifact.v1`: identity (name, size,
 SHA-256), the provider and its version, and the status of three separate
 capabilities: `static`, `decompile` and `live`. Each is `validated`
 (against the fixture it names), `experimental` or `unavailable`. Today the
-providers are PE (static validated; `pe-dotnet` is detected, its metadata
-comes in step 4c) and Electron ASAR. Decompilation is unavailable for all
-of them. The same providers answer `cortex.exe inspect <file>` and the
+providers are:
+- PE: static validated; `pe-dotnet` is detected, its metadata comes in step 4c.
+- Electron ASAR: file tree, per-file integrity check, `header_sha256`, the
+  module graph and a static Electron view (windows and `webPreferences`,
+  preload, IPC channels paired by handler and caller, `contextBridge` keys,
+  main/preload/renderer files).
+- JavaScript/TypeScript: dependencies, exports, IPC uses, bundler signatures,
+  minification, source map URL.
+- Source maps.
+
+Static results say what the source names, not what runs. Decompilation is
+unavailable for all of them. The same providers answer `cortex.exe inspect <file>` and the
 desktop's **Artifacts** workspace.
 
 ## Server metadata
