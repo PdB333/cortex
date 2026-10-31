@@ -17,7 +17,7 @@ namespace cortex::artifacts {
 class AsarProvider final : public Provider {
 public:
     const char* Name() const override { return "asar"; }
-    const char* Version() const override { return "1"; }
+    const char* Version() const override { return "2"; }
     std::vector<std::string> Formats() const override { return {"asar"}; }
     std::vector<Capability> Capabilities() const override;
     int Detect(const ByteSource& source) const override;

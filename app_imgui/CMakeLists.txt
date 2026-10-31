@@ -173,6 +173,10 @@ add_executable(cortex_imgui WIN32
     ../core/artifacts/pe_provider.cpp
     ../core/artifacts/asar_provider.cpp
     ../core/artifacts/registry_default.cpp
+    ../core/artifacts/js_lexer.cpp
+    ../core/artifacts/js_analysis.cpp
+    ../core/artifacts/js_provider.cpp
+    ../core/artifacts/source_map.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

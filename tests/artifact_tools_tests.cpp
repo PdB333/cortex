@@ -132,13 +132,37 @@ int main(int argc, char** argv) {
         CHECK(result["hex"] == "4d5a");
     }
 
+    // Source positions: the map beside the script stays inside the roots.
+    {
+        const std::string map = R"({"version":3,"sources":["orig.ts"],"names":[],"mappings":"AAAA,IAAI","sourcesContent":["let x = 1;"]})";
+        std::ofstream(root / "gen.js") << "x=1\n//# sourceMappingURL=gen.js.map\n";
+        std::ofstream(root / "gen.js.map") << map;
+        std::ofstream(outside / "leak.js.map") << map;
+        std::ofstream(root / "leak.js") << "x=1\n//# sourceMappingURL=../outside/leak.js.map\n";
+        result = call("cortex_artifact_source_position", {{"path", (root / "gen.js").u8string()}, {"line", 1}, {"column", 5}}, roots);
+        CHECK(result["ok"] == true && result["original"]["source"] == "orig.ts" && result["original"]["column"] == 5 &&
+              result["original"]["line_text"] == "let x = 1;");
+        CHECK(call("cortex_artifact_source_position", {{"path", (root / "leak.js").u8string()}, {"line", 1}, {"column", 1}},
+                   roots)["error"] == "path_outside_artifact_roots");
+        CHECK(call("cortex_artifact_source_position", {{"path", (root / "gen.js").u8string()}, {"line", 0}, {"column", 1}},
+                   roots)["error"] == "position_is_1_based");
+        // Inside a container: the sibling entry.
+        const std::string script = "x=1\n//# sourceMappingURL=gen.js.map\n";
+        WriteBytes(root / "maps.asar", Asar({{"dist", {{"files", {{"gen.js", {{"size", script.size()}, {"offset", "0"}}},
+                                                                   {"gen.js.map", {{"size", map.size()}, {"offset", std::to_string(script.size())}}}}}}}},
+                                            script + map));
+        result = call("cortex_artifact_source_position",
+                      {{"path", (root / "maps.asar").u8string()}, {"child", "dist/gen.js"}, {"line", 1}, {"column", 1}}, roots);
+        CHECK(result["ok"] == true && result["original"]["line"] == 1 && result["map"]["name"].get<std::string>().find("!dist/gen.js.map") != std::string::npos);
+    }
+
     // The definitions agents see: read-only and path-required.
     const json definitions = tools::ToolDefinitions();
-    CHECK(definitions.size() == 3);
+    CHECK(definitions.size() == 4);
     for (const auto& tool : definitions) {
         CHECK(tools::IsTool(tool["name"]));
         CHECK(tool["_cortex"]["read_only"] == true);
-        CHECK(tool["inputSchema"]["required"] == json::array({"path"}));
+        CHECK(tool["inputSchema"]["required"][0] == "path");
         CHECK(tool["inputSchema"]["additionalProperties"] == false);
     }
     CHECK(!tools::IsTool("cortex_targets"));

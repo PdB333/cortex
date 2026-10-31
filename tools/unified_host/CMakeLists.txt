@@ -60,6 +60,10 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/source_map.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp
