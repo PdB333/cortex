@@ -425,6 +425,25 @@ This is CIL disassembly, not decompilation. A method without a body
 (abstract, P/Invoke) says so. The CLI equivalent is
 `cortex.exe inspect <file> --cil METHOD`.
 
+Native code of a PE (x86 or x64), offline, with addresses as RVAs:
+- `cortex_artifact_functions`: the function catalog. Every start says where
+  it comes from: `entry`, `export`, `pdata`, `tls`, `call_target` or
+  `after_ret` (heuristic).
+- `cortex_artifact_xrefs`: references to a target, given as an RVA,
+  `va:0x…`, `sub_XXXX`, an export or an annotated name.
+- `cortex_artifact_strings`: strings with the instructions that reference
+  them.
+- `cortex_artifact_cfg`: a function's blocks and instructions, the same
+  algorithm as the runtime's `analysis_cfg`. `covered_rvas` marks what a
+  trace hit.
+
+`cortex_artifact_annotations` reads the names and comments kept for an
+artifact, keyed by its SHA-256. `cortex_artifact_annotate` writes one. It
+is Cortex state, so it needs `mutation_permission=true`, the operator's
+`--allow-state`, and ideally `expected_revision`. Records are stored under
+the user data folder, or under `--annotation-store <dir>`. They are what
+someone wrote, never facts Cortex derived.
+
 Every result uses the schema `cortex.artifact.v1`: identity (name, size,
 SHA-256), the provider and its version, and the status of three separate
 capabilities: `static`, `decompile` and `live`. Each is `validated`

@@ -4,10 +4,20 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 3 and steps 4a–4c (static artifact analysis: PE, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 3 and step 4 (static artifact analysis: PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **Native code analysis of files, offline (step 4d).** For x86 and x64 PEs:
+  - a function catalog where each start states its provenance (entry, export, pdata, TLS, call target, after-ret heuristic);
+  - a cross-reference index (calls, jumps, memory and address operands) and strings with their references;
+  - CFGs with optional coverage from a trace.
+
+  The runtime's CFG algorithm now lives in `core/analysis/cfg_builder.h` and is shared by live and offline analysis.
+
+  New **annotations** (names and comments per artifact SHA-256) with revisions. The desktop can rename functions; agents use `cortex_artifact_annotate`, which needs `--allow-state` and `mutation_permission`.
+
+  New: MCP tools `cortex_artifact_functions`, `_xrefs`, `_strings`, `_cfg`, `_annotations` and `_annotate`; `inspect --functions/--strings/--xrefs/--cfg`; the Artifacts **Code** tab. Checked against objdump and the runtime's unwind reader.
 - **.NET assemblies and ZIP containers, static (step 4c).**
   - The `dotnet` provider reads the CLR header, the metadata streams and all 45 table layouts. It reports the assembly, references, types, fields, methods with ilasm-style signatures, member references, resources and P/Invoke. Its CIL disassembler covers the full opcode table and exception clauses.
   - The `zip` provider (with JAR, APK, NuGet and wheel recognition) uses a bounded DEFLATE decoder and checks CRC-32.

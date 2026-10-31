@@ -583,6 +583,39 @@ compares Cortex with the fresh answers.
 - ZIP: only stored and deflate entries can be read (no deflate64, bzip2,
   LZMA or zstd), and there is no encryption support.
 
+#### Status of step 4d (delivered)
+
+The fixture is the repository's own test target, in x64 and x86. It is
+checked against two independent references: objdump (MinGW binutils) for
+calls and address operands, and the runtime's own unwind reader
+(`mcp_bridge/pe_unwind.h`) for function ranges.
+
+| Item | Implementation | Test |
+|---|---|---|
+| Shared CFG algorithm | `core/analysis/cfg_builder.h`: the runtime's recursive-descent CFG, factored out unchanged. `analysis::BuildCFG` (live memory) and the offline analysis (file bytes) both call it | `manual_demo_e2e.py` still passes on live x64 and x86 targets (`analysis_cfg`); the offline CFG of `CortexDemoApplyDamage` matches objdump's listing |
+| Function catalog | `core/artifacts/native_code.{h,cpp}`, for x86 and x64 whatever the host. Every start carries its provenance: `entry`, `export` (not forwarders or data), `pdata` (chained fragments excluded), `tls`, `call_target`, `after_ret` (heuristic, labelled). Sizes come from pdata when known, otherwise from the next start | every objdump call target is in the catalog (790 on x64, 847 on x86); 400 pdata ranges equal `pe_unwind::Find`; exports carry `export`+`pdata` |
+| Xref index | direct call, jump and conditional-jump xrefs; RIP-relative and absolute memory operands, typed read/write/address (`lea` and table bases are `address`); immediates that are image addresses. Cached by SHA-256 | 120 sampled calls and address operands per architecture are found exactly as objdump shows them; `g_cortex_demo_actor` is read by code |
+| Strings | ASCII and UTF-16LE strings in data sections, with the instructions that reference them | each referenced string points back to its text; a literal with no static reference is reported as having none (objdump agrees) |
+| Coverage | `covered_rvas` (for example from a trace, converted to RVAs) marks the instructions and blocks they hit | `blocks_covered` on the fixture |
+| Annotations | `core/artifacts/annotations.{h,cpp}`: names and comments keyed by artifact SHA-256 plus `rva:`/`token:`/`js:` locations. They are stored atomically under the user data folder or `--annotation-store`, with revisions, and record their source | conflicts, invalid locations and paths, persistence, removal; over MCP they are refused without `--allow-state` and without `mutation_permission`, then recorded and visible in the catalog |
+| Access | MCP tools `cortex_artifact_functions`, `_xrefs`, `_strings`, `_cfg` and `_annotations` (read-only), and `_annotate` (`host_control`, `effect: cortex_state`). CLI: `inspect --functions/--strings/--xrefs/--cfg`. Desktop: the **Code** tab (catalog with provenance, CFG and references on double-click, Rename) | `cortex_native_code_tests` (x64, x86, fuzzing), `native_static_e2e.py` (x64, x86), `--gui-workspace-suite`, security regression (every tool classified) |
+
+**Limits:**
+
+- The xref index comes from a linear sweep. Register-relative, computed and
+  virtual-call references are not seen. Data decoded as code can add false
+  `after_ret` starts, which are labelled.
+- No PDB symbols offline yet: names come from exports and annotations. The
+  runtime's symbol service covers loaded modules.
+- No pseudocode: the `decompile` capability waits for the Ghidra provider
+  in step 8.
+- ARM64 PEs are inspected but their code is not analysed.
+- Background progress through `OperationManager` is not wired. An index
+  over the 64 MiB code cap is reported as truncated instead. Measured
+  natively with -O2 (catalog, xrefs and strings), including the SHA-256: the
+  2.4 MB test target takes 0.12 s, and cortex.exe itself (14 MB, 20,266
+  functions) takes 0.52 s.
+
 ### Step 5: evidence and knowledge
 
 - **Multi-runtime addition:**
