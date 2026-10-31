@@ -18,6 +18,7 @@ on:
       - "tests/context_isolation_e2e.py"
       - "tests/manual_demo_e2e.py"
       - "tests/artifact_mcp_e2e.py"
+      - "tests/dotnet_e2e.py"
       - "tests/fixtures/**"
       - "core/artifacts/**"
       - "tests/fixtures/mcp_tool_risks.json"
@@ -338,6 +339,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "artifact E2E failed on: $($failed -join ', ')" }
+
+      - name: .NET metadata and CIL against System.Reflection.Metadata
+        shell: pwsh
+        run: |
+          # A fresh C# build and fresh oracle answers from this runner's SDK,
+          # then the committed fixture. See tests/dotnet_e2e.py.
+          python tests/fixtures/dotnet/make_dotnet_fixture.py --out "$env:RUNNER_TEMP/dotnet"
+          if ($LASTEXITCODE -ne 0) { throw "building the .NET fixture failed" }
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/dotnet_e2e.py --cortex "$bundle/cortex.exe" --fixtures "$env:RUNNER_TEMP/dotnet"
+          if ($LASTEXITCODE -ne 0) { throw ".NET E2E failed on the fresh build" }
+          python tests/dotnet_e2e.py --cortex "$bundle/cortex.exe"
+          if ($LASTEXITCODE -ne 0) { throw ".NET E2E failed on the committed fixture" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()

@@ -13,6 +13,7 @@
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -440,6 +441,21 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
     }
     std::error_code ignored;
     std::filesystem::remove(script, ignored);
+    // A .NET assembly when one is given (CI passes the C# fixture): the
+    // .NET tab is drawn and a method's CIL is disassembled.
+    const char* assembly = std::getenv("CORTEX_GUI_SUITE_DOTNET");
+    if (ok && assembly && *assembly) {
+        app.ui.commands.push_back(std::string("inspect_artifact ") + assembly);
+        ok = RenderGuiStable(app, error, true) && app.ui.status.find("(dotnet)") != std::string::npos;
+        if (!ok && error.empty()) error = "artifacts_dotnet:" + app.ui.status;
+        if (ok) {
+            app.ui.commands.push_back("artifact_tab .NET");
+            app.ui.commands.push_back("artifact_cil Cortex.Fixture.Actor::Heal");
+            ok = RenderGuiStable(app, error, true) && RenderGuiStable(app, error, true) &&
+                 app.ui.status == "Disassembled 1 method(s): Cortex.Fixture.Actor::Heal";
+            if (!ok && error.empty()) error = "artifacts_cil:" + app.ui.status;
+        }
+    }
     return ok;
 }
 

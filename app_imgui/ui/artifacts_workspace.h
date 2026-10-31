@@ -22,7 +22,8 @@ public:
     void Draw(UiContext& context) override;
     // "inspect_artifact <path>": inspects a file without the dialog;
     // "artifact_tab <name>" selects a result tab; "artifact_position L:C"
-    // maps a generated position through the script's source map.
+    // maps a generated position through the script's source map;
+    // "artifact_cil <method>" disassembles .NET methods.
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
@@ -33,6 +34,8 @@ private:
     void DrawModules(const nlohmann::json& modules);
     void DrawSourcePosition(UiContext& context);
     void LookupPosition(UiContext& context);
+    void DrawDotNet(UiContext& context, const nlohmann::json& dotnet);
+    void Disassemble(UiContext& context, const std::string& method);
     int TabFlags(const char* name) const;  // ImGuiTabItemFlags
 
     std::array<char, 1024> path_ = {};
@@ -47,6 +50,8 @@ private:
     int positionLine_ = 1;
     int positionColumn_ = 1;
     nlohmann::json position_;  // last source position answer
+    nlohmann::json cil_;       // last CIL disassembly
+    std::array<char, 128> typeFilter_ = {};
     std::string selectTab_;    // "artifact_tab <name>": selected on the next frame
 };
 

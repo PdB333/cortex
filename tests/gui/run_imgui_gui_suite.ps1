@@ -115,7 +115,10 @@ $x86 = $null
 $mcp = $null
 
 try {
+    # The Artifacts workspace also opens the C# fixture's .NET tab and CIL.
+    $env:CORTEX_GUI_SUITE_DOTNET = (Resolve-Path (Join-Path $PSScriptRoot "../fixtures/dotnet/Cortex.Fixture.dll")).Path
     Invoke-CortexProcess "workspace-layout" @("--gui-workspace-suite") 30000 | Out-Null
+    Remove-Item Env:CORTEX_GUI_SUITE_DOTNET
     Invoke-CortexProcess "native-window-d3d11" @("--window-smoke-test") 30000 | Out-Null
     Invoke-CortexProcess "ai-activity" @("--ai-activity-smoke") 30000 | Out-Null
 

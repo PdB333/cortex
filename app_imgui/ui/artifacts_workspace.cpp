@@ -4,6 +4,7 @@
 #include "widgets.h"
 
 #include "../../mcp_bridge/artifact_tools.h"
+#include "../../core/artifacts/dotnet_provider.h"
 #include "../../core/artifacts/js_provider.h"
 
 #include <imgui.h>
@@ -83,6 +84,7 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         std::lock_guard<std::mutex> lock(mutex_);
         result_ = std::move(result);
         position_ = nullptr;
+        cil_ = nullptr;
         children_ = std::move(children);
         inspectedPath_ = path;
         inspectedChild_ = child;
@@ -98,6 +100,11 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
     static const std::string position = "artifact_position ";
     if (command.rfind(tab, 0) == 0) {
         selectTab_ = command.substr(tab.size());
+        return;
+    }
+    static const std::string cil = "artifact_cil ";
+    if (command.rfind(cil, 0) == 0) {
+        Disassemble(context, command.substr(cil.size()));
         return;
     }
     if (command.rfind(position, 0) == 0) {
@@ -242,6 +249,10 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
         }
         if (data.contains("modules") && ImGui::BeginTabItem("Modules", nullptr, TabFlags("Modules"))) {
             DrawModules(data["modules"]);
+            ImGui::EndTabItem();
+        }
+        if (data.contains("dotnet") && ImGui::BeginTabItem(".NET", nullptr, TabFlags(".NET"))) {
+            DrawDotNet(context, data["dotnet"]);
             ImGui::EndTabItem();
         }
         const std::string format = result.value("format", std::string());
@@ -457,6 +468,113 @@ void ArtifactsWorkspace::LookupPosition(UiContext& context) {
             : "No original position: " + answer.value("error", std::string("no mapping"));
         std::lock_guard<std::mutex> lock(mutex_);
         position_ = std::move(answer);
+    });
+}
+
+// Assembly identity, types and members; a method's CIL on demand.
+void ArtifactsWorkspace::DrawDotNet(UiContext& context, const json& dotnet) {
+    if (dotnet.contains("error")) {
+        ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "metadata: %s", dotnet.value("error", std::string()).c_str());
+        return;
+    }
+    const json assembly = dotnet.value("assembly", json::object());
+    ImGui::Text("%s %s  -  metadata %s", assembly.value("name", std::string("(no assembly)")).c_str(),
+                assembly.value("version", std::string()).c_str(), dotnet.value("metadata_version", std::string()).c_str());
+    std::string references;
+    for (const auto& reference : dotnet.value("assembly_refs", json::array()))
+        references += (references.empty() ? "" : ", ") + reference.value("name", std::string()) + " " +
+                      reference.value("version", std::string());
+    if (!references.empty()) ImGui::TextWrapped("References: %s", references.c_str());
+    for (const auto& import : dotnet.value("pinvoke", json::array()))
+        ImGui::BulletText("P/Invoke %s -> %s!%s", import.value("method", std::string()).c_str(),
+                          import.value("module", std::string()).c_str(), import.value("entry", std::string()).c_str());
+    HintText("Double-click a method to disassemble its CIL (static; not decompiled).");
+
+    const float listWidth = std::max(Px(320), ImGui::GetContentRegionAvail().x * 0.45f);
+    ImGui::BeginChild("DotNetTypes", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##TypeFilter", "filter types and members", typeFilter_.data(), typeFilter_.size());
+    const std::string filter = typeFilter_.data();
+    for (const auto& type : dotnet.value("types", json::array())) {
+        const std::string typeName = type.value("name", std::string());
+        bool typeMatches = filter.empty() || typeName.find(filter) != std::string::npos;
+        if (!typeMatches)
+            for (const auto& method : type.value("methods", json::array()))
+                typeMatches = typeMatches || method.value("name", std::string()).find(filter) != std::string::npos;
+        if (!typeMatches) continue;
+        ImGui::PushID(typeName.c_str());
+        if (ImGui::TreeNode(typeName.c_str())) {
+            for (const auto& field : type.value("fields", json::array()))
+                ImGui::TextDisabled("field %s %s", field.value("signature", std::string()).c_str(),
+                                    field.value("name", std::string()).c_str());
+            for (const auto& method : type.value("methods", json::array())) {
+                const std::string label = method.value("name", std::string()) + "  " + method.value("signature", std::string());
+                const std::string token = method.value("token", std::string());
+                ImGui::PushID(token.c_str());
+                if (ImGui::Selectable(label.c_str(), cil_.is_object() && cil_.value("query", std::string()) == token,
+                                      ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    Disassemble(context, token);
+                ImGui::PopID();
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("DotNetCil", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    json cil;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cil = cil_;
+    }
+    if (!cil.is_object()) {
+        ImGui::TextDisabled("No method disassembled.");
+    } else if (!cil.value("ok", false)) {
+        ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "%s", cil.value("error", std::string()).c_str());
+    } else {
+        for (const auto& method : cil.value("methods", json::array())) {
+            ImGui::Text("%s  %s", method.value("method", std::string()).c_str(), method.value("signature", std::string()).c_str());
+            if (!method.contains("instructions")) {
+                ImGui::TextDisabled("no body: %s", method.value("reason", std::string()).c_str());
+                continue;
+            }
+            ImGui::TextDisabled("%s header, max stack %d, %d bytes", method.value("header", std::string()).c_str(),
+                                method.value("max_stack", 0), method.value("code_size", 0));
+            for (const auto& clause : method.value("exception_clauses", json::array()))
+                ImGui::TextDisabled(".try IL_%04x..IL_%04x %s IL_%04x %s", clause.value("try_offset", 0),
+                                    clause.value("try_offset", 0) + clause.value("try_length", 0),
+                                    clause.value("kind", std::string()).c_str(), clause.value("handler_offset", 0),
+                                    clause.value("catch_type", json()).is_string() ? clause["catch_type"].get<std::string>().c_str() : "");
+            for (const auto& instruction : method.value("instructions", json::array()))
+                ImGui::Text("IL_%04x  %-12s %s", instruction.value("offset", 0), instruction.value("opcode", std::string()).c_str(),
+                            instruction.value("operand", std::string()).c_str());
+            if (method.contains("warning")) ImGui::TextDisabled("%s", method["warning"].get<std::string>().c_str());
+            ImGui::Separator();
+        }
+    }
+    ImGui::EndChild();
+}
+
+void ArtifactsWorkspace::Disassemble(UiContext& context, const std::string& method) {
+    std::string path, chain;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+    }
+    context.RunInBackground("Disassembling " + method, [this, &context, path, chain, method]() {
+        std::string error;
+        json answer;
+        auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
+        answer = source ? cortex::artifacts::DisassembleMethods(*source, method, 20000) : json{{"ok", false}, {"error", error}};
+        answer["query"] = method;
+        const size_t count = answer.value("methods", json::array()).size();
+        context.status = answer.value("ok", false) ? "Disassembled " + std::to_string(count) + " method(s): " + method
+                                                   : "CIL failed: " + answer.value("error", std::string());
+        std::lock_guard<std::mutex> lock(mutex_);
+        cil_ = std::move(answer);
     });
 }
 
