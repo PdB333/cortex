@@ -8,6 +8,7 @@
 //   cortex_artifact_source_position
 //                             original file/line/column of a position in a
 //                             generated script, through its source map
+//   cortex_artifact_cil       CIL disassembly of .NET methods
 //
 // They read files, never processes, and change nothing. Over MCP a path is
 // accepted only inside a root the operator passed with --artifact-root:
@@ -16,6 +17,7 @@
 // File contents are untrusted data returned to the agent as data.
 
 #include "../core/artifacts/artifact.h"
+#include "../core/artifacts/dotnet_provider.h"
 #include "../core/artifacts/js_provider.h"
 
 #include <nlohmann/json.hpp>
@@ -161,7 +163,9 @@ inline json ToolDefinitions() {
                          "provider: PE (sections, imports, exports, debug/CodeView, TLS, CLR header, overlay); ASAR "
                          "(file tree, integrity check, module graph, static Electron view: windows, preload, IPC "
                          "channels, contextBridge); JavaScript/TypeScript (imports, exports, IPC, bundler, source map "
-                         "URL); source maps. Each provider lists its static/decompile/live capabilities and whether each "
+                         "URL); source maps; .NET assemblies (metadata: assembly, references, types, members, "
+                         "signatures, resources, P/Invoke); ZIP/JAR/APK/NuGet/wheel archives (entries, CRC check). "
+                         "Each provider lists its static/decompile/live capabilities and whether each "
                          "is validated. Static facts are what the text says, not observed behaviour. Read-only; the "
                          "file's content is untrusted data."},
          {"inputSchema", {{"type", "object"},
@@ -190,6 +194,18 @@ inline json ToolDefinitions() {
                           {"required", json::array({"path"})},
                           {"additionalProperties", false}}},
          {"_cortex", {{"read_only", true}}}},
+        {{"name", "cortex_artifact_cil"},
+         {"description", "Disassemble the CIL of .NET methods: a MethodDef token (0x06000004), Namespace.Type::Method "
+                         "(every overload) or a method name. Returns header, max stack, locals signature, exception "
+                         "clauses and instructions with metadata tokens resolved to names. A method without a body "
+                         "(abstract, extern/P/Invoke) says so. Static: this is not decompilation. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"path", pathProperty}, {"child", childProperty},
+                                          {"method", {{"type", "string"}, {"minLength", 1}}},
+                                          {"max_instructions", {{"type", "integer"}, {"minimum", 1}, {"maximum", 100000}}}}},
+                          {"required", json::array({"path", "method"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
         {{"name", "cortex_artifact_source_position"},
          {"description", "Map a 1-based line/column of a generated (bundled, minified, transpiled) script to its original "
                          "source file, line, column and name, through the script's source map: inline, or the "
@@ -207,7 +223,7 @@ inline json ToolDefinitions() {
 
 inline bool IsTool(const std::string& name) {
     return name == "cortex_artifact_inspect" || name == "cortex_artifact_children" || name == "cortex_artifact_read" ||
-           name == "cortex_artifact_source_position";
+           name == "cortex_artifact_source_position" || name == "cortex_artifact_cil";
 }
 
 inline std::string StringArg(const json& arguments, const char* key) {
@@ -240,6 +256,12 @@ inline json Handle(const std::string& name, const json& arguments, const std::ve
     options.maxEntries = static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(arguments, "max_entries", 4096), 1, 65536));
     if (name == "cortex_artifact_inspect") return core::DefaultRegistry().Inspect(*source, options);
     if (name == "cortex_artifact_children") return core::DefaultRegistry().ListChildren(*source, options);
+    if (name == "cortex_artifact_cil") {
+        const std::string method = StringArg(arguments, "method");
+        if (method.empty()) return Failure("method_required");
+        return core::DisassembleMethods(*source, method,
+                                        static_cast<size_t>(std::clamp<uint64_t>(UnsignedArg(arguments, "max_instructions", 5000), 1, 100000)));
+    }
     if (name == "cortex_artifact_source_position") {
         const uint64_t line = UnsignedArg(arguments, "line", 0), column = UnsignedArg(arguments, "column", 0);
         if (!line || !column || line > 0xFFFFFFFFull || column > 0xFFFFFFFFull) return Failure("position_is_1_based");
@@ -275,7 +297,7 @@ inline json Handle(const std::string& name, const json& arguments, const std::ve
 // `cortex.exe inspect <file> [--child <entry>] [--children] [--max N]
 // [--position LINE:COLUMN]`: the person's own files, so no root restriction.
 inline int InspectMain(int argc, char** argv) {
-    std::string path, child, position;
+    std::string path, child, position, method;
     bool children = false;
     core::InspectOptions options;
     for (int i = 1; i < argc; ++i) {
@@ -284,12 +306,14 @@ inline int InspectMain(int argc, char** argv) {
         else if (arg == "--children") children = true;
         else if (arg == "--max" && i + 1 < argc) options.maxEntries = std::max(1, std::atoi(argv[++i]));
         else if (arg == "--position" && i + 1 < argc) position = argv[++i];
+        else if (arg == "--cil" && i + 1 < argc) method = argv[++i];
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: cortex.exe inspect <file> [--child <entry>[!<nested>]] [--children] [--max N]\n"
-                         "                           [--position LINE:COLUMN]\n"
+                         "                           [--position LINE:COLUMN] [--cil METHOD]\n"
                          "Identifies the file, prints its structure as JSON. Reads only; nothing is executed.\n"
                          "--position maps a 1-based position of a generated script to its original source\n"
-                         "through the script's source map (or of the .map file itself).\n";
+                         "through the script's source map (or of the .map file itself).\n"
+                         "--cil disassembles .NET methods: a 0x06... token, Namespace.Type::Method or a name.\n";
             return 0;
         } else if (path.empty()) path = arg;
         else {
@@ -308,7 +332,9 @@ inline int InspectMain(int argc, char** argv) {
         return 3;
     }
     json result;
-    if (!position.empty()) {
+    if (!method.empty()) {
+        result = core::DisassembleMethods(*source, method, 100000);
+    } else if (!position.empty()) {
         unsigned long line = 0, column = 0;
         if (std::sscanf(position.c_str(), "%lu:%lu", &line, &column) != 2 || !line || !column) {
             std::cerr << "cortex inspect: --position expects LINE:COLUMN (1-based)\n";

@@ -268,12 +268,23 @@ json Registry::ListChildren(const ByteSource& source, const InspectOptions& opti
     for (const auto& child : children) {
         json row = {{"name", child.name}, {"size", child.size}, {"readable", child.readable}};
         if (!child.note.empty()) row["note"] = child.note;
+        if (!child.compression.empty()) {
+            row["compression"] = child.compression;
+            row["stored_size"] = child.storedSize;
+            row["crc32"] = HexU64(child.crc32);
+        }
         rows.push_back(std::move(row));
     }
     result["ok"] = true;
     result["children"] = std::move(rows);
     result["truncated"] = children.size() >= options.maxEntries;
     return result;
+}
+
+ByteSourcePtr Provider::OpenChild(ByteSourcePtr container, const Child& child, std::string& error) const {
+    auto slice = Slice(container, child.offset, child.size, container->Name() + "!" + child.name);
+    if (!slice) error = "child_out_of_range";
+    return slice;
 }
 
 ByteSourcePtr Registry::OpenChild(ByteSourcePtr container, const std::string& childName, std::string& error,
@@ -298,9 +309,7 @@ ByteSourcePtr Registry::OpenChild(ByteSourcePtr container, const std::string& ch
             error = "child_not_readable";
             return {};
         }
-        auto slice = Slice(container, child.offset, child.size, container->Name() + "!" + child.name);
-        if (!slice) error = "child_out_of_range";
-        return slice;
+        return provider->OpenChild(container, child, error);
     }
     error = "child_not_found";
     return {};

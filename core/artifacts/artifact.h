@@ -62,6 +62,11 @@ struct Child {
     uint64_t size = 0;
     bool readable = true;        // false: stored outside (ASAR unpacked) or compressed without support
     std::string note;
+    // Compressed entries (ZIP): `offset`/`storedSize` locate the stored
+    // bytes, `size` is the expanded size and `crc32` its checksum.
+    std::string compression;     // "", "stored" or "deflate"
+    uint64_t storedSize = 0;
+    uint32_t crc32 = 0;
 };
 
 struct InspectOptions {
@@ -83,6 +88,9 @@ public:
     virtual json Inspect(const ByteSource& source, const InspectOptions& options, std::string& error) const = 0;
     // Containers list their entries; other providers return none.
     virtual std::vector<Child> Children(const ByteSource&, const InspectOptions&, std::string&) const { return {}; }
+    // A readable child as its own source. The default is a window of the
+    // container; compressed formats expand the entry (bounded).
+    virtual ByteSourcePtr OpenChild(ByteSourcePtr container, const Child& child, std::string& error) const;
 };
 
 using ProviderPtr = std::shared_ptr<const Provider>;

@@ -64,6 +64,11 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
     ${CORTEX_ROOT}/core/artifacts/js_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/source_map.cpp
+    ${CORTEX_ROOT}/core/artifacts/inflate.cpp
+    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/dotnet_metadata.cpp
+    ${CORTEX_ROOT}/core/artifacts/cil.cpp
+    ${CORTEX_ROOT}/core/artifacts/dotnet_provider.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp

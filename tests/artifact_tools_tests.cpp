@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
 
     // The definitions agents see: read-only and path-required.
     const json definitions = tools::ToolDefinitions();
-    CHECK(definitions.size() == 4);
+    CHECK(definitions.size() == 5);
     for (const auto& tool : definitions) {
         CHECK(tools::IsTool(tool["name"]));
         CHECK(tool["_cortex"]["read_only"] == true);

@@ -177,6 +177,11 @@ add_executable(cortex_imgui WIN32
     ../core/artifacts/js_analysis.cpp
     ../core/artifacts/js_provider.cpp
     ../core/artifacts/source_map.cpp
+    ../core/artifacts/inflate.cpp
+    ../core/artifacts/zip_provider.cpp
+    ../core/artifacts/dotnet_metadata.cpp
+    ../core/artifacts/cil.cpp
+    ../core/artifacts/dotnet_provider.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp
