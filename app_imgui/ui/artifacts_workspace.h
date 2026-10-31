@@ -23,7 +23,9 @@ public:
     // "inspect_artifact <path>": inspects a file without the dialog;
     // "artifact_tab <name>" selects a result tab; "artifact_position L:C"
     // maps a generated position through the script's source map;
-    // "artifact_cil <method>" disassembles .NET methods.
+    // "artifact_cil <method>" disassembles .NET methods;
+    // "artifact_functions", "artifact_function <location>" and
+    // "artifact_rename <rva> <name>" drive the Code tab.
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
@@ -36,6 +38,11 @@ private:
     void LookupPosition(UiContext& context);
     void DrawDotNet(UiContext& context, const nlohmann::json& dotnet);
     void Disassemble(UiContext& context, const std::string& method);
+    void DrawCode(UiContext& context);
+    // `announce` false keeps the status line (a reload after a rename).
+    void LoadFunctions(UiContext& context, bool announce = true);
+    void OpenFunction(UiContext& context, const std::string& location, bool announce = true);
+    void Rename(UiContext& context, const std::string& rva, const std::string& name);
     int TabFlags(const char* name) const;  // ImGuiTabItemFlags
 
     std::array<char, 1024> path_ = {};
@@ -52,6 +59,10 @@ private:
     nlohmann::json position_;  // last source position answer
     nlohmann::json cil_;       // last CIL disassembly
     std::array<char, 128> typeFilter_ = {};
+    nlohmann::json functions_;     // native function catalog of the inspected PE
+    nlohmann::json codeDetail_;    // {"cfg", "xrefs"} of the opened function
+    std::array<char, 128> codeFilter_ = {};
+    std::array<char, 128> rename_ = {};
     std::string selectTab_;    // "artifact_tab <name>": selected on the next frame
 };
 

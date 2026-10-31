@@ -3,6 +3,7 @@
 
 #include "desktop_app.h"
 #include "ui/address_resolver.h"
+#include "../core/artifacts/pe_provider.h"
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
@@ -415,6 +416,35 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
         return false;
     }
     if (!RenderGuiStable(app, error, true)) return false;
+
+    // Code tab: the catalog of cortex.exe, the entry point's CFG, and a
+    // name recorded then removed.
+    {
+        std::string peError;
+        cortex::artifacts::PeFile pe;
+        const auto self = cortex::artifacts::OpenFile(std::filesystem::path(executable).u8string(), &peError);
+        if (!self || !cortex::artifacts::ParsePe(*self, pe, peError)) {
+            error = "artifacts_self_pe:" + peError;
+            return false;
+        }
+        char entry[24];
+        std::snprintf(entry, sizeof(entry), "0x%x", pe.entryRva);
+        const std::vector<std::pair<std::string, std::string>> steps = {
+            {"artifact_tab Code", ""},
+            {"artifact_functions", "Code analysed: "},
+            {std::string("artifact_function ") + entry, "Function "},
+            {std::string("artifact_rename ") + entry + " suite_entry", std::string("Renamed ") + entry + " to suite_entry"},
+            {std::string("artifact_rename ") + entry, "Name removed"},
+        };
+        for (const auto& [command, expected] : steps) {
+            app.ui.commands.push_back(command);
+            if (!RenderGuiStable(app, error, true)) return false;
+            if (!expected.empty() && app.ui.status.rfind(expected, 0) != 0) {
+                error = "artifacts_code:" + command + ":" + app.ui.status;
+                return false;
+            }
+        }
+    }
 
     // A generated script with an inline source map and an IPC call: the
     // Electron and Source position tabs are drawn, and the position maps.

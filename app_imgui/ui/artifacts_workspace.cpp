@@ -4,7 +4,9 @@
 #include "widgets.h"
 
 #include "../../mcp_bridge/artifact_tools.h"
+#include "../../core/artifacts/annotations.h"
 #include "../../core/artifacts/dotnet_provider.h"
+#include "../../core/services/user_data.h"
 #include "../../core/artifacts/js_provider.h"
 
 #include <imgui.h>
@@ -13,8 +15,20 @@
 #include <cstdio>
 #include <cstring>
 
+namespace cortex::desktop {
+std::string ExecutableDirectory();
+}
+
 namespace cortex::ui {
 namespace {
+
+// Annotations made in the desktop: the same per-user store the MCP host
+// uses by default, so a name given here is what an agent sees.
+cortex::artifacts::AnnotationStore& DesktopAnnotations() {
+    static cortex::artifacts::AnnotationStore store(
+        cortex::services::UserDataDirectory(std::filesystem::u8path(cortex::desktop::ExecutableDirectory())) / "annotations");
+    return store;
+}
 
 using json = nlohmann::json;
 
@@ -85,6 +99,8 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         result_ = std::move(result);
         position_ = nullptr;
         cil_ = nullptr;
+        functions_ = nullptr;
+        codeDetail_ = nullptr;
         children_ = std::move(children);
         inspectedPath_ = path;
         inspectedChild_ = child;
@@ -103,6 +119,20 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
         return;
     }
     static const std::string cil = "artifact_cil ";
+    if (command == "artifact_functions") {
+        LoadFunctions(context);
+        return;
+    }
+    if (command.rfind("artifact_function ", 0) == 0) {
+        OpenFunction(context, command.substr(18));
+        return;
+    }
+    if (command.rfind("artifact_rename ", 0) == 0) {
+        const std::string rest = command.substr(16);
+        const size_t space = rest.find(' ');
+        Rename(context, rest.substr(0, space), space == std::string::npos ? std::string() : rest.substr(space + 1));
+        return;
+    }
     if (command.rfind(cil, 0) == 0) {
         Disassemble(context, command.substr(cil.size()));
         return;
@@ -249,6 +279,13 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
         }
         if (data.contains("modules") && ImGui::BeginTabItem("Modules", nullptr, TabFlags("Modules"))) {
             DrawModules(data["modules"]);
+            ImGui::EndTabItem();
+        }
+        const std::string machine = data.value("machine", std::string());
+        if (data.contains("sections") && (machine.find("x64") != std::string::npos || machine.find("x86") != std::string::npos ||
+                                          machine.find("amd64") != std::string::npos || machine.find("i386") != std::string::npos) &&
+            ImGui::BeginTabItem("Code", nullptr, TabFlags("Code"))) {
+            DrawCode(context);
             ImGui::EndTabItem();
         }
         if (data.contains("dotnet") && ImGui::BeginTabItem(".NET", nullptr, TabFlags(".NET"))) {
@@ -576,6 +613,178 @@ void ArtifactsWorkspace::Disassemble(UiContext& context, const std::string& meth
         std::lock_guard<std::mutex> lock(mutex_);
         cil_ = std::move(answer);
     });
+}
+
+// Native code of a PE: the function catalog (with provenance), a function's
+// CFG and the references to it, and names kept as annotations.
+void ArtifactsWorkspace::DrawCode(UiContext& context) {
+    json functions, detail;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        functions = functions_;
+        detail = codeDetail_;
+    }
+    if (!functions.is_object()) {
+        if (ImGui::Button("Analyse code")) LoadFunctions(context);
+        ImGui::SameLine();
+        HintText("Builds the function catalog and cross-references from the file (offline, nothing runs).");
+        return;
+    }
+    if (!functions.value("ok", false)) {
+        ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "%s", functions.value("error", std::string()).c_str());
+        return;
+    }
+    std::string sources;
+    const json bySource = functions.value("by_source", json::object());
+    for (const auto& [source, count] : bySource.items())
+        sources += (sources.empty() ? "" : ", ") + source + " " + std::to_string(count.get<size_t>());
+    ImGui::Text("%s: %zu functions (%s), %zu xrefs, %zu strings", functions.value("architecture", std::string()).c_str(),
+                functions.value("total", size_t{0}), sources.c_str(), functions.value("xrefs", size_t{0}),
+                functions.value("strings", size_t{0}));
+    const float listWidth = std::max(Px(300), ImGui::GetContentRegionAvail().x * 0.38f);
+    ImGui::BeginChild("CodeFunctions", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##CodeFilter", "filter functions", codeFilter_.data(), codeFilter_.size());
+    const std::string filter = codeFilter_.data();
+    if (BeginDataTable("CodeFunctionTable", 3, ImGuiTableFlags_ScrollY, ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("RVA", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Provenance", ImGuiTableColumnFlags_WidthFixed, Px(150));
+        ImGui::TableHeadersRow();
+        int shown = 0;
+        for (const auto& function : functions.value("functions", json::array())) {
+            const std::string name = function.value("name", std::string());
+            if (!filter.empty() && name.find(filter) == std::string::npos) continue;
+            if (++shown > 5000) break;
+            const std::string rva = function.value("rva", std::string());
+            ImGui::PushID(rva.c_str());
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            const bool open = detail.is_object() && detail.value("rva", std::string()) == rva;
+            if (ImGui::Selectable(rva.c_str(), open, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                OpenFunction(context, rva);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(name.c_str());
+            ImGui::TableSetColumnIndex(2);
+            std::string provenance;
+            for (const auto& source : function.value("sources", json::array()))
+                provenance += (provenance.empty() ? "" : ",") + source.get<std::string>();
+            ImGui::TextDisabled("%s", provenance.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("CodeDetail", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    if (!detail.is_object()) {
+        ImGui::TextDisabled("Double-click a function for its CFG and references.");
+    } else {
+        const json cfg = detail.value("cfg", json::object());
+        const std::string rva = detail.value("rva", std::string());
+        ImGui::Text("%s  %s", rva.c_str(), cfg.value("name", std::string()).c_str());
+        ImGui::SetNextItemWidth(Px(220));
+        ImGui::InputTextWithHint("##Rename", "new name", rename_.data(), rename_.size());
+        ImGui::SameLine();
+        if (ImGui::Button("Rename")) Rename(context, rva, rename_.data());
+        HintText("A name is an annotation keyed by the file's SHA-256; agents see it too.");
+        const json xrefs = detail.value("xrefs", json::object());
+        ImGui::Text("%zu reference(s)", xrefs.value("total", size_t{0}));
+        for (const auto& ref : xrefs.value("references", json::array())) {
+            const json function = ref.value("function", json::object());
+            ImGui::BulletText("%s %s in %s", ref.value("type", std::string()).c_str(), ref.value("from", std::string()).c_str(),
+                              function.value("name", std::string("?")).c_str());
+        }
+        ImGui::Separator();
+        for (const auto& block : cfg.value("blocks", json::array())) {
+            ImGui::TextDisabled("block %s", block.value("start", std::string()).c_str());
+            for (const auto& instruction : block.value("instructions", json::array())) {
+                std::string text = instruction.value("text", std::string());
+                if (instruction.contains("call")) text += "    ; " + instruction["call"].get<std::string>();
+                ImGui::Text("  %s  %s", instruction.value("rva", std::string()).c_str(), text.c_str());
+            }
+        }
+        for (const auto& edge : cfg.value("edges", json::array()))
+            ImGui::TextDisabled("%s -> %s (%s)", edge.value("from", std::string()).c_str(),
+                                edge["to"].is_string() ? edge["to"].get<std::string>().c_str() : "?",
+                                edge.value("type", std::string()).c_str());
+    }
+    ImGui::EndChild();
+}
+
+void ArtifactsWorkspace::LoadFunctions(UiContext& context, bool announce) {
+    std::string path, chain;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+    }
+    context.RunInBackground("Analysing code", [this, &context, path, chain, announce]() {
+        std::string error;
+        auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
+        json answer = source ? mcp_bridge::artifacts::HandleCode("cortex_artifact_functions", {{"max_entries", 65536}}, *source,
+                                                                &DesktopAnnotations(), "desktop")
+                             : json{{"ok", false}, {"error", error}};
+        if (announce || !answer.value("ok", false))
+            context.status = answer.value("ok", false)
+                ? "Code analysed: " + std::to_string(answer.value("total", size_t{0})) + " functions"
+                : "Code analysis failed: " + answer.value("error", std::string());
+        std::lock_guard<std::mutex> lock(mutex_);
+        functions_ = std::move(answer);
+    });
+}
+
+void ArtifactsWorkspace::OpenFunction(UiContext& context, const std::string& location, bool announce) {
+    std::string path, chain;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+    }
+    context.RunInBackground("Opening " + location, [this, &context, path, chain, location, announce]() {
+        std::string error;
+        auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
+        json detail;
+        if (source) {
+            auto* store = &DesktopAnnotations();
+            detail["cfg"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_cfg", {{"function", location}}, *source, store, "desktop");
+            detail["xrefs"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_xrefs", {{"target", location}, {"max_entries", 200}},
+                                                                *source, store, "desktop");
+            detail["rva"] = detail["cfg"].value("function", location);
+        }
+        const bool ok = source && detail["cfg"].value("ok", false);
+        if (announce || !ok) context.status = ok ? "Function " + detail["cfg"].value("name", location) + ": " +
+                                  std::to_string(detail["cfg"].value("blocks", json::array()).size()) + " blocks"
+                            : "Function failed: " + (source ? detail["cfg"].value("error", std::string()) : error);
+        std::lock_guard<std::mutex> lock(mutex_);
+        codeDetail_ = ok ? std::move(detail) : json(nullptr);
+    });
+}
+
+void ArtifactsWorkspace::Rename(UiContext& context, const std::string& rva, const std::string& name) {
+    std::string path, chain;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+    }
+    std::string error;
+    auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
+    if (!source) {
+        context.status = "Rename failed: " + error;
+        return;
+    }
+    // The desktop writes the person's own annotation: no mutation_permission,
+    // which is the agent-side declaration.
+    const json result = DesktopAnnotations().Put(cortex::artifacts::Sha256Of(*source), "rva:" + rva, "name", name, "desktop", -1);
+    context.status = result.value("ok", false) ? (name.empty() ? "Name removed" : "Renamed " + rva + " to " + name)
+                                               : "Rename failed: " + result.value("error", std::string());
+    if (result.value("ok", false)) {
+        LoadFunctions(context, false);
+        OpenFunction(context, rva, false);
+    }
 }
 
 void ArtifactsWorkspace::DrawChildren(UiContext& context) {
