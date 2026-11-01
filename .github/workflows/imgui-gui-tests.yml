@@ -20,6 +20,8 @@ on:
       - "tests/artifact_mcp_e2e.py"
       - "tests/dotnet_e2e.py"
       - "tests/native_static_e2e.py"
+      - "tests/evidence_e2e.py"
+      - "core/evidence/**"
       - "core/analysis/**"
       - "tests/fixtures/**"
       - "core/artifacts/**"
@@ -360,7 +362,8 @@ jobs:
         run: |
           # objdump comes from MSYS2's MinGW binutils, an independent
           # disassembler. See tests/native_static_e2e.py.
-          $objdump = (msys2 -c 'cygpath -w "$(command -v objdump)"').Trim()
+          $objdump = "$(msys2 -c 'cygpath -w /mingw64/bin/objdump.exe')".Trim()
+          if (-not (Test-Path $objdump)) { throw "objdump not found at '$objdump'" }
           $bundle = (Resolve-Path "stage/Cortex").Path
           $failed = @()
           foreach ($arch in @("x64", "x86")) {
@@ -371,6 +374,20 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "native static E2E failed on: $($failed -join ', ')" }
+
+      - name: Evidence records (class rules, restart without a process, export, compare)
+        shell: pwsh
+        run: |
+          # See tests/evidence_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/evidence_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "evidence E2E failed on: $($failed -join ', ')" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()
