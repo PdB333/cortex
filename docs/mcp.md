@@ -468,6 +468,20 @@ Static results say what the source names, not what runs. Decompilation is
 unavailable for all of them. The same providers answer `cortex.exe inspect <file>` and the
 desktop's **Artifacts** workspace.
 
+## Evidence records
+
+Evidence about artifacts and runs is kept by the host and stays readable
+without the target. See `docs/evidence.md`.
+- Writers, which need `mutation_permission` and `--allow-state`:
+  `cortex_evidence_record`, `cortex_evidence_update`, `cortex_evidence_verify`.
+- Readers: `cortex_evidence_get`, `cortex_evidence_list`,
+  `cortex_evidence_export` (JSON or Markdown) and `cortex_evidence_compare`.
+
+The class is enforced: `verified_observation` requires a static result Cortex
+reruns and reproduces, or a completed and decided trial. Anything else is
+refused with the reason. The store is the user data folder, or
+`--evidence-store <dir>`.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.

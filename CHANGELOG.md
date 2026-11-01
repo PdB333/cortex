@@ -4,10 +4,16 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 3 and step 4 (static artifact analysis: PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 5 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **Evidence records (step 5).** One host-side record type (`cortex.evidence.v1`) for trials, scans, breakpoints and static results, readable without the target process.
+  - Subjects are artifact SHA-256 plus a location. Relations are typed and can cross runtimes.
+  - The class is enforced by Cortex: `verified_observation` only when Cortex reruns the static tool and reproduces the expected values, or when the runner reports the trial completed. Later checks mark records stale; they never upgrade or downgrade them silently.
+  - Builds can be compared with position-independent code fingerprints (unchanged, moved, not found).
+  - Export as JSON or Markdown.
+  - New: MCP tools `cortex_evidence_*`, `cortex.exe evidence export|list`, `--evidence-store`, and the Artifacts **Evidence** tab. See `docs/evidence.md`.
 - **Native code analysis of files, offline (step 4d).** For x86 and x64 PEs:
   - a function catalog where each start states its provenance (entry, export, pdata, TLS, call target, after-ret heuristic);
   - a cross-reference index (calls, jumps, memory and address operands) and strings with their references;

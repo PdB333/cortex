@@ -647,6 +647,35 @@ calls and address operands, and the runtime's own unwind reader
     observation is created;
   - old evidence stays readable without the process.
 
+#### Status of step 5 (delivered)
+
+The full format is in `docs/evidence.md`.
+
+| Item | Implementation | Test |
+|---|---|---|
+| One record type | `core/evidence/evidence.{h,cpp}` (`cortex.evidence.v1`), stored by the MCP host: one atomic file per record, readable without a target | `cortex_evidence_tests`, `evidence_e2e.py` |
+| Artifact-aware subjects | SHA-256, name and format computed by Cortex from a file inside `--artifact-root` (or marked `client_asserted`). Locations: `rva:`, `token:`, `js:file:line:col`, `module:name+0x`. An `rva:` subject in a PE gets a code fingerprint | identity and fingerprint on the shift fixture and the test target |
+| Classes enforced by the store | `verified_observation` only when Cortex reruns the static tool and reproduces every expected value, or when the runner reports the referenced trial completed and decided. The other classes have their own requirements. An unmet class is refused with the reason, and nothing is written | wrong expectations, no basis, undecided and missing trials, a contradiction without a target, a correlation with one reference: all refused, with no new file |
+| No silent upgrades | the knowledge-status mapping goes both ways and never upgrades. `cortex_evidence_verify` marks a record stale when its check no longer holds, without changing its class | the file is replaced under a verified record, which goes stale with its class intact; restoring the file clears the flag |
+| Typed cross-runtime relations | 12 relation types between records or subjects, each with an origin (static, decompiled, observed) | an IPC channel `handled_by` a JS location; `contradicts` and `correlates` between records |
+| Session-to-session comparison | `cortex_evidence_compare` places old records in a new build: same binary, unchanged at RVA, moved (with the new RVA), ambiguous, not found. It uses position-independent fingerprints (relative branches, RIP-relative and in-image addresses masked) | `tests/fixtures/shift_fixture.c` built twice: the moved function is found at its new RVA in x64 and x86, and the changed one is reported as not found; a repacked copy is unchanged at RVA |
+| Export | JSON (`cortex.evidence.export.v1`) and Markdown, over MCP and with `cortex.exe evidence export\|list` | export checks in both tests, and the CLI under Wine |
+| Validation criteria | restart: a new store (unit) and a new server process with no target (E2E) read identical records, and reading, listing, exporting and comparing create no file | both tests |
+| Access | MCP: `cortex_evidence_record`, `_update`, `_verify` (Cortex state: `mutation_permission` + `--allow-state`) and `_get`, `_list`, `_export`, `_compare` (read-only). Desktop: the **Evidence** tab in Artifacts, with a copied Markdown report | E2E refusal without `--allow-state`; security regression (every tool classified); GUI suite |
+
+**Limits:**
+
+- Trials are checked through the runner of the running server. A trial
+  from another server's results folder is not found.
+- The desktop shows and exports evidence but does not create records yet;
+  that comes with the investigation workspace in step 7.
+- Fingerprints cover PE code only. .NET tokens and JS locations are
+  compared as `not_comparable` until their providers gain an equivalent.
+- Project knowledge records (inside the runtime) and evidence records
+  (host) are linked through `references` of kind `knowledge`. They are not
+  merged into one store, so existing knowledge and trial tools keep working
+  unchanged.
+
 ### Step 6: investigation orchestrator
 
 - **Multi-runtime addition:** cross-runtime workflows over the same
