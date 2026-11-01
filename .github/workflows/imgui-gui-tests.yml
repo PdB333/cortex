@@ -21,6 +21,8 @@ on:
       - "tests/dotnet_e2e.py"
       - "tests/native_static_e2e.py"
       - "tests/evidence_e2e.py"
+      - "tests/investigation_e2e.py"
+      - "core/investigation/**"
       - "core/evidence/**"
       - "core/analysis/**"
       - "tests/fixtures/**"
@@ -388,6 +390,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "evidence E2E failed on: $($failed -join ', ')" }
+
+      - name: Investigations (plan, server-run static steps, person approval through the CLI)
+        shell: pwsh
+        run: |
+          # See tests/investigation_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/investigation_e2e.py `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x64.exe"
+          if ($LASTEXITCODE -ne 0) { throw "investigation E2E failed" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()

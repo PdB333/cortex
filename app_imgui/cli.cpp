@@ -67,7 +67,8 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex analyze <directory>     Analyze a crash directory\n"
         "  cortex symbolize [options]     Resolve PE symbols offline\n"
         "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR, JS, .NET, ZIP)\n"
-        "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n",
+        "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n"
+        "  cortex investigation ...       List, show, report, approve or reject investigation steps\n",
         out);
 }
 
@@ -113,6 +114,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
     if (command == "inspect") return ForwardCli(CortexInspectMain, "cortex inspect", args, 2);
     if (command == "evidence") return ForwardCli(CortexEvidenceMain, "cortex evidence", args, 2);
+    if (command == "investigation") return ForwardCli(CortexInvestigationMain, "cortex investigation", args, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
     if (command == "analyze" || command == "analyse") {

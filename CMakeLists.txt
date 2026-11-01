@@ -330,6 +330,7 @@ add_executable(cortex_host
     core/artifacts/native_code.cpp
     core/artifacts/annotations.cpp
     core/evidence/evidence.cpp
+    core/investigation/investigation.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
     host/diagnostics/external_host.cpp
@@ -665,6 +666,30 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_evidence_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
     add_test(NAME cortex_evidence_tests COMMAND cortex_evidence_tests $<TARGET_FILE:cortex_shift_fixture_a> $<TARGET_FILE:cortex_shift_fixture_b>)
 
+    add_executable(cortex_investigation_tests
+        tests/investigation_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+        core/evidence/evidence.cpp
+        core/investigation/investigation.cpp
+    )
+    target_include_directories(cortex_investigation_tests PRIVATE core)
+    target_link_libraries(cortex_investigation_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_investigation_tests COMMAND cortex_investigation_tests $<TARGET_FILE:cortex_test_target> ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/electron-app.asar $<TARGET_FILE:cortex_shift_fixture_a>)
+
     add_executable(cortex_artifact_tools_tests
         tests/artifact_tools_tests.cpp
         core/artifacts/artifact.cpp
@@ -695,7 +720,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

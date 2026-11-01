@@ -72,6 +72,7 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/artifacts/native_code.cpp
     ${CORTEX_ROOT}/core/artifacts/annotations.cpp
     ${CORTEX_ROOT}/core/evidence/evidence.cpp
+    ${CORTEX_ROOT}/core/investigation/investigation.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp
