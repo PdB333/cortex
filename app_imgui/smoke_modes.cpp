@@ -417,16 +417,23 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
     }
     if (!RenderGuiStable(app, error, true)) return false;
 
-    // Code tab: the catalog of cortex.exe, the entry point's CFG, and a
-    // name recorded then removed.
+    // Code tab: the catalog of the system's kernel32.dll (small enough for a
+    // Debug build to analyse quickly, unlike cortex.exe itself), its entry
+    // point's CFG, and a name recorded then removed.
     {
+        wchar_t system[MAX_PATH];
+        const UINT systemLength = GetSystemDirectoryW(system, MAX_PATH);
+        const std::filesystem::path library =
+            std::filesystem::path(std::wstring(system, systemLength < MAX_PATH ? systemLength : 0)) / L"kernel32.dll";
         std::string peError;
         cortex::artifacts::PeFile pe;
-        const auto self = cortex::artifacts::OpenFile(std::filesystem::path(executable).u8string(), &peError);
-        if (!self || !cortex::artifacts::ParsePe(*self, pe, peError)) {
-            error = "artifacts_self_pe:" + peError;
+        const auto self = cortex::artifacts::OpenFile(library.u8string(), &peError);
+        if (!self || !cortex::artifacts::ParsePe(*self, pe, peError) || !pe.entryRva) {
+            error = "artifacts_kernel32:" + peError;
             return false;
         }
+        app.ui.commands.push_back("inspect_artifact " + library.u8string());
+        if (!RenderGuiStable(app, error, true)) return false;
         char entry[24];
         std::snprintf(entry, sizeof(entry), "0x%x", pe.entryRva);
         const std::vector<std::pair<std::string, std::string>> steps = {
@@ -435,6 +442,8 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
             {std::string("artifact_function ") + entry, "Function "},
             {std::string("artifact_rename ") + entry + " suite_entry", std::string("Renamed ") + entry + " to suite_entry"},
             {std::string("artifact_rename ") + entry, "Name removed"},
+            {"artifact_tab Evidence", ""},
+            {"artifact_evidence", "Evidence: "},
         };
         for (const auto& [command, expected] : steps) {
             app.ui.commands.push_back(command);

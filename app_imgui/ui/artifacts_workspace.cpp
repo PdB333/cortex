@@ -5,6 +5,7 @@
 
 #include "../../mcp_bridge/artifact_tools.h"
 #include "../../core/artifacts/annotations.h"
+#include "../../core/evidence/evidence.h"
 #include "../../core/artifacts/dotnet_provider.h"
 #include "../../core/services/user_data.h"
 #include "../../core/artifacts/js_provider.h"
@@ -24,6 +25,13 @@ namespace {
 
 // Annotations made in the desktop: the same per-user store the MCP host
 // uses by default, so a name given here is what an agent sees.
+// Evidence recorded by agents (cortex_evidence_record) in the default store.
+cortex::evidence::Store& DesktopEvidence() {
+    static cortex::evidence::Store store(
+        cortex::services::UserDataDirectory(std::filesystem::u8path(cortex::desktop::ExecutableDirectory())) / "evidence");
+    return store;
+}
+
 cortex::artifacts::AnnotationStore& DesktopAnnotations() {
     static cortex::artifacts::AnnotationStore store(
         cortex::services::UserDataDirectory(std::filesystem::u8path(cortex::desktop::ExecutableDirectory())) / "annotations");
@@ -101,6 +109,7 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         cil_ = nullptr;
         functions_ = nullptr;
         codeDetail_ = nullptr;
+        evidence_ = nullptr;
         children_ = std::move(children);
         inspectedPath_ = path;
         inspectedChild_ = child;
@@ -119,6 +128,10 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
         return;
     }
     static const std::string cil = "artifact_cil ";
+    if (command == "artifact_evidence") {
+        LoadEvidence(context);
+        return;
+    }
     if (command == "artifact_functions") {
         LoadFunctions(context);
         return;
@@ -286,6 +299,10 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
                                           machine.find("amd64") != std::string::npos || machine.find("i386") != std::string::npos) &&
             ImGui::BeginTabItem("Code", nullptr, TabFlags("Code"))) {
             DrawCode(context);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Evidence", nullptr, TabFlags("Evidence"))) {
+            DrawEvidence(context);
             ImGui::EndTabItem();
         }
         if (data.contains("dotnet") && ImGui::BeginTabItem(".NET", nullptr, TabFlags(".NET"))) {
@@ -785,6 +802,66 @@ void ArtifactsWorkspace::Rename(UiContext& context, const std::string& rva, cons
         LoadFunctions(context, false);
         OpenFunction(context, rva, false);
     }
+}
+
+// Evidence about this artifact (by SHA-256), as recorded and checked.
+void ArtifactsWorkspace::DrawEvidence(UiContext& context) {
+    json evidence;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        evidence = evidence_;
+    }
+    if (ImGui::Button(evidence.is_object() ? "Refresh" : "Load evidence")) LoadEvidence(context);
+    ImGui::SameLine();
+    const std::string sha = [&] {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return result_.value("identity", json::object()).value("sha256", std::string());
+    }();
+    if (ImGui::Button("Copy Markdown report"))
+        ImGui::SetClipboardText(DesktopEvidence().Export({{"sha256", sha}}, "markdown").value("document", std::string()).c_str());
+    HintText("Records agents made with cortex_evidence_record. The class is enforced by Cortex: verified_observation "
+             "means Cortex reproduced the static result or found the trial completed.");
+    if (!evidence.is_object()) return;
+    if (BeginDataTable("EvidenceRecords", 5, ImGuiTableFlags_ScrollY, ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Class", ImGuiTableColumnFlags_WidthFixed, Px(150));
+        ImGui::TableSetupColumn("Origin", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Location", ImGuiTableColumnFlags_WidthFixed, Px(150));
+        ImGui::TableSetupColumn("Statement", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Check", ImGuiTableColumnFlags_WidthFixed, Px(140));
+        ImGui::TableHeadersRow();
+        for (const auto& record : evidence.value("records", json::array())) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            const std::string cls = record.value("class", std::string());
+            if (cls == "verified_observation") ImGui::TextColored(ImVec4(0.35f, 0.78f, 0.45f, 1.0f), "%s", cls.c_str());
+            else ImGui::TextUnformatted(cls.c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(record.value("origin", std::string()).c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(record.value("subject", json::object()).value("location", std::string("(artifact)")).c_str());
+            ImGui::TableSetColumnIndex(3);
+            ImGui::TextWrapped("%s", record.value("statement", std::string()).c_str());
+            ImGui::TableSetColumnIndex(4);
+            const std::string status = record.value("verification", json::object()).value("status", std::string("not_checked"));
+            if (record.value("stale", false)) ImGui::TextColored(ImVec4(0.9f, 0.6f, 0.3f, 1.0f), "STALE (%s)", status.c_str());
+            else ImGui::TextDisabled("%s", status.c_str());
+        }
+        ImGui::EndTable();
+    }
+}
+
+void ArtifactsWorkspace::LoadEvidence(UiContext& context) {
+    std::string sha;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        sha = result_.value("identity", json::object()).value("sha256", std::string());
+    }
+    if (sha.empty()) return;
+    json listed = DesktopEvidence().List({{"sha256", sha}}, 1000);
+    context.status = "Evidence: " + std::to_string(listed.value("matched", size_t{0})) + " record(s)";
+    std::lock_guard<std::mutex> lock(mutex_);
+    evidence_ = std::move(listed);
 }
 
 void ArtifactsWorkspace::DrawChildren(UiContext& context) {

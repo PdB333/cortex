@@ -77,6 +77,16 @@ bool ResolveLocation(const CodeIndex& index, const std::string& query, const std
 // Name shown for a function: annotation, export, or sub_<RVA>.
 std::string FunctionName(const Function& function, const std::map<uint32_t, std::string>& annotations);
 
+// A position-independent fingerprint of the code at `rva`: SHA-256 of the
+// first whole instructions (up to 64 bytes, or the function's size) with
+// relative branch targets, RIP-relative displacements and in-image absolute
+// addresses zeroed, so the same function moved by a rebuild still matches.
+// {"sha256", "length", "function_size"} or null if `rva` is not code.
+json Fingerprint(const ByteSource& source, const PeFile& pe, const CodeIndex& index, uint32_t rva);
+// Function starts whose fingerprint equals `fingerprint`.
+std::vector<uint32_t> FindFingerprint(const ByteSource& source, const PeFile& pe, const CodeIndex& index,
+                                      const json& fingerprint);
+
 // JSON views. `annotations` maps RVA -> name given by a person or agent.
 json FunctionsJson(const CodeIndex& index, const std::string& filter, size_t maxEntries,
                    const std::map<uint32_t, std::string>& annotations);

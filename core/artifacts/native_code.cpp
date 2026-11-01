@@ -1,5 +1,7 @@
 #include "native_code.h"
 
+#include "sha256.h"
+
 #include "../analysis/cfg_builder.h"
 
 #include <Zydis/Zydis.h>
@@ -343,6 +345,64 @@ std::string FunctionName(const Function& function, const std::map<uint32_t, std:
     char text[24];
     std::snprintf(text, sizeof(text), "sub_%X", function.rva);
     return text;
+}
+
+json Fingerprint(const ByteSource& source, const PeFile& pe, const CodeIndex& index, uint32_t rva) {
+    const PeSection* section = pe.SectionFor(rva);
+    if (!section || !Executable(*section)) return nullptr;
+    const Function* function = index.At(rva);
+    const uint32_t functionSize = function ? function->size : 0;
+    const size_t limit = functionSize ? std::min<size_t>(functionSize, 64) : 64;
+    const auto bytes = ReadRva(source, pe, rva, limit + 15);
+    const ZydisDecoder decoder = Decoder(index.x64);
+    const uint64_t imageEnd = pe.imageBase + pe.sizeOfImage;
+    std::vector<uint8_t> masked;
+    size_t offset = 0;
+    while (offset < bytes.size() && offset < limit) {
+        ZydisDecodedInstruction instr;
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, bytes.data() + offset, bytes.size() - offset, &instr, operands))) break;
+        std::vector<uint8_t> copy(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                                  bytes.begin() + static_cast<std::ptrdiff_t>(offset + instr.length));
+        auto zero = [&](uint8_t at, uint8_t bits) {
+            for (size_t i = at; i < static_cast<size_t>(at) + bits / 8 && i < copy.size(); ++i) copy[i] = 0;
+        };
+        bool ripRelative = false;
+        for (uint8_t i = 0; i < instr.operand_count; ++i)
+            if (operands[i].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                (operands[i].mem.base == ZYDIS_REGISTER_RIP || operands[i].mem.base == ZYDIS_REGISTER_EIP))
+                ripRelative = true;
+        const uint64_t disp = static_cast<uint64_t>(static_cast<uint32_t>(instr.raw.disp.value));
+        if (instr.raw.disp.size && (ripRelative || (!index.x64 && disp >= pe.imageBase && disp < imageEnd)))
+            zero(instr.raw.disp.offset, instr.raw.disp.size);
+        for (const auto& imm : instr.raw.imm) {
+            if (!imm.size) continue;
+            const uint64_t value = index.x64 ? imm.value.u : static_cast<uint32_t>(imm.value.u);
+            if (imm.is_relative || (value >= pe.imageBase && value < imageEnd)) zero(imm.offset, imm.size);
+        }
+        masked.insert(masked.end(), copy.begin(), copy.end());
+        offset += instr.length;
+    }
+    if (masked.empty()) return nullptr;
+    Sha256 hash;
+    hash.Update(masked.data(), masked.size());
+    return {{"sha256", Sha256::Hex(hash.Final())}, {"length", masked.size()}, {"function_size", functionSize},
+            {"masked", "relative branches, RIP-relative displacements, in-image addresses"}};
+}
+
+std::vector<uint32_t> FindFingerprint(const ByteSource& source, const PeFile& pe, const CodeIndex& index,
+                                      const json& fingerprint) {
+    std::vector<uint32_t> found;
+    const std::string wanted = fingerprint.value("sha256", std::string());
+    const uint32_t size = fingerprint.value("function_size", uint32_t{0});
+    for (const auto& function : index.functions) {
+        // A recorded size narrows the search; functions of another size are skipped.
+        if (size && function.size && function.size != size) continue;
+        const json candidate = Fingerprint(source, pe, index, function.rva);
+        if (candidate.is_object() && candidate["sha256"] == wanted) found.push_back(function.rva);
+        if (found.size() >= 16) break;
+    }
+    return found;
 }
 
 json FunctionsJson(const CodeIndex& index, const std::string& filter, size_t maxEntries,

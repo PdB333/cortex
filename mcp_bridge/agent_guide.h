@@ -421,6 +421,8 @@ inline bool IsCortexStateTool(const std::string& name) {
     // The artifact annotation tool (mcp_bridge/artifact_tools.h) writes
     // Cortex's annotation store.
     if(name=="cortex_artifact_annotate")return true;
+    // So do the evidence writers (mcp_bridge/evidence_tools.h).
+    if(name=="cortex_evidence_record"||name=="cortex_evidence_update"||name=="cortex_evidence_verify")return true;
     static const std::set<std::string> names=[]{
         std::set<std::string> result;
         for(const auto& tool:CortexTestTools())

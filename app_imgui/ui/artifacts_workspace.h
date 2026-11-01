@@ -25,7 +25,8 @@ public:
     // maps a generated position through the script's source map;
     // "artifact_cil <method>" disassembles .NET methods;
     // "artifact_functions", "artifact_function <location>" and
-    // "artifact_rename <rva> <name>" drive the Code tab.
+    // "artifact_rename <rva> <name>" drive the Code tab;
+    // "artifact_evidence" reloads the Evidence tab.
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
@@ -44,6 +45,8 @@ private:
     void OpenFunction(UiContext& context, const std::string& location, bool announce = true);
     void Rename(UiContext& context, const std::string& rva, const std::string& name);
     int TabFlags(const char* name) const;  // ImGuiTabItemFlags
+    void DrawEvidence(UiContext& context);
+    void LoadEvidence(UiContext& context);
 
     std::array<char, 1024> path_ = {};
     std::array<char, 512> child_ = {};
@@ -63,6 +66,7 @@ private:
     nlohmann::json codeDetail_;    // {"cfg", "xrefs"} of the opened function
     std::array<char, 128> codeFilter_ = {};
     std::array<char, 128> rename_ = {};
+    nlohmann::json evidence_;      // evidence records about the inspected artifact
     std::string selectTab_;    // "artifact_tab <name>": selected on the next frame
 };
 

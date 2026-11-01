@@ -66,7 +66,8 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
         "  cortex analyze <directory>     Analyze a crash directory\n"
         "  cortex symbolize [options]     Resolve PE symbols offline\n"
-        "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR)\n",
+        "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR, JS, .NET, ZIP)\n"
+        "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n",
         out);
 }
 
@@ -111,6 +112,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
     if (command == "inspect") return ForwardCli(CortexInspectMain, "cortex inspect", args, 2);
+    if (command == "evidence") return ForwardCli(CortexEvidenceMain, "cortex evidence", args, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
     if (command == "analyze" || command == "analyse") {
