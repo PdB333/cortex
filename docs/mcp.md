@@ -482,6 +482,18 @@ reruns and reproduces, or a completed and decided trial. Anything else is
 refused with the reason. The store is the user data folder, or
 `--evidence-store <dir>`.
 
+## Investigations
+
+A journal of one investigation: question, plan, approvals, evidence and
+conclusion. See `docs/investigations.md`.
+
+The tools are `cortex_investigation_templates`, `_create`, `_get`, `_list`,
+`_report`, `_start`, `_run_step`, `_step_result`, `_skip`, `_conclude` and
+`_cancel`; the writers need `mutation_permission` and `--allow-state`.
+- Cortex runs read-only static steps itself.
+- Steps with effect `target_input` or `mutation` wait for the person's
+  `cortex.exe investigation approve`. There is no MCP approval tool.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.

@@ -4,10 +4,14 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 5 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 6 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **Investigations (step 6).** A host-side journal (`cortex.investigation.v1`) with a testable question, a plan of tool calls, limits, approvals, evidence and a conclusion. It is not a second agent: the AI client runs the tools.
+  - Cortex enforces the states, runs read-only static steps itself, and checks cited trials and evidence. It refuses to record input or mutating steps until the person approves them with `cortex.exe investigation approve`; there is no MCP approval tool.
+  - Templates: `function_static`, `memory_value`, `electron_ipc_native`.
+  - New: 11 MCP tools, `--investigation-store`, `cortex.exe investigation`. See `docs/investigations.md`.
 - **Evidence records (step 5).** One host-side record type (`cortex.evidence.v1`) for trials, scans, breakpoints and static results, readable without the target process.
   - Subjects are artifact SHA-256 plus a location. Relations are typed and can cross runtimes.
   - The class is enforced by Cortex: `verified_observation` only when Cortex reruns the static tool and reproduces the expected values, or when the runner reports the trial completed. Later checks mark records stale; they never upgrade or downgrade them silently.

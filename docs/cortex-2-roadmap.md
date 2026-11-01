@@ -702,6 +702,32 @@ The full format is in `docs/evidence.md`.
 - **Rule:** no second agent system. The orchestrator is a journal plus MCP
   tools, and the AI client stays external.
 
+#### Status of step 6 (delivered)
+
+The full description is in `docs/investigations.md`.
+
+| Item | Implementation | Test |
+|---|---|---|
+| Investigation object | `core/investigation/investigation.{h,cpp}` (`cortex.investigation.v1`), kept by the host. It holds the question, plan, limits, approvals, evidence, conclusion and an append-only journal with actors | `cortex_investigation_tests`, `investigation_e2e.py` |
+| States | planned → running ⇄ awaiting_approval → completed, failed, inconclusive or cancelled, enforced with revisions. `completed` needs every step finished and at least one existing evidence record. A write after the deadline fails the investigation | revision conflicts; closed investigations refuse writes; completion without evidence is refused; deadline |
+| Plan and hops | each step names its tool, capability, effect, runner and hop. Steps run in order. Cortex runs the read-only static steps itself and keeps their output and hash. Agent steps cite trials and evidence that Cortex checks | wrong order refused; an agent step cannot be server-run; a missing trial or evidence id is refused |
+| Approvals by the person | `target_input` and `mutation` steps wait for `cortex.exe investigation approve` (the desktop comes in step 7). Agents cannot approve and MCP has no approval tool. `max_live_steps` is enforced | an agent approval is refused; the CLI approval is recorded in the journal as `cli`; a rejected step must be skipped; the live-step limit holds |
+| Workflows | `function_static`, `memory_value`, `electron_ipc_native`, `custom`. They compose the existing tools; only read-only static steps run in Cortex | `function_static` on the test target, end to end with verified evidence (unit and E2E). `electron_ipc_native` on the Electron fixture with a native PE as the addon: its four static hops run, then it waits for the live breakpoint |
+| Access | 11 MCP tools (writers: `mutation_permission` + `--allow-state`), `--investigation-store`, `cortex.exe investigation list/show/report/approve/reject` | security regression (all tools classified), E2E |
+
+**Limits:**
+
+- The approval governs what the journal records. An agent can still call a
+  live tool outside the investigation, through that tool's own gates
+  (`--allow-writes`, launch profiles); the journal then simply does not
+  contain it.
+- The `memory_value` and `electron_ipc_native` live steps are validated up
+  to their approval. Running them end to end needs a live target, a launch
+  profile and `--allow-writes`, which this test suite does not grant.
+- No .NET-to-JIT or IL2CPP workflow: those wait for the live .NET provider
+  and the IL2CPP provider.
+- Approvals and the investigation list in the desktop belong to step 7.
+
 ### Step 7: AI investigation workspace
 
 - **Multi-runtime addition:**
