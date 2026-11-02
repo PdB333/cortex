@@ -4,6 +4,10 @@
 #include "desktop_app.h"
 #include "ui/address_resolver.h"
 #include "../core/artifacts/pe_provider.h"
+#include "ui/address_context_menu.h"
+#include "ui/code_navigation.h"
+#include "ui/desktop_stores.h"
+#include "../mcp_bridge/evidence_tools.h"
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
@@ -280,7 +284,7 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
     "scripts", "input", "screenshots", "patches", "events", "trace", "tools",
-    "access-finder", "lua", "artifacts"
+    "access-finder", "lua", "artifacts", "ai-investigation"
 };
 
 
@@ -442,6 +446,7 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
             {std::string("artifact_function ") + entry, "Function "},
             {std::string("artifact_rename ") + entry + " suite_entry", std::string("Renamed ") + entry + " to suite_entry"},
             {std::string("artifact_rename ") + entry, "Name removed"},
+            {"artifact_record_function", "Evidence recorded: "},
             {"artifact_tab Evidence", ""},
             {"artifact_evidence", "Evidence: "},
         };
@@ -496,6 +501,97 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
         }
     }
     return ok;
+}
+
+// The AI Investigation workspace against the real stores: an investigation
+// an agent created waits for approval; the person approves from the
+// workspace (actor "desktop"); evidence and the process tree load.
+bool ExerciseAiInvestigationWorkspace(AppState& app, std::string& error) {
+    using json = nlohmann::json;
+    auto& investigations = cortex::ui::DesktopInvestigations();
+    const json created = investigations.Create({{"title", "GUI suite"}, {"question", "Which instruction writes the value?"},
+                                                {"workflow", "memory_value"}, {"parameters", {{"value", "100"}}}}, "agent");
+    const std::string id = created.value("investigation", json::object()).value("id", std::string());
+    if (id.empty() || !investigations.Start(id, 1, "agent").value("ok", false) ||
+        !investigations.StepResult({{"id", id}, {"index", 0}, {"expected_revision", 2}, {"status", "done"}, {"summary", "scan"}},
+                                   "agent", {}).value("ok", false)) {
+        error = "ai_setup:" + created.dump();
+        return false;
+    }
+    app.workspaces.CloseAll();
+    app.workspaces.Select("ai-investigation");
+    const std::vector<std::pair<std::string, std::string>> steps = {
+        {"ai_tab Investigations", ""},
+        {"ai_investigations_refresh", "Investigations: "},
+        {"ai_investigation_open " + id, "Investigation GUI suite: awaiting_approval"},
+        {"ai_investigation_approve " + id + " 1", "Approved step 1 of " + id},
+        {"ai_tab Evidence", ""},
+        {"ai_evidence_refresh", "Evidence: "},
+        {"ai_tab Process tree", ""},
+        {"ai_process_tree " + std::to_string(GetCurrentProcessId()), "Process tree: "},
+    };
+    for (const auto& [command, expected] : steps) {
+        app.ui.commands.push_back(command);
+        if (!RenderGuiStable(app, error, true)) return false;
+        if (!expected.empty() && app.ui.status.rfind(expected, 0) != 0) {
+            error = "ai_workspace:" + command + ":" + app.ui.status;
+            return false;
+        }
+    }
+    const json after = investigations.Get(id)["investigation"];
+    if (after["plan"][1].value("status", std::string()) != "approved" || after["plan"][1]["approval"].value("by", std::string()) != "desktop") {
+        error = "ai_approval_not_recorded:" + after["plan"][1].dump();
+        return false;
+    }
+    investigations.Cancel(id, after["revision"].get<int64_t>(), "GUI suite", "desktop");
+    return true;
+}
+
+// Live <-> static by module+RVA on an attached target: the address menu's
+// static view of the module that holds `address`, back to the same live
+// address, and evidence recorded on that location shown live.
+bool ExerciseLiveStaticNavigation(AppState& app, uint64_t address, std::string& error) {
+    using json = nlohmann::json;
+    const auto module = cortex::ui::ModuleAt(app.ui, address);
+    if (!module) {
+        error = "navigation_no_module_for_address";
+        return false;
+    }
+    cortex::ui::OpenStaticCode(app.ui, *module, address);
+    if (!RenderGuiStable(app, error, true) || !RenderGuiStable(app, error, true)) return false;
+    if (app.ui.status.rfind("Opened ", 0) != 0) {
+        error = "navigation_static:" + app.ui.status;
+        return false;
+    }
+    app.ui.commands.push_back("artifact_show_live");
+    if (!RenderGuiStable(app, error, true)) return false;
+    // The disassembly view takes over the status line once it draws; the
+    // navigation itself is what is checked.
+    if (app.ui.navigationCurrent.workspace != "disassembly" || app.ui.navigationCurrent.address != address) {
+        error = "navigation_live:" + app.ui.status;
+        return false;
+    }
+    // Evidence on that module+RVA, then Live from the AI workspace.
+    char rva[24];
+    std::snprintf(rva, sizeof(rva), "0x%llx", static_cast<unsigned long long>(address - module->base));
+    const json recorded = mcp_bridge::evidence::Handle(
+        "cortex_evidence_record",
+        {{"statement", "GUI suite: the target was executing here"}, {"class", "hypothesis"}, {"origin", "observed"},
+         {"subject", {{"path", module->path}, {"location", std::string("rva:") + rva}}}, {"mutation_permission", true}},
+        &cortex::ui::DesktopEvidence(), {std::filesystem::u8path(module->path).parent_path()}, nullptr, "desktop");
+    const std::string id = recorded.value("record", json::object()).value("id", std::string());
+    if (id.empty()) {
+        error = "navigation_evidence:" + recorded.dump();
+        return false;
+    }
+    app.ui.NavigateTo("memory-browser", 0x1000);
+    app.ui.commands.push_back("ai_evidence_live " + id);
+    if (!RenderGuiStable(app, error, true)) return false;
+    if (app.ui.navigationCurrent.workspace != "disassembly" || app.ui.navigationCurrent.address != address) {
+        error = "navigation_evidence_live:" + app.ui.status;
+        return false;
+    }
+    return true;
 }
 
 bool ExerciseNavigationContract(AppState& app, std::string& error) {
@@ -1147,6 +1243,10 @@ int RunGuiWorkspaceSuite() {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 6;
     }
+    if (!ExerciseAiInvestigationWorkspace(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 7;
+    }
 
     std::printf(
         "PASS: GUI workspace suite %zu workspaces / %zu presets / docking / navigation\n",
@@ -1215,6 +1315,10 @@ int RunGuiAttachedSuite(const std::vector<std::string>& args) {
     if (!ExerciseEveryWorkspace(app, error)) {
         std::fprintf(stderr, "gui attached suite: workspace render failed: %s\n", error.c_str());
         return 9;
+    }
+    if (!ExerciseLiveStaticNavigation(app, address, error)) {
+        std::fprintf(stderr, "gui attached suite: live/static navigation failed: %s\n", error.c_str());
+        return 13;
     }
 
     // Give the panel-local live refresh loops enough time to execute at least

@@ -146,7 +146,7 @@ public:
                 OpenMany({"disassembly", "debugger", "trace", "memory-browser", "watches"});
                 break;
             case WorkspacePreset::Automation:
-                OpenMany({"lua", "scripts", "input", "actions", "events", "watches", "runtime"});
+                OpenMany({"lua", "scripts", "input", "actions", "events", "watches", "runtime", "ai-investigation"});
                 break;
             case WorkspacePreset::Runtime:
                 OpenMany({"runtime", "diagnostics", "network", "screenshots", "instrumentation",
@@ -294,7 +294,7 @@ public:
 
             case WorkspacePreset::Automation:
                 DockMany(left, {"scripts", "input"}, docked);
-                DockMany(center, {"lua", "actions", "events"}, docked);
+                DockMany(center, {"lua", "actions", "events", "ai-investigation"}, docked);
                 DockMany(right, {"watches", "runtime"}, docked);
                 break;
 

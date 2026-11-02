@@ -4,8 +4,9 @@
 #include "widgets.h"
 
 #include "../../mcp_bridge/artifact_tools.h"
-#include "../../core/artifacts/annotations.h"
-#include "../../core/evidence/evidence.h"
+#include "../../mcp_bridge/evidence_tools.h"
+#include "code_navigation.h"
+#include "desktop_stores.h"
 #include "../../core/artifacts/dotnet_provider.h"
 #include "../../core/services/user_data.h"
 #include "../../core/artifacts/js_provider.h"
@@ -16,27 +17,8 @@
 #include <cstdio>
 #include <cstring>
 
-namespace cortex::desktop {
-std::string ExecutableDirectory();
-}
-
 namespace cortex::ui {
 namespace {
-
-// Annotations made in the desktop: the same per-user store the MCP host
-// uses by default, so a name given here is what an agent sees.
-// Evidence recorded by agents (cortex_evidence_record) in the default store.
-cortex::evidence::Store& DesktopEvidence() {
-    static cortex::evidence::Store store(
-        cortex::services::UserDataDirectory(std::filesystem::u8path(cortex::desktop::ExecutableDirectory())) / "evidence");
-    return store;
-}
-
-cortex::artifacts::AnnotationStore& DesktopAnnotations() {
-    static cortex::artifacts::AnnotationStore store(
-        cortex::services::UserDataDirectory(std::filesystem::u8path(cortex::desktop::ExecutableDirectory())) / "annotations");
-    return store;
-}
 
 using json = nlohmann::json;
 
@@ -86,23 +68,73 @@ void JsonTree(const json& value, const char* label, int depth) {
 
 } // namespace
 
+namespace {
+
+// The inspection of a file (or a container entry) and its entries.
+json InspectNow(const std::string& path, const std::string& child, json& children, std::string& name) {
+    std::string error;
+    auto source = mcp_bridge::artifacts::OpenChain(path, child, error);
+    if (!source) return {{"ok", false}, {"error", error}};
+    name = source->Name();
+    const auto& registry = cortex::artifacts::DefaultRegistry();
+    json result = registry.Inspect(*source);
+    const auto provider = registry.Detect(*source);
+    if (provider && !provider->Children(*source, {}, error).empty()) children = registry.ListChildren(*source);
+    return result;
+}
+
+// CFG and references of one function, with the desktop's annotations.
+json FunctionDetail(const std::string& path, const std::string& chain, const std::string& location, std::string& error) {
+    auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
+    if (!source) return nullptr;
+    auto* store = &DesktopAnnotations();
+    json detail;
+    detail["cfg"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_cfg", {{"function", location}}, *source, store, "desktop");
+    detail["xrefs"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_xrefs", {{"target", location}, {"max_entries", 200}},
+                                                        *source, store, "desktop");
+    detail["rva"] = detail["cfg"].value("function", location);
+    detail["sha256"] = cortex::artifacts::Sha256Of(*source);
+    detail["file_name"] = std::filesystem::u8path(path).filename().u8string();
+    return detail;
+}
+
+} // namespace
+
+void ArtifactsWorkspace::OpenAt(UiContext& context, const std::string& path, const std::string& location) {
+    Copy(path_.data(), path_.size(), path);
+    child_.fill(0);
+    context.RunInBackground("Opening " + location + " in " + path, [this, &context, path, location]() {
+        json children;
+        std::string name, error;
+        json result = InspectNow(path, "", children, name);
+        json detail = result.value("ok", false) ? FunctionDetail(path, "", location, error) : json(nullptr);
+        const bool ok = detail.is_object() && detail["cfg"].value("ok", false);
+        context.status = ok ? "Opened " + detail["cfg"].value("name", location) + " in " + name
+                            : "Open failed: " + (result.value("ok", false) ? (detail.is_object() ? detail["cfg"].value("error", std::string()) : error)
+                                                                          : result.value("error", std::string()));
+        std::lock_guard<std::mutex> lock(mutex_);
+        result_ = std::move(result);
+        children_ = std::move(children);
+        inspectedPath_ = path;
+        inspectedChild_.clear();
+        position_ = nullptr;
+        cil_ = nullptr;
+        functions_ = nullptr;
+        evidence_ = nullptr;
+        codeDetail_ = ok ? std::move(detail) : json(nullptr);
+        selectTab_ = "Code";
+    });
+}
+
 void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, const std::string& child) {
     if (path.empty()) {
         context.status = "Enter a file path";
         return;
     }
     context.RunInBackground("Inspecting " + path, [this, &context, path, child]() {
-        std::string error;
-        json result, children;
-        auto source = mcp_bridge::artifacts::OpenChain(path, child, error);
-        if (!source) {
-            result = {{"ok", false}, {"error", error}};
-        } else {
-            const auto& registry = cortex::artifacts::DefaultRegistry();
-            result = registry.Inspect(*source);
-            const auto provider = registry.Detect(*source);
-            if (provider && !provider->Children(*source, {}, error).empty()) children = registry.ListChildren(*source);
-        }
+        json children;
+        std::string name;
+        json result = InspectNow(path, child, children, name);
         std::lock_guard<std::mutex> lock(mutex_);
         result_ = std::move(result);
         position_ = nullptr;
@@ -114,7 +146,7 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         inspectedPath_ = path;
         inspectedChild_ = child;
         context.status = result_.value("ok", false)
-            ? "Inspected " + source->Name() + " (" + result_.value("format", std::string("?")) + ")"
+            ? "Inspected " + name + " (" + result_.value("format", std::string("?")) + ")"
             : "Inspect failed: " + result_.value("error", std::string("unknown"));
     });
 }
@@ -134,6 +166,32 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
     }
     if (command == "artifact_functions") {
         LoadFunctions(context);
+        return;
+    }
+    if (command.rfind("artifact_open ", 0) == 0) {
+        // "artifact_open <path>|<location>" (from the address menu)
+        const std::string rest = command.substr(14);
+        const size_t bar = rest.rfind('|');
+        if (bar != std::string::npos) OpenAt(context, rest.substr(0, bar), rest.substr(bar + 1));
+        return;
+    }
+    if (command == "artifact_show_live") {
+        json detail;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            detail = codeDetail_;
+        }
+        if (detail.is_object())
+            ShowLive(context, detail.value("sha256", std::string()), detail.value("file_name", std::string()), detail.value("rva", std::string()));
+        return;
+    }
+    if (command == "artifact_record_function") {
+        std::string rva;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (codeDetail_.is_object()) rva = codeDetail_.value("rva", std::string());
+        }
+        if (!rva.empty()) RecordFunctionEvidence(context, rva);
         return;
     }
     if (command.rfind("artifact_function ", 0) == 0) {
@@ -707,6 +765,14 @@ void ArtifactsWorkspace::DrawCode(UiContext& context) {
         ImGui::SameLine();
         if (ImGui::Button("Rename")) Rename(context, rva, rename_.data());
         HintText("A name is an annotation keyed by the file's SHA-256; agents see it too.");
+        // Live: only when a loaded module is this very file (same SHA-256).
+        const std::string sha = detail.value("sha256", std::string());
+        if (ImGui::Button("Show in live disassembly")) ShowLive(context, sha, detail.value("file_name", std::string()), rva);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Needs a target that has loaded this exact file (same SHA-256).");
+        ImGui::SameLine();
+        if (ImGui::Button("Record as evidence")) RecordFunctionEvidence(context, rva);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Records that this function is in the catalog at this RVA; Cortex reruns the catalog to verify it.");
         const json xrefs = detail.value("xrefs", json::object());
         ImGui::Text("%zu reference(s)", xrefs.value("total", size_t{0}));
         for (const auto& ref : xrefs.value("references", json::array())) {
@@ -762,22 +828,83 @@ void ArtifactsWorkspace::OpenFunction(UiContext& context, const std::string& loc
     }
     context.RunInBackground("Opening " + location, [this, &context, path, chain, location, announce]() {
         std::string error;
-        auto source = mcp_bridge::artifacts::OpenChain(path, chain, error);
-        json detail;
-        if (source) {
-            auto* store = &DesktopAnnotations();
-            detail["cfg"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_cfg", {{"function", location}}, *source, store, "desktop");
-            detail["xrefs"] = mcp_bridge::artifacts::HandleCode("cortex_artifact_xrefs", {{"target", location}, {"max_entries", 200}},
-                                                                *source, store, "desktop");
-            detail["rva"] = detail["cfg"].value("function", location);
-        }
-        const bool ok = source && detail["cfg"].value("ok", false);
+        json detail = FunctionDetail(path, chain, location, error);
+        const bool ok = detail.is_object() && detail["cfg"].value("ok", false);
         if (announce || !ok) context.status = ok ? "Function " + detail["cfg"].value("name", location) + ": " +
                                   std::to_string(detail["cfg"].value("blocks", json::array()).size()) + " blocks"
-                            : "Function failed: " + (source ? detail["cfg"].value("error", std::string()) : error);
+                            : "Function failed: " + (detail.is_object() ? detail["cfg"].value("error", std::string()) : error);
         std::lock_guard<std::mutex> lock(mutex_);
         codeDetail_ = ok ? std::move(detail) : json(nullptr);
     });
+}
+
+void ArtifactsWorkspace::ShowLive(UiContext& context, const std::string& sha256, const std::string& fileName,
+                                  const std::string& rva) {
+    const auto module = ModuleForSha256(context, sha256, fileName);
+    uint64_t offset = 0;
+    try {
+        offset = std::stoull(rva, nullptr, 16);
+    } catch (...) {
+        context.status = "Show live failed: invalid RVA";
+        return;
+    }
+    if (!module) {
+        context.status = "Show live: no loaded module has this file's SHA-256";
+        return;
+    }
+    context.NavigateTo("disassembly", module->base + offset);
+    char text[96];
+    std::snprintf(text, sizeof(text), "Live %s+%s = 0x%llx", module->name.c_str(), rva.c_str(),
+                  static_cast<unsigned long long>(module->base + offset));
+    context.status = text;
+}
+
+// The person records what the catalog shows; Cortex reruns it to verify.
+void ArtifactsWorkspace::RecordFunctionEvidence(UiContext& context, const std::string& rva) {
+    std::string path, chain, name;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+        if (codeDetail_.is_object()) name = codeDetail_["cfg"].value("name", std::string());
+    }
+    if (!chain.empty()) {
+        context.status = "Record evidence: open the file itself, not a container entry";
+        return;
+    }
+    // Annotated names are the person's; the catalog proves the export name or sub_<RVA>.
+    const json catalog = mcp_bridge::artifacts::Handle(
+        "cortex_artifact_functions", {{"path", path}, {"filter", ""}, {"max_entries", 65536}},
+        {std::filesystem::u8path(path).parent_path()}, nullptr);
+    size_t index = 0;
+    bool found = false;
+    for (const auto& function : catalog.value("functions", json::array())) {
+        if (function.value("rva", std::string()) == rva) {
+            found = true;
+            break;
+        }
+        ++index;
+    }
+    if (!found) {
+        context.status = "Record evidence: " + rva + " is not a function start in the catalog";
+        return;
+    }
+    const std::vector<std::filesystem::path> roots = {std::filesystem::u8path(path).parent_path()};
+    const json result = mcp_bridge::evidence::Handle(
+        "cortex_evidence_record",
+        {{"statement", "A function starts at " + rva + (name.empty() ? "" : " (" + name + ")") + " in " +
+                           std::filesystem::u8path(path).filename().u8string()},
+         {"class", "verified_observation"},
+         {"origin", "static"},
+         {"subject", {{"path", path}, {"location", "rva:" + rva}}},
+         {"produced_by", {{"tool", "cortex_artifact_functions"},
+                          {"arguments", {{"path", path}, {"filter", ""}, {"max_entries", 65536}}},
+                          {"expect", json::array({{{"pointer", "/functions/" + std::to_string(index) + "/rva"}, {"value", rva}}})}}},
+         {"mutation_permission", true}},
+        &DesktopEvidence(), roots, nullptr, "desktop");
+    context.status = result.value("ok", false)
+        ? "Evidence recorded: " + result["record"].value("id", std::string()) + " (verified_observation)"
+        : "Record evidence failed: " + result.value("error", std::string()) + " " + result.value("reason", std::string());
 }
 
 void ArtifactsWorkspace::Rename(UiContext& context, const std::string& rva, const std::string& name) {

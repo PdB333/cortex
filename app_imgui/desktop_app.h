@@ -57,6 +57,7 @@
 #include "ui/access_finder_workspace.h"
 #include "ui/lua_workspace.h"
 #include "ui/artifacts_workspace.h"
+#include "ui/ai_investigation_workspace.h"
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
@@ -290,6 +291,7 @@ struct AppState {
         workspaces.Add<cortex::ui::AccessFinderWorkspace>();
         workspaces.Add<cortex::ui::LuaWorkspace>();
         workspaces.Add<cortex::ui::ArtifactsWorkspace>();
+        workspaces.Add<cortex::ui::AiInvestigationWorkspace>();
         workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
     }
 

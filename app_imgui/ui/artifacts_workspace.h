@@ -26,7 +26,9 @@ public:
     // "artifact_cil <method>" disassembles .NET methods;
     // "artifact_functions", "artifact_function <location>" and
     // "artifact_rename <rva> <name>" drive the Code tab;
-    // "artifact_evidence" reloads the Evidence tab.
+    // "artifact_evidence" reloads the Evidence tab; "artifact_open
+    // <path>|<rva>", "artifact_show_live" and "artifact_record_function"
+    // navigate between live and static code and record evidence.
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
@@ -47,6 +49,12 @@ private:
     int TabFlags(const char* name) const;  // ImGuiTabItemFlags
     void DrawEvidence(UiContext& context);
     void LoadEvidence(UiContext& context);
+    // Inspect `path` and open the function at `location` (module+RVA from
+    // the live address menu), in one background task.
+    void OpenAt(UiContext& context, const std::string& path, const std::string& location);
+    // Disassemble base+RVA in the target when a loaded module is this file.
+    void ShowLive(UiContext& context, const std::string& sha256, const std::string& fileName, const std::string& rva);
+    void RecordFunctionEvidence(UiContext& context, const std::string& rva);
 
     std::array<char, 1024> path_ = {};
     std::array<char, 512> child_ = {};

@@ -135,6 +135,7 @@ add_executable(cortex_imgui WIN32
     ui/patches_workspace.cpp
     ui/project_workspace.cpp
     ui/artifacts_workspace.cpp
+    ui/ai_investigation_workspace.cpp
     ui/symbols_workspace.cpp
     ui/structures_workspace.cpp
     ui/pointer_maps_workspace.cpp
@@ -188,6 +189,7 @@ add_executable(cortex_imgui WIN32
     ../core/artifacts/annotations.cpp
     ../core/evidence/evidence.cpp
     ../core/investigation/investigation.cpp
+    ../core/target/process_tree.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp
