@@ -165,6 +165,10 @@ fixture. A cache hit costs one file hash plus reading the cached JSON.
 - Decompiled code is the engine's reconstruction, not the original source.
   Names such as `param_1` and types are Ghidra's guesses. ILSpy's C# compiles to
   the same API on the fixture, which does not prove identical bodies.
+- ILSpy 9.1's project does not compile as written. Its `AssemblyInfo.cs`
+  carries `[module: RefSafetyRules(11)]`, which the compiler reserves for
+  itself (CS8335). The E2E removes that one line, and reports it, before
+  rebuilding; Cortex returns the files unchanged.
 - Ghidra is validated on PE x64/x86 only. ELF, Mach-O and other formats Ghidra
   can import are not offered until they are validated.
 - Results are the engine's defaults: no custom analyzers, no PDB loading

@@ -47,6 +47,27 @@ def oracle(dll, dotnet):
     return json.loads(run.stdout)
 
 
+RESERVED = ("[module: RefSafetyRules(",)
+
+
+def strip_reserved_attributes(project):
+    """Drops attribute lines only the compiler may emit; returns them."""
+    removed = []
+    for folder, _, names in os.walk(project):
+        for name in names:
+            if not name.endswith(".cs"):
+                continue
+            path = os.path.join(folder, name)
+            with open(path, encoding="utf-8") as handle:
+                lines = handle.read().split("\n")
+            kept = [line for line in lines if not line.strip().startswith(RESERVED)]
+            if len(kept) != len(lines):
+                removed += [os.path.relpath(path, project) + ": " + line.strip() for line in lines if line not in kept]
+                with open(path, "w", encoding="utf-8", newline="") as handle:
+                    handle.write("\n".join(kept))
+    return removed
+
+
 def members(document):
     """type -> (extends, fields, methods) by name and signature."""
     out = {}
@@ -158,6 +179,11 @@ def main():
                 files += 1
             offset = result.get("next_offset")
         check(files >= 5, "decompiled project written (%d files)" % files)
+        # ILSpy writes [module: RefSafetyRules(11)], an attribute the C#
+        # compiler reserves for itself (CS8335) and emits again on its own.
+        # That one line is removed, and reported; nothing else is edited.
+        removed = strip_reserved_attributes(project)
+        print("      removed before rebuilding (compiler-reserved): %s" % (removed or "nothing"))
         csproj = [name for name in os.listdir(project) if name.endswith(".csproj")]
         build = subprocess.run([arguments.dotnet, "build", "-c", "Release", "-o", os.path.join(project, "out"),
                                 os.path.join(project, csproj[0]) if csproj else project],
