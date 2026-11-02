@@ -332,7 +332,15 @@ void Service::Execute(const std::shared_ptr<Job>& first) {
                     outcome.error = "provider_exception";
                     outcome.message = e.what();
                 }
-                fs::remove_all(workDir, ec);
+                // A killed engine's files can stay locked for a moment on
+                // Windows; retry before giving up (the folder is reported).
+                for (int attempt = 0; attempt < 50; ++attempt) {
+                    ec.clear();
+                    fs::remove_all(workDir, ec);
+                    if (!ec && !fs::exists(workDir, ec)) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                }
+                if (fs::exists(workDir, ec)) outcome.provenance["work_folder_left"] = workDir.u8string();
                 // The engine read the file by path; it must still be the
                 // file that was hashed.
                 if (outcome.ok && FileSha256(fs::u8path(job->path)) != job->sha256) {
