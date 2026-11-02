@@ -246,7 +246,10 @@ json Service::Start(const std::string& providerName, const Request& request) {
     job->provider = providerName;
     job->version = info.version;
     job->feature = request.feature;
-    job->path = request.path;
+    // Engines run in their own work folder: a relative path would not
+    // name the hashed file there.
+    job->path = fs::absolute(fs::u8path(request.path), ec).u8string();
+    if (ec) return {{"ok", false}, {"error", "file_not_found"}};
     job->sha256 = sha256;
     job->options = options;
     const fs::path cache = CachePath(providerName, info.version, sha256, request.feature, options);

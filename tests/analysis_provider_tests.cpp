@@ -300,6 +300,17 @@ void TestService(const fs::path& temp) {
         CHECK(restarted.Start("fake", {file.u8string(), "count", {{"scale", 2}}})["cache_hit"] == true && second->runs == 0);
     }
 
+    {
+        // A relative path is resolved before the engine runs elsewhere.
+        const fs::path previous = fs::current_path();
+        fs::current_path(temp);
+        const json relative = service.Start("fake", {"input.bin", "count", {{"scale", 11}}});
+        fs::current_path(previous);
+        CHECK(relative["ok"] == true);
+        service.Wait(relative["job_id"], std::chrono::seconds(10));
+        const json done = service.Get(relative["job_id"]);
+        CHECK(done["state"] == "completed" && done["path"] == fs::absolute(file).u8string());
+    }
     // One slot: the second job queues; cancelling both ends them.
     fake->hold = true;
     std::ofstream(file, std::ios::binary) << "new content";
@@ -476,7 +487,9 @@ void TestIlspy(const fs::path& temp, const std::string& assembly) {
     const json types = service.RunAndWait("ilspy", {assembly, "list_types"}, {{"part", "types"}, {"limit", 500}});
     CHECK(types["state"] == "completed");
     std::set<std::string> listed;
-    for (const auto& row : types["result"]["items"]) listed.insert(row["name"].get<std::string>());
+    if (types["state"] != "completed") std::cerr << types.dump(2).substr(0, 6000) << std::endl;
+    else
+        for (const auto& row : types["result"]["items"]) listed.insert(row["name"].get<std::string>());
     CHECK(!listed.empty() && listed == expected);
 
     // The whole assembly as a project.
@@ -493,7 +506,9 @@ void TestIlspy(const fs::path& temp, const std::string& assembly) {
     // One type on its own.
     const json one = service.RunAndWait("ilspy", {assembly, "decompile", {{"type", "Cortex.Fixture.DamageKind"}}},
                                         {{"part", "files"}});
-    CHECK(one["state"] == "completed" && one["result"]["items"][0]["text"].get<std::string>().find("enum DamageKind") != std::string::npos);
+    CHECK(one["state"] == "completed");
+    if (one["state"] == "completed")
+        CHECK(one["result"]["items"][0]["text"].get<std::string>().find("enum DamageKind") != std::string::npos);
     CHECK(service.Start("ilspy", {assembly, "decompile", {{"type", "--help"}}})["error"] == "invalid_options");
     CHECK(service.Start("ilspy", {assembly, "list_types"})["cache_hit"] == true);
 }
