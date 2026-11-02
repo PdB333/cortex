@@ -502,6 +502,21 @@ Electron apps, each process's role: main, renderer, gpu-process,
 `utility:<service>` or crashpad-handler. Use it to choose which Electron
 process to attach to.
 
+## External analysis engines
+
+`cortex_analysis_providers`, `cortex_analysis_start`, `cortex_analysis_get`,
+`cortex_analysis_cancel` and `cortex_analysis_jobs` run Ghidra headless
+(native PE) and ILSpy (C#) as separate processes on files inside
+`--artifact-root`.
+- The engines are configured by the operator with `--ghidra-dir`,
+  `--ilspycmd` and `--dotnet`, or with `GHIDRA_INSTALL_DIR` and
+  `CORTEX_ILSPYCMD`.
+- Results are cached by SHA-256 in `--analysis-cache`.
+- They are read-only for targets; `cortex_analysis_cancel` stops only
+  Cortex's own engine process.
+
+See `docs/analysis-providers.md`.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.

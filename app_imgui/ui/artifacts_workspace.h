@@ -26,7 +26,9 @@ public:
     // "artifact_cil <method>" disassembles .NET methods;
     // "artifact_functions", "artifact_function <location>" and
     // "artifact_rename <rva> <name>" drive the Code tab;
-    // "artifact_evidence" reloads the Evidence tab; "artifact_open
+    // "artifact_engine_start <ghidra|ilspy>", "artifact_engine_cancel",
+    // "artifact_engine_open <rva|path>" and "artifact_engines_refresh" drive
+    // the Engines tab; "artifact_evidence" reloads the Evidence tab; "artifact_open
     // <path>|<rva>", "artifact_show_live" and "artifact_record_function"
     // navigate between live and static code and record evidence.
     void HandleCommand(UiContext& context, const std::string& command) override;
@@ -55,6 +57,12 @@ private:
     // Disassemble base+RVA in the target when a loaded module is this file.
     void ShowLive(UiContext& context, const std::string& sha256, const std::string& fileName, const std::string& rva);
     void RecordFunctionEvidence(UiContext& context, const std::string& rva);
+    // External engines (core/providers): Ghidra for PE, ILSpy for .NET.
+    void DrawEngines(UiContext& context);
+    void StartEngine(UiContext& context, const std::string& provider);
+    void PollEngine(UiContext& context, bool force = false);
+    void OpenEngineItem(UiContext& context, const std::string& key);  // an RVA (Ghidra) or a file path (ILSpy)
+    void RefreshEngines(UiContext& context);
 
     std::array<char, 1024> path_ = {};
     std::array<char, 512> child_ = {};
@@ -76,6 +84,18 @@ private:
     std::array<char, 128> rename_ = {};
     nlohmann::json evidence_;      // evidence records about the inspected artifact
     std::string selectTab_;    // "artifact_tab <name>": selected on the next frame
+    // Engine job of the inspected file; guarded by mutex_.
+    std::string engineJob_;
+    std::string engineProvider_;
+    nlohmann::json engineState_;      // last cortex::providers::Service::Get (summary)
+    nlohmann::json engineItems_;      // Ghidra functions or ILSpy files, texts clipped
+    nlohmann::json engineDetail_;     // the opened decompiled function or file
+    nlohmann::json engineProviders_;  // detected engines
+    double enginePolled_ = 0;
+    std::array<char, 1024> ghidraDir_ = {};
+    std::array<char, 1024> ilspycmd_ = {};
+    std::array<char, 1024> dotnetPath_ = {};
+    std::array<char, 128> engineFilter_ = {};
 };
 
 } // namespace cortex::ui

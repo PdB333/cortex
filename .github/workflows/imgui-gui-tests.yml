@@ -22,6 +22,9 @@ on:
       - "tests/native_static_e2e.py"
       - "tests/evidence_e2e.py"
       - "tests/investigation_e2e.py"
+      - "tests/analysis_e2e.py"
+      - "tests/analysis_provider_tests.cpp"
+      - "core/providers/**"
       - "core/investigation/**"
       - "core/evidence/**"
       - "core/analysis/**"
@@ -92,6 +95,102 @@ jobs:
             $errors | Format-List *
             throw "GUI suite PowerShell parser reported $($errors.Count) error(s)"
           }
+
+  # Real external engines (step 8): Ghidra headless (pinned release, JDK 21)
+  # and ilspycmd on the test targets and the C# fixture. Slow (Ghidra's
+  # auto-analysis takes minutes per binary), so it has its own job.
+  analysis-engines:
+    needs:
+      - windows-release-full
+      - x86-fixture
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      GHIDRA_VERSION: "11.4.2"
+      GHIDRA_BUILD: "20250826"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache Ghidra
+        id: ghidra-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ghidra
+          key: ghidra-${{ env.GHIDRA_VERSION }}-${{ env.GHIDRA_BUILD }}
+
+      - name: Download Ghidra (Apache-2.0, external process)
+        if: steps.ghidra-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/ghidra.zip"
+          $url = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${env:GHIDRA_VERSION}_build/ghidra_${env:GHIDRA_VERSION}_PUBLIC_${env:GHIDRA_BUILD}.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP/ghidra" -Force
+          Remove-Item $zip
+
+      - name: Locate engines
+        shell: pwsh
+        run: |
+          $ghidra = (Get-ChildItem "$env:RUNNER_TEMP/ghidra" -Directory | Select-Object -First 1).FullName
+          if (-not (Test-Path "$ghidra/support/analyzeHeadless.bat")) { throw "Ghidra not found under $env:RUNNER_TEMP/ghidra" }
+          "GHIDRA_INSTALL_DIR=$ghidra" | Add-Content $env:GITHUB_ENV
+          dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path "$env:RUNNER_TEMP/ilspy"
+          if ($LASTEXITCODE -ne 0) { throw "ilspycmd install failed" }
+          "CORTEX_ILSPYCMD=$env:RUNNER_TEMP\ilspy\ilspycmd.exe" | Add-Content $env:GITHUB_ENV
+
+      - name: Build provider tests and the x64 target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_test_target --parallel 2
+
+      - name: Download x86 GUI fixture
+        uses: actions/download-artifact@v4
+        with:
+          name: imgui-gui-x86-fixture
+          path: build/x86-fixture
+
+      - name: Provider tests with Ghidra and ILSpy (x64 and x86 targets)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_ENGINES: "1"
+        run: |
+          $tests = "build/analysis/cortex_analysis_provider_tests.exe"
+          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll"
+          if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x64 target)" }
+          & $tests "build/x86-fixture/e2e/cortex_test_target_x86.exe"
+          if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x86 target)" }
+
+      - name: Download tested portable bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-gui-tested-portable
+          path: stage/Cortex
+
+      - name: Ghidra and ILSpy through MCP
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD" `
+            --ghidra-dir "$env:GHIDRA_INSTALL_DIR" --target "$bundle/e2e/cortex_test_target_x64.exe"
+          if ($LASTEXITCODE -ne 0) { throw "analysis E2E failed" }
 
   x86-fixture:
     runs-on: windows-2025
@@ -232,8 +331,19 @@ jobs:
           Copy-Item "build/x86-fixture/runtime/x86/cortex_core.dll" "$app/runtime/x86/cortex_core.dll" -Force
           Copy-Item "build/x86-fixture/runtime/x86/cortex_runtime_helper.exe" "$app/runtime/x86/cortex_runtime_helper.exe" -Force
 
+      # ILSpy (MIT) for the Engines tab of the GUI suite and the analysis
+      # E2E; pinned so results are reproducible.
+      - name: Install ilspycmd
+        shell: pwsh
+        run: |
+          dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path "$env:RUNNER_TEMP/ilspy"
+          if ($LASTEXITCODE -ne 0) { throw "ilspycmd install failed" }
+          "CORTEX_ILSPYCMD=$env:RUNNER_TEMP\ilspy\ilspycmd.exe" | Add-Content $env:GITHUB_ENV
+
       - name: Run full GUI integration suite
         shell: pwsh
+        env:
+          CORTEX_GUI_SUITE_ILSPY: "1"
         run: |
           ./tests/gui/run_imgui_gui_suite.ps1             -CortexExe "build/gui-release/cortex.exe"             -X64Target "build/runtime-x64/cortex_test_target_x64.exe"             -X86Target "build/x86-fixture/e2e/cortex_test_target_x86.exe"             -ReportPath "build/gui-report-direct.json"
 
@@ -400,6 +510,14 @@ jobs:
             --cortex "$bundle/cortex.exe" `
             --target "$bundle/e2e/cortex_test_target_x64.exe"
           if ($LASTEXITCODE -ne 0) { throw "investigation E2E failed" }
+
+      - name: ILSpy through MCP (rebuilt decompiled project compared with the original)
+        shell: pwsh
+        run: |
+          # Ghidra runs in the analysis-engines job. See tests/analysis_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD"
+          if ($LASTEXITCODE -ne 0) { throw "analysis E2E (ILSpy) failed" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()

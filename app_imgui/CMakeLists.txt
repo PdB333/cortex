@@ -172,6 +172,7 @@ add_executable(cortex_imgui WIN32
     ../tools/inspect_main.cpp
     ../tools/evidence_main.cpp
     ../tools/investigation_main.cpp
+    ../tools/provider_main.cpp
     ../core/artifacts/artifact.cpp
     ../core/artifacts/pe_provider.cpp
     ../core/artifacts/asar_provider.cpp
@@ -190,6 +191,10 @@ add_executable(cortex_imgui WIN32
     ../core/evidence/evidence.cpp
     ../core/investigation/investigation.cpp
     ../core/target/process_tree.cpp
+    ../core/providers/process_runner.cpp
+    ../core/providers/analysis_provider.cpp
+    ../core/providers/ghidra_provider.cpp
+    ../core/providers/ilspy_provider.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

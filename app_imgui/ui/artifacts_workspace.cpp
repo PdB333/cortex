@@ -3,6 +3,7 @@
 #include "file_dialog.h"
 #include "widgets.h"
 
+#include "../../mcp_bridge/analysis_tools.h"
 #include "../../mcp_bridge/artifact_tools.h"
 #include "../../mcp_bridge/evidence_tools.h"
 #include "code_navigation.h"
@@ -115,6 +116,11 @@ void ArtifactsWorkspace::OpenAt(UiContext& context, const std::string& path, con
         std::lock_guard<std::mutex> lock(mutex_);
         result_ = std::move(result);
         children_ = std::move(children);
+        engineJob_.clear();
+        engineProvider_.clear();
+        engineState_ = nullptr;
+        engineItems_ = nullptr;
+        engineDetail_ = nullptr;
         inspectedPath_ = path;
         inspectedChild_.clear();
         position_ = nullptr;
@@ -143,6 +149,11 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         codeDetail_ = nullptr;
         evidence_ = nullptr;
         children_ = std::move(children);
+        engineJob_.clear();
+        engineProvider_.clear();
+        engineState_ = nullptr;
+        engineItems_ = nullptr;
+        engineDetail_ = nullptr;
         inspectedPath_ = path;
         inspectedChild_ = child;
         context.status = result_.value("ok", false)
@@ -162,6 +173,30 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
     static const std::string cil = "artifact_cil ";
     if (command == "artifact_evidence") {
         LoadEvidence(context);
+        return;
+    }
+    if (command.rfind("artifact_engine_start ", 0) == 0) {
+        StartEngine(context, command.substr(22));
+        return;
+    }
+    if (command == "artifact_engine_cancel") {
+        std::string job;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            job = engineJob_;
+        }
+        if (!job.empty()) {
+            const json answer = DesktopAnalysis()->Cancel(job);
+            context.status = "Engine job " + job + ": " + answer.value("state", answer.value("error", std::string()));
+        }
+        return;
+    }
+    if (command.rfind("artifact_engine_open ", 0) == 0) {
+        OpenEngineItem(context, command.substr(21));
+        return;
+    }
+    if (command == "artifact_engines_refresh") {
+        RefreshEngines(context);
         return;
     }
     if (command == "artifact_functions") {
@@ -361,6 +396,11 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
         }
         if (ImGui::BeginTabItem("Evidence", nullptr, TabFlags("Evidence"))) {
             DrawEvidence(context);
+            ImGui::EndTabItem();
+        }
+        const bool pe = data.contains("sections");
+        if (pe && ImGui::BeginTabItem("Engines", nullptr, TabFlags("Engines"))) {
+            DrawEngines(context);
             ImGui::EndTabItem();
         }
         if (data.contains("dotnet") && ImGui::BeginTabItem(".NET", nullptr, TabFlags(".NET"))) {
@@ -770,6 +810,16 @@ void ArtifactsWorkspace::DrawCode(UiContext& context) {
         if (ImGui::Button("Show in live disassembly")) ShowLive(context, sha, detail.value("file_name", std::string()), rva);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Needs a target that has loaded this exact file (same SHA-256).");
         ImGui::SameLine();
+        bool ghidraDone = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ghidraDone = engineProvider_ == "ghidra" && engineState_.value("state", std::string()) == "completed";
+        }
+        if (ghidraDone && ImGui::Button("Ghidra decompilation")) {
+            OpenEngineItem(context, rva);
+            selectTab_ = "Engines";
+        }
+        if (ghidraDone) ImGui::SameLine();
         if (ImGui::Button("Record as evidence")) RecordFunctionEvidence(context, rva);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Records that this function is in the catalog at this RVA; Cortex reruns the catalog to verify it.");
@@ -1034,6 +1084,255 @@ void ArtifactsWorkspace::DrawChildren(UiContext& context) {
         ImGui::PopID();
     }
     ImGui::EndTable();
+}
+
+} // namespace cortex::ui
+
+namespace cortex::ui {
+
+void ArtifactsWorkspace::RefreshEngines(UiContext& context) {
+    context.RunInBackground("Detecting analysis engines", [this, &context]() {
+        json providers = DesktopAnalysis()->Providers(true);
+        size_t available = 0;
+        for (const auto& row : providers.value("providers", json::array())) available += row.value("available", false) ? 1 : 0;
+        context.status = "Engines: " + std::to_string(available) + " available";
+        std::lock_guard<std::mutex> lock(mutex_);
+        engineProviders_ = std::move(providers);
+    });
+}
+
+void ArtifactsWorkspace::StartEngine(UiContext& context, const std::string& provider) {
+    std::string path, chain;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        path = inspectedPath_;
+        chain = inspectedChild_;
+    }
+    if (path.empty()) {
+        context.status = "Inspect a file first";
+        return;
+    }
+    context.RunInBackground("Starting " + provider, [this, &context, path, chain, provider]() {
+        auto service = DesktopAnalysis();
+        std::string file = path, error;
+        if (!chain.empty() &&
+            !mcp_bridge::analysis::ExtractChild(path, chain, DesktopEngineSettings().cacheDir / "extracted", file, error)) {
+            context.status = "Engine failed: " + error;
+            return;
+        }
+        // Ghidra: every function decompiled (bounded), so any RVA opens
+        // from the same cached run. ILSpy: the whole assembly as a project.
+        const json options = provider == "ghidra" ? json{{"decompile_limit", 5000}} : json::object();
+        const json started = service->Start(provider, {file, provider == "ghidra" ? "analyze" : "decompile", options});
+        if (!started.value("ok", false)) {
+            context.status = "Engine failed: " + started.value("error", std::string()) + " " + started.value("message", std::string());
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            engineJob_ = started["job_id"];
+            engineProvider_ = provider;
+            engineState_ = started;
+            engineItems_ = nullptr;
+            engineDetail_ = nullptr;
+        }
+        context.status = "Engine job " + started["job_id"].get<std::string>() + ": " + started["state"].get<std::string>() +
+                         (started.value("cache_hit", false) ? " (cache)" : "");
+        PollEngine(context, true);
+    });
+}
+
+void ArtifactsWorkspace::PollEngine(UiContext& context, bool force) {
+    std::string job, provider, state;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        job = engineJob_;
+        provider = engineProvider_;
+        state = engineState_.is_object() ? engineState_.value("state", std::string()) : "";
+        if (job.empty() || (!force && (engineItems_.is_object() || state == "failed" || state == "cancelled"))) return;
+        if (!force) {
+            const double now = ImGui::GetTime();
+            if (now - enginePolled_ < 0.5) return;
+            enginePolled_ = now;
+        }
+    }
+    auto service = DesktopAnalysis();
+    json current = service->Get(job);
+    const std::string next = current.value("state", std::string());
+    json items;
+    if (next == "completed") {
+        // The list for the left pane, with long texts cut.
+        const std::string part = provider == "ghidra" ? "functions" : "files";
+        items = json::array();
+        for (size_t offset = 0;;) {
+            const json page = service->Get(job, {{"part", part}, {"offset", offset}, {"limit", 500}, {"max_chars", 256}});
+            const json result = page.value("result", json::object());
+            for (const auto& item : result.value("items", json::array()))
+                items.push_back({{"key", item.value(provider == "ghidra" ? "rva" : "path", std::string())},
+                                 {"name", item.value("name", item.value("path", std::string()))},
+                                 {"detail", item.value("signature", std::string())}});
+            if (!result.value("next_offset", json()).is_number()) break;
+            offset = result["next_offset"].get<size_t>();
+        }
+    }
+    if (next != state)
+        context.status = "Engine job " + job + ": " + next +
+                         (next == "completed"
+                              ? " (" + std::to_string(items.size()) + (provider == "ghidra" ? " functions)" : " files)")
+                              : next == "failed" ? " " + current.value("error", std::string()) : std::string());
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (engineJob_ != job) return;
+    engineState_ = std::move(current);
+    if (items.is_array()) engineItems_ = {{"items", std::move(items)}};
+}
+
+void ArtifactsWorkspace::OpenEngineItem(UiContext& context, const std::string& key) {
+    std::string job, provider;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        job = engineJob_;
+        provider = engineProvider_;
+    }
+    if (job.empty()) {
+        context.status = "No engine result";
+        return;
+    }
+    auto service = DesktopAnalysis();
+    json found;
+    if (provider == "ghidra") {
+        const json decompiled = service->Get(job, {{"part", "decompiled"}, {"rva", key}, {"max_chars", 1 << 20}});
+        const json function = service->Get(job, {{"part", "functions"}, {"rva", key}, {"max_chars", 4096}});
+        const json items = decompiled.value("result", json::object()).value("items", json::array());
+        const json functions = function.value("result", json::object()).value("items", json::array());
+        if (!functions.empty()) {
+            found = functions[0];
+            found["text"] = items.empty() ? std::string("(not decompiled: beyond the decompile limit, or a thunk)")
+                                          : items[0].value("c", "(Ghidra could not decompile it: " + items[0].value("error", std::string()) + ")");
+        }
+    } else {
+        const json files = service->Get(job, {{"part", "files"}, {"query", key}, {"limit", 500}, {"max_chars", 1 << 20}});
+        for (const auto& item : files.value("result", json::object()).value("items", json::array()))
+            if (item.value("path", std::string()) == key) found = item;
+    }
+    context.status = found.is_object() ? "Engine: opened " + key : "Engine: nothing at " + key;
+    std::lock_guard<std::mutex> lock(mutex_);
+    engineDetail_ = found.is_object() ? found : json();
+}
+
+void ArtifactsWorkspace::DrawEngines(UiContext& context) {
+    PollEngine(context);
+    json providers, state, items, detail, result;
+    std::string provider;
+    bool detect = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (engineProviders_.is_null()) {
+            engineProviders_ = json::object();  // first draw: detect once
+            detect = true;
+        }
+        providers = engineProviders_;
+        state = engineState_;
+        items = engineItems_;
+        detail = engineDetail_;
+        provider = engineProvider_;
+        result = result_;
+    }
+    if (detect) {
+        const auto settings = DesktopEngineSettings();
+        Copy(ghidraDir_.data(), ghidraDir_.size(), settings.ghidraDir);
+        Copy(ilspycmd_.data(), ilspycmd_.size(), settings.ilspycmd);
+        Copy(dotnetPath_.data(), dotnetPath_.size(), settings.dotnet);
+        RefreshEngines(context);
+    }
+    if (!providers.contains("providers")) {
+        ImGui::TextDisabled("Detecting engines...");
+        return;
+    }
+    HintText("External engines run as separate processes on this file; nothing is linked or loaded into Cortex. Results "
+             "are cached by SHA-256. Decompiled code is the engine's reconstruction, not the original source.");
+    if (BeginDataTable("EngineProviders", 4, 0, ImVec2(0, 0), 80.0f)) {
+        ImGui::TableSetupColumn("Engine", ImGuiTableColumnFlags_WidthFixed, Px(170));
+        ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        ImGui::TableSetupColumn("Licence", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Availability", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (const auto& row : providers["providers"]) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(row.value("engine", std::string()).c_str());
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(row.value("version", std::string()).c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(row.value("license", std::string()).c_str());
+            ImGui::TableSetColumnIndex(3);
+            const std::string availability = row.value("availability", std::string());
+            if (row.value("available", false)) ImGui::TextColored(ImVec4(0.35f, 0.78f, 0.45f, 1.0f), "%s", availability.c_str());
+            else ImGui::TextDisabled("%s", availability.c_str());
+        }
+        ImGui::EndTable();
+    }
+    if (ImGui::CollapsingHeader("Engine locations")) {
+        ImGui::SetNextItemWidth(Px(480));
+        ImGui::InputTextWithHint("Ghidra folder", "GHIDRA_INSTALL_DIR", ghidraDir_.data(), ghidraDir_.size());
+        ImGui::SetNextItemWidth(Px(480));
+        ImGui::InputTextWithHint("ilspycmd", "CORTEX_ILSPYCMD, or ilspycmd on PATH", ilspycmd_.data(), ilspycmd_.size());
+        ImGui::SetNextItemWidth(Px(480));
+        ImGui::InputTextWithHint("dotnet (for ilspycmd.dll)", "PATH", dotnetPath_.data(), dotnetPath_.size());
+        if (ImGui::Button("Save and detect")) {
+            std::string error;
+            if (ConfigureDesktopAnalysis(ghidraDir_.data(), ilspycmd_.data(), dotnetPath_.data(), error)) RefreshEngines(context);
+            else context.status = "Saving engine locations failed: " + error;
+        }
+    }
+    const bool dotnet = result.value("data", json::object()).contains("dotnet");
+    if (ImGui::Button(dotnet ? "Decompile C# (ILSpy)" : "Analyse and decompile (Ghidra)")) StartEngine(context, dotnet ? "ilspy" : "ghidra");
+    ImGui::SameLine();
+    HintText(dotnet ? "Seconds for a small assembly." : "Ghidra's auto-analysis takes minutes on a large binary; it can be cancelled.");
+    if (!state.is_object()) return;
+    const std::string current = state.value("state", std::string());
+    ImGui::Text("Job %s (%s): %s%s", state.value("job_id", std::string()).c_str(), provider.c_str(), current.c_str(),
+                state.value("cache_hit", false) ? ", from cache" : "");
+    if (current == "running" || current == "queued") {
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) HandleCommand(context, "artifact_engine_cancel");
+    }
+    if (current == "failed" || current == "cancelled") {
+        ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.35f, 1.0f), "%s %s", state.value("error", std::string()).c_str(),
+                           state.value("message", std::string()).substr(0, 600).c_str());
+        return;
+    }
+    if (!items.is_object()) return;
+    const json provenance = state.value("provenance", json::object());
+    ImGui::TextDisabled("%s %s, SHA-256 %s", provenance.value("engine", std::string()).c_str(),
+                        state.value("engine_version", std::string()).c_str(), state.value("sha256", std::string()).substr(0, 16).c_str());
+    const float listWidth = std::max(Px(300), ImGui::GetContentRegionAvail().x * 0.35f);
+    ImGui::BeginChild("EngineItems", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##EngineFilter", "filter", engineFilter_.data(), engineFilter_.size());
+    const std::string filter = engineFilter_.data();
+    int shown = 0;
+    for (const auto& item : items["items"]) {
+        const std::string key = item.value("key", std::string()), name = item.value("name", std::string());
+        if (!filter.empty() && name.find(filter) == std::string::npos && key.find(filter) == std::string::npos) continue;
+        if (++shown > 5000) break;
+        const bool selected = detail.is_object() && (detail.value("rva", std::string()) == key || detail.value("path", std::string()) == key);
+        const std::string label = (provider == "ghidra" ? key + "  " + name : name) + "##" + key;
+        if (ImGui::Selectable(label.c_str(), selected)) OpenEngineItem(context, key);
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("EngineDetail", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    if (!detail.is_object()) {
+        ImGui::TextDisabled(provider == "ghidra" ? "Select a function." : "Select a file.");
+    } else {
+        if (provider == "ghidra")
+            ImGui::TextWrapped("%s  %s", detail.value("rva", std::string()).c_str(), detail.value("signature", std::string()).c_str());
+        else
+            ImGui::TextUnformatted(detail.value("path", std::string()).c_str());
+        std::string text = detail.value("text", std::string());
+        ImGui::InputTextMultiline("##EngineText", text.data(), text.size() + 1, ImVec2(-1, -1), ImGuiInputTextFlags_ReadOnly);
+    }
+    ImGui::EndChild();
 }
 
 } // namespace cortex::ui

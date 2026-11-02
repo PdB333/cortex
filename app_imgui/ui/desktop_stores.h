@@ -7,9 +7,13 @@
 #include "../../core/artifacts/annotations.h"
 #include "../../core/evidence/evidence.h"
 #include "../../core/investigation/investigation.h"
+#include "../../core/providers/analysis_provider.h"
 #include "../../core/services/user_data.h"
 
 #include <filesystem>
+#include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
 
 namespace cortex::desktop {
@@ -35,6 +39,62 @@ inline cortex::evidence::Store& DesktopEvidence() {
 inline cortex::investigation::Store& DesktopInvestigations() {
     static cortex::investigation::Store store(DesktopDataDirectory() / "investigations");
     return store;
+}
+
+// External engines (Ghidra, ILSpy). The person is the operator here: the
+// engine paths they set are kept in analysis-engines.json; empty fields fall
+// back to GHIDRA_INSTALL_DIR / CORTEX_ILSPYCMD / PATH. The result cache is
+// the folder `cortex.exe mcp` uses by default.
+inline cortex::providers::Settings DesktopEngineSettings() {
+    cortex::providers::Settings settings;
+    settings.cacheDir = DesktopDataDirectory() / "analysis-cache";
+    settings.tempDir = std::filesystem::temp_directory_path();
+    try {
+        std::ifstream file(DesktopDataDirectory() / "analysis-engines.json");
+        if (file) {
+            const auto saved = nlohmann::json::parse(file);
+            settings.ghidraDir = saved.value("ghidra_dir", std::string());
+            settings.ilspycmd = saved.value("ilspycmd", std::string());
+            settings.dotnet = saved.value("dotnet", std::string());
+        }
+    } catch (...) {
+    }
+    return settings;
+}
+
+struct DesktopAnalysisSlot {
+    std::mutex mutex;
+    std::shared_ptr<cortex::providers::Service> service;
+};
+
+inline DesktopAnalysisSlot& DesktopAnalysisState() {
+    static DesktopAnalysisSlot slot;
+    return slot;
+}
+
+inline std::shared_ptr<cortex::providers::Service> DesktopAnalysis() {
+    auto& slot = DesktopAnalysisState();
+    std::lock_guard<std::mutex> lock(slot.mutex);
+    if (!slot.service) slot.service = std::make_shared<cortex::providers::Service>(DesktopEngineSettings());
+    return slot.service;
+}
+
+// Saves the engine paths and starts a new service (running jobs of the old
+// one are cancelled when it is released).
+inline bool ConfigureDesktopAnalysis(const std::string& ghidraDir, const std::string& ilspycmd, const std::string& dotnet,
+                                     std::string& error) {
+    const nlohmann::json saved{{"ghidra_dir", ghidraDir}, {"ilspycmd", ilspycmd}, {"dotnet", dotnet}};
+    std::error_code ec;
+    std::filesystem::create_directories(DesktopDataDirectory(), ec);
+    if (!cortex::services::WriteFileAtomically(DesktopDataDirectory() / "analysis-engines.json", saved.dump(2), &error)) return false;
+    auto& slot = DesktopAnalysisState();
+    std::shared_ptr<cortex::providers::Service> old;
+    {
+        std::lock_guard<std::mutex> lock(slot.mutex);
+        old = std::move(slot.service);
+        slot.service = std::make_shared<cortex::providers::Service>(DesktopEngineSettings());
+    }
+    return true;
 }
 
 } // namespace cortex::ui

@@ -1,0 +1,177 @@
+# External analysis providers (Ghidra, ILSpy)
+
+Cortex can run external analysis engines on a file and keep their results
+next to its own static analysis. The engines are **not linked** into Cortex.
+Each one runs as a separate process on a file the person (or the operator of
+`cortex.exe mcp`) points at, and its output is turned into typed JSON with
+provenance.
+
+| Provider | Engine | Licence | Formats | Features | Status |
+|---|---|---|---|---|---|
+| `ghidra` | Ghidra `analyzeHeadless` (11.x, JDK 21+) | Apache-2.0 | PE | `analyze`: functions (RVA, name, signature, body ranges, calls), imports, composite types, decompiled C keyed by RVA | validated on PE x64 and x86 (`cortex_test_target`) |
+| `ilspy` | ILSpy command line `ilspycmd` (9.x) | MIT | .NET assemblies | `decompile` (the whole assembly as a C# project, or one type), `list_types` | validated on `tests/fixtures/dotnet` |
+
+Code: `core/providers/` (interface, process runner, job service, the two
+providers), `mcp_bridge/analysis_tools.h` (MCP tools and the CLI).
+
+## Configuring an engine
+
+Engines are located by the person or the operator. An MCP client cannot name
+an executable or pass engine arguments.
+
+- **Ghidra:** pass `--ghidra-dir <folder>` or set `GHIDRA_INSTALL_DIR`. The
+  folder must contain `support/analyzeHeadless[.bat]` and
+  `Ghidra/application.properties`, from which the version is read. Ghidra needs
+  a JDK (21 for 11.x) in `JAVA_HOME` or `PATH`.
+- **ILSpy:** pass `--ilspycmd <path>`, set `CORTEX_ILSPYCMD`, or put
+  `ilspycmd` on `PATH` (`dotnet tool install ilspycmd`). You can point at the
+  tool's `ilspycmd.dll`; it is then run by `dotnet` (from `--dotnet`,
+  `DOTNET_HOST_PATH` or `PATH`). The version comes from `ilspycmd --version`.
+- **Desktop:** Artifacts › Engines › *Engine locations*. The paths are saved in
+  `analysis-engines.json` in the user data folder; an empty field falls back to
+  the environment.
+
+## Running
+
+- **Desktop:** inspect a file, then open **Engines** and click *Analyse and
+  decompile (Ghidra)* for a PE or *Decompile C# (ILSpy)* for an assembly. The
+  job runs in the background and can be cancelled. Once it completes, the list
+  shows Ghidra's functions or ILSpy's files, and selecting one shows its code.
+  When a Ghidra result exists, the Code tab's function detail has a
+  **Ghidra decompilation** button.
+- **CLI:**
+  ```
+  cortex provider list [--ghidra-dir DIR] [--ilspycmd PATH]
+  cortex provider run ghidra app.exe --part decompiled --rva 0x14c0
+  cortex provider run ilspy Lib.dll --feature list_types --part types
+  cortex provider run ilspy pkg.nupkg --child lib/net8.0/Lib.dll --part files --query Actor.cs
+  ```
+- **MCP** (`cortex.exe mcp --artifact-root DIR --ghidra-dir ... --ilspycmd ...`):
+  - `cortex_analysis_providers`: availability, version, licence, formats,
+    features and their status;
+  - `cortex_analysis_start {provider, feature, path, child?, options?}`: starts
+    a job. The file must be inside an `--artifact-root`. A `child` entry
+    (ZIP/NuGet/ASAR) is extracted to the cache folder first;
+  - `cortex_analysis_get {job_id, part?, rva?, query?, offset?, limit?, max_chars?}`:
+    the job state and, once completed, the summary or one result array (paged,
+    filtered by RVA or name, long texts clipped);
+  - `cortex_analysis_cancel {job_id}` and `cortex_analysis_jobs`.
+
+### Options
+
+- **Ghidra `analyze`:**
+  - `decompile_limit` (0–5000, default 200): how many functions to decompile,
+    in address order;
+  - `decompile`: up to 256 RVAs to decompile instead;
+  - `decompile_timeout`: per-function decompiler timeout, 1–300 s (default 30);
+  - `timeout`: the whole run, 30–7200 s (default 1800);
+  - `max_cpu`: 1–16 (default 2).
+- **ILSpy:**
+  - `type` (`Namespace.Type`, `decompile` only), checked against a strict
+    name pattern so it cannot carry switches;
+  - `timeout`: 10–3600 s (default 600).
+
+## Guarantees and how they are enforced
+
+- **Own project, own files.** Ghidra runs in a new temporary project folder
+  that Cortex creates, with `-deleteProject`. Cortex writes its post-script
+  (`CortexExport.java`, embedded in Cortex) into that folder. A project of the
+  person's is never opened. ILSpy writes into a fresh temporary folder. Both
+  folders are deleted after the run.
+- **Identity.** The file's SHA-256 is computed before the run, and again after
+  it; if the file changed, the result is discarded (`file_changed_during_run`).
+  Ghidra also reports the SHA-256 of the bytes it imported, which must equal
+  Cortex's (`identity_mismatch` otherwise).
+- **Mapping to a live module.** Results are keyed by RVA and the file's
+  SHA-256. They apply to a loaded module only when that module's file has the
+  same SHA-256. This is the rule the Code tab's *Show in live disassembly* and
+  `cortex_knowledge_code_check` already follow.
+- **Cache.** `<cache>/<provider>/<engine version>/<sha256>/<feature>-<options hash>.json`,
+  written atomically. The default folder is `analysis-cache` in the user data
+  folder, or the one given by `--analysis-cache`. The same file, engine version
+  and options are answered from the cache without starting the engine. A
+  damaged entry is ignored and rewritten.
+- **Cancellation.** Cancelling a job, its `timeout`, or closing Cortex kills
+  the engine's process tree:
+  - on Windows, a job object with kill-on-close; Ghidra's launcher starts a
+    JVM, which is in the job;
+  - elsewhere, the process group.
+
+  A process that survives termination is abandoned after 10 s, not waited
+  for.
+- **No arguments from MCP.** On Windows, Ghidra's launcher is a `.bat`. Every
+  argument passed through `cmd.exe` is refused if it contains `" % ! & | < > ^`
+  or a line break, because batch files expand `%1` unquoted. A file whose path
+  contains one of these must be copied elsewhere first.
+- **Network.** `ilspycmd` is always run with `--disable-updatecheck`, since it
+  otherwise contacts NuGet on every run. The `.NET` telemetry opt-out is set
+  for its process. Ghidra headless makes no network calls for a local import.
+- **Concurrency.** Two jobs run at a time; further jobs queue. The 64 most
+  recent jobs are kept in memory; results stay in the cache.
+- **Read-only for targets.** No provider touches a target process. The MCP
+  tools are read-only, except `cortex_analysis_cancel`, which stops Cortex's
+  own engine process. They work without `--allow-writes`/`--allow-state`.
+
+## Validation
+
+`cortex_analysis_provider_tests` always tests the parts that need no engine:
+- the process runner: exit code, output, environment, timeout, cancellation
+  that also kills a grandchild, `.bat` quoting and refusal;
+- result views;
+- the job service with a fake provider: cache by SHA-256 surviving a restart,
+  queueing, cancellation, a file changed during a run, and cleanup of the work
+  folders.
+
+With `GHIDRA_INSTALL_DIR` / `CORTEX_ILSPYCMD` set (and
+`CORTEX_REQUIRE_ENGINES=1` in CI), it runs the real engines and checks them
+against Cortex's own parsers and the fixture source, not the engines' own
+claims.
+
+**Ghidra 11.4.2** on `cortex_test_target` x64 and x86:
+- the bytes Ghidra imported have Cortex's SHA-256, and the image base and
+  bitness match `ParsePe`;
+- every exported function is a Ghidra function at the same RVA (7/7 on both).
+  On x64, every start in the exception directory (`.pdata`) is a Ghidra
+  function (3817/3817);
+- the decompiled `CortexDemoApplyDamage` contains the source's writes to the
+  actor (`+ 4` health, `+ 8` armor, `+ 0xc` hits) and the `/ 3` of the
+  armour rule;
+- some function calls it (call references);
+- a second request comes from the cache, `decompile` limits the output to
+  the listed RVA, and a running job is cancelled.
+
+**ilspycmd 9.1.0.7988** on `Cortex.Fixture.dll`:
+- `list_types` equals the TypeDef table read by Cortex's metadata reader;
+- the project contains `Actor.cs` with the original signatures
+  (`ApplyDamage(int amount, DamageKind kind)`, generic `Pick<T>` with its
+  constraint);
+- one type decompiles alone;
+- a switch disguised as a type name is refused.
+
+`tests/analysis_e2e.py` drives the same through `cortex.exe mcp`. It also
+rebuilds ILSpy's decompiled project with `dotnet build` and compares the
+rebuilt assembly's types and member signatures with the original's, as read by
+`System.Reflection.Metadata` (`tests/fixtures/dotnet/Oracle`). It also checks
+the `--artifact-root` boundary and decompiling from inside the NuGet package.
+The `analysis-engines` CI job runs everything with a pinned Ghidra and
+ilspycmd on Windows. The GUI suite decompiles the fixture from the Engines tab.
+
+Performance: Ghidra's auto-analysis of the test target, with 400 functions
+decompiled, takes about 2 minutes on two cores. ILSpy takes 1–2 s for the
+fixture. A cache hit costs one file hash plus reading the cached JSON.
+
+## Limits
+
+- Decompiled code is the engine's reconstruction, not the original source.
+  Names such as `param_1` and types are Ghidra's guesses. ILSpy's C# compiles to
+  the same API on the fixture, which does not prove identical bodies.
+- Ghidra is validated on PE x64/x86 only. ELF, Mach-O and other formats Ghidra
+  can import are not offered until they are validated.
+- Results are the engine's defaults: no custom analyzers, no PDB loading
+  options, no user scripts.
+- The decompile limit applies in address order. A function beyond it is
+  listed but not decompiled; request it with `decompile`.
+- One run is one process with its own JVM (no Ghidra server, no reuse between
+  runs). The cache is the only speed-up.
+- Java (Vineflower/CFR) and live providers (CDP for Node/Electron, .NET live,
+  JDWP, DAP) are not implemented yet; see the roadmap.

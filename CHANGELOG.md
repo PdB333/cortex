@@ -4,9 +4,16 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 7 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations; step 7: the AI Investigation workspace). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations; step 7: the AI Investigation workspace; step 8: external analysis engines). See `docs/cortex-2-roadmap.md`.
 
 ### Added
+
+- **External analysis engines (step 8).** One `AnalysisProvider` interface for engines that run as separate processes, never linked.
+  - **Ghidra** headless: a Cortex-owned temporary project and an embedded post-script. It exports functions, imports, calls, types and decompiled C keyed by RVA, and checks that the imported bytes have Cortex's SHA-256.
+  - **ILSpy** (`ilspycmd`): the C# project or one type, and the type list.
+  - Jobs can be cancelled (the engine's process tree is killed) and results are cached by SHA-256, engine version and options.
+  - New: MCP tools `cortex_analysis_*`, `cortex.exe provider list|run`, the Artifacts **Engines** tab, the options `--ghidra-dir`, `--ilspycmd`, `--dotnet` and `--analysis-cache`, and the CI job `analysis-engines` with pinned Ghidra 11.4.2 and ilspycmd 9.1.
+  - See `docs/analysis-providers.md` and `docs/third-party.md`.
 
 - **AI Investigation workspace (step 7).**
   - Investigations with their plan, journal, evidence and report, plus **Approve/Reject** by the person (actor `desktop`).

@@ -452,7 +452,9 @@ std::vector<Capability> PeProvider::Capabilities() const {
     return {{"static", CapabilityStatus::Validated, "cortex_artifacts_tests (PE fixtures, malformed inputs)",
              "headers, sections, imports, exports, relocations, debug/CodeView, TLS, exception table, CLR header, "
              "overlay"},
-            {"decompile", CapabilityStatus::Unavailable, "", "external engine (Ghidra) in step 8"},
+            {"decompile", CapabilityStatus::Unavailable, "",
+             "no built-in decompiler. External: the Ghidra analysis provider (cortex_analysis_start provider=ghidra, "
+             "`cortex provider run ghidra`) when the operator configures Ghidra"},
             {"live", CapabilityStatus::Validated, "native engine",
              "the native memory/debugger engine attaches to running PE processes"}};
 }

@@ -113,7 +113,7 @@ States:
 | Vtables + MSVC RTTI names | functional | `analysis::DumpVTable` | RE | `analysis_vtable` | E2E | Needs `/GR` |
 | Annotations: comments, renames, bookmarks | partial | project addresses/notes, `re_facts` | Project, RE | `project_*` | E2E | No per-instruction comment or function rename model; no navigation history persistence |
 | Pseudocode | absent | — | — | — | — | `StructureCFG` is explicitly "not decompilation" |
-| Ghidra interop | partial | `core/ghidra/ghidra.cpp` | RE › Ghidra | `ghidra_export`, `ghidra_import`, `ghidra_import_symbols` | — | One-way JSON export plus a Jython import script the person runs inside Ghidra, and a JSON symbol import. No headless analysis, no decompilation, no binary-identity check, no RVA mapping beyond "first module base" (step 8) |
+| Ghidra interop | partial | `core/ghidra/ghidra.cpp` | RE › Ghidra | `ghidra_export`, `ghidra_import`, `ghidra_import_symbols` | — | One-way JSON export plus a Jython import script the person runs inside Ghidra, and a JSON symbol import. No headless analysis, no decompilation, no binary-identity check, no RVA mapping beyond "first module base". Step 8 adds headless analysis and decompilation separately (`core/providers`, Artifacts › Engines, `cortex_analysis_*`) |
 
 ### 3.3 Investigation, knowledge and agents
 
@@ -807,6 +807,32 @@ The full description is in `docs/investigations.md`.
 - **Licence:** Ghidra is Apache-2.0 and is invoked as an external process, not
   linked. Record this in `docs/third-party.md`.
 - **Validation:** CI with a pinned Ghidra on the PE fixture.
+
+#### Status of step 8 (delivered in part: decompilers; live providers pending)
+
+| Item | Implementation | Test |
+|---|---|---|
+| `AnalysisProvider` interface | `core/providers/analysis_provider.h`: name, engine, licence, version, availability, formats, features with a status, permissions; typed JSON results with provenance (command, exit code, durations, SHA-256). The engine locations come only from the operator (`--ghidra-dir`, `--ilspycmd`, `--dotnet`, environment, desktop settings) | `cortex_analysis_provider_tests` with a fake provider |
+| Process runner | `core/providers/process_runner.cpp`: a Windows job object (kill on close; Ghidra's JVM is in it) or a POSIX process group. Timeout, cancellation, bounded output, `.bat` through `cmd.exe` with unsafe characters refused | exit code, output, environment, timeout, cancellation killing a grandchild, `.bat` quoting, under Wine x64 and natively |
+| Jobs and cache | `Service`: two jobs at a time, a queue, cancel, 64 retained jobs. Cache by provider, engine version, SHA-256 and options hash, written atomically. The file is re-hashed after the run | cache surviving a restart, queueing, cancellation, a file changed during a run, no leftover work folders |
+| Ghidra provider | `ghidra_provider.cpp`: `analyzeHeadless` in a fresh temporary project with `-deleteProject` and an embedded post-script (`CortexExport.java`). It exports functions (RVA, name, signature, ranges, calls), imports, composite types and decompiled C by RVA. Ghidra's imported-bytes SHA-256 must equal Cortex's | Ghidra 11.4.2 on `cortex_test_target` x64 and x86. Exports 7/7 at the same RVA; x64 `.pdata` starts 3817/3817. The decompiled `CortexDemoApplyDamage` writes `+4`/`+8`/`+0xc` and divides by 3, as the source does. Cache hit, `decompile` list, cancellation |
+| ILSpy provider | `ilspy_provider.cpp`: `decompile` (project or one type) and `list_types`, always with `--disable-updatecheck`. Type names are checked against a strict pattern | ilspycmd 9.1 on the C# fixture: types equal Cortex's TypeDef table; signatures present. `analysis_e2e.py` rebuilds the decompiled project and compares member signatures with `System.Reflection.Metadata` |
+| MCP and CLI | `cortex_analysis_providers/_start/_get/_cancel/_jobs` (files inside `--artifact-root`, `child` entries extracted), `cortex provider list\|run` | `tests/analysis_e2e.py` (CI job `analysis-engines`, and the ILSpy part in `windows-release-full`) |
+| Desktop | Artifacts › **Engines** tab: detected engines, engine locations, start/cancel, the function or file list and its code. The Code tab gains **Ghidra decompilation** | GUI suite: ILSpy from the Engines tab, then opening `Actor.cs` |
+| Mapping to a loaded module | by the file's SHA-256 only: the Code tab's live navigation (step 7) and `cortex_knowledge_code_check` | as in step 7 |
+
+**Limits:**
+
+- Validated on PE x64/x86 (Ghidra) and on a C# fixture (ILSpy) only.
+- Decompiled code is a reconstruction. Matching member signatures after a
+  rebuild does not prove identical bodies.
+- The existing `ghidra_export`/`ghidra_import` routes stay as they are: they
+  serve the interactive Ghidra GUI (runtime labels into a person's project).
+  The headless provider does not write into a person's project.
+- **Not implemented yet:**
+  - Java decompilers (Vineflower/CFR);
+  - the live providers (CDP for Node/Electron, .NET live, JDWP, DAP);
+  - Ghidra on ELF/Mach-O.
 
 ### Step 9: quality
 

@@ -21,6 +21,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <thread>
 
 namespace cortex::desktop {
 
@@ -498,6 +500,27 @@ bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
             ok = RenderGuiStable(app, error, true) && RenderGuiStable(app, error, true) &&
                  app.ui.status == "Disassembled 1 method(s): Cortex.Fixture.Actor::Heal";
             if (!ok && error.empty()) error = "artifacts_cil:" + app.ui.status;
+        }
+        // The Engines tab with a real ILSpy (CI sets CORTEX_ILSPYCMD and
+        // CORTEX_GUI_SUITE_ILSPY): decompile the assembly, open one file.
+        const char* ilspy = std::getenv("CORTEX_GUI_SUITE_ILSPY");
+        if (ok && ilspy && *ilspy) {
+            app.ui.commands.push_back("artifact_tab Engines");
+            app.ui.commands.push_back("artifact_engine_start ilspy");
+            ok = RenderGuiStable(app, error, true);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+            while (ok && app.ui.status.find(": completed (") == std::string::npos &&
+                   app.ui.status.find(": failed") == std::string::npos && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                ok = RenderGuiFrame(app, error, false);
+            }
+            ok = ok && app.ui.status.find(": completed (") != std::string::npos;
+            if (!ok && error.empty()) error = "artifacts_ilspy:" + app.ui.status;
+            if (ok) {
+                app.ui.commands.push_back("artifact_engine_open Cortex.Fixture/Actor.cs");
+                ok = RenderGuiStable(app, error, true) && app.ui.status == "Engine: opened Cortex.Fixture/Actor.cs";
+                if (!ok && error.empty()) error = "artifacts_ilspy_open:" + app.ui.status;
+            }
         }
     }
     return ok;

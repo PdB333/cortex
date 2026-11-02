@@ -74,6 +74,10 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/evidence/evidence.cpp
     ${CORTEX_ROOT}/core/investigation/investigation.cpp
     ${CORTEX_ROOT}/core/target/process_tree.cpp
+    ${CORTEX_ROOT}/core/providers/process_runner.cpp
+    ${CORTEX_ROOT}/core/providers/analysis_provider.cpp
+    ${CORTEX_ROOT}/core/providers/ghidra_provider.cpp
+    ${CORTEX_ROOT}/core/providers/ilspy_provider.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp

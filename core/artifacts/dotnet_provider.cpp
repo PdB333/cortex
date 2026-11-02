@@ -12,7 +12,8 @@ std::vector<Capability> DotNetProvider::Capabilities() const {
              "CLR header, metadata streams and all 45 table layouts; assembly, references, types, fields, methods, "
              "signatures, member references, resources, P/Invoke; CIL disassembly with exception clauses"},
             {"decompile", CapabilityStatus::Unavailable, "",
-             "no C# decompiler; CIL is disassembled (static). A decompiler provider is planned for step 8"},
+             "no built-in C# decompiler (CIL is disassembled). External: the ILSpy analysis provider "
+             "(cortex_analysis_start provider=ilspy, `cortex provider run ilspy`) when the operator configures ilspycmd"},
             {"live", CapabilityStatus::Unavailable, "",
              "managed debugging is not provided; the native engine still attaches to the process"}};
 }
