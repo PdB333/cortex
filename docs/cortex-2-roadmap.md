@@ -750,6 +750,25 @@ The full description is in `docs/investigations.md`.
   - bidirectional navigation using `module+RVA`.
 - **Rule:** no API key in Cortex; the AI side is any MCP client.
 
+#### Status of step 7 (delivered)
+
+| Item | Implementation | Test |
+|---|---|---|
+| Investigations in the desktop | the **AI Investigation** workspace (Automation preset), tab Investigations. It shows the list with states and step counts, then for one investigation: the question, plan (tool, capability/effect, hop, status), journal, cited evidence and a copyable report. **Approve** and **Reject** go through the same store as the CLI; the actor is `desktop` and the person can add a note | the workspace suite creates an investigation as an agent would, approves step 1 from the workspace, and checks the store records `approved by desktop` |
+| Evidence in the desktop | tab Evidence (every record, class, check, stale). The Artifacts Code tab gains **Record as evidence**: the person records a function start, Cortex reruns the catalog and stores it as `verified_observation` | the workspace suite records evidence for kernel32's entry point |
+| Process tree | `core/target/process_tree.{h,cpp}`: parent links (with a creation-time check against reused PIDs) and command lines (`NtQueryInformationProcess` class 60, or the PEB, including WOW64). The role comes from `--type=` (main, renderer, gpu-process, `utility:<service>`, crashpad-handler). Shown in the Process tree tab and by the read-only MCP tool `cortex_process_tree` | `cortex_process_tree_tests` spawns three children with Chromium switches and reads them back, under Wine x64 and x86 |
+| module+RVA in both directions | `code_navigation.h`: the module that holds an address, and the loaded module whose file on disk has a given SHA-256 (cached by path, size and time). The address menu gains **Open in Artifacts (static code)**. The Code tab gains **Show in live disassembly**. Evidence rows get **Live** and **Static** | the attached suite on a live target goes from a live address to the static code of its module, back to the same live address, then from an evidence record to that address |
+| Capability-gated actions | each navigation action is disabled with a reason unless its basis exists: a module with a file on disk, a loaded module whose file has the same SHA-256, an `rva:` location | the same suites; a name match alone never enables Live |
+
+**Limits:**
+
+- Navigation by SHA-256 needs the module's file on disk and identical bytes;
+  a patched or packed file on disk does not match its loaded image.
+- The process tree finds Electron roles from command lines. Attaching to a
+  renderer or a utility process uses the normal attach (and its gates).
+- No dedicated per-format views for the JVM and Wasm yet; those formats
+  come with their providers.
+
 ### Step 8: Ghidra and the `AnalysisProvider` interface
 
 - **Multi-runtime addition (external engines, all optional, invoked as

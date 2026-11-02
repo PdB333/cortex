@@ -65,7 +65,10 @@ cortex.exe investigation approve <id> <step> --note "D key once"
 cortex.exe investigation reject <id> <step>
 ```
 
-There is no MCP approval tool, and `mutation_permission` is not an approval.
+The person can also approve or reject a step in the desktop: **AI
+Investigation** workspace, Investigations tab. There the actor is
+`desktop`. There is no MCP approval tool, and `mutation_permission` is not
+an approval.
 Approving a live step counts against `max_live_steps` (default 4).
 
 The approval controls what the investigation records. It does not replace

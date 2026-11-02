@@ -4,10 +4,20 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased]
 
-Cortex 2.0, steps 1 to 6 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0, steps 1 to 7 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations; step 7: the AI Investigation workspace). See `docs/cortex-2-roadmap.md`.
 
 ### Added
 
+- **AI Investigation workspace (step 7).**
+  - Investigations with their plan, journal, evidence and report, plus **Approve/Reject** by the person (actor `desktop`).
+  - Every evidence record, with **Live** and **Static** navigation.
+  - The process tree of a multi-process target with Electron/Chromium roles, also available as the read-only MCP tool `cortex_process_tree`.
+
+  module+RVA navigation in both directions:
+  - the address menu has **Open in Artifacts (static code)**;
+  - the Code tab has **Show in live disassembly** and **Record as evidence**.
+
+  Live and static are linked only through a loaded module whose file has the same SHA-256.
 - **Investigations (step 6).** A host-side journal (`cortex.investigation.v1`) with a testable question, a plan of tool calls, limits, approvals, evidence and a conclusion. It is not a second agent: the AI client runs the tools.
   - Cortex enforces the states, runs read-only static steps itself, and checks cited trials and evidence. It refuses to record input or mutating steps until the person approves them with `cortex.exe investigation approve`; there is no MCP approval tool.
   - Templates: `function_static`, `memory_value`, `electron_ipc_native`.

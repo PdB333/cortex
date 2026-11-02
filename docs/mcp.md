@@ -494,6 +494,14 @@ The tools are `cortex_investigation_templates`, `_create`, `_get`, `_list`,
 - Steps with effect `target_input` or `mutation` wait for the person's
   `cortex.exe investigation approve`. There is no MCP approval tool.
 
+## Process tree
+
+`cortex_process_tree {pid}` (read-only) returns a process and its
+descendants, with parent links, command lines and, for Chromium and
+Electron apps, each process's role: main, renderer, gpu-process,
+`utility:<service>` or crashpad-handler. Use it to choose which Electron
+process to attach to.
+
 ## Server metadata
 
 `initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
