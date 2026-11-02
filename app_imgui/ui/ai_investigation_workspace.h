@@ -22,7 +22,9 @@ public:
     // "ai_investigations_refresh", "ai_investigation_open <id>",
     // "ai_investigation_approve <id> <step>", "ai_investigation_reject <id>
     // <step>", "ai_evidence_refresh", "ai_evidence_live <id>",
-    // "ai_evidence_static <id>", "ai_process_tree <pid>", "ai_tab <name>".
+    // "ai_evidence_static <id>", "ai_process_tree <pid>", "ai_tab <name>",
+    // "ai_live_attach <port>", "ai_live_script <url>", "ai_live_breakpoint
+    // <line>", "ai_live_hits", "ai_live_detach".
     void HandleCommand(UiContext& context, const std::string& command) override;
 
 private:
@@ -36,6 +38,12 @@ private:
     void EvidenceLive(UiContext& context, const nlohmann::json& record);
     void EvidenceStatic(UiContext& context, const nlohmann::json& record);
     void LoadProcessTree(UiContext& context, uint64_t pid);
+    // Live (CDP): a Node.js/Electron inspector on 127.0.0.1.
+    void DrawLive(UiContext& context);
+    void LiveAttach(UiContext& context, int port);
+    void LiveOpenScript(UiContext& context, const std::string& url);
+    void LiveBreakpoint(UiContext& context, int line);
+    void LiveDetach(UiContext& context);
     int TabFlags(const char* name) const;
 
     nlohmann::json investigations_;
@@ -46,6 +54,16 @@ private:
     std::array<char, 128> evidenceFilter_ = {};
     int treePid_ = 0;
     std::string selectTab_;
+    std::string liveSession_;
+    int livePort_ = 9229;
+    int liveLine_ = 1;
+    int liveBreakpoint_ = 0;
+    double livePolled_ = 0;
+    nlohmann::json liveStatus_;
+    nlohmann::json liveScripts_;
+    nlohmann::json liveSource_;
+    nlohmann::json liveHits_;
+    std::array<char, 128> liveFilter_ = {};
 };
 
 } // namespace cortex::ui

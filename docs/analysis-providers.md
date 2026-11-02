@@ -179,3 +179,95 @@ fixture. A cache hit costs one file hash plus reading the cached JSON.
   runs). The cache is the only speed-up.
 - Java (Vineflower/CFR) and live providers (CDP for Node/Electron, .NET live,
   JDWP, DAP) are not implemented yet; see the roadmap.
+
+## Live provider: CDP (Node.js and Electron)
+
+`core/live/cdp.{h,cpp}` connects to the Chrome DevTools Protocol inspector of
+a Node.js process (`node --inspect=127.0.0.1:PORT`). Electron exposes the
+same inspector: `--inspect` for its main process, `--remote-debugging-port`
+for its renderers. The WebSocket client (`core/live/websocket.cpp`, RFC 6455
+with the handshake key checked) connects to **127.0.0.1 only**; a target
+whose WebSocket URL is not on the inspector's own loopback port is refused.
+
+What it does:
+- lists targets (`/json/list`), attaches, and enables the `Debugger` and
+  `Runtime` domains;
+- lists parsed scripts (URL, lines, source map URL) and returns their source;
+- records console messages and uncaught exceptions (bounded);
+- sets **log breakpoints** at a 1-based line (and column) of a script URL. At
+  each hit it captures the call stack and the top frame's locals, then
+  resumes at once:
+  - locals come from `Runtime.getProperties` with `ownProperties`, which
+    lists accessors without running them; object previews and texts are
+    clipped;
+  - after `max_hits` (default 20, at most 1000) the breakpoint removes itself.
+
+What it never does:
+- `Runtime.evaluate`;
+- breakpoint conditions (CDP evaluates them inside the target);
+- setting variables or editing scripts;
+- `runIfWaitingForDebugger`;
+- leaving the program paused. A pause Cortex did not set, such as a
+  `debugger;` statement, which pauses once a debugger is enabled, is recorded
+  as a *foreign pause* and resumed. The program behaves as it would without a
+  debugger, apart from the time spent at a hit.
+
+Authority:
+- **MCP:**
+  - `cortex_live_targets/_attach/_status/_scripts/_source/_console/_hits` are
+    read-only. They work only on ports the operator allows with
+    `--inspect-port <port>` (repeatable); any other port is refused
+    (`port_not_allowed`);
+  - `cortex_live_breakpoint_set/_remove` are target control, like the native
+    debugger's breakpoints: they need `mutation_permission` **and** the
+    operator's `--allow-writes` (`write_authority_required` otherwise, logged
+    as a denial);
+  - `cortex_live_detach` removes Cortex's breakpoints and disables the domains.
+- **CLI:** `cortex live targets|scripts|watch --port N ...`, on the person's
+  own local inspector.
+- **Desktop:** AI Investigation › **Live (CDP)**: port, attach, scripts and
+  source, log breakpoint on a line, hits with locals. The breakpoint button
+  follows the desktop's write permission.
+
+### Validation
+
+`cortex_cdp_tests` checks SHA-1 and Base64 against RFC vectors (including the
+RFC 6455 handshake example) and the refusals: port not allowed, nothing
+listening. It then starts `tests/fixtures/node-live/app.js` under a real
+`node --inspect` and checks it against its source:
+- the script and its source are listed;
+- a log breakpoint on the health write resolves and records 6 hits. Each hit
+  is in `applyDamage` at that line, with `amount = 9`, `absorbed` between 0
+  and 3, and the actor's health (from the preview) following the fixture's
+  rule from one hit to the next: it drops by `amount - absorbed`, or resets
+  to 100;
+- the breakpoint removes itself after `max_hits`;
+- the `debugger;` statement at every 50th tick is recorded as a foreign pause
+  (`reason: other`) and resumed. Console ticks keep increasing, so the
+  program never stopped;
+- after detaching, a new session sees the process still running.
+
+The test passes natively (Linux, ASan/UBSan) and as a Windows build
+(Winsock) under Wine against the same native node. `tests/live_e2e.py` drives
+`cortex.exe mcp` and `cortex.exe live watch`:
+- the `--inspect-port` boundary;
+- breakpoints refused without `--allow-writes`, and without
+  `mutation_permission`;
+- 5 hits following the rule, the foreign pause, ticks continuing, detach.
+
+The GUI suite drives the Live (CDP) tab when `CORTEX_GUI_SUITE_NODE_FIXTURE`
+is set (CI). The Windows CI runs all three against the runner's node.
+
+### Limits (CDP)
+
+- Validated on Node.js 22. **Electron is not validated**: no Electron binary
+  runs in CI yet. Its inspector is the same protocol, but its renderer targets
+  (`page`) and preload scripts have not been tested.
+- Locals are captured for the top frame only, and objects only as V8's
+  preview (at most 24 properties, values as text).
+- Hits are matched by the inspector's breakpoint id. Source maps are listed,
+  but hits are not yet mapped back to original TypeScript positions.
+- A process started with `--inspect-brk` stays paused at its first line:
+  Cortex does not release it.
+- IPC observation in Electron is done by setting log breakpoints in
+  `ipcMain`/`ipcRenderer` handlers by hand. There is no dedicated IPC view.

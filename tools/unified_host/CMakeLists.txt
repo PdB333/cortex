@@ -78,6 +78,8 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/providers/analysis_provider.cpp
     ${CORTEX_ROOT}/core/providers/ghidra_provider.cpp
     ${CORTEX_ROOT}/core/providers/ilspy_provider.cpp
+    ${CORTEX_ROOT}/core/live/websocket.cpp
+    ${CORTEX_ROOT}/core/live/cdp.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp

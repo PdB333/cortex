@@ -8,6 +8,7 @@
 #include "../../core/evidence/evidence.h"
 #include "../../core/investigation/investigation.h"
 #include "../../core/providers/analysis_provider.h"
+#include "../../core/live/cdp.h"
 #include "../../core/services/user_data.h"
 
 #include <filesystem>
@@ -39,6 +40,14 @@ inline cortex::evidence::Store& DesktopEvidence() {
 inline cortex::investigation::Store& DesktopInvestigations() {
     static cortex::investigation::Store store(DesktopDataDirectory() / "investigations");
     return store;
+}
+
+// Live CDP sessions (Node.js/Electron inspectors). In the desktop the person
+// is the operator: any port on 127.0.0.1. Breakpoints still need the
+// desktop's write permission.
+inline cortex::live::LiveService& DesktopLive() {
+    static cortex::live::LiveService service({}, true);
+    return service;
 }
 
 // External engines (Ghidra, ILSpy). The person is the operator here: the

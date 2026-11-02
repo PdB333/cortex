@@ -25,6 +25,9 @@ on:
       - "tests/analysis_e2e.py"
       - "tests/analysis_provider_tests.cpp"
       - "core/providers/**"
+      - "core/live/**"
+      - "tests/live_e2e.py"
+      - "tests/cdp_tests.cpp"
       - "core/investigation/**"
       - "core/evidence/**"
       - "core/analysis/**"
@@ -159,7 +162,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_test_target --parallel 2
+          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_cdp_tests cortex_test_target --parallel 2
 
       - name: Download x86 GUI fixture
         uses: actions/download-artifact@v4
@@ -177,6 +180,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x64 target)" }
           & $tests "build/x86-fixture/e2e/cortex_test_target_x86.exe"
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x86 target)" }
+
+      - name: CDP tests against a real node (Winsock client)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_NODE: "1"
+        run: |
+          build/analysis/cortex_cdp_tests.exe tests/fixtures/node-live/app.js
+          if ($LASTEXITCODE -ne 0) { throw "CDP tests failed" }
 
       - name: Download tested portable bundle
         uses: actions/download-artifact@v4
@@ -344,6 +355,7 @@ jobs:
         shell: pwsh
         env:
           CORTEX_GUI_SUITE_ILSPY: "1"
+          CORTEX_GUI_SUITE_NODE_FIXTURE: ${{ github.workspace }}\tests\fixtures\node-live\app.js
         run: |
           ./tests/gui/run_imgui_gui_suite.ps1             -CortexExe "build/gui-release/cortex.exe"             -X64Target "build/runtime-x64/cortex_test_target_x64.exe"             -X86Target "build/x86-fixture/e2e/cortex_test_target_x86.exe"             -ReportPath "build/gui-report-direct.json"
 
@@ -518,6 +530,15 @@ jobs:
           $bundle = (Resolve-Path "stage/Cortex").Path
           python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD"
           if ($LASTEXITCODE -ne 0) { throw "analysis E2E (ILSpy) failed" }
+
+      - name: Node.js live through CDP (log breakpoints, console, write authority)
+        shell: pwsh
+        run: |
+          # See tests/live_e2e.py; node is preinstalled on the runner.
+          node --version
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/live_e2e.py --cortex "$bundle/cortex.exe" --node node
+          if ($LASTEXITCODE -ne 0) { throw "live E2E (CDP) failed" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()

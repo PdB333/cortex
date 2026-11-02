@@ -9,6 +9,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace cortex::ui {
@@ -56,6 +57,16 @@ void AiInvestigationWorkspace::HandleCommand(UiContext& context, const std::stri
         else EvidenceStatic(context, found["record"]);
     } else if (command.rfind("ai_process_tree ", 0) == 0) LoadProcessTree(context, std::strtoull(argument("ai_process_tree ").c_str(), nullptr, 10));
     else if (command.rfind("ai_tab ", 0) == 0) selectTab_ = argument("ai_tab ");
+    else if (command.rfind("ai_live_attach ", 0) == 0) LiveAttach(context, std::atoi(argument("ai_live_attach ").c_str()));
+    else if (command.rfind("ai_live_script ", 0) == 0) LiveOpenScript(context, argument("ai_live_script "));
+    else if (command.rfind("ai_live_breakpoint ", 0) == 0) LiveBreakpoint(context, std::atoi(argument("ai_live_breakpoint ").c_str()));
+    else if (command == "ai_live_hits") {
+        auto session = DesktopLive().Get(liveSession_);
+        if (session && liveBreakpoint_) {
+            liveHits_ = session->Hits(liveBreakpoint_, 0, 200);
+            context.status = "Live: " + std::to_string(liveHits_.value("hits", 0)) + " hit(s)";
+        }
+    } else if (command == "ai_live_detach") LiveDetach(context);
 }
 
 void AiInvestigationWorkspace::Draw(UiContext& context) {
@@ -72,6 +83,10 @@ void AiInvestigationWorkspace::Draw(UiContext& context) {
         }
         if (ImGui::BeginTabItem("Process tree", nullptr, TabFlags("Process tree"))) {
             DrawProcessTree(context);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Live (CDP)", nullptr, TabFlags("Live (CDP)"))) {
+            DrawLive(context);
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
@@ -314,6 +329,159 @@ void AiInvestigationWorkspace::DrawProcessTree(UiContext& context) {
         ImGui::TextDisabled("%s", line.is_string() ? line.get<std::string>().c_str() : "(not readable)");
     }
     ImGui::EndTable();
+}
+
+} // namespace cortex::ui
+
+namespace cortex::ui {
+
+void AiInvestigationWorkspace::LiveAttach(UiContext& context, int port) {
+    if (port <= 0 || port > 65535) {
+        context.status = "Live: invalid port";
+        return;
+    }
+    if (!liveSession_.empty()) DesktopLive().Detach(liveSession_);
+    liveSession_.clear();
+    liveScripts_ = liveSource_ = liveHits_ = nullptr;
+    liveBreakpoint_ = 0;
+    const json attached = DesktopLive().Attach(static_cast<uint16_t>(port), "");
+    if (!attached.value("ok", false)) {
+        context.status = "Live: attach failed: " + attached.value("error", std::string());
+        return;
+    }
+    livePort_ = port;
+    liveSession_ = attached.value("session_id", std::string());
+    liveStatus_ = attached;
+    const json target = attached.contains("target") && attached["target"].is_object() ? attached["target"] : json::object();
+    context.status = "Live: attached " + liveSession_ + " (" + target.value("type", std::string()) + " " +
+                     target.value("title", std::string()) + ")";
+}
+
+void AiInvestigationWorkspace::LiveOpenScript(UiContext& context, const std::string& url) {
+    auto session = DesktopLive().Get(liveSession_);
+    if (!session) {
+        context.status = "Live: not attached";
+        return;
+    }
+    liveSource_ = session->Source(url, 1, 20000);
+    context.status = liveSource_.value("ok", false) ? "Live: source of " + url : "Live: no script " + url;
+}
+
+void AiInvestigationWorkspace::LiveBreakpoint(UiContext& context, int line) {
+    auto session = DesktopLive().Get(liveSession_);
+    if (!session || !liveSource_.is_object() || !liveSource_.value("ok", false)) {
+        context.status = "Live: open a script first";
+        return;
+    }
+    // A breakpoint pauses the program briefly at each hit: it follows the
+    // desktop's write permission like the native debugger.
+    if (!context.mutationAllowed) {
+        context.status = "Live: breakpoints need write permission (enable writes for this target)";
+        return;
+    }
+    const json bp = session->SetLogBreakpoint(liveSource_.value("url", std::string()), static_cast<uint32_t>(std::max(1, line)), 0, 50, 8);
+    if (!bp.value("ok", false)) {
+        context.status = "Live: breakpoint failed: " + bp.value("error", std::string());
+        return;
+    }
+    liveBreakpoint_ = bp.value("breakpoint", 0);
+    liveHits_ = nullptr;
+    context.status = "Live: breakpoint " + std::to_string(liveBreakpoint_) + " at " + liveSource_.value("url", std::string()) + ":" +
+                     std::to_string(line);
+}
+
+void AiInvestigationWorkspace::LiveDetach(UiContext& context) {
+    if (liveSession_.empty()) return;
+    DesktopLive().Detach(liveSession_);
+    liveSession_.clear();
+    liveBreakpoint_ = 0;
+    context.status = "Live: detached";
+}
+
+void AiInvestigationWorkspace::DrawLive(UiContext& context) {
+    HintText("A Node.js or Electron inspector on 127.0.0.1 (node --inspect=127.0.0.1:PORT, Electron --inspect or "
+             "--remote-debugging-port). Cortex lists scripts and console output and sets LOG breakpoints: each hit records "
+             "the stack and locals, then the program resumes at once. Nothing is evaluated in the program.");
+    auto session = DesktopLive().Get(liveSession_);
+    ImGui::SetNextItemWidth(Px(120));
+    ImGui::InputInt("Port", &livePort_);
+    ImGui::SameLine();
+    if (ImGui::Button(session ? "Reattach" : "Attach")) LiveAttach(context, livePort_);
+    if (session) {
+        ImGui::SameLine();
+        if (ImGui::Button("Detach")) {
+            LiveDetach(context);
+            return;
+        }
+    }
+    if (!session) return;
+    const double now = ImGui::GetTime();
+    if (now - livePolled_ > 0.5) {
+        livePolled_ = now;
+        liveStatus_ = session->Status();
+        liveScripts_ = session->Scripts(liveFilter_.data(), 0, 500);
+        if (liveBreakpoint_) liveHits_ = session->Hits(liveBreakpoint_, 0, 200);
+    }
+    if (!liveStatus_.is_object()) liveStatus_ = json::object();
+    const json target = liveStatus_.contains("target") && liveStatus_["target"].is_object() ? liveStatus_["target"] : json::object();
+    ImGui::Text("%s  %s: %zu scripts, %llu console messages, %llu foreign pauses resumed%s",
+                target.value("type", std::string()).c_str(), target.value("title", std::string()).c_str(),
+                liveStatus_.value("scripts", size_t{0}), static_cast<unsigned long long>(liveStatus_.value("console_messages", uint64_t{0})),
+                static_cast<unsigned long long>(liveStatus_.value("foreign_pauses", uint64_t{0})),
+                liveStatus_.value("connected", false) ? "" : "  (disconnected)");
+    const float listWidth = std::max(Px(260), ImGui::GetContentRegionAvail().x * 0.3f);
+    ImGui::BeginChild("LiveScripts", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##LiveFilter", "filter scripts (URL)", liveFilter_.data(), liveFilter_.size());
+    const json scripts = liveScripts_.is_object() ? liveScripts_.value("scripts", json::array()) : json::array();
+    for (const auto& script : scripts) {
+        const std::string url = script.value("url", std::string());
+        if (url.empty()) continue;
+        const bool selected = liveSource_.is_object() && liveSource_.value("url", std::string()) == url;
+        if (ImGui::Selectable(url.c_str(), selected)) LiveOpenScript(context, url);
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("LiveDetail", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    if (liveSource_.is_object() && liveSource_.value("ok", false)) {
+        ImGui::TextUnformatted(liveSource_.value("url", std::string()).c_str());
+        ImGui::SetNextItemWidth(Px(100));
+        ImGui::InputInt("Line", &liveLine_);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!context.mutationAllowed);
+        if (ImGui::Button("Log breakpoint")) LiveBreakpoint(context, liveLine_);
+        ImGui::EndDisabled();
+        if (!context.mutationAllowed && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Needs write permission: a hit pauses the program briefly.");
+        const float sourceHeight = ImGui::GetContentRegionAvail().y * (liveBreakpoint_ ? 0.5f : 1.0f);
+        std::string text = liveSource_.value("text", std::string());
+        ImGui::InputTextMultiline("##LiveSource", text.data(), text.size() + 1, ImVec2(-1, sourceHeight), ImGuiInputTextFlags_ReadOnly);
+        if (liveBreakpoint_ && liveHits_.is_object()) {
+            ImGui::Text("Breakpoint %d: %d hit(s)%s", liveBreakpoint_, liveHits_.value("hits", 0),
+                        liveHits_.value("active", false) ? "" : " (removed after its hit limit)");
+            ImGui::BeginChild("LiveHits", ImVec2(0, 0), ImGuiChildFlags_None);
+            const json records = liveHits_.value("records", json::array());
+            for (const auto& record : records) {
+                if (!record.is_object()) continue;
+                const json frames = record.value("frames", json::array());
+                if (frames.empty() || !frames[0].is_object()) continue;
+                const json& top = frames[0];
+                std::string locals;
+                const json frameLocals = top.value("locals", json::object());
+                for (const auto& [name, value] : frameLocals.items()) {
+                    if (!value.is_object()) continue;
+                    locals += (locals.empty() ? "" : ", ") + name + "=" +
+                              (value.contains("value") ? value["value"].dump() : value.value("description", value.value("type", std::string())));
+                }
+                ImGui::BulletText("#%d %s %s:%d  %s", record.value("hit", 0), top.value("function", std::string()).c_str(),
+                                  top.value("url", std::string()).c_str(), top.value("line", 0), locals.c_str());
+            }
+            ImGui::EndChild();
+        }
+    } else {
+        ImGui::TextDisabled("Select a script.");
+    }
+    ImGui::EndChild();
 }
 
 } // namespace cortex::ui

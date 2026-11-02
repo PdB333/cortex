@@ -173,6 +173,7 @@ add_executable(cortex_imgui WIN32
     ../tools/evidence_main.cpp
     ../tools/investigation_main.cpp
     ../tools/provider_main.cpp
+    ../tools/live_main.cpp
     ../core/artifacts/artifact.cpp
     ../core/artifacts/pe_provider.cpp
     ../core/artifacts/asar_provider.cpp
@@ -195,6 +196,8 @@ add_executable(cortex_imgui WIN32
     ../core/providers/analysis_provider.cpp
     ../core/providers/ghidra_provider.cpp
     ../core/providers/ilspy_provider.cpp
+    ../core/live/websocket.cpp
+    ../core/live/cdp.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

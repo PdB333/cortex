@@ -7,6 +7,7 @@
 #include "ui/address_context_menu.h"
 #include "ui/code_navigation.h"
 #include "ui/desktop_stores.h"
+#include "../core/providers/process_runner.h"
 #include "../mcp_bridge/evidence_tools.h"
 
 #include "services/assembler.h"
@@ -23,6 +24,7 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <atomic>
 
 namespace cortex::desktop {
 
@@ -567,6 +569,78 @@ bool ExerciseAiInvestigationWorkspace(AppState& app, std::string& error) {
         return false;
     }
     investigations.Cancel(id, after["revision"].get<int64_t>(), "GUI suite", "desktop");
+    // The Live (CDP) tab against a real node (CI sets CORTEX_GUI_SUITE_NODE_FIXTURE
+    // to tests/fixtures/node-live/app.js): attach, open the script, a log
+    // breakpoint on the health write, hits, detach.
+    const char* fixture = std::getenv("CORTEX_GUI_SUITE_NODE_FIXTURE");
+    if (fixture && *fixture) {
+        // CORTEX_GUI_SUITE_INSPECT_PORT: a fixture already started elsewhere.
+        const char* external = std::getenv("CORTEX_GUI_SUITE_INSPECT_PORT");
+        const std::string node = external ? std::string() : cortex::providers::FindOnPath("node");
+        if (!external && node.empty()) {
+            error = "ai_live:node_not_on_path";
+            return false;
+        }
+        const int port = external ? std::atoi(external) : 9700 + static_cast<int>(GetCurrentProcessId() % 200);
+        std::atomic<bool> stop{false};
+        std::thread runner([&] {
+            if (external) return;
+            cortex::providers::ProcessSpec spec;
+            spec.argv = {node, "--inspect=127.0.0.1:" + std::to_string(port), fixture};
+            spec.timeout = std::chrono::minutes(3);
+            cortex::providers::RunProcess(spec, &stop);
+        });
+        auto finish = [&](bool result) {
+            stop = true;
+            runner.join();
+            return result;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        app.ui.commands.push_back("ai_tab Live (CDP)");
+        app.ui.commands.push_back("ai_live_attach " + std::to_string(port));
+        if (!RenderGuiStable(app, error, true) || app.ui.status.rfind("Live: attached", 0) != 0) {
+            if (error.empty()) error = "ai_live_attach:" + app.ui.status;
+            return finish(false);
+        }
+        std::string url;
+        int line = 0;
+        for (int attempt = 0; attempt < 50 && url.empty(); ++attempt) {
+            const json sessions = cortex::ui::DesktopLive().Sessions();
+            for (const auto& row : sessions["sessions"]) {
+                auto session = cortex::ui::DesktopLive().Get(row.value("session_id", std::string()));
+                const json scripts = session ? session->Scripts("app.js", 0, 5) : json();
+                if (session && scripts.value("total", 0) == 1) url = scripts["scripts"][0].value("url", std::string());
+            }
+            if (url.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        {
+            std::ifstream source(fixture);
+            std::string text;
+            for (int n = 1; std::getline(source, text); ++n)
+                if (text.find("CORTEX_HEALTH_WRITE") != std::string::npos) line = n;
+        }
+        const bool writes = app.ui.mutationAllowed;
+        app.ui.mutationAllowed = true;
+        app.ui.commands.push_back("ai_live_script " + url);
+        app.ui.commands.push_back("ai_live_breakpoint " + std::to_string(line));
+        bool ok = RenderGuiStable(app, error, true) && app.ui.status.rfind("Live: breakpoint 1 at ", 0) == 0;
+        if (!ok && error.empty()) error = "ai_live_breakpoint:" + app.ui.status + " url=" + url;
+        for (int attempt = 0; ok && attempt < 100; ++attempt) {
+            app.ui.commands.push_back("ai_live_hits");
+            ok = RenderGuiFrame(app, error, false);
+            if (app.ui.status.rfind("Live: ", 0) == 0 && std::atoi(app.ui.status.c_str() + 6) >= 3) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (ok && std::atoi(app.ui.status.c_str() + 6) < 3) {
+            ok = false;
+            error = "ai_live_hits:" + app.ui.status;
+        }
+        app.ui.commands.push_back("ai_live_detach");
+        ok = ok && RenderGuiStable(app, error, true) && app.ui.status == "Live: detached";
+        if (!ok && error.empty()) error = "ai_live_detach:" + app.ui.status;
+        app.ui.mutationAllowed = writes;
+        return finish(ok);
+    }
     return true;
 }
 
