@@ -595,10 +595,18 @@ bool ExerciseAiInvestigationWorkspace(AppState& app, std::string& error) {
             runner.join();
             return result;
         };
-        std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        // node needs a moment to open its inspector (longer on a busy
+        // runner): retry the attach for up to 20 s.
         app.ui.commands.push_back("ai_tab Live (CDP)");
-        app.ui.commands.push_back("ai_live_attach " + std::to_string(port));
-        if (!RenderGuiStable(app, error, true) || app.ui.status.rfind("Live: attached", 0) != 0) {
+        bool attachedOk = false;
+        const auto attachDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (!attachedOk && std::chrono::steady_clock::now() < attachDeadline) {
+            app.ui.commands.push_back("ai_live_attach " + std::to_string(port));
+            if (!RenderGuiStable(app, error, true)) return finish(false);
+            attachedOk = app.ui.status.rfind("Live: attached", 0) == 0;
+            if (!attachedOk) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+        if (!attachedOk) {
             if (error.empty()) error = "ai_live_attach:" + app.ui.status;
             return finish(false);
         }
