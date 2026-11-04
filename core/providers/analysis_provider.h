@@ -36,6 +36,8 @@ struct Settings {
     std::string ghidraDir;   // --ghidra-dir, or GHIDRA_INSTALL_DIR
     std::string ilspycmd;    // --ilspycmd (ilspycmd[.exe] or ilspycmd.dll), or CORTEX_ILSPYCMD, or PATH
     std::string dotnet;      // runs ilspycmd.dll; DOTNET_HOST_PATH or PATH when empty
+    std::string vineflowerJar;  // --vineflower, or CORTEX_VINEFLOWER
+    std::string java;           // runs vineflower; JAVA_HOME or PATH when empty
     std::filesystem::path cacheDir;  // results by SHA-256
     std::filesystem::path tempDir;   // engine projects; a fresh folder per run
     size_t maxConcurrentJobs = 2;
@@ -98,6 +100,7 @@ public:
 
 std::unique_ptr<AnalysisProvider> MakeGhidraProvider(const Settings& settings);
 std::unique_ptr<AnalysisProvider> MakeIlspyProvider(const Settings& settings);
+std::unique_ptr<AnalysisProvider> MakeVineflowerProvider(const Settings& settings);
 
 // Views over a result: scalars and array sizes ("summary"), or one array
 // paged and filtered ("functions", "decompiled", "files", ...).

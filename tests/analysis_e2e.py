@@ -85,6 +85,7 @@ def main():
     parser.add_argument("--dotnet", default="dotnet", help="dotnet that rebuilds the decompiled project (host side)")
     parser.add_argument("--engine-dotnet", default="", help="dotnet that cortex.exe uses to run an ilspycmd.dll")
     parser.add_argument("--ghidra-dir", default="")
+    parser.add_argument("--vineflower", default="", help="vineflower.jar; javac/javap on PATH rebuild and compare")
     parser.add_argument("--target", default="")
     parser.add_argument("--runner", default="")
     arguments = parser.parse_args()
@@ -120,6 +121,10 @@ def main():
             command += ["--dotnet", arguments.engine_dotnet]
         if arguments.ghidra_dir:
             command += ["--ghidra-dir", arguments.ghidra_dir]
+        if arguments.vineflower:
+            command += ["--vineflower", arguments.vineflower]
+        jar = os.path.join(root, "Cortex.Fixture.jar")
+        shutil.copyfile(os.path.join(HERE, "fixtures", "java", "Cortex.Fixture.jar"), jar)
         server = Mcp(command, bundle)
         server.initialize()
 
@@ -199,6 +204,45 @@ def main():
 
         failed, again = server.call("cortex_analysis_start", {"provider": "ilspy", "feature": "decompile", "path": windows_path(runner, dll)})
         check(again.get("cache_hit") is True and again.get("state") == "completed", "same file and options: from the cache", again)
+
+        # Vineflower: decompile, recompile with javac, compare javap -p of
+        # every class with the original's.
+        if arguments.vineflower:
+            failed, started = server.call("cortex_analysis_start", {"provider": "vineflower", "feature": "decompile",
+                                                                   "path": windows_path(runner, jar)})
+            state = wait(started.get("job_id", ""), 600)
+            check(state.get("state") == "completed", "vineflower decompiles the jar", state)
+            sources = os.path.join(root, "java-decompiled")
+            offset = 0
+            while offset is not None and state.get("state") == "completed":
+                failed, page = server.call("cortex_analysis_get", {"job_id": started["job_id"], "part": "files", "offset": offset,
+                                                                   "limit": 100, "max_chars": 1048576})
+                result = page.get("result", {})
+                for item in result.get("items", []):
+                    if not item["path"].endswith(".java"):
+                        continue
+                    path = os.path.join(sources, *item["path"].split("/"))
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "w", encoding="utf-8", newline="") as handle:
+                        handle.write(item["text"])
+                offset = result.get("next_offset")
+            java_files = [os.path.join(r, n) for r, _, ns in os.walk(sources) for n in ns if n.endswith(".java")]
+            rebuilt = os.path.join(root, "java-rebuilt")
+            original = os.path.join(root, "java-original")
+            build = subprocess.run(["javac", "--release", "17", "-d", rebuilt] + java_files, capture_output=True, text=True, timeout=300)
+            check(build.returncode == 0, "the decompiled Java sources compile", build.stderr[-2000:])
+            import zipfile
+            with zipfile.ZipFile(jar) as archive:
+                archive.extractall(original)
+                classes = [n[:-6].replace("/", ".") for n in archive.namelist() if n.endswith(".class")]
+            different = []
+            for name in classes:
+                a = subprocess.run(["javap", "-p", "-cp", original, name], capture_output=True, text=True).stdout
+                b = subprocess.run(["javap", "-p", "-cp", rebuilt, name], capture_output=True, text=True).stdout
+                if not a or a != b:
+                    different.append(name)
+            check(build.returncode == 0 and not different, "every rebuilt class has the original's javap -p signatures (%d classes)"
+                  % len(classes), different)
 
         # Ghidra
         if arguments.ghidra_dir and target:

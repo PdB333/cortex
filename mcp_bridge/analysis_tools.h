@@ -47,19 +47,20 @@ inline json ToolDefinitions() {
          {"_cortex", {{"read_only", true}}}},
         {{"name", "cortex_analysis_start"},
          {"description", "Start an analysis job: ghidra/analyze (functions, imports, calls, types and decompiled C keyed "
-                         "by RVA; minutes per binary) or ilspy/decompile|list_types (C# for a .NET assembly). Answered "
+                         "by RVA; minutes per binary), ilspy/decompile|list_types (C# for a .NET assembly) or vineflower/decompile (Java "
+                         "sources for a .jar/.class). Answered "
                          "from the cache when the same file (SHA-256), engine version and options were analysed before. "
                          "Poll cortex_analysis_get. Reads the file only; no target process is touched. Decompiled code "
                          "is the engine's reconstruction, not the original source."},
          {"inputSchema", {{"type", "object"},
-                          {"properties", {{"provider", {{"type", "string"}, {"enum", json::array({"ghidra", "ilspy"})}}},
+                          {"properties", {{"provider", {{"type", "string"}, {"enum", json::array({"ghidra", "ilspy", "vineflower"})}}},
                                           {"feature", {{"type", "string"}, {"enum", json::array({"analyze", "decompile", "list_types"})}}},
                                           {"path", path},
                                           {"child", child},
                                           {"options", {{"type", "object"},
                                                        {"description", "ghidra: decompile_limit (0-5000), decompile (RVA list), "
                                                                        "decompile_timeout (s), timeout (s), max_cpu. ilspy: type "
-                                                                       "(Namespace.Type, decompile only), timeout (s)."}}}}},
+                                                                       "(Namespace.Type, decompile only), timeout (s). vineflower: timeout (s)."}}}}},
                           {"required", json::array({"provider", "feature", "path"})},
                           {"additionalProperties", false}}},
          {"_cortex", {{"read_only", true}, {"host_process", true}}}},
@@ -166,10 +167,10 @@ inline int AnalyzeMain(int argc, char** argv, const fs::path& userData) {
     bool list = false;
     auto usage = [] {
         std::cerr << "usage: cortex provider list [--ghidra-dir DIR] [--ilspycmd PATH] [--dotnet PATH]\n"
-                     "       cortex provider run ghidra|ilspy [--feature analyze|decompile|list_types]\n"
+                     "       cortex provider run ghidra|ilspy|vineflower [--feature analyze|decompile|list_types]\n"
                      "              [--options JSON] [--child ENTRY] [--part P] [--rva HEX] [--query TEXT]\n"
                      "              [--offset N] [--limit N] [--cache DIR] [--ghidra-dir DIR] [--ilspycmd PATH]\n"
-                     "              [--dotnet PATH] <file>\n";
+                     "              [--dotnet PATH] [--vineflower JAR] [--java PATH] <file>\n";
         return 2;
     };
     int first = 1;
@@ -190,6 +191,8 @@ inline int AnalyzeMain(int argc, char** argv, const fs::path& userData) {
         else if (arg == "--ghidra-dir" && next(settings.ghidraDir)) {}
         else if (arg == "--ilspycmd" && next(settings.ilspycmd)) {}
         else if (arg == "--dotnet" && next(settings.dotnet)) {}
+        else if (arg == "--vineflower" && next(settings.vineflowerJar)) {}
+        else if (arg == "--java" && next(settings.java)) {}
         else if (arg == "--cache" && next(value)) settings.cacheDir = fs::u8path(value);
         else if ((arg == "--part" || arg == "--rva" || arg == "--query") && next(value)) view[arg.substr(2)] = value;
         else if ((arg == "--offset" || arg == "--limit") && next(value)) {

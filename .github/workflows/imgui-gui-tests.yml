@@ -111,6 +111,8 @@ jobs:
     env:
       GHIDRA_VERSION: "11.4.2"
       GHIDRA_BUILD: "20250826"
+      VINEFLOWER_VERSION: "1.11.1"
+      VINEFLOWER_SHA1: "77767cdbc76d116c6d5e1565ec387e531085b9f4"
     steps:
       - uses: actions/checkout@v4
 
@@ -156,6 +158,11 @@ jobs:
           dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path "$env:RUNNER_TEMP/ilspy"
           if ($LASTEXITCODE -ne 0) { throw "ilspycmd install failed" }
           "CORTEX_ILSPYCMD=$env:RUNNER_TEMP\ilspy\ilspycmd.exe" | Add-Content $env:GITHUB_ENV
+          # Vineflower (Apache-2.0) from Maven Central, checked against its SHA-1.
+          $jar = "$env:RUNNER_TEMP\vineflower-$env:VINEFLOWER_VERSION.jar"
+          Invoke-WebRequest -Uri "https://repo1.maven.org/maven2/org/vineflower/vineflower/$env:VINEFLOWER_VERSION/vineflower-$env:VINEFLOWER_VERSION.jar" -OutFile $jar
+          if ((Get-FileHash $jar -Algorithm SHA1).Hash.ToLower() -ne $env:VINEFLOWER_SHA1) { throw "vineflower hash mismatch" }
+          "CORTEX_VINEFLOWER=$jar" | Add-Content $env:GITHUB_ENV
 
       - name: Build provider tests and the x64 target
         shell: msys2 {0}
@@ -176,7 +183,7 @@ jobs:
           CORTEX_REQUIRE_ENGINES: "1"
         run: |
           $tests = "build/analysis/cortex_analysis_provider_tests.exe"
-          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll"
+          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll" "tests/fixtures/java/Cortex.Fixture.jar"
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x64 target)" }
           & $tests "build/x86-fixture/e2e/cortex_test_target_x86.exe"
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x86 target)" }
@@ -200,7 +207,8 @@ jobs:
         run: |
           $bundle = (Resolve-Path "stage/Cortex").Path
           python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD" `
-            --ghidra-dir "$env:GHIDRA_INSTALL_DIR" --target "$bundle/e2e/cortex_test_target_x64.exe"
+            --ghidra-dir "$env:GHIDRA_INSTALL_DIR" --target "$bundle/e2e/cortex_test_target_x64.exe" `
+            --vineflower "$env:CORTEX_VINEFLOWER"
           if ($LASTEXITCODE -ne 0) { throw "analysis E2E failed" }
 
   x86-fixture:

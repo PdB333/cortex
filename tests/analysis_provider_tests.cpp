@@ -513,6 +513,38 @@ void TestIlspy(const fs::path& temp, const std::string& assembly) {
     CHECK(service.Start("ilspy", {assembly, "list_types"})["cache_hit"] == true);
 }
 
+void TestVineflower(const fs::path& temp, const std::string& jar) {
+    Settings settings;
+    settings.cacheDir = temp / "vineflower-cache";
+    settings.tempDir = temp / "vineflower-work";
+    Service service(settings);
+    json info;
+    const json providers = service.Providers();
+    for (const auto& row : providers["providers"])
+        if (row["name"] == "vineflower") info = row;
+    if (!info.value("available", false)) {
+        std::cout << "vineflower: SKIPPED (" << info.value("availability", std::string()) << ")" << std::endl;
+        CHECK(!RequireEngines());
+        return;
+    }
+    std::cout << "vineflower " << info["version"] << std::endl;
+    const json job = service.RunAndWait("vineflower", {jar, "decompile"}, {{"part", "files"}, {"query", "Actor.java"}});
+    CHECK(job["state"] == "completed");
+    if (job["state"] != "completed") {
+        std::cerr << job.dump(2).substr(0, 4000) << std::endl;
+        return;
+    }
+    CHECK(job["result"]["total"] == 1);
+    const std::string actor = job["result"]["items"][0].value("text", std::string());
+    CHECK(actor.find("public void applyDamage(int") != std::string::npos);
+    CHECK(actor.find("public static <T extends CharSequence> T pick(List<T>") != std::string::npos);
+    CHECK(actor.find("public static final class Snapshot") != std::string::npos);
+    const json kinds = service.Get(job["job_id"], {{"part", "files"}, {"query", "DamageKind.java"}});
+    CHECK(kinds["result"]["total"] == 1 && kinds["result"]["items"][0]["text"].get<std::string>().find("enum DamageKind") != std::string::npos);
+    CHECK(service.Start("vineflower", {jar, "decompile"})["cache_hit"] == true);
+    CHECK(service.Start("vineflower", {jar, "decompile", {{"args", "-x"}}})["error"] == "invalid_options");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -526,6 +558,7 @@ int main(int argc, char** argv) {
     TestService(temp);
     if (argc > 1) TestGhidra(temp, argv[1]);
     if (argc > 2) TestIlspy(temp, argv[2]);
+    if (argc > 3) TestVineflower(temp, argv[3]);
     std::error_code ec;
     fs::remove_all(temp, ec);
     if (failures) {

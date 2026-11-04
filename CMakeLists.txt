@@ -336,6 +336,7 @@ add_executable(cortex_host
     core/providers/analysis_provider.cpp
     core/providers/ghidra_provider.cpp
     core/providers/ilspy_provider.cpp
+    core/providers/vineflower_provider.cpp
     core/live/websocket.cpp
     core/live/cdp.cpp
     tools/diagnostics_host/main.cpp
@@ -703,6 +704,7 @@ if(BUILD_TESTING)
         core/providers/analysis_provider.cpp
         core/providers/ghidra_provider.cpp
         core/providers/ilspy_provider.cpp
+    core/providers/vineflower_provider.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
         core/artifacts/asar_provider.cpp
@@ -723,7 +725,8 @@ if(BUILD_TESTING)
     # Real engines run when GHIDRA_INSTALL_DIR / CORTEX_ILSPYCMD are set (CI
     # sets them in the analysis-engines job); otherwise those parts skip.
     add_test(NAME cortex_analysis_provider_tests COMMAND cortex_analysis_provider_tests
-             $<TARGET_FILE:cortex_test_target> ${CMAKE_SOURCE_DIR}/tests/fixtures/dotnet/Cortex.Fixture.dll)
+             $<TARGET_FILE:cortex_test_target> ${CMAKE_SOURCE_DIR}/tests/fixtures/dotnet/Cortex.Fixture.dll
+             ${CMAKE_SOURCE_DIR}/tests/fixtures/java/Cortex.Fixture.jar)
     set_tests_properties(cortex_analysis_provider_tests PROPERTIES TIMEOUT 3600)
 
     add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/providers/process_runner.cpp)

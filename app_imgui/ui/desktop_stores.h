@@ -65,6 +65,7 @@ inline cortex::providers::Settings DesktopEngineSettings() {
             settings.ghidraDir = saved.value("ghidra_dir", std::string());
             settings.ilspycmd = saved.value("ilspycmd", std::string());
             settings.dotnet = saved.value("dotnet", std::string());
+            settings.vineflowerJar = saved.value("vineflower", std::string());
         }
     } catch (...) {
     }
@@ -91,8 +92,8 @@ inline std::shared_ptr<cortex::providers::Service> DesktopAnalysis() {
 // Saves the engine paths and starts a new service (running jobs of the old
 // one are cancelled when it is released).
 inline bool ConfigureDesktopAnalysis(const std::string& ghidraDir, const std::string& ilspycmd, const std::string& dotnet,
-                                     std::string& error) {
-    const nlohmann::json saved{{"ghidra_dir", ghidraDir}, {"ilspycmd", ilspycmd}, {"dotnet", dotnet}};
+                                     const std::string& vineflower, std::string& error) {
+    const nlohmann::json saved{{"ghidra_dir", ghidraDir}, {"ilspycmd", ilspycmd}, {"dotnet", dotnet}, {"vineflower", vineflower}};
     std::error_code ec;
     std::filesystem::create_directories(DesktopDataDirectory(), ec);
     if (!cortex::services::WriteFileAtomically(DesktopDataDirectory() / "analysis-engines.json", saved.dump(2), &error)) return false;

@@ -10,6 +10,7 @@ provenance.
 |---|---|---|---|---|---|
 | `ghidra` | Ghidra `analyzeHeadless` (11.x, JDK 21+) | Apache-2.0 | PE | `analyze`: functions (RVA, name, signature, body ranges, calls), imports, composite types, decompiled C keyed by RVA | validated on PE x64 and x86 (`cortex_test_target`) |
 | `ilspy` | ILSpy command line `ilspycmd` (9.x) | MIT | .NET assemblies | `decompile` (the whole assembly as a C# project, or one type), `list_types` | validated on `tests/fixtures/dotnet` |
+| `vineflower` | Vineflower 1.11 (`java -jar vineflower.jar`, JDK 11+) | Apache-2.0 | `.jar`, `.class` | `decompile` (Java sources) | validated on `tests/fixtures/java`: the sources recompile and every class has the original's `javap -p` signatures |
 
 Code: `core/providers/` (interface, process runner, job service, the two
 providers), `mcp_bridge/analysis_tools.h` (MCP tools and the CLI).
@@ -27,6 +28,8 @@ an executable or pass engine arguments.
   `ilspycmd` on `PATH` (`dotnet tool install ilspycmd`). You can point at the
   tool's `ilspycmd.dll`; it is then run by `dotnet` (from `--dotnet`,
   `DOTNET_HOST_PATH` or `PATH`). The version comes from `ilspycmd --version`.
+- **Vineflower:** pass `--vineflower <vineflower.jar>` or set `CORTEX_VINEFLOWER`; `java` comes from `JAVA_HOME` or
+  `PATH` (`--java` on the CLI). The version is read from the jar's `--help` banner.
 - **Desktop:** Artifacts › Engines › *Engine locations*. The paths are saved in
   `analysis-engines.json` in the user data folder; an empty field falls back to
   the environment.

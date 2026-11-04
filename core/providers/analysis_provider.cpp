@@ -71,6 +71,7 @@ void Settings::ApplyEnvironment() {
     if (ghidraDir.empty()) ghidraDir = Env("GHIDRA_INSTALL_DIR");
     if (ilspycmd.empty()) ilspycmd = Env("CORTEX_ILSPYCMD");
     if (dotnet.empty()) dotnet = Env("DOTNET_HOST_PATH");
+    if (vineflowerJar.empty()) vineflowerJar = Env("CORTEX_VINEFLOWER");
 }
 
 json ProviderInfo::ToJson() const {
@@ -157,6 +158,7 @@ Service::Service(Settings settings) : settings_(std::move(settings)) {
     settings_.ApplyEnvironment();
     Add(MakeGhidraProvider(settings_));
     Add(MakeIlspyProvider(settings_));
+    Add(MakeVineflowerProvider(settings_));
 }
 
 Service::~Service() {

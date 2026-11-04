@@ -95,6 +95,7 @@ private:
     std::array<char, 1024> ghidraDir_ = {};
     std::array<char, 1024> ilspycmd_ = {};
     std::array<char, 1024> dotnetPath_ = {};
+    std::array<char, 1024> vineflowerJar_ = {};
     std::array<char, 128> engineFilter_ = {};
 };
 

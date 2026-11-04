@@ -399,7 +399,14 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
             ImGui::EndTabItem();
         }
         const bool pe = data.contains("sections");
-        if (pe && ImGui::BeginTabItem("Engines", nullptr, TabFlags("Engines"))) {
+        std::string inspected;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            inspected = inspectedChild_.empty() ? inspectedPath_ : inspectedChild_;
+        }
+        std::string extension = inspected.size() >= 4 ? inspected.substr(inspected.size() - 4) : "";
+        for (auto& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if ((pe || extension == ".jar") && ImGui::BeginTabItem("Engines", nullptr, TabFlags("Engines"))) {
             DrawEngines(context);
             ImGui::EndTabItem();
         }
@@ -1242,6 +1249,7 @@ void ArtifactsWorkspace::DrawEngines(UiContext& context) {
         Copy(ghidraDir_.data(), ghidraDir_.size(), settings.ghidraDir);
         Copy(ilspycmd_.data(), ilspycmd_.size(), settings.ilspycmd);
         Copy(dotnetPath_.data(), dotnetPath_.size(), settings.dotnet);
+        Copy(vineflowerJar_.data(), vineflowerJar_.size(), settings.vineflowerJar);
         RefreshEngines(context);
     }
     if (!providers.contains("providers")) {
@@ -1278,16 +1286,21 @@ void ArtifactsWorkspace::DrawEngines(UiContext& context) {
         ImGui::InputTextWithHint("ilspycmd", "CORTEX_ILSPYCMD, or ilspycmd on PATH", ilspycmd_.data(), ilspycmd_.size());
         ImGui::SetNextItemWidth(Px(480));
         ImGui::InputTextWithHint("dotnet (for ilspycmd.dll)", "PATH", dotnetPath_.data(), dotnetPath_.size());
+        ImGui::SetNextItemWidth(Px(480));
+        ImGui::InputTextWithHint("vineflower.jar", "CORTEX_VINEFLOWER (java from JAVA_HOME or PATH)", vineflowerJar_.data(), vineflowerJar_.size());
         if (ImGui::Button("Save and detect")) {
             std::string error;
-            if (ConfigureDesktopAnalysis(ghidraDir_.data(), ilspycmd_.data(), dotnetPath_.data(), error)) RefreshEngines(context);
+            if (ConfigureDesktopAnalysis(ghidraDir_.data(), ilspycmd_.data(), dotnetPath_.data(), vineflowerJar_.data(), error)) RefreshEngines(context);
             else context.status = "Saving engine locations failed: " + error;
         }
     }
     const bool dotnet = result.value("data", json::object()).contains("dotnet");
-    if (ImGui::Button(dotnet ? "Decompile C# (ILSpy)" : "Analyse and decompile (Ghidra)")) StartEngine(context, dotnet ? "ilspy" : "ghidra");
+    const bool java = !dotnet && !result.value("data", json::object()).contains("sections");  // a .jar (ZIP)
+    const char* engine = dotnet ? "ilspy" : java ? "vineflower" : "ghidra";
+    if (ImGui::Button(dotnet ? "Decompile C# (ILSpy)" : java ? "Decompile Java (Vineflower)" : "Analyse and decompile (Ghidra)"))
+        StartEngine(context, engine);
     ImGui::SameLine();
-    HintText(dotnet ? "Seconds for a small assembly." : "Ghidra's auto-analysis takes minutes on a large binary; it can be cancelled.");
+    HintText(dotnet || java ? "Seconds for a small archive." : "Ghidra's auto-analysis takes minutes on a large binary; it can be cancelled.");
     if (!state.is_object()) return;
     const std::string current = state.value("state", std::string());
     ImGui::Text("Job %s (%s): %s%s", state.value("job_id", std::string()).c_str(), provider.c_str(), current.c_str(),
