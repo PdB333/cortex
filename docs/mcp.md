@@ -515,7 +515,27 @@ process to attach to.
 - They are read-only for targets; `cortex_analysis_cancel` stops only
   Cortex's own engine process.
 
-See `docs/analysis-providers.md`.
+`cortex_analysis_map` (read-only) maps a job's RVAs to the selected target's
+loaded module whose file has the job's SHA-256.
+
+## Live debug interfaces
+
+The `cortex_live_*` tools reach debug endpoints on 127.0.0.1 ports the
+operator allows with `--inspect-port`:
+- the CDP inspector of Node.js and Electron;
+- DAP adapters: debugpy (Python), and netcoredbg (.NET), which attaches to a
+  process id and needs `--allow-writes`;
+- JDWP (Java).
+
+The tools:
+- **reads** (targets, status, scripts, source, console, hits) are read-only;
+- **`cortex_live_breakpoint_set/_remove`** set log breakpoints: Cortex records
+  the stack and locals and resumes at once. They need `mutation_permission`
+  and `--allow-writes`;
+- **`cortex_live_detach`** removes Cortex's breakpoints and leaves the program
+  running.
+
+Nothing is evaluated in the program. See `docs/analysis-providers.md`.
 
 ## Server metadata
 

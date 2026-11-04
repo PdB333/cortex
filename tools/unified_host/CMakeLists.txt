@@ -82,6 +82,7 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/live/websocket.cpp
     ${CORTEX_ROOT}/core/live/cdp.cpp
     ${CORTEX_ROOT}/core/live/dap.cpp
+    ${CORTEX_ROOT}/core/live/jdwp.cpp
     ${CORTEX_ROOT}/core/live/live_service.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}

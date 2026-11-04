@@ -808,7 +808,7 @@ The full description is in `docs/investigations.md`.
   linked. Record this in `docs/third-party.md`.
 - **Validation:** CI with a pinned Ghidra on the PE fixture.
 
-#### Status of step 8 (delivered in part: decompilers; live providers pending)
+#### Status of step 8 (delivered)
 
 | Item | Implementation | Test |
 |---|---|---|
@@ -819,7 +819,13 @@ The full description is in `docs/investigations.md`.
 | ILSpy provider | `ilspy_provider.cpp`: `decompile` (project or one type) and `list_types`, always with `--disable-updatecheck`. Type names are checked against a strict pattern | ilspycmd 9.1 on the C# fixture: types equal Cortex's TypeDef table; signatures present. `analysis_e2e.py` rebuilds the decompiled project and compares member signatures with `System.Reflection.Metadata` |
 | MCP and CLI | `cortex_analysis_providers/_start/_get/_cancel/_jobs` (files inside `--artifact-root`, `child` entries extracted), `cortex provider list\|run` | `tests/analysis_e2e.py` (CI job `analysis-engines`, and the ILSpy part in `windows-release-full`) |
 | Desktop | Artifacts › **Engines** tab: detected engines, engine locations, start/cancel, the function or file list and its code. The Code tab gains **Ghidra decompilation** | GUI suite: ILSpy from the Engines tab, then opening `Actor.cs` |
-| Mapping to a loaded module | by the file's SHA-256 only: the Code tab's live navigation (step 7) and `cortex_knowledge_code_check` | as in step 7 |
+| Mapping to a loaded module | by the file's SHA-256 only: the Code tab's live navigation (step 7), `cortex_knowledge_code_check`, and `cortex_analysis_map` for analysis RVAs (it hashes the target's loaded module files) | unit test of the matching; on the running test target, the mapped `CortexDemoApplyDamage` equals the address the process reports |
+| Ghidra on ELF | `formats: pe, elf` | `tests/fixtures/elf` (gcc PIE): 10/10 `nm` functions at the same RVA, decompiled health write |
+| Vineflower (Java decompiler) | `vineflower_provider.cpp`: `java -jar vineflower.jar -s` on a .jar/.class | `tests/fixtures/java`: the decompiled sources recompile with `javac`, and every class has the original's `javap -p` signatures |
+| Live: CDP (Node.js, Electron) | `core/live/{websocket,cdp}`: loopback WebSocket, scripts, source, console, log breakpoints; no evaluation; foreign pauses resumed | real `node --inspect` (natively and the Windows build under Wine), `live_e2e.py`, GUI suite |
+| Live: DAP (Python, .NET) | `core/live/dap`: debugpy, and netcoredbg attached to a pid (needs `--allow-writes`); log breakpoints; `Source` only for files the debugger reported | real debugpy 1.8.22 and netcoredbg 3.1.2 against fixtures; CI pins both |
+| Live: JDWP (Java) | `core/live/jdwp`: EVENT_THREAD breakpoints, stack and locals with `GetValues`, no method invocation, Dispose on detach | real OpenJDK 21 against `tests/fixtures/java-live` |
+| One live interface | `LiveSession` / `LiveService` behind `cortex_live_*` (ports allowed with `--inspect-port`; breakpoints need `mutation_permission` and `--allow-writes`), `cortex.exe live`, AI Investigation › Live tab with a protocol selector | security regression, MCP E2E, GUI suite |
 
 **Limits:**
 
@@ -829,10 +835,13 @@ The full description is in `docs/investigations.md`.
 - The existing `ghidra_export`/`ghidra_import` routes stay as they are: they
   serve the interactive Ghidra GUI (runtime labels into a person's project).
   The headless provider does not write into a person's project.
-- **Not implemented yet:**
-  - Java decompilers (Vineflower/CFR);
-  - the live providers (CDP for Node/Electron, .NET live, JDWP, DAP);
-  - Ghidra on ELF/Mach-O.
+- **Validated on Node.js only (no Electron):** the CDP provider; Electron
+  speaks the same protocol, but no Electron binary is run.
+- **.NET live goes through netcoredbg (DAP),** not the CLR data access layer.
+  Dump analysis is not provided.
+- **Ghidra:** Mach-O is not validated.
+- **JDWP:** breakpoints on classes that are not loaded yet are refused.
+- **debugpy values come from `repr()`**, which runs user `__repr__` code.
 
 ### Step 9: quality
 

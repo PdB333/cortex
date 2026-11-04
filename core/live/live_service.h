@@ -6,6 +6,7 @@
 
 #include "cdp.h"
 #include "dap.h"
+#include "jdwp.h"
 
 #include <map>
 #include <memory>
@@ -23,6 +24,8 @@ public:
     json Attach(uint16_t port, const std::string& targetId);  // CDP
     // DAP: adapter "debugpy" or "netcoredbg" (needs processId).
     json AttachDap(uint16_t port, const std::string& adapter, uint64_t processId);
+    // JDWP: a JVM started with -agentlib:jdwp=...,server=y,address=127.0.0.1:PORT.
+    json AttachJdwp(uint16_t port);
     std::shared_ptr<LiveSession> Get(const std::string& sessionId) const;
     json Detach(const std::string& sessionId);
     json Sessions() const;

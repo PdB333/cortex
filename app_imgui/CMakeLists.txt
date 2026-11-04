@@ -200,6 +200,7 @@ add_executable(cortex_imgui WIN32
     ../core/live/websocket.cpp
     ../core/live/cdp.cpp
     ../core/live/dap.cpp
+    ../core/live/jdwp.cpp
     ../core/live/live_service.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp

@@ -359,3 +359,50 @@ and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
   that refuse a debugger, or are protected against one, are not worked
   around.
 - **JDWP (Java live) is a separate provider;** see below.
+
+## Live provider: JDWP (Java)
+
+`core/live/jdwp.{h,cpp}` speaks the JVM's Java Debug Wire Protocol over TCP
+to **127.0.0.1**. The operator starts the program with
+`-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:PORT`
+and allows the port with `--inspect-port`. The session is opened with
+`cortex_live_attach {port, protocol: "jdwp"}` or
+`cortex.exe live watch --protocol jdwp`. A breakpoint takes a loaded class
+name (`pkg.Outer$Inner`) and a source line.
+
+How it stays read-only:
+- **Setting a breakpoint:** `EventRequest.Set` (BREAKPOINT, suspend policy
+  `EVENT_THREAD`, `LocationOnly` at the lowest code index of that line in the
+  class's methods).
+- **At a hit:** Cortex reads the stack (`FrameCount`, then `Frames`), the top
+  frame's line and the locals in scope (`VariableTable`, then
+  `StackFrame.GetValues`). Then it resumes **only that thread**.
+- **Values:** primitives are decoded and strings read with
+  `StringReference.Value`. Other objects are reported only by their runtime
+  type (`ObjectReference.ReferenceType`). No Java method is invoked
+  (`InvokeMethod` is never used).
+- **After `max_hits`:** the request is cleared.
+- **Detaching:** `VirtualMachine.Dispose` removes Cortex's requests and lets
+  the VM run on.
+
+Validation, in `cortex_dap_tests`: `tests/fixtures/java-live/LiveApp.java`
+compiled with `javac -g` on OpenJDK 21 (JDWP 21.0).
+- Unknown class and a line in no method are refused.
+- 5 hits in `LiveApp.applyDamage` at the health-write line: `amount = 9`,
+  `absorbed` between 0 and 3, `target` of type `LiveApp$Actor`, and
+  `LiveApp.main` as the caller.
+- The breakpoint is cleared after 5 hits.
+- A second breakpoint in `main`'s loop keeps being hit, so the thread was
+  resumed each time. Its `String` local reads `"tick"`.
+- After Dispose, a new connection attaches again.
+- The Windows build was checked under Wine against the same JVM with
+  `cortex.exe live watch --protocol jdwp`. The `analysis-engines` CI job runs
+  it on Windows.
+
+Limits (JDWP):
+- The class must already be loaded. A ClassPrepare deferral is not
+  implemented.
+- Locals need classes compiled with `-g`; without it, no variable table.
+- JDWP carries no program output, and sources are read with
+  `cortex_artifact_read`.
+- One debugger connection per JVM, as JDWP allows.

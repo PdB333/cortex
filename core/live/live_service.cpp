@@ -48,6 +48,18 @@ json LiveService::AttachDap(uint16_t port, const std::string& adapter, uint64_t 
     return Register("dap", port, session);
 }
 
+json LiveService::AttachJdwp(uint16_t port) {
+    if (!PortAllowed(port)) return PortRefused();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (sessions_.size() >= 8) return {{"ok", false}, {"error", "too_many_sessions"}};
+    }
+    auto session = std::make_shared<JdwpSession>();
+    std::string error;
+    if (!session->Attach(port, error)) return {{"ok", false}, {"error", error}};
+    return Register("jdwp", port, session);
+}
+
 std::shared_ptr<LiveSession> LiveService::Get(const std::string& sessionId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = sessions_.find(sessionId);

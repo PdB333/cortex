@@ -208,16 +208,17 @@ jobs:
           build/analysis/cortex_cdp_tests.exe tests/fixtures/node-live/app.js
           if ($LASTEXITCODE -ne 0) { throw "CDP tests failed" }
 
-      - name: DAP tests (Python through debugpy, .NET through netcoredbg)
+      - name: DAP and JDWP tests (Python through debugpy, .NET through netcoredbg, Java through JDWP)
         shell: pwsh
         env:
           CORTEX_REQUIRE_DEBUGPY: "1"
           CORTEX_REQUIRE_NETCOREDBG: "1"
+          CORTEX_REQUIRE_JDWP: "1"
         run: |
           dotnet build tests/fixtures/dotnet-live/Cortex.LiveFixture.csproj -c Debug -o "$env:RUNNER_TEMP\dotnet-live"
           if ($LASTEXITCODE -ne 0) { throw "building the .NET live fixture failed" }
           $env:CORTEX_TEST_PYTHON = (Get-Command python).Source
-          build/analysis/cortex_dap_tests.exe tests/fixtures/python-live/app.py "$env:RUNNER_TEMP\dotnet-live\Cortex.LiveFixture.dll" "$env:CORTEX_NETCOREDBG" tests/fixtures/dotnet-live/Program.cs
+          build/analysis/cortex_dap_tests.exe tests/fixtures/python-live/app.py "$env:RUNNER_TEMP\dotnet-live\Cortex.LiveFixture.dll" "$env:CORTEX_NETCOREDBG" tests/fixtures/dotnet-live/Program.cs tests/fixtures/java-live/LiveApp.java
           if ($LASTEXITCODE -ne 0) { throw "DAP tests failed" }
 
       - name: Download tested portable bundle

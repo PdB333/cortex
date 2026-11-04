@@ -340,6 +340,7 @@ add_executable(cortex_host
     core/live/websocket.cpp
     core/live/cdp.cpp
     core/live/dap.cpp
+    core/live/jdwp.cpp
     core/live/live_service.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
@@ -731,7 +732,7 @@ if(BUILD_TESTING)
              ${CMAKE_SOURCE_DIR}/tests/fixtures/java/Cortex.Fixture.jar ${CMAKE_SOURCE_DIR}/tests/fixtures/elf/actor.elf)
     set_tests_properties(cortex_analysis_provider_tests PROPERTIES TIMEOUT 3600)
 
-    add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
+    add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/jdwp.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
     target_include_directories(cortex_cdp_tests PRIVATE core)
     target_link_libraries(cortex_cdp_tests PRIVATE nlohmann_json::nlohmann_json)
     if(WIN32)
@@ -741,7 +742,7 @@ if(BUILD_TESTING)
     add_test(NAME cortex_cdp_tests COMMAND cortex_cdp_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/node-live/app.js)
     set_tests_properties(cortex_cdp_tests PROPERTIES TIMEOUT 300)
 
-    add_executable(cortex_dap_tests tests/dap_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
+    add_executable(cortex_dap_tests tests/dap_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/jdwp.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
     target_include_directories(cortex_dap_tests PRIVATE core)
     target_link_libraries(cortex_dap_tests PRIVATE nlohmann_json::nlohmann_json)
     if(WIN32)

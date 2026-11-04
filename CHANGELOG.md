@@ -13,6 +13,15 @@ Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code
   - **ILSpy** (`ilspycmd`): the C# project or one type, and the type list.
   - Jobs can be cancelled (the engine's process tree is killed) and results are cached by SHA-256, engine version and options.
   - New: MCP tools `cortex_analysis_*`, `cortex.exe provider list|run`, the Artifacts **Engines** tab, the options `--ghidra-dir`, `--ilspycmd`, `--dotnet` and `--analysis-cache`, and the CI job `analysis-engines` with pinned Ghidra 11.4.2 and ilspycmd 9.1.
+  - **Vineflower** for Java (.jar/.class), and Ghidra on ELF.
+  - `cortex_analysis_map` maps analysis RVAs to the live target's module whose file has the same SHA-256.
+  - **Live providers** behind one interface (`cortex_live_*`, `cortex.exe live`, AI Investigation › Live):
+    - CDP for Node.js/Electron;
+    - DAP for Python (debugpy) and .NET (netcoredbg);
+    - JDWP for Java.
+
+    All three use log breakpoints only: Cortex records the stack and locals, then resumes. There is no evaluation and no method invocation, and a pause Cortex did not set is resumed.
+  - Ports are allowed with `--inspect-port`. Breakpoints need `mutation_permission` and `--allow-writes`.
   - See `docs/analysis-providers.md` and `docs/third-party.md`.
 
 - **AI Investigation workspace (step 7).**

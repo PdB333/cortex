@@ -20,6 +20,8 @@ install.
 | [Ghidra](https://github.com/NationalSecurityAgency/ghidra) | Apache-2.0 | Native analysis and decompilation (PE) | Runs `support/analyzeHeadless` in a temporary project with a post-script that Cortex writes (`CortexExport.java`, part of Cortex) and reads its JSON |
 | [ILSpy / ilspycmd](https://github.com/icsharpcode/ILSpy) | MIT | C# decompilation of .NET assemblies | Runs `ilspycmd` with `--disable-updatecheck` and reads the files or the output it writes |
 | [Vineflower](https://github.com/Vineflower/vineflower) | Apache-2.0 | Java decompilation (.jar/.class) | Runs `java -jar vineflower.jar -s <input> <out>` and reads the `.java` files it writes |
+| [debugpy](https://github.com/microsoft/debugpy) | MIT | Python live (DAP) | Started by the operator (`python -m debugpy --listen`); Cortex connects to it |
+| [netcoredbg](https://github.com/Samsung/netcoredbg) | MIT | .NET live (DAP) | Started by the operator in server mode; Cortex connects and attaches it to a process id |
 | Java runtime (JDK 21+) | that of the vendor (e.g. GPLv2 with Classpath Exception for OpenJDK builds) | Needed by Ghidra | Started by Ghidra's launcher, not by Cortex |
 | .NET runtime | MIT | Needed by ilspycmd | Started by ilspycmd's host, or by `dotnet <ilspycmd.dll>` |
 

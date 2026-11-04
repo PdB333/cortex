@@ -1,7 +1,8 @@
 // DAP live provider (roadmap step 8): Python through debugpy and .NET
 // through netcoredbg.
 //
-//   cortex_dap_tests <app.py|-> [<Cortex.LiveFixture.dll> <netcoredbg> <Program.cs>]
+//   cortex_dap_tests <app.py|-> [<Cortex.LiveFixture.dll|-> <netcoredbg> <Program.cs> [<LiveApp.java>]]
+// (the JDWP part, with a JDK, also lives here: CORTEX_REQUIRE_JDWP=1)
 //
 // Python (python with debugpy: CORTEX_TEST_PYTHON or python3/python on PATH;
 // CORTEX_REQUIRE_DEBUGPY=1 makes it mandatory) runs the fixture under
@@ -255,12 +256,103 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     fs::remove(pidFile);
 }
 
+std::string JavaTool(const char* name) {
+    if (const char* home = std::getenv("JAVA_HOME")) {
+#if defined(_WIN32)
+        const fs::path candidate = fs::u8path(home) / "bin" / (std::string(name) + ".exe");
+#else
+        const fs::path candidate = fs::u8path(home) / "bin" / name;
+#endif
+        if (fs::exists(candidate)) return candidate.u8string();
+    }
+    return cortex::providers::FindOnPath(name);
+}
+
+// JDWP: the fixture compiled with -g runs with the JDWP agent on loopback.
+void TestJava(const std::string& source) {
+    const std::string javac = JavaTool("javac"), java = JavaTool("java");
+    if (javac.empty() || java.empty()) {
+        std::cout << "jdwp: SKIPPED (no JDK)" << std::endl;
+        CHECK(!(std::getenv("CORTEX_REQUIRE_JDWP") && std::string(std::getenv("CORTEX_REQUIRE_JDWP")) == "1"));
+        return;
+    }
+    const fs::path classes = fs::temp_directory_path() / ("cortex-jdwp-" + std::to_string(Pid()));
+    fs::create_directories(classes);
+    cortex::providers::ProcessSpec compile;
+    compile.argv = {javac, "-g", "-d", classes.u8string(), source};
+    compile.timeout = std::chrono::minutes(2);
+    const auto compiled = cortex::providers::RunProcess(compile);
+    CHECK(compiled.exitCode == 0);
+    if (compiled.exitCode != 0) {
+        std::cerr << compiled.output << std::endl;
+        return;
+    }
+    const uint16_t port = static_cast<uint16_t>(7000 + Pid() % 500);
+    std::atomic<bool> stop{false};
+    std::thread app([&] {
+        cortex::providers::ProcessSpec spec;
+        spec.argv = {java, "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:" + std::to_string(port), "-cp",
+                     classes.u8string(), "LiveApp"};
+        spec.timeout = std::chrono::minutes(5);
+        cortex::providers::RunProcess(spec, &stop);
+    });
+    LiveService service({port}, false);
+    json attached;
+    CHECK(WaitFor([&] { return (attached = service.AttachJdwp(port)).value("ok", false); }, 30));
+    std::cout << "attach: " << attached.dump() << std::endl;
+    auto session = service.Get(attached.value("session_id", std::string()));
+    if (session) {
+        const json classesList = session->Scripts("LiveApp", 0, 10);
+        CHECK(classesList["total"].get<size_t>() >= 1);
+        CHECK(session->SetLogBreakpoint("NoSuchClass", 1, 0, 1, 1)["error"] == "class_not_loaded");
+        CHECK(session->SetLogBreakpoint("LiveApp", 1, 0, 1, 1)["error"] == "line_not_in_class");
+        const uint32_t line = LineOf(source, "CORTEX_HEALTH_WRITE");
+        const json bp = session->SetLogBreakpoint("LiveApp", line, 0, 5, 4);
+        CHECK(bp.value("ok", false));
+        const int id = bp.value("breakpoint", 0);
+        json hits;
+        CHECK(WaitFor([&] { return (hits = session->Hits(id, 0, 100))["hits"] == 5; }, 30));
+        CHECK(hits["active"] == false);
+        std::cout << "first hit: " << (hits["records"].empty() ? json() : hits["records"][0]).dump() << std::endl;
+        for (const auto& record : hits["records"]) {
+            CHECK(!record["frames"].empty());
+            if (record["frames"].empty()) continue;
+            const json top = record["frames"][0];
+            CHECK(top["function"] == "LiveApp.applyDamage" && top["line"] == line);
+            CHECK(record["frames"].size() >= 2 && record["frames"][1]["function"] == "LiveApp.main");
+            const json locals = top.value("locals", json::object());
+            CHECK(locals.value("amount", json::object()).value("value", std::string()) == "9");
+            const int absorbed = std::atoi(locals.value("absorbed", json::object()).value("value", std::string("-1")).c_str());
+            CHECK(absorbed >= 0 && absorbed <= 3);
+            CHECK(locals.value("target", json::object()).value("type", std::string()) == "LiveApp$Actor");
+        }
+        // The thread was resumed after each hit: a breakpoint in main's loop
+        // keeps being hit, with the String local read without calling Java.
+        const json loop = session->SetLogBreakpoint("LiveApp", LineOf(source, "System.out.println"), 0, 3, 2);
+        CHECK(loop.value("ok", false));
+        json loopHits;
+        CHECK(WaitFor([&] { return (loopHits = session->Hits(loop.value("breakpoint", 0), 0, 10))["hits"] == 3; }, 30));
+        if (!loopHits["records"].empty() && !loopHits["records"][0]["frames"].empty())
+            CHECK(loopHits["records"][0]["frames"][0]["locals"].value("label", json::object()).value("value", std::string()) == "tick");
+        CHECK(service.Detach(attached["session_id"])["detached"] == true);
+        // After Dispose the VM runs on: a new connection attaches again.
+        json again;
+        CHECK(WaitFor([&] { return (again = service.AttachJdwp(port)).value("ok", false); }, 15));
+        service.Detach(again.value("session_id", std::string()));
+    }
+    stop = true;
+    app.join();
+    std::error_code ec;
+    fs::remove_all(classes, ec);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     TestRefusals();
     if (argc > 1 && std::string(argv[1]) != "-") TestPython(fs::absolute(argv[1]).u8string());
-    if (argc > 4) TestDotnet(fs::absolute(argv[2]).u8string(), fs::absolute(argv[3]).u8string(), fs::absolute(argv[4]).u8string());
+    if (argc > 4 && std::string(argv[2]) != "-") TestDotnet(fs::absolute(argv[2]).u8string(), fs::absolute(argv[3]).u8string(), fs::absolute(argv[4]).u8string());
+    if (argc > 5) TestJava(fs::absolute(argv[5]).u8string());
     if (failures) {
         std::cerr << failures << " failure(s)" << std::endl;
         return 1;

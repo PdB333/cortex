@@ -33,10 +33,12 @@ inline json ToolDefinitions() {
                          "its Debugger and Runtime domains to list scripts and record console messages. protocol=dap: a Debug "
                          "Adapter Protocol adapter the operator started: adapter=debugpy (python -m debugpy --listen "
                          "127.0.0.1:PORT) or adapter=netcoredbg (--interpreter=vscode --server=PORT) with the .NET process_id "
-                         "to attach to, which needs --allow-writes and mutation_permission. Never evaluates code; a pause "
+                         "to attach to, which needs --allow-writes and mutation_permission. protocol=jdwp: a JVM started with "
+                         "-agentlib:jdwp=transport=dt_socket,server=y,address=127.0.0.1:PORT (breakpoints take a class name). "
+                         "Never evaluates code; a pause "
                          "Cortex did not set is recorded and resumed."},
          {"inputSchema", object({{"port", port}, {"target_id", {{"type", "string"}, {"maxLength", 128}}},
-                                 {"protocol", {{"type", "string"}, {"enum", json::array({"cdp", "dap"})}}},
+                                 {"protocol", {{"type", "string"}, {"enum", json::array({"cdp", "dap", "jdwp"})}}},
                                  {"adapter", {{"type", "string"}, {"enum", json::array({"debugpy", "netcoredbg"})}}},
                                  {"process_id", {{"type", "integer"}, {"minimum", 1}}},
                                  {"mutation_permission", {{"type", "boolean"}}}},
@@ -111,7 +113,9 @@ inline json Handle(const std::string& name, const json& a, cortex::live::LiveSer
             return {{"ok", false}, {"error", "invalid_port"}};
         const uint16_t port = static_cast<uint16_t>(a["port"].get<uint64_t>());
         if (name == "cortex_live_targets") return service->Targets(port);
-        if (a.value("protocol", std::string("cdp")) != "dap") return service->Attach(port, a.value("target_id", std::string()));
+        const std::string protocol = a.value("protocol", std::string("cdp"));
+        if (protocol == "jdwp") return service->AttachJdwp(port);
+        if (protocol != "dap") return service->Attach(port, a.value("target_id", std::string()));
         const std::string adapter = a.value("adapter", std::string("debugpy"));
         uint64_t pid = 0;
         if (adapter == "netcoredbg") {
@@ -164,8 +168,8 @@ inline int LiveMain(int argc, char** argv) {
         std::cerr << "usage: cortex live targets --port N\n"
                      "       cortex live scripts --port N [--query TEXT]\n"
                      "       cortex live watch --port N --url URL --line L [--column C] [--hits K] [--seconds S] [--target ID]\n"
-                     "                         [--protocol cdp|dap] [--adapter debugpy|netcoredbg] [--pid PID]\n"
-                     "  (DAP: --url is the source file path; netcoredbg needs --pid)\n";
+                     "                         [--protocol cdp|dap|jdwp] [--adapter debugpy|netcoredbg] [--pid PID]\n"
+                     "  (DAP: --url is the source file path; netcoredbg needs --pid; JDWP: --url is the class name)\n";
         return 2;
     };
     if (argc < 2) return usage();
@@ -202,8 +206,9 @@ inline int LiveMain(int argc, char** argv) {
     }
     if (command != "scripts" && command != "watch") return usage();
     if (command == "watch" && (url.empty() || !line)) return usage();
-    const json attached = protocol == "dap" ? service.AttachDap(static_cast<uint16_t>(port), adapter, pid)
-                                            : service.Attach(static_cast<uint16_t>(port), target);
+    const json attached = protocol == "dap"    ? service.AttachDap(static_cast<uint16_t>(port), adapter, pid)
+                          : protocol == "jdwp" ? service.AttachJdwp(static_cast<uint16_t>(port))
+                                               : service.Attach(static_cast<uint16_t>(port), target);
     if (!attached.value("ok", false)) {
         std::cout << attached.dump(2) << std::endl;
         return 1;

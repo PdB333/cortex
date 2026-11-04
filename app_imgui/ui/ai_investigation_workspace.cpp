@@ -378,7 +378,8 @@ void AiInvestigationWorkspace::LiveAttachDap(UiContext& context, int port, const
     liveSession_.clear();
     liveScripts_ = liveSource_ = liveHits_ = nullptr;
     liveBreakpoint_ = 0;
-    const json attached = DesktopLive().AttachDap(static_cast<uint16_t>(port), adapter, static_cast<uint64_t>(std::max(0, pid)));
+    const json attached = adapter == "jdwp" ? DesktopLive().AttachJdwp(static_cast<uint16_t>(port))
+                                            : DesktopLive().AttachDap(static_cast<uint16_t>(port), adapter, static_cast<uint64_t>(std::max(0, pid)));
     if (!attached.value("ok", false)) {
         context.status = "Live: attach failed: " + attached.value("error", std::string());
         return;
@@ -398,7 +399,7 @@ void AiInvestigationWorkspace::LiveOpenScript(UiContext& context, const std::str
     liveSource_ = session->Source(url, 1, 20000);
     // DAP: a file is readable once the debugger reported it in a stack;
     // before that the path is still usable for a breakpoint.
-    if (session->Protocol() == "dap" && !liveSource_.value("ok", false))
+    if ((session->Protocol() == "dap" || session->Protocol() == "jdwp") && !liveSource_.value("ok", false))
         liveSource_ = {{"ok", true}, {"url", url}, {"text", "(the source is shown once the debugger reports this file in a stack)"}};
     context.status = liveSource_.value("ok", false) ? "Live: source of " + url : "Live: no script " + url;
 }
@@ -439,7 +440,7 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
              "--remote-debugging-port). Cortex lists scripts and console output and sets LOG breakpoints: each hit records "
              "the stack and locals, then the program resumes at once. Nothing is evaluated in the program.");
     auto session = DesktopLive().Get(liveSession_);
-    static const char* protocols[] = {"CDP (Node.js, Electron)", "DAP: debugpy (Python)", "DAP: netcoredbg (.NET)"};
+    static const char* protocols[] = {"CDP (Node.js, Electron)", "DAP: debugpy (Python)", "DAP: netcoredbg (.NET)", "JDWP (Java)"};
     ImGui::SetNextItemWidth(Px(220));
     ImGui::Combo("##LiveProtocol", &liveProtocol_, protocols, IM_ARRAYSIZE(protocols));
     ImGui::SameLine();
@@ -453,6 +454,7 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
     ImGui::SameLine();
     if (ImGui::Button(session ? "Reattach" : "Attach")) {
         if (liveProtocol_ == 0) LiveAttach(context, livePort_);
+        else if (liveProtocol_ == 3) LiveAttachDap(context, livePort_, "jdwp", 0);
         else LiveAttachDap(context, livePort_, liveProtocol_ == 1 ? "debugpy" : "netcoredbg", livePid_);
     }
     if (session) {
@@ -479,8 +481,9 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
                 liveStatus_.value("connected", false) ? "" : "  (disconnected)");
     const float listWidth = std::max(Px(260), ImGui::GetContentRegionAvail().x * 0.3f);
     ImGui::BeginChild("LiveScripts", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
-    if (session->Protocol() == "dap") {
-        ImGui::TextWrapped("DAP: give the source file path for a breakpoint.");
+    if (session->Protocol() == "dap" || session->Protocol() == "jdwp") {
+        ImGui::TextWrapped(session->Protocol() == "dap" ? "DAP: give the source file path for a breakpoint."
+                                                        : "JDWP: give a loaded class name (pkg.Class) for a breakpoint.");
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##LivePath", "source file path", livePath_.data(), livePath_.size());
         if (ImGui::Button("Use this file")) LiveOpenScript(context, livePath_.data());
