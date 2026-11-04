@@ -26,4 +26,4 @@ install.
 CI downloads Ghidra 11.4.2 (`ghidra_11.4.2_PUBLIC_20250826.zip`) from the
 project's GitHub releases, Vineflower 1.11.1 from Maven Central (SHA-1
 checked) and installs ilspycmd 9.1.0.7988 from NuGet, to
-test against fixed versions. Neither is uploaded with the build artifacts.
+test against fixed versions. None of them is uploaded with the build artifacts.
