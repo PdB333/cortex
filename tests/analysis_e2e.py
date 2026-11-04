@@ -33,6 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_mcp_e2e import Mcp, windows_path  # noqa: E402
+from context_isolation_e2e import start_target, wait_for_runtime  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, "fixtures", "dotnet")
@@ -166,6 +167,7 @@ def main():
 
         # ILSpy: the whole project; rebuilt and compared member by member.
         failed, started = server.call("cortex_analysis_start", {"provider": "ilspy", "feature": "decompile", "path": windows_path(runner, dll)})
+        jobs_ilspy_id = started.get("job_id", "")
         state = wait(started.get("job_id", ""), 600)
         check(state.get("state") == "completed", "ilspy decompiles the assembly", state)
         check(state.get("provenance", {}).get("sha256") == state.get("sha256") and "--disable-updatecheck" in state.get("provenance", {}).get("command", []),
@@ -278,6 +280,28 @@ def main():
             items = page.get("result", {}).get("items", [])
             c = items[0].get("c", "") if items else ""
             check("+ 4)" in c and "/ 3" in c, "decompiled CortexDemoApplyDamage shows the health write and the armor third", c)
+
+            # The same file running: Cortex maps the RVA to the loaded module
+            # (matched by SHA-256) and the address is the one the target
+            # reports for its own CortexDemoApplyDamage.
+            process, manifest = start_target(runner, target, root, "map")
+            try:
+                inject = subprocess.run(runner + [cortex, "inject", str(manifest["pid"])], cwd=bundle,
+                                        capture_output=True, text=True, timeout=120)
+                check(inject.returncode == 0 and wait_for_runtime(bundle, manifest["pid"]), "runtime loaded into the target")
+                failed, attached = server.call("cortex_attach", {"pid": manifest["pid"]})
+                generation = attached.get("target", {}).get("generation", 0)
+                failed, mapped = server.call("cortex_analysis_map", {"job_id": started["job_id"], "rvas": [str(rva), "0x7fffffff"],
+                                                                   "_cortex_target": manifest["pid"], "_cortex_generation": generation})
+                expected = int(manifest.get("demo_apply_damage", "0"), 16)
+                got = int(mapped.get("mapped", [{}])[0].get("address", "0"), 16) if mapped.get("ok") else -1
+                check(not failed and got == expected, "the mapped address is the target's own CortexDemoApplyDamage (0x%x)" % expected, mapped)
+                check(mapped.get("ok") and mapped["mapped"][1].get("error") == "outside_module_image", "an RVA outside the image is refused", mapped)
+                failed, wrong = server.call("cortex_analysis_map", {"job_id": jobs_ilspy_id, "rvas": ["0x1000"],
+                                                                   "_cortex_target": manifest["pid"], "_cortex_generation": generation})
+                check(failed and wrong.get("error") == "no_loaded_module_matches", "a file the target has not loaded maps to nothing", wrong)
+            finally:
+                process.kill()
 
             failed, slow = server.call("cortex_analysis_start", {"provider": "ghidra", "feature": "analyze",
                                                                 "path": windows_path(runner, target), "options": {"decompile_limit": 3}})

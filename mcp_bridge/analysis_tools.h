@@ -13,7 +13,9 @@
 #include "../core/artifacts/sha256.h"
 #include "../core/services/user_data.h"
 
+#include <cstdio>
 #include <fstream>
+#include <functional>
 #include <iostream>
 
 namespace mcp_bridge::analysis {
@@ -77,6 +79,19 @@ inline json ToolDefinitions() {
          {"inputSchema", {{"type", "object"}, {"properties", {{"job_id", {{"type", "string"}}}}},
                           {"required", json::array({"job_id"})}, {"additionalProperties", false}}},
          {"_cortex", {{"host_control", true}}}},
+        {{"name", "cortex_analysis_map"},
+         {"description", "Map RVAs of a completed analysis job (Ghidra functions, decompiled code) to absolute addresses in "
+                         "the selected live target. Cortex hashes the files of the target's loaded modules and maps only to a "
+                         "module whose on-disk file has the job's SHA-256; otherwise nothing is mapped. A matching file does not "
+                         "prove the loaded image is unmodified. Read-only."},
+         {"inputSchema", {{"type", "object"},
+                          {"properties", {{"job_id", {{"type", "string"}}},
+                                          {"rvas", {{"type", "array"}, {"items", {{"type", "string"}, {"maxLength", 20}}}, {"minItems", 1}, {"maxItems", 64}}},
+                                          {"_cortex_target", {{"oneOf", json::array({{{"type", "integer"}}, {{"type", "string"}}})}}},
+                                          {"_cortex_generation", {{"type", "integer"}, {"minimum", 1}}}}},
+                          {"required", json::array({"job_id", "rvas", "_cortex_target", "_cortex_generation"})},
+                          {"additionalProperties", false}}},
+         {"_cortex", {{"read_only", true}}}},
         {{"name", "cortex_analysis_jobs"},
          {"description", "Analysis jobs of this session, newest first."},
          {"inputSchema", {{"type", "object"}, {"properties", json::object()}, {"additionalProperties", false}}},
@@ -84,7 +99,61 @@ inline json ToolDefinitions() {
     });
 }
 
-inline bool IsTool(const std::string& name) { return name.rfind("cortex_analysis_", 0) == 0; }
+inline bool IsTool(const std::string& name) { return name.rfind("cortex_analysis_", 0) == 0 && name != "cortex_analysis_map"; }
+
+struct LoadedModule {
+    std::string name, path;
+    uint64_t base = 0, size = 0;
+};
+
+// cortex_analysis_map without the target: `hash(path)` returns
+// {"status":"hashed","sha256","file_size"} (mcp_bridge/test_file_version.h).
+// Only modules whose file has the job's size are hashed.
+inline json MapRvas(const json& job, const json& rvas, const std::vector<LoadedModule>& modules,
+                    const std::function<json(const std::string&)>& hash) {
+    if (job.value("state", std::string()) != "completed")
+        return {{"ok", false}, {"error", "job_not_completed"}};
+    const std::string sha = job.value("sha256", std::string());
+    std::error_code ec;
+    const uint64_t size = fs::file_size(fs::u8path(job.value("path", std::string())), ec);
+    json checked = json::array();
+    const LoadedModule* match = nullptr;
+    for (const auto& module : modules) {
+        std::error_code sizeError;
+        if (ec || fs::file_size(fs::u8path(module.path), sizeError) != size || sizeError) continue;
+        const json digest = hash(module.path);
+        checked.push_back({{"module", module.name}, {"status", digest.value("status", std::string())}});
+        if (digest.value("status", std::string()) == "hashed" && digest.value("sha256", std::string()) == sha) {
+            match = &module;
+            break;
+        }
+    }
+    if (!match)
+        return {{"ok", false}, {"error", "no_loaded_module_matches"},
+                {"message", "No loaded module's file has the analysed file's SHA-256; RVAs are not mapped."},
+                {"sha256", sha}, {"modules_checked", checked}};
+    json rows = json::array();
+    for (const auto& value : rvas) {
+        std::string text = value.is_string() ? value.get<std::string>() : "";
+        if (text.rfind("0x", 0) == 0 || text.rfind("0X", 0) == 0) text = text.substr(2);
+        if (text.empty() || text.size() > 16 || text.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+            rows.push_back({{"rva", value}, {"error", "invalid_rva"}});
+            continue;
+        }
+        const uint64_t rva = std::stoull(text, nullptr, 16);
+        if (rva >= match->size) {
+            rows.push_back({{"rva", value}, {"error", "outside_module_image"}});
+            continue;
+        }
+        char address[32];
+        std::snprintf(address, sizeof address, "0x%llx", static_cast<unsigned long long>(match->base + rva));
+        rows.push_back({{"rva", value}, {"address", address}});
+    }
+    char base[32];
+    std::snprintf(base, sizeof base, "0x%llx", static_cast<unsigned long long>(match->base));
+    return {{"ok", true}, {"module", match->name}, {"path", match->path}, {"base", base}, {"sha256", sha},
+            {"mapped", rows}, {"note", "same file on disk; the loaded image may still differ (patches, relocations applied)"}};
+}
 
 inline json View(const json& arguments) {
     json view = json::object();

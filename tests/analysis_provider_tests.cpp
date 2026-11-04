@@ -18,6 +18,7 @@
 #include "artifacts/pe_provider.h"
 #include "providers/analysis_provider.h"
 #include "providers/process_runner.h"
+#include "../mcp_bridge/analysis_tools.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -341,6 +342,34 @@ void TestService(const fs::path& temp) {
     CHECK(leftovers == 0);
 }
 
+// cortex_analysis_map: only a loaded module whose file has the job's SHA-256
+// maps; files of another size are not even hashed.
+void TestMap(const fs::path& temp) {
+    const fs::path image = temp / "image.bin", copy = temp / "copy.bin", other = temp / "other.bin", sameSize = temp / "same-size.bin";
+    std::ofstream(image, std::ios::binary) << std::string(4096, 'A');
+    std::ofstream(copy, std::ios::binary) << std::string(4096, 'A');
+    std::ofstream(other, std::ios::binary) << std::string(100, 'B');
+    std::ofstream(sameSize, std::ios::binary) << std::string(4096, 'C');
+    const json job{{"state", "completed"}, {"path", image.u8string()}, {"sha256", FileSha256(image)}};
+    int hashed = 0;
+    auto hash = [&](const std::string& path) -> json {
+        ++hashed;
+        return {{"status", "hashed"}, {"sha256", FileSha256(fs::u8path(path))}};
+    };
+    using mcp_bridge::analysis::LoadedModule;
+    const std::vector<LoadedModule> modules{{"other.bin", other.u8string(), 0x10000, 0x1000},
+                                            {"same-size.bin", sameSize.u8string(), 0x20000, 0x3000},
+                                            {"copy.bin", copy.u8string(), 0x7ff600000000ull, 0x3000}};
+    const json mapped = mcp_bridge::analysis::MapRvas(job, json::array({"0x14c0", "2fff", "0x3000", "zz"}), modules, hash);
+    CHECK(mapped["ok"] == true && mapped["module"] == "copy.bin" && mapped["base"] == "0x7ff600000000");
+    CHECK(mapped["mapped"][0]["address"] == "0x7ff6000014c0" && mapped["mapped"][1]["address"] == "0x7ff600002fff");
+    CHECK(mapped["mapped"][2]["error"] == "outside_module_image" && mapped["mapped"][3]["error"] == "invalid_rva");
+    CHECK(hashed == 2);  // other.bin has another size: not hashed
+    const json none = mcp_bridge::analysis::MapRvas(job, json::array({"0x10"}), {modules[0], modules[1]}, hash);
+    CHECK(none["ok"] == false && none["error"] == "no_loaded_module_matches" && !none.contains("mapped"));
+    CHECK(mcp_bridge::analysis::MapRvas({{"state", "running"}}, json::array({"0x10"}), modules, hash)["error"] == "job_not_completed");
+}
+
 bool RequireEngines() {
     const char* value = std::getenv("CORTEX_REQUIRE_ENGINES");
     return value && std::string(value) == "1";
@@ -612,6 +641,7 @@ int main(int argc, char** argv) {
     TestRunner(temp);
     TestViews();
     TestService(temp);
+    TestMap(temp);
     if (argc > 1 && std::string(argv[1]) != "-") TestGhidra(temp, argv[1]);
     if (argc > 2 && std::string(argv[2]) != "-") TestIlspy(temp, argv[2]);
     if (argc > 3 && std::string(argv[3]) != "-") TestVineflower(temp, argv[3]);

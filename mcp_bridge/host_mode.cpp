@@ -1115,6 +1115,24 @@ if(name=="cortex_test_code_link"){
 }
 // Read-only check after reconnect/restart. Only the CURRENT live module list
 // supplies a base; no stale absolute instruction pointer is ever reused.
+if(name=="cortex_analysis_map"){
+    if(!a.is_object()||!a.contains("job_id")||!a["job_id"].is_string()||!a.contains("rvas")||!a["rvas"].is_array()||a["rvas"].empty()||a["rvas"].size()>64){
+        response=LocalToolResponse(MessageId(m),LocalToolFailure("invalid_map_request","job_id and 1-64 rvas are required"),true);return true;}
+    std::string code,message;
+    auto runtime=ResolveRuntime(RuntimeSnapshot(s),a,code,message);
+    if(!runtime||!ValidateGeneration(runtime,a,code,message)){response=LocalToolResponse(MessageId(m),LocalToolFailure(code,message),true);return true;}
+    if(!s->analysis){response=LocalToolResponse(MessageId(m),LocalToolFailure("analysis_unavailable",""),true);return true;}
+    const json job=s->analysis->Get(a["job_id"].get<std::string>());
+    std::string modulesError;
+    const auto modules=cortex::target::ListTargetModules(runtime->target,&modulesError);
+    if(!modulesError.empty()){response=LocalToolResponse(MessageId(m),LocalToolFailure("module_snapshot_unavailable",modulesError),true);return true;}
+    std::vector<mcp_bridge::analysis::LoadedModule> loaded;
+    for(const auto&mod:modules)loaded.push_back({mod.name,mod.path,mod.base,mod.size});
+    json r=mcp_bridge::analysis::MapRvas(job,a["rvas"],loaded,cortex::test::file_version::Hash);
+    r["target"]=TargetJson(runtime->target,true);
+    const bool failed=!r.value("ok",false);
+    response=LocalToolResponse(MessageId(m),std::move(r),failed);return true;
+}
 if(name=="cortex_knowledge_code_check"){
     if(!a.is_object() || a.size()!=3 ||
        !a.contains("knowledge_id") || !a["knowledge_id"].is_string() ||

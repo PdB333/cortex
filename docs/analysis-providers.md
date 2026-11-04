@@ -89,6 +89,14 @@ an executable or pass engine arguments.
   SHA-256. They apply to a loaded module only when that module's file has the
   same SHA-256. This is the rule the Code tab's *Show in live disassembly* and
   `cortex_knowledge_code_check` already follow.
+  - `cortex_analysis_map {job_id, rvas, _cortex_target, _cortex_generation}`
+    (read-only) applies it for agents. It hashes the files of the target's
+    loaded modules, only those of the job's file size. It returns
+    `base + rva` for the matching module, refuses RVAs outside its image, and
+    maps nothing when no module matches.
+  - Validated on the running test target: the mapped address of
+    `CortexDemoApplyDamage` equals the address the process reports for it
+    (`--e2e-manifest`).
 - **Cache.** `<cache>/<provider>/<engine version>/<sha256>/<feature>-<options hash>.json`,
   written atomically. The default folder is `analysis-cache` in the user data
   folder, or the one given by `--analysis-cache`. The same file, engine version
