@@ -358,6 +358,8 @@ and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
 - **Attaching netcoredbg to a process uses the .NET debugging API.** Programs
   that refuse a debugger, or are protected against one, are not worked
   around.
+- **netcoredbg's server mode serves one client session and then exits:**
+  the operator starts it again for each attach.
 - **JDWP (Java live) is a separate provider;** see below.
 
 ## Live provider: JDWP (Java)

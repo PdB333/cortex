@@ -115,7 +115,12 @@ bool DapSession::Attach(uint16_t port, const std::string& adapter, uint64_t proc
     const json done = Request("configurationDone", json::object(), 15000);
     const json attached = Wait(attachSeq, 15000);
     if (!attached.value("success", false)) {
-        error = "dap_attach_failed: " + attached.value("message", std::string());
+        // The adapter's own explanation (message, and body.error.format).
+        std::string detail = attached.value("message", std::string());
+        const json body = attached.value("body", json::object());
+        if (body.is_object() && body.contains("error") && body["error"].is_object())
+            detail += " " + body["error"].value("format", std::string());
+        error = "dap_attach_failed: " + detail;
         Detach();
         return false;
     }

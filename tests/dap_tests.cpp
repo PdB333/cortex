@@ -219,7 +219,20 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     }, 30));
     LiveService service({port}, false);
     json attached;
-    CHECK(WaitFor([&] { return (attached = service.AttachDap(port, "netcoredbg", pid)).value("ok", false); }, 30));
+    // netcoredbg's server serves one session and exits when it ends: retry
+    // only while it is not listening yet; any other failure is final.
+    std::string firstError;
+    CHECK(WaitFor([&] {
+        attached = service.AttachDap(port, "netcoredbg", pid);
+        if (attached.value("ok", false)) return true;
+        const std::string error = attached.value("error", std::string());
+        if (error != "connect_refused" && error != "connect_failed") {
+            if (firstError.empty()) firstError = error;
+            return true;  // stop retrying: the session ended, the adapter is gone
+        }
+        return false;
+    }, 30) && attached.value("ok", false));
+    if (!firstError.empty()) std::cerr << "netcoredbg attach error: " << firstError << std::endl;
     std::cout << "attach: " << attached.dump() << std::endl;
     if (!attached.value("ok", false)) {
         // Why the adapter is not answering: its own output and exit code.
