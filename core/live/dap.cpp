@@ -96,9 +96,10 @@ bool DapSession::Attach(uint16_t port, const std::string& adapter, uint64_t proc
     events_ = std::thread([this] { EventLoop(); });
     const json init = Request("initialize", {{"clientID", "cortex"}, {"clientName", "Cortex"}, {"adapterID", adapter},
                                              {"linesStartAt1", true}, {"columnsStartAt1", true}, {"pathFormat", "path"},
-                                             {"supportsVariableType", true}, {"supportsRunInTerminalRequest", false}});
+                                             {"supportsVariableType", true}, {"supportsRunInTerminalRequest", false}},
+                              60000);  // a first start can be slow (netcoredbg loads its managed part)
     if (!init.value("success", false)) {
-        error = "dap_initialize_failed";
+        error = "dap_initialize_failed: " + init.value("message", std::string());
         Detach();
         return false;
     }
@@ -111,9 +112,9 @@ bool DapSession::Attach(uint16_t port, const std::string& adapter, uint64_t proc
     if (adapter == "debugpy") attach = {{"justMyCode", false}, {"subProcess", false}, {"redirectOutput", true}};
     else attach = {{"processId", processId}};
     const int64_t attachSeq = Send("attach", attach);
-    WaitEvent("initialized", 15000);
-    const json done = Request("configurationDone", json::object(), 15000);
-    const json attached = Wait(attachSeq, 15000);
+    WaitEvent("initialized", 60000);
+    const json done = Request("configurationDone", json::object(), 60000);
+    const json attached = Wait(attachSeq, 60000);
     if (!attached.value("success", false)) {
         // The adapter's own explanation (message, and body.error.format).
         std::string detail = attached.value("message", std::string());

@@ -231,7 +231,7 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
             return true;  // stop retrying: the session ended, the adapter is gone
         }
         return false;
-    }, 30) && attached.value("ok", false));
+    }, 120) && attached.value("ok", false));
     if (!firstError.empty()) std::cerr << "netcoredbg attach error: " << firstError << std::endl;
     std::cout << "attach: " << attached.dump() << std::endl;
     if (!attached.value("ok", false)) {
