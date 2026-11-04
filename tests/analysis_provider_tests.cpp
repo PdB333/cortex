@@ -1,6 +1,7 @@
 // External analysis providers (roadmap step 8).
 //
-//   cortex_analysis_provider_tests <test target exe> <Cortex.Fixture.dll>
+//   cortex_analysis_provider_tests <test target exe> <Cortex.Fixture.dll> <Cortex.Fixture.jar> <actor.elf>
+//   ("-" skips one)
 //
 // Always: the process runner (exit code, output, timeout, cancellation that
 // kills a grandchild), result views, and the job service (cache by SHA-256,
@@ -21,6 +22,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <set>
 #include <thread>
 
@@ -364,6 +366,7 @@ void TestGhidra(const fs::path& temp, const std::string& target) {
     const auto source = cortex::artifacts::OpenFile(target, &error);
     cortex::artifacts::PeFile pe;
     CHECK(source && cortex::artifacts::ParsePe(*source, pe, error));
+    if (!source) return;
     cortex::artifacts::native::CodeIndex index;
     CHECK(cortex::artifacts::native::BuildIndex(*source, pe, index, error));
     uint32_t applyDamage = 0;
@@ -513,6 +516,59 @@ void TestIlspy(const fs::path& temp, const std::string& assembly) {
     CHECK(service.Start("ilspy", {assembly, "list_types"})["cache_hit"] == true);
 }
 
+// Ghidra on an ELF (tests/fixtures/elf): function entries against nm's
+// symbols (actor-expected.json) and the decompiled health write.
+void TestGhidraElf(const fs::path& temp, const std::string& elf) {
+    Settings settings;
+    settings.cacheDir = temp / "ghidra-elf-cache";
+    settings.tempDir = temp / "ghidra-elf-work";
+    Service service(settings);
+    const json providers = service.Providers();
+    json info;
+    for (const auto& row : providers["providers"])
+        if (row["name"] == "ghidra") info = row;
+    if (!info.value("available", false)) {
+        std::cout << "ghidra (elf): SKIPPED" << std::endl;
+        CHECK(!RequireEngines());
+        return;
+    }
+    std::ifstream file(fs::u8path(elf).parent_path() / "actor-expected.json");
+    const json expected = json::parse(file, nullptr, false);
+    CHECK(expected.is_object());
+    if (!expected.is_object()) return;
+    const std::string apply = expected["functions"]["CortexDemoApplyDamage"];
+    const json job = service.RunAndWait("ghidra", {elf, "analyze", {{"decompile", {apply}}}}, json::object());
+    CHECK(job["state"] == "completed");
+    if (job["state"] != "completed") {
+        std::cerr << job.dump(2).substr(0, 4000) << std::endl;
+        return;
+    }
+    const json summary = job["result"]["summary"];
+    CHECK(summary["executable_sha256"] == FileSha256(fs::u8path(elf)));
+    CHECK(summary["format"].get<std::string>().find("ELF") != std::string::npos);
+    CHECK(summary["language"].get<std::string>().find("x86:LE:64") == 0);
+    std::map<std::string, std::string> byName;
+    const json functions = service.Get(job["job_id"], {{"part", "functions"}, {"limit", 500}});
+    for (const auto& row : functions["result"]["items"]) {
+        char normal[32];
+        snprintf(normal, sizeof normal, "0x%llx", static_cast<unsigned long long>(std::stoull(row["rva"].get<std::string>(), nullptr, 16)));
+        byName[row["name"]] = normal;
+    }
+    size_t found = 0;
+    for (const auto& [name, rva] : expected["functions"].items()) {
+        const bool same = byName.count(name) && byName[name] == rva.get<std::string>();
+        if (!same) std::cerr << "elf: " << name << " at " << rva << " is not a Ghidra function there" << std::endl;
+        found += same ? 1 : 0;
+    }
+    std::cout << "ghidra (elf): " << found << "/" << expected["functions"].size() << " nm functions at the same RVA" << std::endl;
+    CHECK(found == expected["functions"].size());
+    const json decompiled = service.Get(job["job_id"], {{"part", "decompiled"}, {"rva", apply}});
+    CHECK(decompiled["result"]["total"] == 1);
+    const std::string c = decompiled["result"]["total"] == 1 ? decompiled["result"]["items"][0].value("c", std::string()) : "";
+    std::cout << c << std::endl;
+    CHECK(c.find("+ 4)") != std::string::npos && c.find("+ 8)") != std::string::npos && c.find("+ 0xc)") != std::string::npos);
+}
+
 void TestVineflower(const fs::path& temp, const std::string& jar) {
     Settings settings;
     settings.cacheDir = temp / "vineflower-cache";
@@ -556,9 +612,10 @@ int main(int argc, char** argv) {
     TestRunner(temp);
     TestViews();
     TestService(temp);
-    if (argc > 1) TestGhidra(temp, argv[1]);
-    if (argc > 2) TestIlspy(temp, argv[2]);
-    if (argc > 3) TestVineflower(temp, argv[3]);
+    if (argc > 1 && std::string(argv[1]) != "-") TestGhidra(temp, argv[1]);
+    if (argc > 2 && std::string(argv[2]) != "-") TestIlspy(temp, argv[2]);
+    if (argc > 3 && std::string(argv[3]) != "-") TestVineflower(temp, argv[3]);
+    if (argc > 4 && std::string(argv[4]) != "-") TestGhidraElf(temp, argv[4]);
     std::error_code ec;
     fs::remove_all(temp, ec);
     if (failures) {

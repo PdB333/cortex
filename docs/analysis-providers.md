@@ -8,7 +8,7 @@ provenance.
 
 | Provider | Engine | Licence | Formats | Features | Status |
 |---|---|---|---|---|---|
-| `ghidra` | Ghidra `analyzeHeadless` (11.x, JDK 21+) | Apache-2.0 | PE | `analyze`: functions (RVA, name, signature, body ranges, calls), imports, composite types, decompiled C keyed by RVA | validated on PE x64 and x86 (`cortex_test_target`) |
+| `ghidra` | Ghidra `analyzeHeadless` (11.x, JDK 21+) | Apache-2.0 | PE, ELF | `analyze`: functions (RVA, name, signature, body ranges, calls), imports, composite types, decompiled C keyed by RVA | validated on PE x64 and x86 (`cortex_test_target`) and ELF x86-64 (`tests/fixtures/elf`: 10/10 `nm` functions at the same RVA, the decompiled health write) |
 | `ilspy` | ILSpy command line `ilspycmd` (9.x) | MIT | .NET assemblies | `decompile` (the whole assembly as a C# project, or one type), `list_types` | validated on `tests/fixtures/dotnet` |
 | `vineflower` | Vineflower 1.11 (`java -jar vineflower.jar`, JDK 11+) | Apache-2.0 | `.jar`, `.class` | `decompile` (Java sources) | validated on `tests/fixtures/java`: the sources recompile and every class has the original's `javap -p` signatures |
 
@@ -172,7 +172,8 @@ fixture. A cache hit costs one file hash plus reading the cached JSON.
   carries `[module: RefSafetyRules(11)]`, which the compiler reserves for
   itself (CS8335). The E2E removes that one line, and reports it, before
   rebuilding; Cortex returns the files unchanged.
-- Ghidra is validated on PE x64/x86 only. ELF, Mach-O and other formats Ghidra
+- Ghidra is validated on PE x64/x86 and ELF x86-64 (a PIE built by
+  `tests/fixtures/elf/make_elf_fixture.sh`). Mach-O and other formats Ghidra
   can import are not offered until they are validated.
 - Results are the engine's defaults: no custom analyzers, no PDB loading
   options, no user scripts.

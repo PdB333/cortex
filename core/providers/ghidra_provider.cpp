@@ -221,12 +221,12 @@ public:
         info.name = "ghidra";
         info.engine = "Ghidra (analyzeHeadless)";
         info.license = "Apache-2.0";
-        info.formats = {"pe"};
+        info.formats = {"pe", "elf"};
         info.permissions = {"reads_file", "spawns_process", "writes_temp_project", "writes_cache"};
         info.features = {{"analyze", "validated",
                           "Auto-analysis in a Cortex-owned temporary project; exports functions (RVA, name, signature, "
                           "body ranges, calls), imports, composite types and decompiled C keyed by RVA. Validated on "
-                          "PE x64/x86 (cortex_test_target)."}};
+                          "PE x64/x86 (cortex_test_target) and ELF x86-64 (tests/fixtures/elf)."}};
         if (dir_.empty()) {
             info.availability = "not configured: pass --ghidra-dir or set GHIDRA_INSTALL_DIR";
             return info;

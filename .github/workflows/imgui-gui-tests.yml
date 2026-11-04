@@ -183,7 +183,7 @@ jobs:
           CORTEX_REQUIRE_ENGINES: "1"
         run: |
           $tests = "build/analysis/cortex_analysis_provider_tests.exe"
-          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll" "tests/fixtures/java/Cortex.Fixture.jar"
+          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll" "tests/fixtures/java/Cortex.Fixture.jar" "tests/fixtures/elf/actor.elf"
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x64 target)" }
           & $tests "build/x86-fixture/e2e/cortex_test_target_x86.exe"
           if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x86 target)" }
