@@ -202,11 +202,15 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         cortex::providers::RunProcess(spec, &stop);
     });
     const uint16_t port = static_cast<uint16_t>(6400 + Pid() % 500);
+    cortex::providers::ProcessOutcome adapterOutcome;
+    std::atomic<bool> adapterDone{false};
     std::thread adapter([&] {
         cortex::providers::ProcessSpec spec;
         spec.argv = {netcoredbg, "--interpreter=vscode", "--server=" + std::to_string(port)};
+        spec.workingDirectory = fs::u8path(netcoredbg).parent_path().u8string();
         spec.timeout = std::chrono::minutes(5);
-        cortex::providers::RunProcess(spec, &stop);
+        adapterOutcome = cortex::providers::RunProcess(spec, &stop);
+        adapterDone = true;
     });
     uint64_t pid = 0;
     CHECK(WaitFor([&] {
@@ -217,6 +221,16 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     json attached;
     CHECK(WaitFor([&] { return (attached = service.AttachDap(port, "netcoredbg", pid)).value("ok", false); }, 30));
     std::cout << "attach: " << attached.dump() << std::endl;
+    if (!attached.value("ok", false)) {
+        // Why the adapter is not answering: its own output and exit code.
+        stop = true;
+        adapter.join();
+        std::cerr << "netcoredbg exited=" << adapterDone.load() << " code=" << adapterOutcome.exitCode
+                  << " started=" << adapterOutcome.started << " error=" << adapterOutcome.error << "\n"
+                  << adapterOutcome.output.substr(0, 4000) << std::endl;
+        app.join();
+        return;
+    }
     auto session = service.Get(attached.value("session_id", std::string()));
     if (session) {
         const uint32_t line = LineOf(source, "CORTEX_HEALTH_WRITE");

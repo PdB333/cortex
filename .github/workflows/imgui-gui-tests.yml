@@ -222,12 +222,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "DAP tests failed" }
 
       - name: Download tested portable bundle
+        if: success() || failure()
         uses: actions/download-artifact@v4
         with:
           name: cortex-imgui-gui-tested-portable
           path: stage/Cortex
 
       - name: Ghidra and ILSpy through MCP
+        if: success() || failure()
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "stage/Cortex").Path
