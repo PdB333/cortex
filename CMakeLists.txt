@@ -339,6 +339,8 @@ add_executable(cortex_host
     core/providers/vineflower_provider.cpp
     core/live/websocket.cpp
     core/live/cdp.cpp
+    core/live/dap.cpp
+    core/live/live_service.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
     host/diagnostics/external_host.cpp
@@ -729,7 +731,7 @@ if(BUILD_TESTING)
              ${CMAKE_SOURCE_DIR}/tests/fixtures/java/Cortex.Fixture.jar ${CMAKE_SOURCE_DIR}/tests/fixtures/elf/actor.elf)
     set_tests_properties(cortex_analysis_provider_tests PROPERTIES TIMEOUT 3600)
 
-    add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/providers/process_runner.cpp)
+    add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
     target_include_directories(cortex_cdp_tests PRIVATE core)
     target_link_libraries(cortex_cdp_tests PRIVATE nlohmann_json::nlohmann_json)
     if(WIN32)
@@ -738,6 +740,17 @@ if(BUILD_TESTING)
     # Node runs the fixture when it is on PATH (CI); otherwise that part skips.
     add_test(NAME cortex_cdp_tests COMMAND cortex_cdp_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/node-live/app.js)
     set_tests_properties(cortex_cdp_tests PROPERTIES TIMEOUT 300)
+
+    add_executable(cortex_dap_tests tests/dap_tests.cpp core/live/websocket.cpp core/live/cdp.cpp core/live/dap.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
+    target_include_directories(cortex_dap_tests PRIVATE core)
+    target_link_libraries(cortex_dap_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(cortex_dap_tests PRIVATE ws2_32)
+    endif()
+    # Python with debugpy runs the fixture when present (CI's analysis-engines
+    # job also passes the .NET fixture and netcoredbg); otherwise it skips.
+    add_test(NAME cortex_dap_tests COMMAND cortex_dap_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/python-live/app.py)
+    set_tests_properties(cortex_dap_tests PROPERTIES TIMEOUT 300)
 
     add_executable(cortex_process_tree_tests tests/process_tree_tests.cpp core/target/process_tree.cpp)
     target_link_libraries(cortex_process_tree_tests PRIVATE nlohmann_json::nlohmann_json)
@@ -773,7 +786,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

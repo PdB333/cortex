@@ -199,6 +199,8 @@ add_executable(cortex_imgui WIN32
     ../core/providers/vineflower_provider.cpp
     ../core/live/websocket.cpp
     ../core/live/cdp.cpp
+    ../core/live/dap.cpp
+    ../core/live/live_service.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp

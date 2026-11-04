@@ -23,7 +23,8 @@ public:
     // "ai_investigation_approve <id> <step>", "ai_investigation_reject <id>
     // <step>", "ai_evidence_refresh", "ai_evidence_live <id>",
     // "ai_evidence_static <id>", "ai_process_tree <pid>", "ai_tab <name>",
-    // "ai_live_attach <port>", "ai_live_script <url>", "ai_live_breakpoint
+    // "ai_live_attach <port>" (CDP), "ai_live_attach_dap <port> <debugpy|netcoredbg> [pid]",
+    // "ai_live_script <url>", "ai_live_breakpoint
     // <line>", "ai_live_hits", "ai_live_detach".
     void HandleCommand(UiContext& context, const std::string& command) override;
 
@@ -41,6 +42,7 @@ private:
     // Live (CDP): a Node.js/Electron inspector on 127.0.0.1.
     void DrawLive(UiContext& context);
     void LiveAttach(UiContext& context, int port);
+    void LiveAttachDap(UiContext& context, int port, const std::string& adapter, int pid);
     void LiveOpenScript(UiContext& context, const std::string& url);
     void LiveBreakpoint(UiContext& context, int line);
     void LiveDetach(UiContext& context);
@@ -56,6 +58,9 @@ private:
     std::string selectTab_;
     std::string liveSession_;
     int livePort_ = 9229;
+    int liveProtocol_ = 0;  // 0 CDP, 1 DAP debugpy, 2 DAP netcoredbg
+    int livePid_ = 0;
+    std::array<char, 1024> livePath_ = {};
     int liveLine_ = 1;
     int liveBreakpoint_ = 0;
     double livePolled_ = 0;

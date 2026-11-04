@@ -385,6 +385,7 @@ json CdpSession::Status() const {
     json foreign = json::array();
     for (const auto& pause : foreignPauses_) foreign.push_back(pause);
     return {{"ok", true},
+            {"protocol", "cdp"},
             {"connected", connected_.load()},
             {"port", port_},
             {"target", target_},
@@ -503,60 +504,6 @@ json CdpSession::Console(size_t offset, size_t limit) const {
             rows.push_back(std::move(entry));
         }
     return {{"ok", true}, {"total", consoleTotal_}, {"oldest_kept", first}, {"messages", rows}};
-}
-
-json LiveService::Targets(uint16_t port) const {
-    if (!PortAllowed(port)) return {{"ok", false}, {"error", "port_not_allowed"}, {"message", "the operator allows inspector ports with --inspect-port"}};
-    return ListTargets(port);
-}
-
-json LiveService::Attach(uint16_t port, const std::string& targetId) {
-    if (!PortAllowed(port)) return {{"ok", false}, {"error", "port_not_allowed"}, {"message", "the operator allows inspector ports with --inspect-port"}};
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (sessions_.size() >= 8) return {{"ok", false}, {"error", "too_many_sessions"}};
-    }
-    auto session = std::make_shared<CdpSession>();
-    std::string error;
-    if (!session->Attach(port, targetId, error)) return {{"ok", false}, {"error", error}};
-    std::lock_guard<std::mutex> lock(mutex_);
-    const std::string id = "cdp-" + std::to_string(++counter_);
-    sessions_[id] = session;
-    json status = session->Status();
-    info_[id] = {{"session_id", id}, {"port", port}, {"target", status["target"]}};
-    status["session_id"] = id;
-    return status;
-}
-
-std::shared_ptr<CdpSession> LiveService::Get(const std::string& sessionId) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = sessions_.find(sessionId);
-    return it == sessions_.end() ? nullptr : it->second;
-}
-
-json LiveService::Detach(const std::string& sessionId) {
-    std::shared_ptr<CdpSession> session;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        const auto it = sessions_.find(sessionId);
-        if (it == sessions_.end()) return {{"ok", false}, {"error", "unknown_session"}};
-        session = it->second;
-        sessions_.erase(it);
-        info_.erase(sessionId);
-    }
-    session->Detach();
-    return {{"ok", true}, {"session_id", sessionId}, {"detached", true}};
-}
-
-json LiveService::Sessions() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    json rows = json::array();
-    for (const auto& [id, row] : info_) {
-        json entry = row;
-        entry["connected"] = sessions_.at(id)->Connected();
-        rows.push_back(entry);
-    }
-    return {{"ok", true}, {"sessions", rows}};
 }
 
 } // namespace cortex::live

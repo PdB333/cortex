@@ -283,3 +283,79 @@ is set (CI). The Windows CI runs all three against the runner's node.
   Cortex does not release it.
 - IPC observation in Electron is done by setting log breakpoints in
   `ipcMain`/`ipcRenderer` handlers by hand. There is no dedicated IPC view.
+
+## Live provider: DAP (Python through debugpy, .NET through netcoredbg)
+
+`core/live/dap.{h,cpp}` is a Debug Adapter Protocol client over TCP to
+**127.0.0.1**. It shares the `LiveSession` interface, the `cortex_live_*`
+tools, `cortex.exe live` and the desktop tab with the CDP provider.
+
+The adapter is started by the operator and its port allowed with
+`--inspect-port`:
+
+- **Python:** `python -m debugpy --listen 127.0.0.1:PORT app.py` (debugpy,
+  MIT). `cortex_live_attach {port, protocol: "dap", adapter: "debugpy"}`
+  attaches to that process.
+- **.NET:** `netcoredbg --interpreter=vscode --server=PORT` (netcoredbg, MIT).
+  `cortex_live_attach {port, protocol: "dap", adapter: "netcoredbg",
+  process_id, mutation_permission: true}` attaches it to a running .NET
+  process. Attaching a debugger to a process is control: it needs the
+  operator's `--allow-writes`. In the desktop it follows the write permission.
+
+Same rules as CDP:
+- log breakpoints only (`setBreakpoints` with lines, no condition, no
+  `logMessage`, no hit condition, no `evaluate`);
+- at a hit, Cortex records the stack and the top frame's locals (one
+  `variables` request, nothing expanded), then sends `continue`;
+- the breakpoint is removed after `max_hits`;
+- a stop Cortex did not set, such as Python's `breakpoint()`, is recorded and
+  continued;
+- detaching clears Cortex's breakpoints and sends `disconnect` with
+  `terminateDebuggee: false`.
+
+`cortex_live_source` on a DAP session reads only files that the debugger
+reported in a recorded stack. Other files go through `cortex_artifact_read`
+and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
+
+### Validation
+
+`cortex_dap_tests`:
+- **refusals:** port not allowed, unknown adapter, netcoredbg without a
+  process id, nothing listening;
+- **Python, debugpy 1.8.22:** the fixture `tests/fixtures/python-live/app.py`
+  runs under `debugpy --listen`:
+  - 6 hits in `apply_damage` at the health-write line, with `amount = 9`,
+    `absorbed` between 0 and 3, and the dict's health following the fixture's
+    rule from one hit to the next;
+  - the breakpoint removes itself after 6 hits;
+  - `breakpoint()` is recorded as a foreign stop (`reason: breakpoint`) and
+    continued, and the output keeps coming;
+  - the source is refused before the file appears in a stack, then readable;
+  - after a detach, a new session sees the process running;
+- **.NET, netcoredbg 3.1.2:** the Debug build of
+  `tests/fixtures/dotnet-live` runs on its own; netcoredbg in server mode
+  attaches to its process id:
+  - 5 hits in `Program.ApplyDamage()` at the health-write line, with
+    `amount = 9` and `absorbed` between 0 and 3;
+  - the `Actor` local shows as `{Actor}`: no property getter ran;
+  - the breakpoint removes itself;
+  - the process is still alive after detaching.
+- **Where it ran:** natively on Linux with ASan/UBSan. The Windows build
+  (Winsock) was checked under Wine against the same debugpy with
+  `cortex.exe live watch --protocol dap`. The `analysis-engines` CI job runs
+  both adapters on Windows with pinned versions (netcoredbg by SHA-256,
+  debugpy by version).
+
+### Limits (DAP)
+
+- **debugpy builds values with `repr()`,** so a user class's `__repr__` runs
+  in the target. The fixture uses plain dicts. netcoredbg shows objects by
+  type name.
+- **Only the top frame's first scope (Locals) is captured,** one level, at
+  most 48 variables.
+- **Breakpoints are matched by the adapter's id,** or by path and line when
+  the adapter gives none.
+- **Attaching netcoredbg to a process uses the .NET debugging API.** Programs
+  that refuse a debugger, or are protected against one, are not worked
+  around.
+- **JDWP (Java live) is a separate provider;** see below.

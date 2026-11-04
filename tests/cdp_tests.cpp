@@ -16,7 +16,7 @@
 //   - detaching leaves the process running.
 // CORTEX_TEST_INSPECT_PORT uses an already started fixture instead.
 
-#include "live/cdp.h"
+#include "live/live_service.h"
 #include "providers/process_runner.h"
 
 #include <atomic>
@@ -94,7 +94,7 @@ int64_t PreviewNumber(const json& described, const std::string& name) {
     return INT64_MIN;
 }
 
-int64_t LastTick(CdpSession& session) {
+int64_t LastTick(LiveSession& session) {
     const json console = session.Console(0, 5000);
     int64_t tick = -1;
     for (const auto& message : console["messages"]) {

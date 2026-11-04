@@ -35,30 +35,52 @@ using json = nlohmann::json;
 // GET /json/list and /json/version of a local inspector.
 json ListTargets(uint16_t port);
 
-class CdpSession {
+// What every live session offers (CDP here, DAP in dap.h). Reads are
+// observation; breakpoints are log breakpoints that never leave the program
+// paused.
+class LiveSession {
+public:
+    virtual ~LiveSession() = default;
+    virtual std::string Protocol() const = 0;
+    virtual void Detach() = 0;
+    virtual bool Connected() const = 0;
+    virtual json Status() const = 0;
+    virtual json Scripts(const std::string& query, size_t offset, size_t limit) const = 0;
+    virtual json Source(const std::string& key, size_t firstLine, size_t lineCount) = 0;
+    // `location` is a script URL (CDP) or a source file path (DAP).
+    virtual json SetLogBreakpoint(const std::string& location, uint32_t line, uint32_t column, uint32_t maxHits,
+                                  uint32_t maxFrames) = 0;
+    virtual json RemoveBreakpoint(int id) = 0;
+    virtual json Breakpoints() const = 0;
+    virtual json Hits(int id, size_t offset, size_t limit) const = 0;
+    virtual json Console(size_t offset, size_t limit) const = 0;
+};
+
+class CdpSession final : public LiveSession {
 public:
     CdpSession() = default;
-    ~CdpSession();
+    ~CdpSession() override;
     CdpSession(const CdpSession&) = delete;
     CdpSession& operator=(const CdpSession&) = delete;
 
     // Attaches to `targetId` (or the only/first node or page target) of
     // the inspector on `port`; enables the Debugger and Runtime domains.
     bool Attach(uint16_t port, const std::string& targetId, std::string& error);
-    void Detach();
-    bool Connected() const { return connected_; }
+    std::string Protocol() const override { return "cdp"; }
+    void Detach() override;
+    bool Connected() const override { return connected_; }
 
-    json Status() const;
-    json Scripts(const std::string& query, size_t offset, size_t limit) const;
+    json Status() const override;
+    json Scripts(const std::string& query, size_t offset, size_t limit) const override;
     // Source by script id or URL; 1-based line range.
-    json Source(const std::string& scriptIdOrUrl, size_t firstLine, size_t lineCount);
+    json Source(const std::string& scriptIdOrUrl, size_t firstLine, size_t lineCount) override;
     // A log breakpoint at a 1-based line (and optional 1-based column) of a
     // script URL.
-    json SetLogBreakpoint(const std::string& url, uint32_t line, uint32_t column, uint32_t maxHits, uint32_t maxFrames);
-    json RemoveBreakpoint(int id);
-    json Breakpoints() const;
-    json Hits(int id, size_t offset, size_t limit) const;
-    json Console(size_t offset, size_t limit) const;
+    json SetLogBreakpoint(const std::string& url, uint32_t line, uint32_t column, uint32_t maxHits, uint32_t maxFrames) override;
+    json RemoveBreakpoint(int id) override;
+    json Breakpoints() const override;
+    json Hits(int id, size_t offset, size_t limit) const override;
+    json Console(size_t offset, size_t limit) const override;
 
 private:
     json Call(const std::string& method, const json& params, int timeoutMs = 5000);
@@ -102,27 +124,6 @@ private:
     uint64_t foreignPauseTotal_ = 0;
     uint64_t pauses_ = 0;
     std::string lastError_;
-};
-
-// Sessions for MCP, the CLI and the desktop. `allowedPorts` empty with
-// `anyPort` false refuses every attach (MCP without --inspect-port).
-class LiveService {
-public:
-    LiveService(std::set<uint16_t> allowedPorts, bool anyPort) : allowed_(std::move(allowedPorts)), anyPort_(anyPort) {}
-    bool PortAllowed(uint16_t port) const { return anyPort_ || allowed_.count(port) > 0; }
-    json Targets(uint16_t port) const;
-    json Attach(uint16_t port, const std::string& targetId);
-    std::shared_ptr<CdpSession> Get(const std::string& sessionId) const;
-    json Detach(const std::string& sessionId);
-    json Sessions() const;
-
-private:
-    std::set<uint16_t> allowed_;
-    bool anyPort_;
-    mutable std::mutex mutex_;
-    std::map<std::string, std::shared_ptr<CdpSession>> sessions_;
-    std::map<std::string, json> info_;
-    uint64_t counter_ = 0;
 };
 
 } // namespace cortex::live

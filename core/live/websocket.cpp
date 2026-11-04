@@ -238,6 +238,43 @@ bool HttpGet(uint16_t port, const std::string& path, std::string& body, std::str
     return true;
 }
 
+TcpStream::TcpStream() : socket_(kInvalid) {}
+TcpStream::~TcpStream() { Close(); }
+bool TcpStream::Open() const { return socket_ != kInvalid; }
+
+bool TcpStream::Connect(uint16_t port, std::string& error, int timeoutMs) {
+    Close();
+    socket_ = ConnectLoopback(port, timeoutMs, error);
+    return socket_ != kInvalid;
+}
+
+bool TcpStream::Send(const std::string& bytes) {
+    std::lock_guard<std::mutex> lock(sendMutex_);
+    return socket_ != kInvalid && SendAll(socket_, bytes.data(), bytes.size());
+}
+
+int TcpStream::Read(char* buffer, size_t max, int timeoutMs) {
+    const intptr_t s = socket_;
+    if (s == kInvalid) return -1;
+    const int ready = Poll(s, POLLIN, timeoutMs);
+    if (ready == 0) return 0;
+    if (ready < 0) return -1;
+    const int got = ::recv(static_cast<Native>(s), buffer, static_cast<int>(std::min<size_t>(max, 1 << 20)), 0);
+    return got > 0 ? got : -1;
+}
+
+void TcpStream::Close() {
+    std::lock_guard<std::mutex> lock(sendMutex_);
+    if (socket_ == kInvalid) return;
+#if defined(_WIN32)
+    shutdown(static_cast<SOCKET>(socket_), SD_BOTH);
+#else
+    shutdown(static_cast<int>(socket_), SHUT_RDWR);
+#endif
+    CloseNative(socket_);
+    socket_ = kInvalid;
+}
+
 WebSocket::WebSocket() : socket_(kInvalid) {}
 WebSocket::~WebSocket() { Close(); }
 bool WebSocket::Open() const { return socket_ != kInvalid; }

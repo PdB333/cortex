@@ -113,6 +113,9 @@ jobs:
       GHIDRA_BUILD: "20250826"
       VINEFLOWER_VERSION: "1.11.1"
       VINEFLOWER_SHA1: "77767cdbc76d116c6d5e1565ec387e531085b9f4"
+      NETCOREDBG_RELEASE: "3.1.2-1054"
+      NETCOREDBG_SHA256: "09b4385fd556014a8a96df7a368d4937f4fc9e06f031365d41a288aabd2d78f9"
+      DEBUGPY_VERSION: "1.8.22"
     steps:
       - uses: actions/checkout@v4
 
@@ -163,13 +166,22 @@ jobs:
           Invoke-WebRequest -Uri "https://repo1.maven.org/maven2/org/vineflower/vineflower/$env:VINEFLOWER_VERSION/vineflower-$env:VINEFLOWER_VERSION.jar" -OutFile $jar
           if ((Get-FileHash $jar -Algorithm SHA1).Hash.ToLower() -ne $env:VINEFLOWER_SHA1) { throw "vineflower hash mismatch" }
           "CORTEX_VINEFLOWER=$jar" | Add-Content $env:GITHUB_ENV
+          # netcoredbg (MIT), the .NET debug adapter, checked against its SHA-256.
+          $zip = "$env:RUNNER_TEMP\netcoredbg.zip"
+          Invoke-WebRequest -Uri "https://github.com/Samsung/netcoredbg/releases/download/$env:NETCOREDBG_RELEASE/netcoredbg-win64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $env:NETCOREDBG_SHA256) { throw "netcoredbg hash mismatch" }
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\netcoredbg" -Force
+          "CORTEX_NETCOREDBG=$env:RUNNER_TEMP\netcoredbg\netcoredbg\netcoredbg.exe" | Add-Content $env:GITHUB_ENV
+          # debugpy (MIT) for the Python live fixture.
+          python -m pip install "debugpy==$env:DEBUGPY_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "debugpy install failed" }
 
       - name: Build provider tests and the x64 target
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_cdp_tests cortex_test_target --parallel 2
+          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_target --parallel 2
 
       - name: Download x86 GUI fixture
         uses: actions/download-artifact@v4
@@ -195,6 +207,18 @@ jobs:
         run: |
           build/analysis/cortex_cdp_tests.exe tests/fixtures/node-live/app.js
           if ($LASTEXITCODE -ne 0) { throw "CDP tests failed" }
+
+      - name: DAP tests (Python through debugpy, .NET through netcoredbg)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_DEBUGPY: "1"
+          CORTEX_REQUIRE_NETCOREDBG: "1"
+        run: |
+          dotnet build tests/fixtures/dotnet-live/Cortex.LiveFixture.csproj -c Debug -o "$env:RUNNER_TEMP\dotnet-live"
+          if ($LASTEXITCODE -ne 0) { throw "building the .NET live fixture failed" }
+          $env:CORTEX_TEST_PYTHON = (Get-Command python).Source
+          build/analysis/cortex_dap_tests.exe tests/fixtures/python-live/app.py "$env:RUNNER_TEMP\dotnet-live\Cortex.LiveFixture.dll" "$env:CORTEX_NETCOREDBG" tests/fixtures/dotnet-live/Program.cs
+          if ($LASTEXITCODE -ne 0) { throw "DAP tests failed" }
 
       - name: Download tested portable bundle
         uses: actions/download-artifact@v4

@@ -15,6 +15,25 @@ namespace cortex::live {
 bool HttpGet(uint16_t port, const std::string& path, std::string& body, std::string& error, int timeoutMs = 3000,
              size_t maxBody = 8u << 20);
 
+// A plain TCP stream to 127.0.0.1 (DAP and JDWP transports).
+class TcpStream {
+public:
+    TcpStream();
+    ~TcpStream();
+    TcpStream(const TcpStream&) = delete;
+    TcpStream& operator=(const TcpStream&) = delete;
+    bool Connect(uint16_t port, std::string& error, int timeoutMs = 3000);
+    bool Send(const std::string& bytes);  // thread-safe
+    // Up to `max` bytes; 0 on timeout, -1 on close or error.
+    int Read(char* buffer, size_t max, int timeoutMs);
+    void Close();
+    bool Open() const;
+
+private:
+    intptr_t socket_;
+    std::mutex sendMutex_;
+};
+
 class WebSocket {
 public:
     WebSocket();

@@ -10,6 +10,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <sstream>
 #include <cstdio>
 
 namespace cortex::ui {
@@ -58,7 +59,13 @@ void AiInvestigationWorkspace::HandleCommand(UiContext& context, const std::stri
     } else if (command.rfind("ai_process_tree ", 0) == 0) LoadProcessTree(context, std::strtoull(argument("ai_process_tree ").c_str(), nullptr, 10));
     else if (command.rfind("ai_tab ", 0) == 0) selectTab_ = argument("ai_tab ");
     else if (command.rfind("ai_live_attach ", 0) == 0) LiveAttach(context, std::atoi(argument("ai_live_attach ").c_str()));
-    else if (command.rfind("ai_live_script ", 0) == 0) LiveOpenScript(context, argument("ai_live_script "));
+    else if (command.rfind("ai_live_attach_dap ", 0) == 0) {
+        std::istringstream in(argument("ai_live_attach_dap "));
+        int port = 0, pid = 0;
+        std::string adapter;
+        in >> port >> adapter >> pid;
+        LiveAttachDap(context, port, adapter, pid);
+    } else if (command.rfind("ai_live_script ", 0) == 0) LiveOpenScript(context, argument("ai_live_script "));
     else if (command.rfind("ai_live_breakpoint ", 0) == 0) LiveBreakpoint(context, std::atoi(argument("ai_live_breakpoint ").c_str()));
     else if (command == "ai_live_hits") {
         auto session = DesktopLive().Get(liveSession_);
@@ -357,6 +364,31 @@ void AiInvestigationWorkspace::LiveAttach(UiContext& context, int port) {
                      target.value("title", std::string()) + ")";
 }
 
+void AiInvestigationWorkspace::LiveAttachDap(UiContext& context, int port, const std::string& adapter, int pid) {
+    if (port <= 0 || port > 65535) {
+        context.status = "Live: invalid port";
+        return;
+    }
+    // Attaching a managed debugger to a process follows the write permission.
+    if (adapter == "netcoredbg" && !context.mutationAllowed) {
+        context.status = "Live: attaching netcoredbg to a process needs write permission";
+        return;
+    }
+    if (!liveSession_.empty()) DesktopLive().Detach(liveSession_);
+    liveSession_.clear();
+    liveScripts_ = liveSource_ = liveHits_ = nullptr;
+    liveBreakpoint_ = 0;
+    const json attached = DesktopLive().AttachDap(static_cast<uint16_t>(port), adapter, static_cast<uint64_t>(std::max(0, pid)));
+    if (!attached.value("ok", false)) {
+        context.status = "Live: attach failed: " + attached.value("error", std::string());
+        return;
+    }
+    livePort_ = port;
+    liveSession_ = attached.value("session_id", std::string());
+    liveStatus_ = attached;
+    context.status = "Live: attached " + liveSession_ + " (" + adapter + ")";
+}
+
 void AiInvestigationWorkspace::LiveOpenScript(UiContext& context, const std::string& url) {
     auto session = DesktopLive().Get(liveSession_);
     if (!session) {
@@ -364,6 +396,10 @@ void AiInvestigationWorkspace::LiveOpenScript(UiContext& context, const std::str
         return;
     }
     liveSource_ = session->Source(url, 1, 20000);
+    // DAP: a file is readable once the debugger reported it in a stack;
+    // before that the path is still usable for a breakpoint.
+    if (session->Protocol() == "dap" && !liveSource_.value("ok", false))
+        liveSource_ = {{"ok", true}, {"url", url}, {"text", "(the source is shown once the debugger reports this file in a stack)"}};
     context.status = liveSource_.value("ok", false) ? "Live: source of " + url : "Live: no script " + url;
 }
 
@@ -403,10 +439,22 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
              "--remote-debugging-port). Cortex lists scripts and console output and sets LOG breakpoints: each hit records "
              "the stack and locals, then the program resumes at once. Nothing is evaluated in the program.");
     auto session = DesktopLive().Get(liveSession_);
+    static const char* protocols[] = {"CDP (Node.js, Electron)", "DAP: debugpy (Python)", "DAP: netcoredbg (.NET)"};
+    ImGui::SetNextItemWidth(Px(220));
+    ImGui::Combo("##LiveProtocol", &liveProtocol_, protocols, IM_ARRAYSIZE(protocols));
+    ImGui::SameLine();
     ImGui::SetNextItemWidth(Px(120));
     ImGui::InputInt("Port", &livePort_);
+    if (liveProtocol_ == 2) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(Px(120));
+        ImGui::InputInt("Process id", &livePid_);
+    }
     ImGui::SameLine();
-    if (ImGui::Button(session ? "Reattach" : "Attach")) LiveAttach(context, livePort_);
+    if (ImGui::Button(session ? "Reattach" : "Attach")) {
+        if (liveProtocol_ == 0) LiveAttach(context, livePort_);
+        else LiveAttachDap(context, livePort_, liveProtocol_ == 1 ? "debugpy" : "netcoredbg", livePid_);
+    }
     if (session) {
         ImGui::SameLine();
         if (ImGui::Button("Detach")) {
@@ -431,8 +479,15 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
                 liveStatus_.value("connected", false) ? "" : "  (disconnected)");
     const float listWidth = std::max(Px(260), ImGui::GetContentRegionAvail().x * 0.3f);
     ImGui::BeginChild("LiveScripts", ImVec2(listWidth, 0), ImGuiChildFlags_Borders);
+    if (session->Protocol() == "dap") {
+        ImGui::TextWrapped("DAP: give the source file path for a breakpoint.");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##LivePath", "source file path", livePath_.data(), livePath_.size());
+        if (ImGui::Button("Use this file")) LiveOpenScript(context, livePath_.data());
+    }
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##LiveFilter", "filter scripts (URL)", liveFilter_.data(), liveFilter_.size());
+    if (session->Protocol() == "cdp")
+        ImGui::InputTextWithHint("##LiveFilter", "filter scripts (URL)", liveFilter_.data(), liveFilter_.size());
     const json scripts = liveScripts_.is_object() ? liveScripts_.value("scripts", json::array()) : json::array();
     for (const auto& script : scripts) {
         const std::string url = script.value("url", std::string());
@@ -474,7 +529,7 @@ void AiInvestigationWorkspace::DrawLive(UiContext& context) {
                               (value.contains("value") ? value["value"].dump() : value.value("description", value.value("type", std::string())));
                 }
                 ImGui::BulletText("#%d %s %s:%d  %s", record.value("hit", 0), top.value("function", std::string()).c_str(),
-                                  top.value("url", std::string()).c_str(), top.value("line", 0), locals.c_str());
+                                  top.value("url", top.value("path", std::string())).c_str(), top.value("line", 0), locals.c_str());
             }
             ImGui::EndChild();
         }
