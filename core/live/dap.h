@@ -3,8 +3,11 @@
 // Debug Adapter Protocol (DAP) live provider: one client for the adapters
 // the operator starts and points Cortex at, on 127.0.0.1:
 //   - debugpy (Python): `python -m debugpy --listen 127.0.0.1:PORT app.py`;
-//   - netcoredbg (.NET, MIT): `netcoredbg --interpreter=vscode --server=PORT`,
-//     then Cortex attaches it to a .NET process id.
+//   - netcoredbg (.NET, MIT): stdio mode (AttachStdio: Cortex starts the
+//     operator's `netcoredbg --interpreter=vscode` and speaks DAP over its
+//     pipes; the only mode that works on Windows), or
+//     `netcoredbg --interpreter=vscode --server=PORT` started by the operator.
+//     Either way Cortex attaches it to a .NET process id.
 //
 // Same rules as the CDP provider: log breakpoints only (no condition, no
 // logMessage, no hit condition, no evaluate). At a hit the stack and the top
