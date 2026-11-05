@@ -360,6 +360,19 @@ and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
   around.
 - **netcoredbg's server mode serves one client session and then exits:**
   the operator starts it again for each attach.
+- **.NET live is validated on Linux only.** On Windows, netcoredbg 3.1.2
+  (`netcoredbg-win64`) in `--server` mode answers `initialize`, sends
+  `initialized`, and then reads no further command.
+  - CI's engine log (`--engineLogging`) shows only `initialize` received;
+    `attach` and `configurationDone` never arrive at the adapter.
+  - Under Wine, a plain Python DAP client hits the same: no answer to a
+    second request in the same session.
+  - The Linux build of the same release passes the whole test.
+
+  The `analysis-engines` CI job keeps the test, so it stays red on Windows
+  until this is solved. One possible way round it is Cortex starting
+  netcoredbg itself in stdio mode (`--interpreter=vscode` over pipes); this
+  is not implemented.
 - **JDWP (Java live) is a separate provider;** see below.
 
 ## Live provider: JDWP (Java)
