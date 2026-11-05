@@ -264,7 +264,31 @@ void TestCheckedPatchRevert() {
            "a patch in memory that no longer exists is refused");
 }
 
+// Scan sessions are kept in the target's memory: only the most recent few
+// survive, so repeated scans cannot grow the target without limit.
+void TestScanSessionsAreBounded() {
+    auto* page = static_cast<uint32_t*>(VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    Expect(page != nullptr, "VirtualAlloc scan session page");
+    if (!page) return;
+    page[0] = 0x51CE5E55;
+    std::vector<int> ids;
+    for (int i = 0; i < 7; ++i) {
+        size_t count = 0;
+        bool truncated = false;
+        ids.push_back(memscan::ScanNew("u32", std::to_string(page[0]), reinterpret_cast<uintptr_t>(page),
+                                       reinterpret_cast<uintptr_t>(page) + 4, count, truncated));
+    }
+    Expect(memscan::ScanList().size() <= 4, "at most four scan sessions are kept");
+    std::vector<memscan::ScanResult> results;
+    size_t total = 0;
+    Expect(!memscan::ScanResults(ids.front(), 0, 1, results, total), "the oldest scan session was evicted");
+    Expect(memscan::ScanResults(ids.back(), 0, 1, results, total) && total == 1, "the newest scan session is kept");
+    for (int id : ids) memscan::ScanReset(id);
+    VirtualFree(page, 0, MEM_RELEASE);
+}
+
 int main() {
+    TestScanSessionsAreBounded();
     TestCheckedPatchRevert();
     TestExact64BitScan();
     TestLargeRegionIsNotSkipped();

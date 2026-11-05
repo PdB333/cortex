@@ -188,6 +188,7 @@ def main():
         names = [tool["name"] for tool in (listed or {}).get("result", {}).get("tools", [])]
         skip = {"cortex_launch", "cortex_restart", "cortex_stop", "cortex_detach"}
         unanswered = []
+        killer = None
         for name in names:
             if name in skip:
                 continue
@@ -199,13 +200,15 @@ def main():
                 if reply is None:
                     unanswered.append((name, bad))
                 if server.proc.poll() is not None or process.poll() is not None:
+                    killer = {"tool": name, "argument": bad, "server_exit": server.proc.poll(),
+                              "target_exit": process.poll()}
                     break
             if server.proc.poll() is not None or process.poll() is not None:
                 break
         check(len(names) > 50, "tools listed for the malformed-argument sweep (%d)" % len(names))
         check(not unanswered, "every malformed tool call is answered", unanswered[:10])
-        check(server.proc.poll() is None, "the server survives wrongly typed arguments to every tool")
-        check(process.poll() is None, "the target survives wrongly typed arguments to every tool")
+        check(server.proc.poll() is None, "the server survives wrongly typed arguments to every tool", killer)
+        check(process.poll() is None, "the target survives wrongly typed arguments to every tool", killer)
         for raw in ('{"jsonrpc":"2.0","method":5}', '{"jsonrpc":"2.0","id":901,"method":"tools/call","params":5}',
                     '{"jsonrpc":"2.0","id":902,"method":"tools/call","params":{"name":7}}', '[1,2,3]', '"text"',
                     '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":null}}'):

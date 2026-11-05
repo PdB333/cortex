@@ -89,6 +89,7 @@ def main():
     parser.add_argument("--vineflower", default="", help="vineflower.jar; javac/javap on PATH rebuild and compare")
     parser.add_argument("--target", default="")
     parser.add_argument("--runner", default="")
+    parser.add_argument("--compare-out", default="", help="write the Cortex vs Ghidra function comparison (JSON) here")
     arguments = parser.parse_args()
     runner = shlex.split(arguments.runner)
     cortex = os.path.abspath(arguments.cortex)
@@ -275,6 +276,35 @@ def main():
             missing = [name for name, rva in code_exports.items() if int(str(rva), 16) not in entries]
             check(code_exports and not missing, "exported Cortex* functions are Ghidra functions at the same RVA",
                   {"missing": missing, "exports": code_exports})
+            # Step 9 benchmark: Cortex's own native function catalog (offline,
+            # Zydis) against Ghidra's on the same bytes, per dimension. A
+            # measurement: only the exported functions must agree.
+            ghidra_seconds = time.time() - began
+            began = time.time()
+            failed, catalog = server.call("cortex_artifact_functions", {"path": windows_path(runner, target),
+                                                                        "max_entries": 65536})
+            cortex_seconds = time.time() - began
+            starts = {int(row["rva"], 16) for row in catalog.get("functions", [])} if not failed else set()
+            check(not failed and starts, "Cortex's function catalog of the test target", catalog)
+            exported = {int(str(rva), 16) for rva in code_exports.values()}
+            comparison = {
+                "binary": os.path.basename(target),
+                "ghidra": {"functions": len(entries), "seconds": round(ghidra_seconds, 1), "version": state.get("engine_version") or state.get("result", {}).get("provenance", {}).get("engine_version")},
+                "cortex": {"functions": len(starts), "seconds": round(cortex_seconds, 2),
+                           "total_reported": catalog.get("total")},
+                "both": len(starts & entries),
+                "only_cortex": len(starts - entries),
+                "only_ghidra": len(entries - starts),
+                "cortex_starts_confirmed_by_ghidra": round(len(starts & entries) / len(starts), 4) if starts else 0,
+                "ghidra_starts_found_by_cortex": round(len(starts & entries) / len(entries), 4) if entries else 0,
+                "exported_functions": len(exported),
+                "exported_found": {"cortex": len(exported & starts), "ghidra": len(exported & entries)},
+            }
+            print("      cortex vs ghidra: " + json.dumps(comparison))
+            check(exported <= starts, "Cortex's catalog has every exported Cortex* function", sorted(exported - starts))
+            if arguments.compare_out:
+                with open(arguments.compare_out, "w") as handle:
+                    json.dump(comparison, handle, indent=1)
             rva = code_exports.get("CortexDemoApplyDamage")
             failed, page = server.call("cortex_analysis_get", {"job_id": started["job_id"], "part": "decompiled", "rva": str(rva)})
             items = page.get("result", {}).get("items", [])

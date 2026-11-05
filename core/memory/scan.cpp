@@ -30,6 +30,12 @@ namespace {
 // stops as soon as it's hit -- callers that know roughly where to look
 // should pass rangeStart/rangeEnd to stay clear of this entirely.
 constexpr size_t kMaxCandidates = 3000000;
+// Scan sessions live in the target's memory: an unknown-value scan can hold
+// millions of candidates with their values and types. Keep the most recent
+// few; a client asking for an evicted scan gets "unknown scan", as after
+// DELETE /scan/<id>. Without a bound, repeated scans grew the target without
+// limit (each one also slowed the next).
+constexpr size_t kMaxSessions = 4;
 constexpr size_t kMaxAobMatches = 5000;
 constexpr size_t kMaxResultsPage = 1000;
 // Never allocate/read an entire VirtualQuery region at once. Games and
@@ -288,6 +294,17 @@ int ScanNew(const std::string& type, std::optional<std::string> value,
             size_t& outCount, bool& outTruncated, const ScanOptions& options) {
     outCount = 0;
     outTruncated = false;
+    {
+        // Make room before scanning, so at most kMaxSessions are held at once.
+        std::lock_guard<std::mutex> lock(g_mutex);
+        while (!g_sessions.empty() && g_sessions.size() >= kMaxSessions) {
+            auto oldest = g_sessions.begin();
+            provenance::Unregister(oldest->second.candidateRangeId);
+            provenance::Unregister(oldest->second.valueRangeId);
+            provenance::Unregister(oldest->second.typeRangeId);
+            g_sessions.erase(oldest);
+        }
+    }
     bool isAll = (type == "all");
     size_t typeSize = isAll ? 1 : TypeSize(type);
     if (!isAll && typeSize == 0) return -1;
@@ -368,6 +385,13 @@ int ScanNew(const std::string& type, std::optional<std::string> value,
     outCount = session.candidates.size();
 
     std::lock_guard<std::mutex> lock(g_mutex);
+    while (g_sessions.size() >= kMaxSessions) {  // oldest first: ids only grow
+        auto oldest = g_sessions.begin();
+        provenance::Unregister(oldest->second.candidateRangeId);
+        provenance::Unregister(oldest->second.valueRangeId);
+        provenance::Unregister(oldest->second.typeRangeId);
+        g_sessions.erase(oldest);
+    }
     int id = g_nextId++;
     g_sessions[id] = std::move(session);
     return id;

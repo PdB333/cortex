@@ -17,6 +17,7 @@ on:
       - "tests/security_no_writes_regression.py"
       - "tests/context_isolation_e2e.py"
       - "tests/robustness_e2e.py"
+      - "tests/live_baseline.py"
       - "tests/manual_demo_e2e.py"
       - "tests/artifact_mcp_e2e.py"
       - "tests/dotnet_e2e.py"
@@ -255,8 +256,16 @@ jobs:
           $bundle = (Resolve-Path "stage/Cortex").Path
           python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD" `
             --ghidra-dir "$env:GHIDRA_INSTALL_DIR" --target "$bundle/e2e/cortex_test_target_x64.exe" `
-            --vineflower "$env:CORTEX_VINEFLOWER"
+            --vineflower "$env:CORTEX_VINEFLOWER" --compare-out build/engines-comparison.json
           if ($LASTEXITCODE -ne 0) { throw "analysis E2E failed" }
+
+      - name: Upload the Cortex vs Ghidra comparison
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-vs-ghidra-functions
+          path: build/engines-comparison.json
+          if-no-files-found: warn
 
   x86-fixture:
     runs-on: windows-2025
@@ -702,6 +711,27 @@ jobs:
           } finally {
             Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue
           }
+
+      # Step 9: live baselines on this Windows runner (scan time on a real
+      # process, MCP round-trip latency). Shared runners are noisy: compare
+      # trends, not single runs. See tests/live_baseline.py.
+      - name: Record live baselines (x64 and x86 targets)
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          New-Item -ItemType Directory -Force -Path build/live-baseline | Out-Null
+          foreach ($arch in @("x64", "x86")) {
+            python tests/live_baseline.py --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe" --out "build/live-baseline/live-$arch.json"
+            if ($LASTEXITCODE -ne 0) { throw "live baseline failed on $arch" }
+          }
+
+      - name: Upload live baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-live-baseline-windows
+          path: build/live-baseline
+          if-no-files-found: error
 
       - name: Publish GUI test summary
         if: always()

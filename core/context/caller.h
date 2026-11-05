@@ -32,22 +32,38 @@ struct CallerInfo {
 };
 
 namespace detail {
-inline CallerInfo& CurrentCallerSlot() {
-    thread_local CallerInfo current;
+// The per-thread slot holds no object with a destructor. With MinGW, a
+// thread_local with a non-trivial destructor in a DLL (this runtime) can be
+// destroyed after its TLS block was freed when a thread exits, which crashed
+// the target (~CallerInfo reading freed memory). A fixed buffer avoids it.
+struct CallerSlot {
+    Caller caller = Caller::Unattributed;
+    unsigned char length = 0;
+    char session[127] = {};
+};
+inline CallerSlot& CurrentCallerSlot() {
+    thread_local CallerSlot current;
     return current;
+}
+inline CallerInfo Read(const CallerSlot& slot) { return CallerInfo{slot.caller, std::string(slot.session, slot.length)}; }
+inline void Write(CallerSlot& slot, const CallerInfo& info) {
+    slot.caller = info.caller;
+    const size_t length = info.session.size() < sizeof slot.session ? info.session.size() : sizeof slot.session;
+    for (size_t i = 0; i < length; ++i) slot.session[i] = info.session[i];
+    slot.length = static_cast<unsigned char>(length);
 }
 } // namespace detail
 
 // The caller of the request running on this thread. Native route dispatch
 // is synchronous, so nested dispatches (batch steps) inherit it.
-inline const CallerInfo& CurrentCaller() { return detail::CurrentCallerSlot(); }
+inline CallerInfo CurrentCaller() { return detail::Read(detail::CurrentCallerSlot()); }
 
 class ScopedCaller {
 public:
-    ScopedCaller(Caller caller, std::string session) : previous_(detail::CurrentCallerSlot()) {
-        detail::CurrentCallerSlot() = CallerInfo{caller, std::move(session)};
+    ScopedCaller(Caller caller, std::string session) : previous_(CurrentCaller()) {
+        detail::Write(detail::CurrentCallerSlot(), CallerInfo{caller, std::move(session)});
     }
-    ~ScopedCaller() { detail::CurrentCallerSlot() = std::move(previous_); }
+    ~ScopedCaller() { detail::Write(detail::CurrentCallerSlot(), previous_); }
     ScopedCaller(const ScopedCaller&) = delete;
     ScopedCaller& operator=(const ScopedCaller&) = delete;
 
