@@ -203,6 +203,7 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     });
     const uint16_t port = static_cast<uint16_t>(6400 + Pid() % 500);
     const fs::path engineLog = fs::temp_directory_path() / ("cortex-netcoredbg-" + std::to_string(Pid()) + ".log");
+    const fs::path adapterOutput = fs::temp_directory_path() / ("cortex-netcoredbg-" + std::to_string(Pid()) + ".out");
     fs::remove(engineLog);
     cortex::providers::ProcessOutcome adapterOutcome;
     std::atomic<bool> adapterDone{false};
@@ -211,7 +212,9 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         // --engineLogging: netcoredbg's own protocol/engine log, printed when
         // the attach fails (its "current folder" log is the work folder).
         spec.argv = {netcoredbg, "--interpreter=vscode", "--server=" + std::to_string(port),
-                     "--engineLogging=" + engineLog.u8string()};
+                     "--engineLogging=" + engineLog.u8string(), "--log=file"};
+        // Its output goes to a file, not a pipe (as when an operator starts it).
+        spec.outputFile = adapterOutput.u8string();
         spec.workingDirectory = fs::u8path(netcoredbg).parent_path().u8string();
         spec.timeout = std::chrono::minutes(5);
         adapterOutcome = cortex::providers::RunProcess(spec, &stop);
@@ -250,6 +253,17 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
         std::cerr << "netcoredbg engine log (" << text.size() << " bytes):\n"
                   << (text.size() > 12000 ? text.substr(text.size() - 12000) : text) << std::endl;
+        // Its stdout/stderr and its own --log file(s) in its folder.
+        auto dump = [](const fs::path& file) {
+            std::ifstream in(file, std::ios::binary);
+            const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            std::cerr << "--- " << file.u8string() << " (" << content.size() << " bytes)\n"
+                      << (content.size() > 8000 ? content.substr(content.size() - 8000) : content) << std::endl;
+        };
+        dump(adapterOutput);
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(fs::u8path(netcoredbg).parent_path(), ec))
+            if (entry.path().extension() == ".log") dump(entry.path());
         app.join();
         return;
     }
@@ -292,6 +306,7 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     fs::remove(pidFile);
     std::error_code ignored;
     fs::remove(engineLog, ignored);
+    fs::remove(adapterOutput, ignored);
 }
 
 std::string JavaTool(const char* name) {

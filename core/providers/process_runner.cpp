@@ -199,8 +199,13 @@ ProcessOutcome RunProcess(const ProcessSpec& spec, const std::atomic<bool>* canc
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdInput = nul;
-    startup.hStdOutput = writePipe;
-    startup.hStdError = writePipe;
+    HANDLE outputFile = INVALID_HANDLE_VALUE;
+    if (!spec.outputFile.empty()) {
+        outputFile = CreateFileW(Wide(spec.outputFile).c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
+                                 CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    startup.hStdOutput = outputFile != INVALID_HANDLE_VALUE ? outputFile : writePipe;
+    startup.hStdError = outputFile != INVALID_HANDLE_VALUE ? outputFile : writePipe;
     PROCESS_INFORMATION process{};
     std::wstring mutableLine = Wide(commandLine);
     std::wstring environment = EnvironmentBlock(spec.environment);
@@ -210,6 +215,7 @@ ProcessOutcome RunProcess(const ProcessSpec& spec, const std::atomic<bool>* canc
                                         directory.empty() ? nullptr : directory.c_str(), &startup, &process);
     CloseHandle(writePipe);
     if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    if (outputFile != INVALID_HANDLE_VALUE) CloseHandle(outputFile);
     if (!created) {
         outcome.error = "start_failed:" + std::to_string(GetLastError());
         CloseHandle(readPipe);
@@ -316,8 +322,10 @@ ProcessOutcome RunProcess(const ProcessSpec& spec, const std::atomic<bool>* canc
         setpgid(0, 0);
         const int nul = open("/dev/null", O_RDONLY);
         if (nul >= 0) dup2(nul, 0);
-        dup2(pipeFds[1], 1);
-        dup2(pipeFds[1], 2);
+        const int out = spec.outputFile.empty() ? -1 : open(spec.outputFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        dup2(out >= 0 ? out : pipeFds[1], 1);
+        dup2(out >= 0 ? out : pipeFds[1], 2);
+        if (out >= 0) close(out);
         close(pipeFds[0]);
         close(pipeFds[1]);
         for (const auto& [key, value] : spec.environment) setenv(key.c_str(), value.c_str(), 1);

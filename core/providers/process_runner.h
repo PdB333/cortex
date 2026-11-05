@@ -21,6 +21,10 @@ struct ProcessSpec {
     std::vector<std::pair<std::string, std::string>> environment;  // added or replaced
     std::chrono::milliseconds timeout{std::chrono::minutes(15)};
     size_t outputLimit = 1u << 20;  // stdout+stderr kept (the tail beyond is dropped)
+    // When set, stdout and stderr go to this file instead of a pipe (and
+    // ProcessOutcome::output stays empty). Some tools behave differently
+    // when their output is a pipe.
+    std::string outputFile;
 };
 
 struct ProcessOutcome {
