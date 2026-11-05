@@ -61,7 +61,7 @@ Then the end-to-end suites that cover what you touched, from a staged bundle
 | Anything reachable from MCP | `tests/security_no_writes_regression.py` (no call may change a target without `--allow-writes`) |
 | Investigation context, targets | `tests/context_isolation_e2e.py` |
 | Scanner, watches, breakpoints, navigation | `tests/manual_demo_e2e.py` |
-| Static parsers (PE, ASAR, JS, ZIP) | `tests/artifact_mcp_e2e.py`, `tests/native_static_e2e.py` |
+| Static parsers (PE, ASAR, JS, ZIP) | `tests/artifact_mcp_e2e.py`, `tests/native_static_e2e.py`, and the fuzzers in `tests/fuzz/` (Linux, clang) |
 | .NET metadata or CIL | `tests/dotnet_e2e.py` |
 | Evidence, investigations | `tests/evidence_e2e.py`, `tests/investigation_e2e.py` |
 | External engines | `cortex_analysis_provider_tests`, `tests/analysis_e2e.py` |
@@ -79,7 +79,8 @@ red or pending run.
 - Update the docs that describe the behaviour: `docs/`, `agent/`, and the
   `[Unreleased]` section of `CHANGELOG.md`.
 - New parsers handle untrusted input: check every bound, cap sizes and counts,
-  and add a fixture with malformed cases.
+  add a fixture with malformed cases, and reach the parser from a harness in
+  `tests/fuzz/`.
 - New MCP tools declare their risk (`tests/fixtures/mcp_tool_risks.json`), keep
   a bounded output, and refuse changes without authority.
 

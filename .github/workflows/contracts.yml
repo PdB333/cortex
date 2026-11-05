@@ -314,6 +314,53 @@ jobs:
           -o investigation_context_tsan
           && setarch "$(uname -m)" -R env TSAN_OPTIONS=halt_on_error=1 ./investigation_context_tsan
 
+  # ---- Fuzzing of the file parsers (step 9). Inputs are untrusted: every
+  # parser must survive malformed files without a crash, an out-of-bounds
+  # access or undefined behaviour (ASan + UBSan).
+  fuzz-parsers:
+    name: Fuzz file parsers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang and its sanitizer runtimes
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev ninja-build
+          # ASan needs fewer random mmap bits than recent runner kernels use.
+          sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Build the fuzzers (libFuzzer, ASan, UBSan)
+        run: |
+          cmake -S tests/fuzz -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build build/fuzz --parallel
+
+      - name: Replay the kept crash inputs and the seeds
+        run: |
+          cmake -S tests/fuzz -B build/fuzz-replay -G Ninja -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCORTEX_FUZZ_REPLAY=ON
+          cmake --build build/fuzz-replay --parallel
+          ctest --test-dir build/fuzz-replay --output-on-failure
+          python3 tests/fuzz/make_seeds.py build/fuzz-seeds
+          for harness in artifact pe_code text; do build/fuzz-replay/fuzz_$harness build/fuzz-seeds/$harness; done
+
+      - name: Fuzz each harness for 60 s
+        run: |
+          mkdir -p build/fuzz-findings
+          for harness in artifact pe_code text; do
+            mkdir -p build/fuzz-work/$harness
+            build/fuzz/fuzz_$harness -max_total_time=60 -max_len=65536 -timeout=10 -rss_limit_mb=2048 \
+              -artifact_prefix=build/fuzz-findings/$harness- build/fuzz-work/$harness build/fuzz-seeds/$harness
+          done
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings
+          path: build/fuzz-findings
+          if-no-files-found: ignore
+
   # ---- P4 Target Model (was .github/workflows/p4-target-model.yml)
   p4-target-model:
     name: target-model-${{ matrix.arch }}
