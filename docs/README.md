@@ -9,6 +9,12 @@ This directory contains both user-facing documentation for the unified Cortex ap
 - [French illustrated walkthrough](ui-walkthrough-fr.md) — French translation.
 - [Demonstration A: manual reverse engineering](demo-manual.md) — find a value, watch it, find what writes it, navigate the code and keep it across sessions, on Cortex's test program.
 - [Cortex UI guide](ui-guide.md) — complete workspace map, address context menu, shortcuts, Settings and write-permission behavior.
+- [Analysis providers](analysis-providers.md) — Ghidra, ILSpy and Vineflower, and the live providers (CDP, debugpy, netcoredbg, JDWP): setup, guarantees, validation and limits.
+- [Evidence](evidence.md) and [investigations](investigations.md) — records with provenance and status; supervised multi-step investigations.
+- [Launching and testing programs](automated-tests.md) — operator launch profiles and the bounded trial runner.
+- [Known limitations](limitations.md) — the documented limits, collected in one page.
+- [Third-party notices](third-party.md) — licences of the libraries and of the optional external engines.
+- [Contributing](../CONTRIBUTING.md) and [security policy](../SECURITY.md).
 
 ## Product architecture
 

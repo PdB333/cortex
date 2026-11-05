@@ -8,6 +8,12 @@ Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code
 
 ### Added
 
+- **Product documentation (step 10, in progress).**
+  - The README is reorganized around what Cortex does. It has three GIFs recorded from the real app against the test target and fixtures, an architecture diagram, a table of what can be analyzed with each row's validation, a safety model and an FAQ.
+  - New: `CONTRIBUTING.md`, `SECURITY.md`, issue and pull request templates, and `docs/limitations.md`.
+- **netcoredbg in stdio mode.**
+  - Cortex starts the operator's netcoredbg (`--netcoredbg`, `CORTEX_NETCOREDBG`) and speaks DAP over its pipes. This works around the Windows 3.1.2 `--server` mode, which reads no request after `initialize`.
+  - `cortex_live_attach` with `adapter: "netcoredbg"` and no port uses this mode.
 - **External analysis engines (step 8).** One `AnalysisProvider` interface for engines that run as separate processes, never linked.
   - **Ghidra** headless: a Cortex-owned temporary project and an embedded post-script. It exports functions, imports, calls, types and decompiled C keyed by RVA, and checks that the imported bytes have Cortex's SHA-256.
   - **ILSpy** (`ilspycmd`): the C# project or one type, and the type list.

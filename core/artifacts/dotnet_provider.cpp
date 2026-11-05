@@ -15,7 +15,9 @@ std::vector<Capability> DotNetProvider::Capabilities() const {
              "no built-in C# decompiler (CIL is disassembled). External: the ILSpy analysis provider "
              "(cortex_analysis_start provider=ilspy, `cortex provider run ilspy`) when the operator configures ilspycmd"},
             {"live", CapabilityStatus::Unavailable, "",
-             "managed debugging is not provided; the native engine still attaches to the process"}};
+             "no managed debugging in this file provider; the native engine still attaches to the process. External: "
+             "the netcoredbg live provider (cortex_live_attach protocol=dap adapter=netcoredbg, log breakpoints only) "
+             "when the operator configures --netcoredbg"}};
 }
 
 int DotNetProvider::Detect(const ByteSource& source) const {

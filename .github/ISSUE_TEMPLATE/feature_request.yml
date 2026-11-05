@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a capability or an improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Requests to bypass anti-cheat, DRM, licence checks or access controls are out of scope and will be closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The investigation or workflow, and where Cortex gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What Cortex should do. Say whether it only reads or also changes the target.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: How could it be validated?
+      description: A fixture, an owned program or a reference tool to compare against.

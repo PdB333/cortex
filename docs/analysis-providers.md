@@ -189,8 +189,8 @@ fixture. A cache hit costs one file hash plus reading the cached JSON.
   listed but not decompiled; request it with `decompile`.
 - One run is one process with its own JVM (no Ghidra server, no reuse between
   runs). The cache is the only speed-up.
-- Java (Vineflower/CFR) and live providers (CDP for Node/Electron, .NET live,
-  JDWP, DAP) are not implemented yet; see the roadmap.
+- CFR is not provided; Java decompilation goes through Vineflower (above).
+  Live providers (CDP, DAP, JDWP) are described in the sections below.
 
 ## Live provider: CDP (Node.js and Electron)
 
