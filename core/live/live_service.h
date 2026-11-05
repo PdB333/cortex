@@ -24,6 +24,11 @@ public:
     json Attach(uint16_t port, const std::string& targetId);  // CDP
     // DAP: adapter "debugpy" or "netcoredbg" (needs processId).
     json AttachDap(uint16_t port, const std::string& adapter, uint64_t processId);
+    // netcoredbg in stdio mode, started by Cortex from the operator's path
+    // (SetNetcoredbg); no port.
+    json AttachNetcoredbgStdio(uint64_t processId, const std::string& logFile = {});
+    void SetNetcoredbg(std::string path) { netcoredbg_ = std::move(path); }
+    const std::string& Netcoredbg() const { return netcoredbg_; }
     // JDWP: a JVM started with -agentlib:jdwp=...,server=y,address=127.0.0.1:PORT.
     json AttachJdwp(uint16_t port);
     std::shared_ptr<LiveSession> Get(const std::string& sessionId) const;
@@ -35,6 +40,7 @@ private:
 
     std::set<uint16_t> allowed_;
     bool anyPort_;
+    std::string netcoredbg_;
     mutable std::mutex mutex_;
     std::map<std::string, std::shared_ptr<LiveSession>> sessions_;
     std::map<std::string, json> info_;

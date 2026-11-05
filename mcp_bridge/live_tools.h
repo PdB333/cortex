@@ -10,6 +10,7 @@
 #include "../core/live/live_service.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 
@@ -32,8 +33,9 @@ inline json ToolDefinitions() {
          {"description", "Attach to a local debug endpoint. protocol=cdp (default): a Node.js/Electron inspector target; enables "
                          "its Debugger and Runtime domains to list scripts and record console messages. protocol=dap: a Debug "
                          "Adapter Protocol adapter the operator started: adapter=debugpy (python -m debugpy --listen "
-                         "127.0.0.1:PORT) or adapter=netcoredbg (--interpreter=vscode --server=PORT) with the .NET process_id "
-                         "to attach to, which needs --allow-writes and mutation_permission. protocol=jdwp: a JVM started with "
+                         "127.0.0.1:PORT) or adapter=netcoredbg with the .NET process_id to attach to (no port: Cortex starts the "
+                         "operator's netcoredbg, --netcoredbg, in stdio mode; with a port: a netcoredbg --server the operator "
+                         "started), which needs --allow-writes and mutation_permission. protocol=jdwp: a JVM started with "
                          "-agentlib:jdwp=transport=dt_socket,server=y,address=127.0.0.1:PORT (breakpoints take a class name). "
                          "Never evaluates code; a pause "
                          "Cortex did not set is recorded and resumed."},
@@ -42,7 +44,7 @@ inline json ToolDefinitions() {
                                  {"adapter", {{"type", "string"}, {"enum", json::array({"debugpy", "netcoredbg"})}}},
                                  {"process_id", {{"type", "integer"}, {"minimum", 1}}},
                                  {"mutation_permission", {{"type", "boolean"}}}},
-                                json::array({"port"}))},
+                                json::array())},
          {"_cortex", {{"read_only", true}}}},
         {{"name", "cortex_live_status"},
          {"description", "State of a live session: target, scripts, breakpoints, pauses, console count, foreign pauses."},
@@ -108,7 +110,11 @@ inline size_t Size(const json& a, const char* key, size_t fallback, size_t high)
 inline json Handle(const std::string& name, const json& a, cortex::live::LiveService* service, bool allowWrites) {
     if (!service) return {{"ok", false}, {"error", "live_unavailable"}};
     if (!a.is_object()) return {{"ok", false}, {"error", "invalid_arguments"}};
-    if (name == "cortex_live_targets" || name == "cortex_live_attach") {
+    // netcoredbg without a port: stdio mode, Cortex starts the operator's
+    // netcoredbg (--netcoredbg) and talks to it over pipes.
+    const bool netcoredbgStdio = name == "cortex_live_attach" && a.value("protocol", std::string()) == "dap" &&
+                                 a.value("adapter", std::string()) == "netcoredbg" && !a.contains("port");
+    if (name == "cortex_live_targets" || (name == "cortex_live_attach" && !netcoredbgStdio)) {
         if (!a.contains("port") || !a["port"].is_number_unsigned() || a["port"].get<uint64_t>() == 0 || a["port"].get<uint64_t>() > 65535)
             return {{"ok", false}, {"error", "invalid_port"}};
         const uint16_t port = static_cast<uint16_t>(a["port"].get<uint64_t>());
@@ -130,6 +136,15 @@ inline json Handle(const std::string& name, const json& a, cortex::live::LiveSer
             pid = a["process_id"].get<uint64_t>();
         }
         return service->AttachDap(port, adapter, pid);
+    }
+    if (netcoredbgStdio) {
+        if (!a.contains("process_id") || !a["process_id"].is_number_unsigned()) return {{"ok", false}, {"error", "process_id_required"}};
+        if (!a.value("mutation_permission", false))
+            return {{"ok", false}, {"error", "mutation_permission_required"}, {"message", "Attaching netcoredbg to a process needs mutation_permission=true."}};
+        if (!allowWrites)
+            return {{"ok", false}, {"error", "write_authority_required"},
+                    {"message", "Attaching a debugger to a process needs the person's --allow-writes."}};
+        return service->AttachNetcoredbgStdio(a["process_id"].get<uint64_t>());
     }
     const std::string id = a.value("session_id", std::string());
     if (name == "cortex_live_detach") return service->Detach(id);
@@ -169,13 +184,14 @@ inline int LiveMain(int argc, char** argv) {
                      "       cortex live scripts --port N [--query TEXT]\n"
                      "       cortex live watch --port N --url URL --line L [--column C] [--hits K] [--seconds S] [--target ID]\n"
                      "                         [--protocol cdp|dap|jdwp] [--adapter debugpy|netcoredbg] [--pid PID]\n"
-                     "  (DAP: --url is the source file path; netcoredbg needs --pid; JDWP: --url is the class name)\n";
+                     "  (DAP: --url is the source file path; netcoredbg needs --pid and, without --port, is started by\n"
+                     "   Cortex in stdio mode from --netcoredbg PATH or CORTEX_NETCOREDBG; JDWP: --url is the class name)\n";
         return 2;
     };
     if (argc < 2) return usage();
     const std::string command = argv[1];
     uint64_t port = 0, line = 0, column = 0, hits = 10, seconds = 30, pid = 0;
-    std::string url, query, target, protocol = "cdp", adapter = "debugpy";
+    std::string url, query, target, protocol = "cdp", adapter = "debugpy", netcoredbg;
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
         if (i + 1 >= argc) return usage();
@@ -192,13 +208,17 @@ inline int LiveMain(int argc, char** argv) {
             else if (arg == "--protocol") protocol = value;
             else if (arg == "--adapter") adapter = value;
             else if (arg == "--pid") pid = std::stoull(value);
+            else if (arg == "--netcoredbg") netcoredbg = value;
             else return usage();
         } catch (...) {
             return usage();
         }
     }
-    if (!port || port > 65535) return usage();
+    const bool stdio = protocol == "dap" && adapter == "netcoredbg" && !port;
+    if ((!port && !stdio) || port > 65535) return usage();
     cortex::live::LiveService service({}, true);
+    if (const char* path = std::getenv("CORTEX_NETCOREDBG")) service.SetNetcoredbg(path);
+    if (!netcoredbg.empty()) service.SetNetcoredbg(netcoredbg);
     if (command == "targets") {
         const json result = service.Targets(static_cast<uint16_t>(port));
         std::cout << result.dump(2) << std::endl;
@@ -206,7 +226,8 @@ inline int LiveMain(int argc, char** argv) {
     }
     if (command != "scripts" && command != "watch") return usage();
     if (command == "watch" && (url.empty() || !line)) return usage();
-    const json attached = protocol == "dap"    ? service.AttachDap(static_cast<uint16_t>(port), adapter, pid)
+    const json attached = stdio                ? service.AttachNetcoredbgStdio(pid)
+                          : protocol == "dap"  ? service.AttachDap(static_cast<uint16_t>(port), adapter, pid)
                           : protocol == "jdwp" ? service.AttachJdwp(static_cast<uint16_t>(port))
                                                : service.Attach(static_cast<uint16_t>(port), target);
     if (!attached.value("ok", false)) {

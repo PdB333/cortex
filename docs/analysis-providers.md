@@ -296,10 +296,12 @@ The adapter is started by the operator and its port allowed with
 - **Python:** `python -m debugpy --listen 127.0.0.1:PORT app.py` (debugpy,
   MIT). `cortex_live_attach {port, protocol: "dap", adapter: "debugpy"}`
   attaches to that process.
-- **.NET:** `netcoredbg --interpreter=vscode --server=PORT` (netcoredbg, MIT).
-  `cortex_live_attach {port, protocol: "dap", adapter: "netcoredbg",
-  process_id, mutation_permission: true}` attaches it to a running .NET
-  process. Attaching a debugger to a process is control: it needs the
+- **.NET:** netcoredbg (MIT), in stdio mode (started by Cortex from the
+  operator's `--netcoredbg` path; recommended, and the only mode that works
+  on Windows) or `netcoredbg --interpreter=vscode --server=PORT` started by
+  the operator. `cortex_live_attach {protocol: "dap", adapter: "netcoredbg",
+  process_id, mutation_permission: true}`, with `port` for the server mode,
+  attaches it to a running .NET process. Attaching a debugger to a process is control: it needs the
   operator's `--allow-writes`. In the desktop it follows the write permission.
 
 Same rules as CDP:
@@ -360,19 +362,27 @@ and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
   around.
 - **netcoredbg's server mode serves one client session and then exits:**
   the operator starts it again for each attach.
-- **.NET live is validated on Linux only.** On Windows, netcoredbg 3.1.2
+- **On Windows, use stdio mode.** netcoredbg 3.1.2 for Windows
   (`netcoredbg-win64`) in `--server` mode answers `initialize`, sends
   `initialized`, and then reads no further command.
-  - CI's engine log (`--engineLogging`) shows only `initialize` received;
-    `attach` and `configurationDone` never arrive at the adapter.
-  - Under Wine, a plain Python DAP client hits the same: no answer to a
-    second request in the same session.
-  - The Linux build of the same release passes the whole test.
+  - CI's engine log shows only `initialize` received.
+  - Under Wine, a plain Python DAP client hits the same.
 
-  The `analysis-engines` CI job keeps the test, so it stays red on Windows
-  until this is solved. One possible way round it is Cortex starting
-  netcoredbg itself in stdio mode (`--interpreter=vscode` over pipes); this
-  is not implemented.
+  In stdio mode, Cortex starts netcoredbg itself:
+  - The operator gives its path with `--netcoredbg` or `CORTEX_NETCOREDBG`;
+    an MCP client never chooses the executable.
+  - Cortex runs `netcoredbg --interpreter=vscode` and speaks DAP over its
+    stdin and stdout pipes, with a job object or process group, so the
+    adapter dies with the session.
+  - Call `cortex_live_attach {protocol: "dap", adapter: "netcoredbg",
+    process_id, mutation_permission: true}` without a port, or use
+    `cortex.exe live watch --protocol dap --adapter netcoredbg --pid N`
+    without `--port`. Desktop: port 0.
+  - Through Win32 pipes, the same Windows binary answers `initialize`,
+    `attach` and `configurationDone` in 0.5 s.
+
+  `cortex_dap_tests` runs stdio mode on every system, and the `--server`
+  mode on non-Windows systems only.
 - **JDWP (Java live) is a separate provider;** see below.
 
 ## Live provider: JDWP (Java)

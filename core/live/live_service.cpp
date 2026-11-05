@@ -48,6 +48,20 @@ json LiveService::AttachDap(uint16_t port, const std::string& adapter, uint64_t 
     return Register("dap", port, session);
 }
 
+json LiveService::AttachNetcoredbgStdio(uint64_t processId, const std::string& logFile) {
+    if (netcoredbg_.empty())
+        return {{"ok", false}, {"error", "netcoredbg_not_configured"},
+                {"message", "the operator gives netcoredbg's path with --netcoredbg (or CORTEX_NETCOREDBG)"}};
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (sessions_.size() >= 8) return {{"ok", false}, {"error", "too_many_sessions"}};
+    }
+    auto session = std::make_shared<DapSession>();
+    std::string error;
+    if (!session->AttachStdio(netcoredbg_, "netcoredbg", processId, error, logFile)) return {{"ok", false}, {"error", error}};
+    return Register("dap", 0, session);
+}
+
 json LiveService::AttachJdwp(uint16_t port) {
     if (!PortAllowed(port)) return PortRefused();
     {

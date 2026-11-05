@@ -52,7 +52,7 @@ int64_t DapSession::Send(const std::string& command, const json& arguments) {
         seq = ++seq_;
     }
     const std::string body = json{{"seq", seq}, {"type", "request"}, {"command", command}, {"arguments", arguments}}.dump();
-    if (!stream_.Send("Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body)) return -1;
+    if (!SendRaw("Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body)) return -1;
     return seq;
 }
 
@@ -88,6 +88,49 @@ bool DapSession::Attach(uint16_t port, const std::string& adapter, uint64_t proc
     }
     if (!stream_.Connect(port, error)) return false;
     port_ = port;
+    return Handshake(adapter, processId, error);
+}
+
+bool DapSession::AttachStdio(const std::string& adapterPath, const std::string& adapter, uint64_t processId, std::string& error,
+                             const std::string& logFile) {
+    if (adapter != "netcoredbg") {
+        error = "stdio_mode_is_for_netcoredbg";
+        return false;
+    }
+    if (processId == 0) {
+        error = "process_id_required";
+        return false;
+    }
+    child_ = std::make_unique<providers::ChildProcess>();
+    providers::ProcessSpec spec;
+    spec.argv = {adapterPath, "--interpreter=vscode"};
+    spec.outputFile = logFile;
+    std::error_code ec;
+    const auto folder = std::filesystem::u8path(adapterPath).parent_path();
+    if (!folder.empty()) spec.workingDirectory = folder.u8string();
+    if (!child_->Start(spec, error)) {
+        child_.reset();
+        return false;
+    }
+    return Handshake(adapter, processId, error);
+}
+
+bool DapSession::SendRaw(const std::string& bytes) {
+    if (!child_) return stream_.Send(bytes);  // TcpStream serializes sends itself
+    std::lock_guard<std::mutex> lock(sendMutex_);
+    return child_->Write(bytes);
+}
+
+int DapSession::ReadRaw(char* buffer, size_t max, int timeoutMs) {
+    return child_ ? child_->Read(buffer, max, timeoutMs) : stream_.Read(buffer, max, timeoutMs);
+}
+
+void DapSession::CloseRaw() {
+    if (child_) child_->Kill();  // after disconnect: the adapter only
+    else stream_.Close();
+}
+
+bool DapSession::Handshake(const std::string& adapter, uint64_t processId, std::string& error) {
     adapter_ = adapter;
     processId_ = processId;
     connected_ = true;
@@ -156,18 +199,21 @@ void DapSession::Detach() {
     }
     stopping_ = true;
     connected_ = false;
-    stream_.Close();
+    // A socket is closed first to wake the reader; an adapter's pipes are
+    // closed only after the reader stopped using them (it polls stopping_).
+    if (!child_) CloseRaw();
     responded_.notify_all();
     queued_.notify_all();
     if (reader_.joinable()) reader_.join();
     if (events_.joinable()) events_.join();
+    if (child_) CloseRaw();
 }
 
 void DapSession::ReadLoop() {
     std::string buffer;
     char chunk[8192];
     while (!stopping_) {
-        const int got = stream_.Read(chunk, sizeof chunk, 200);
+        const int got = ReadRaw(chunk, sizeof chunk, 200);
         if (got == 0) continue;
         if (got < 0) break;
         buffer.append(chunk, static_cast<size_t>(got));

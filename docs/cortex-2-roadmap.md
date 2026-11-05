@@ -823,7 +823,7 @@ The full description is in `docs/investigations.md`.
 | Ghidra on ELF | `formats: pe, elf` | `tests/fixtures/elf` (gcc PIE): 10/10 `nm` functions at the same RVA, decompiled health write |
 | Vineflower (Java decompiler) | `vineflower_provider.cpp`: `java -jar vineflower.jar -s` on a .jar/.class | `tests/fixtures/java`: the decompiled sources recompile with `javac`, and every class has the original's `javap -p` signatures |
 | Live: CDP (Node.js, Electron) | `core/live/{websocket,cdp}`: loopback WebSocket, scripts, source, console, log breakpoints; no evaluation; foreign pauses resumed | real `node --inspect` (natively and the Windows build under Wine), `live_e2e.py`, GUI suite |
-| Live: DAP (Python, .NET) | `core/live/dap`: debugpy, and netcoredbg attached to a pid (needs `--allow-writes`); log breakpoints; `Source` only for files the debugger reported | debugpy 1.8.22 against its fixture on Linux and Windows. netcoredbg 3.1.2 against its fixture on Linux only: on Windows its `--server` mode reads no command after `initialize` (see analysis-providers.md), and that CI step is red |
+| Live: DAP (Python, .NET) | `core/live/dap`: debugpy, and netcoredbg attached to a pid (needs `--allow-writes`); log breakpoints; `Source` only for files the debugger reported | debugpy 1.8.22 against its fixture on Linux and Windows. netcoredbg 3.1.2 in stdio mode (Cortex starts it from the operator's `--netcoredbg` path) against its fixture, on Linux and in Windows CI. Its `--server` mode is used on Linux only: on Windows it reads no command after `initialize` (see analysis-providers.md) |
 | Live: JDWP (Java) | `core/live/jdwp`: EVENT_THREAD breakpoints, stack and locals with `GetValues`, no method invocation, Dispose on detach | real OpenJDK 21 against `tests/fixtures/java-live` |
 | One live interface | `LiveSession` / `LiveService` behind `cortex_live_*` (ports allowed with `--inspect-port`; breakpoints need `mutation_permission` and `--allow-writes`), `cortex.exe live`, AI Investigation › Live tab with a protocol selector | security regression, MCP E2E, GUI suite |
 
@@ -838,8 +838,8 @@ The full description is in `docs/investigations.md`.
 - **Validated on Node.js only (no Electron):** the CDP provider; Electron
   speaks the same protocol, but no Electron binary is run.
 - **.NET live goes through netcoredbg (DAP),** not the CLR data access layer.
-  Dump analysis is not provided. It is validated on Linux only: the Windows
-  netcoredbg 3.1.2 server stops reading after `initialize`.
+  Dump analysis is not provided. On Windows it runs in stdio mode, because
+  the Windows netcoredbg 3.1.2 server stops reading after `initialize`.
 - **Ghidra:** Mach-O is not validated.
 - **JDWP:** breakpoints on classes that are not loaded yet are refused.
 - **debugpy values come from `repr()`**, which runs user `__repr__` code.

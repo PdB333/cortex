@@ -185,7 +185,12 @@ void TestPython(const std::string& fixture) {
 
 // .NET: the fixture (built in Debug) runs on its own; netcoredbg listens
 // in server mode; Cortex attaches it to the fixture's process id.
-void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std::string& source) {
+// stdio: Cortex starts netcoredbg itself and talks over its pipes (the
+// supported mode, on Windows too); otherwise netcoredbg --server, which on
+// Windows reads no command after initialize (documented), so that mode runs
+// on other systems only.
+void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std::string& source, bool stdio) {
+    std::cout << "netcoredbg mode: " << (stdio ? "stdio" : "server") << std::endl;
     std::string dotnet = std::getenv("CORTEX_TEST_DOTNET") ? std::getenv("CORTEX_TEST_DOTNET") : cortex::providers::FindOnPath("dotnet");
     if (dotnet.empty() || !fs::exists(dll) || !fs::exists(netcoredbg)) {
         std::cout << "netcoredbg: SKIPPED (dotnet, fixture or netcoredbg missing)" << std::endl;
@@ -207,7 +212,8 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     fs::remove(engineLog);
     cortex::providers::ProcessOutcome adapterOutcome;
     std::atomic<bool> adapterDone{false};
-    std::thread adapter([&] {
+    std::thread adapter;
+    if (!stdio) adapter = std::thread([&] {
         cortex::providers::ProcessSpec spec;
         // --engineLogging: netcoredbg's own protocol/engine log, printed when
         // the attach fails (its "current folder" log is the work folder).
@@ -226,11 +232,16 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         return static_cast<bool>(in >> pid) && pid > 0;
     }, 30));
     LiveService service({port}, false);
+    service.SetNetcoredbg(netcoredbg);
     json attached;
+    if (stdio) {
+        attached = service.AttachNetcoredbgStdio(pid, adapterOutput.u8string());
+        CHECK(attached.value("ok", false));
+    }
     // netcoredbg's server serves one session and exits when it ends: retry
     // only while it is not listening yet; any other failure is final.
     std::string firstError;
-    CHECK(WaitFor([&] {
+    if (!stdio) CHECK(WaitFor([&] {
         attached = service.AttachDap(port, "netcoredbg", pid);
         if (attached.value("ok", false)) return true;
         const std::string error = attached.value("error", std::string());
@@ -245,7 +256,7 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     if (!attached.value("ok", false)) {
         // Why the adapter is not answering: its own output and exit code.
         stop = true;
-        adapter.join();
+        if (adapter.joinable()) adapter.join();
         std::cerr << "netcoredbg exited=" << adapterDone.load() << " code=" << adapterOutcome.exitCode
                   << " started=" << adapterOutcome.started << " error=" << adapterOutcome.error << "\n"
                   << adapterOutcome.output.substr(0, 4000) << std::endl;
@@ -302,7 +313,7 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
 #endif
     stop = true;
     app.join();
-    adapter.join();
+    if (adapter.joinable()) adapter.join();
     fs::remove(pidFile);
     std::error_code ignored;
     fs::remove(engineLog, ignored);
@@ -404,7 +415,12 @@ void TestJava(const std::string& source) {
 int main(int argc, char** argv) {
     TestRefusals();
     if (argc > 1 && std::string(argv[1]) != "-") TestPython(fs::absolute(argv[1]).u8string());
-    if (argc > 4 && std::string(argv[2]) != "-") TestDotnet(fs::absolute(argv[2]).u8string(), fs::absolute(argv[3]).u8string(), fs::absolute(argv[4]).u8string());
+    if (argc > 4 && std::string(argv[2]) != "-") {
+        TestDotnet(fs::absolute(argv[2]).u8string(), fs::absolute(argv[3]).u8string(), fs::absolute(argv[4]).u8string(), true);
+#if !defined(_WIN32)
+        TestDotnet(fs::absolute(argv[2]).u8string(), fs::absolute(argv[3]).u8string(), fs::absolute(argv[4]).u8string(), false);
+#endif
+    }
     if (argc > 5) TestJava(fs::absolute(argv[5]).u8string());
     if (failures) {
         std::cerr << failures << " failure(s)" << std::endl;

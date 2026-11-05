@@ -10,6 +10,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <sstream>
 #include <cstdio>
 
@@ -365,7 +366,9 @@ void AiInvestigationWorkspace::LiveAttach(UiContext& context, int port) {
 }
 
 void AiInvestigationWorkspace::LiveAttachDap(UiContext& context, int port, const std::string& adapter, int pid) {
-    if (port <= 0 || port > 65535) {
+    // netcoredbg with port 0: Cortex starts it in stdio mode (CORTEX_NETCOREDBG).
+    const bool stdio = adapter == "netcoredbg" && port == 0;
+    if (!stdio && (port <= 0 || port > 65535)) {
         context.status = "Live: invalid port";
         return;
     }
@@ -378,7 +381,10 @@ void AiInvestigationWorkspace::LiveAttachDap(UiContext& context, int port, const
     liveSession_.clear();
     liveScripts_ = liveSource_ = liveHits_ = nullptr;
     liveBreakpoint_ = 0;
-    const json attached = adapter == "jdwp" ? DesktopLive().AttachJdwp(static_cast<uint16_t>(port))
+    if (stdio && DesktopLive().Netcoredbg().empty())
+        if (const char* path = std::getenv("CORTEX_NETCOREDBG")) DesktopLive().SetNetcoredbg(path);
+    const json attached = stdio             ? DesktopLive().AttachNetcoredbgStdio(static_cast<uint64_t>(std::max(0, pid)))
+                          : adapter == "jdwp" ? DesktopLive().AttachJdwp(static_cast<uint16_t>(port))
                                             : DesktopLive().AttachDap(static_cast<uint16_t>(port), adapter, static_cast<uint64_t>(std::max(0, pid)));
     if (!attached.value("ok", false)) {
         context.status = "Live: attach failed: " + attached.value("error", std::string());

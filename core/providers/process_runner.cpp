@@ -377,4 +377,196 @@ ProcessOutcome RunProcess(const ProcessSpec& spec, const std::atomic<bool>* canc
 #endif
 }
 
+#if defined(_WIN32)
+bool ChildProcess::Start(const ProcessSpec& spec, std::string& error) {
+    if (spec.argv.empty()) {
+        error = "empty_command";
+        return false;
+    }
+    SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE inRead = nullptr, inWrite = nullptr, outRead = nullptr, outWrite = nullptr;
+    if (!CreatePipe(&inRead, &inWrite, &security, 0) || !CreatePipe(&outRead, &outWrite, &security, 0)) {
+        error = "pipe_failed";
+        return false;
+    }
+    SetHandleInformation(inWrite, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
+    HANDLE errorOut = spec.outputFile.empty()
+                          ? CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, nullptr)
+                          : CreateFileW(Wide(spec.outputFile).c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    job_ = CreateJobObjectW(nullptr, nullptr);
+    if (job_) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+    }
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = inRead;
+    startup.hStdOutput = outWrite;
+    startup.hStdError = errorOut != INVALID_HANDLE_VALUE ? errorOut : outWrite;
+    std::string commandLine;
+    for (const auto& argument : spec.argv) commandLine += (commandLine.empty() ? "" : " ") + QuoteArgument(argument);
+    std::wstring line = Wide(commandLine);
+    std::wstring environment = EnvironmentBlock(spec.environment);
+    const std::wstring directory = Wide(spec.workingDirectory);
+    PROCESS_INFORMATION info{};
+    const BOOL created = CreateProcessW(Wide(spec.argv[0]).c_str(), line.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, environment.data(),
+                                        directory.empty() ? nullptr : directory.c_str(), &startup, &info);
+    CloseHandle(inRead);
+    CloseHandle(outWrite);
+    if (errorOut != INVALID_HANDLE_VALUE) CloseHandle(errorOut);
+    if (!created) {
+        error = "start_failed:" + std::to_string(GetLastError());
+        CloseHandle(inWrite);
+        CloseHandle(outRead);
+        return false;
+    }
+    if (job_) AssignProcessToJobObject(static_cast<HANDLE>(job_), info.hProcess);
+    ResumeThread(info.hThread);
+    CloseHandle(info.hThread);
+    process_ = info.hProcess;
+    pid_ = info.dwProcessId;
+    stdinWrite_ = inWrite;
+    stdoutRead_ = outRead;
+    return true;
+}
+
+bool ChildProcess::Write(const std::string& bytes) {
+    if (!stdinWrite_) return false;
+    const char* data = bytes.data();
+    size_t left = bytes.size();
+    while (left) {
+        DWORD written = 0;
+        if (!WriteFile(static_cast<HANDLE>(stdinWrite_), data, static_cast<DWORD>(std::min<size_t>(left, 1 << 20)), &written, nullptr) ||
+            !written)
+            return false;
+        data += written;
+        left -= written;
+    }
+    return true;
+}
+
+int ChildProcess::Read(char* buffer, size_t max, int timeoutMs) {
+    if (!stdoutRead_) return -1;
+    const auto deadline = Clock::now() + std::chrono::milliseconds(timeoutMs);
+    for (;;) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(static_cast<HANDLE>(stdoutRead_), nullptr, 0, nullptr, &available, nullptr)) return -1;
+        if (available) {
+            DWORD read = 0;
+            if (!ReadFile(static_cast<HANDLE>(stdoutRead_), buffer, static_cast<DWORD>(std::min<size_t>(max, available)), &read, nullptr))
+                return -1;
+            return static_cast<int>(read);
+        }
+        if (Clock::now() >= deadline) return 0;
+        Sleep(5);
+    }
+}
+
+void ChildProcess::Kill() {
+    if (job_) TerminateJobObject(static_cast<HANDLE>(job_), 1);
+    if (process_) {
+        TerminateProcess(static_cast<HANDLE>(process_), 1);
+        WaitForSingleObject(static_cast<HANDLE>(process_), 5000);
+        CloseHandle(static_cast<HANDLE>(process_));
+        process_ = nullptr;
+    }
+    for (void** handle : {&stdinWrite_, &stdoutRead_, &job_})
+        if (*handle) {
+            CloseHandle(static_cast<HANDLE>(*handle));
+            *handle = nullptr;
+        }
+}
+
+bool ChildProcess::Running() const {
+    return process_ && WaitForSingleObject(static_cast<HANDLE>(process_), 0) == WAIT_TIMEOUT;
+}
+#else
+bool ChildProcess::Start(const ProcessSpec& spec, std::string& error) {
+    if (spec.argv.empty()) {
+        error = "empty_command";
+        return false;
+    }
+    int in[2], out[2];
+    if (pipe(in) != 0 || pipe(out) != 0) {
+        error = "pipe_failed";
+        return false;
+    }
+    std::vector<std::string> arguments = spec.argv;
+    std::vector<char*> raw;
+    for (auto& argument : arguments) raw.push_back(argument.data());
+    raw.push_back(nullptr);
+    const pid_t pid = fork();
+    if (pid < 0) {
+        error = "fork_failed";
+        return false;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(in[0], 0);
+        dup2(out[1], 1);
+        const int err = spec.outputFile.empty() ? open("/dev/null", O_WRONLY) : open(spec.outputFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (err >= 0) dup2(err, 2);
+        close(in[0]);
+        close(in[1]);
+        close(out[0]);
+        close(out[1]);
+        for (const auto& [key, value] : spec.environment) setenv(key.c_str(), value.c_str(), 1);
+        if (!spec.workingDirectory.empty() && chdir(spec.workingDirectory.c_str()) != 0) _exit(126);
+        execv(raw[0], raw.data());
+        _exit(127);
+    }
+    setpgid(pid, pid);
+    close(in[0]);
+    close(out[1]);
+    signal(SIGPIPE, SIG_IGN);
+    pid_ = static_cast<unsigned long>(pid);
+    stdinWrite_ = in[1];
+    stdoutRead_ = out[0];
+    return true;
+}
+
+bool ChildProcess::Write(const std::string& bytes) {
+    size_t done = 0;
+    while (done < bytes.size()) {
+        const ssize_t n = ::write(stdinWrite_, bytes.data() + done, bytes.size() - done);
+        if (n <= 0) return false;
+        done += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+int ChildProcess::Read(char* buffer, size_t max, int timeoutMs) {
+    if (stdoutRead_ < 0) return -1;
+    pollfd entry{stdoutRead_, POLLIN, 0};
+    const int ready = poll(&entry, 1, timeoutMs);
+    if (ready == 0) return 0;
+    if (ready < 0) return -1;
+    const ssize_t n = ::read(stdoutRead_, buffer, max);
+    return n > 0 ? static_cast<int>(n) : -1;
+}
+
+void ChildProcess::Kill() {
+    if (pid_) {
+        kill(-static_cast<pid_t>(pid_), SIGKILL);
+        int status = 0;
+        waitpid(static_cast<pid_t>(pid_), &status, 0);
+    }
+    if (stdinWrite_ >= 0) close(stdinWrite_);
+    if (stdoutRead_ >= 0) close(stdoutRead_);
+    stdinWrite_ = stdoutRead_ = -1;
+    pid_ = 0;
+}
+
+bool ChildProcess::Running() const {
+    return pid_ && kill(static_cast<pid_t>(pid_), 0) == 0;
+}
+#endif
+
+ChildProcess::~ChildProcess() { Kill(); }
+
 } // namespace cortex::providers

@@ -20,6 +20,7 @@
 
 #include "cdp.h"  // LiveSession
 #include "websocket.h"
+#include "../providers/process_runner.h"
 
 #include <nlohmann/json.hpp>
 
@@ -27,6 +28,7 @@
 #include <condition_variable>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -42,6 +44,11 @@ public:
     // adapter: "debugpy" (attach to the listener's own process) or
     // "netcoredbg" (attach to `processId`).
     bool Attach(uint16_t port, const std::string& adapter, uint64_t processId, std::string& error);
+    // stdio mode: Cortex starts the operator-configured adapter
+    // (`netcoredbg --interpreter=vscode`) and speaks DAP over its pipes.
+    // `logFile` (optional) receives the adapter's stderr.
+    bool AttachStdio(const std::string& adapterPath, const std::string& adapter, uint64_t processId, std::string& error,
+                     const std::string& logFile = {});
 
     std::string Protocol() const override { return "dap"; }
     void Detach() override;
@@ -56,6 +63,10 @@ public:
     json Console(size_t offset, size_t limit) const override;
 
 private:
+    bool Handshake(const std::string& adapter, uint64_t processId, std::string& error);
+    bool SendRaw(const std::string& bytes);
+    int ReadRaw(char* buffer, size_t max, int timeoutMs);
+    void CloseRaw();
     json Request(const std::string& command, const json& arguments, int timeoutMs = 10000);
     int64_t Send(const std::string& command, const json& arguments);
     json Wait(int64_t seq, int timeoutMs);
@@ -78,6 +89,8 @@ private:
     };
 
     TcpStream stream_;
+    std::unique_ptr<providers::ChildProcess> child_;  // stdio mode
+    std::mutex sendMutex_;
     std::atomic<bool> connected_{false};
     std::atomic<bool> stopping_{false};
     uint16_t port_ = 0;

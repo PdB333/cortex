@@ -42,6 +42,38 @@ struct ProcessOutcome {
 // true (polled every 50 ms).
 ProcessOutcome RunProcess(const ProcessSpec& spec, const std::atomic<bool>* cancel = nullptr);
 
+// A child process the caller talks to over its stdin/stdout (a debug
+// adapter in stdio mode). stderr goes to spec.outputFile, or is discarded.
+// The child and its descendants are killed on Kill() or destruction (job
+// object / process group).
+class ChildProcess {
+public:
+    ChildProcess() = default;
+    ~ChildProcess();
+    ChildProcess(const ChildProcess&) = delete;
+    ChildProcess& operator=(const ChildProcess&) = delete;
+
+    bool Start(const ProcessSpec& spec, std::string& error);
+    bool Write(const std::string& bytes);  // thread-safe with Read
+    // Up to `max` bytes of its stdout; 0 on timeout, -1 when it is closed.
+    int Read(char* buffer, size_t max, int timeoutMs);
+    void Kill();
+    bool Running() const;
+    unsigned long Pid() const { return pid_; }
+
+private:
+    unsigned long pid_ = 0;
+#if defined(_WIN32)
+    void* process_ = nullptr;
+    void* job_ = nullptr;
+    void* stdinWrite_ = nullptr;
+    void* stdoutRead_ = nullptr;
+#else
+    int stdinWrite_ = -1;
+    int stdoutRead_ = -1;
+#endif
+};
+
 // The first match for `name` in PATH (with PATHEXT on Windows), or "".
 std::string FindOnPath(const std::string& name);
 
