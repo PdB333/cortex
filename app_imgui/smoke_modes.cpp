@@ -829,20 +829,55 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
         app.ui.mutationAllowed = true;
         app.ui.accessFinderRequests.push_back({frame, 4, true});
         app.workspaces.Select("access-finder");
+        // Two phases with time budgets rather than a fixed number of frames:
+        // on a loaded runner the debugger can take seconds to apply the
+        // breakpoint, which used to use up the whole wait. The test still
+        // requires at least one recorded write once it is applied.
         size_t hits = 0;
-        for (int attempt = 0; attempt < 80 && hits == 0; ++attempt) {
+        const DebugBreakpointInfo* installed = nullptr;
+        auto findBreakpoint = [&]() -> const DebugBreakpointInfo* {
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+                if (breakpoint.address == frame && breakpoint.kind == "hw_write") return &breakpoint;
+            return nullptr;
+        };
+        const auto installStart = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - installStart < std::chrono::seconds(30)) {
+            if (!RenderGuiStable(app, error, true)) return false;
+            installed = findBreakpoint();
+            if (installed && installed->appliedThreads > 0) break;
+            Sleep(100);
+        }
+        const auto installMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - installStart).count();
+        if (!installed || installed->appliedThreads == 0) {
+            error = "access_finder_breakpoint_not_applied: present=" + std::string(installed ? "yes" : "no") +
+                    " applied_threads=" + std::to_string(installed ? installed->appliedThreads : 0) + "/" +
+                    std::to_string(installed ? installed->totalThreads : 0) + " waited_ms=" + std::to_string(installMs);
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+                if (breakpoint.address == frame) app.debuggerModel.RemoveBreakpoint(breakpoint.id, nullptr);
+            app.ui.mutationAllowed = false;
+            return false;
+        }
+        size_t logEntries = 0;
+        uint64_t hitCount = 0;
+        const auto hitStart = std::chrono::steady_clock::now();
+        while (hits == 0 && std::chrono::steady_clock::now() - hitStart < std::chrono::seconds(20)) {
             if (!RenderGuiStable(app, error, true)) return false;
             Sleep(150);
-            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
-                if (breakpoint.address == frame && breakpoint.kind == "hw_write") hits = breakpoint.hitCount;
+            if (const auto* breakpoint = findBreakpoint()) hitCount = breakpoint->hitCount;
+            hits = static_cast<size_t>(hitCount);
             std::vector<DebugBreakpointLogEntry> entries;
             for (const auto& breakpoint : app.debuggerModel.Breakpoints()) {
                 if (breakpoint.address != frame) continue;
                 std::string logError;
-                if (app.debuggerModel.LoadBreakpointLog(breakpoint.id, 0, 16, entries, &logError))
+                if (app.debuggerModel.LoadBreakpointLog(breakpoint.id, 0, 16, entries, &logError)) {
+                    logEntries = entries.size();
                     hits = std::max(hits, entries.size());
+                }
             }
         }
+        const auto hitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - hitStart).count();
         for (const auto& breakpoint : app.debuggerModel.Breakpoints())
             if (breakpoint.address == frame) app.debuggerModel.RemoveBreakpoint(breakpoint.id, nullptr);
         // Hits still queued for the removed breakpoint must not reach the
@@ -854,7 +889,9 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         if (hits == 0) {
-            error = "access_finder_recorded_no_write";
+            error = "access_finder_recorded_no_write: hit_count=" + std::to_string(hitCount) +
+                    " log_entries=" + std::to_string(logEntries) + " applied_after_ms=" + std::to_string(installMs) +
+                    " waited_ms=" + std::to_string(hitMs);
             return false;
         }
         summary += " frame_writes=" + std::to_string(hits);

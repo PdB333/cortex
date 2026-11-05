@@ -16,6 +16,7 @@ on:
       - "tests/gui/**"
       - "tests/security_no_writes_regression.py"
       - "tests/context_isolation_e2e.py"
+      - "tests/robustness_e2e.py"
       - "tests/manual_demo_e2e.py"
       - "tests/artifact_mcp_e2e.py"
       - "tests/dotnet_e2e.py"
@@ -467,6 +468,24 @@ jobs:
             if ($LASTEXITCODE -ne 0) { $failed += $arch }
           }
           if ($failed.Count -gt 0) { throw "context isolation E2E failed on: $($failed -join ', ')" }
+
+      - name: Robustness (malformed requests, target killed mid-request, engines absent or failing)
+        shell: pwsh
+        run: |
+          # Every tool with wrongly typed arguments and malformed JSON-RPC:
+          # answered, nothing dies. A target killed during a request, and a
+          # debuggee killed with a hardware breakpoint: bounded errors, the
+          # server keeps serving new targets. Engines absent or failing mid-job.
+          # See tests/robustness_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/robustness_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "robustness E2E failed on: $($failed -join ', ')" }
 
       - name: Manual workflow demo (scan, watch, find what writes, navigate, save)
         shell: pwsh

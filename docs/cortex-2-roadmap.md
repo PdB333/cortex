@@ -861,6 +861,16 @@ The full description is in `docs/investigations.md`.
   - compare against §4 baselines;
   - benchmark fixtures against CE/Ghidra, measured per dimension.
 
+**Status (in progress):**
+
+| Item | Result | Validation |
+|---|---|---|
+| 9.1 Ad hoc builds into CTest | Done. Eleven contract tests are CMake targets; `contracts.yml` runs them through `ctest` | 11/11 under Wine, x64 and x86; CI |
+| 9.2 Parser fuzzing | Three libFuzzer harnesses (`tests/fuzz`) with ASan and UBSan; 60 s per harness in CI (`fuzz-parsers`); crash inputs replayed by `ctest` | Found a stack overflow: a .NET `TypeSpec` signature that refers to itself recursed forever (`dotnet_metadata.cpp`). Fixed by bounding TypeSpec nesting and the work per signature; both crash inputs fail before the fix and pass after. Not fuzzed: the live protocol decoders and the JSON project files |
+| 9.3 Robustness E2E | `tests/robustness_e2e.py`: every tool with wrongly typed arguments, malformed JSON-RPC, target killed during a request, debuggee killed with a hardware breakpoint, new target on the same server, engines absent or failing mid-job | 42 checks, x64 and x86 under Wine; CI step in the GUI suite. Found two crashes of `cortex.exe mcp`: a wrongly typed argument to a local tool (`{"job_id": null}`) and a notification with a non-string `method` ended the server. Fixed: such requests get `invalid_arguments` or `internal_error`, and the server keeps running |
+| 9.4 Flaky test, faster CI | Open | |
+| Baselines, benchmarks | Open | Need a Windows host |
+
 ### Step 10: product
 
 - The README order, the portable archive, three demos and the guides listed in

@@ -8,6 +8,10 @@ Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code
 
 ### Added
 
+- **Quality (step 9).**
+  - Contract tests are now in CTest.
+  - Fuzzing of the file parsers (`tests/fuzz`, CI job `fuzz-parsers`).
+  - Robustness end-to-end tests (`tests/robustness_e2e.py`).
 - **Product documentation (step 10, in progress).**
   - The README is reorganized around what Cortex does. It has three GIFs recorded from the real app against the test target and fixtures, an architecture diagram, a table of what can be analyzed with each row's validation, a safety model and an FAQ.
   - New: `CONTRIBUTING.md`, `SECURITY.md`, issue and pull request templates, and `docs/limitations.md`.
@@ -111,6 +115,8 @@ Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code
 
 ### Fixed
 
+- `cortex.exe mcp` no longer exits when a client sends a wrongly typed argument to one of its own tools (for example `cortex_analysis_get {"job_id": null}`), a `tools/call` whose `params` is not an object, or a notification whose `method` is not a string. The request gets `invalid_arguments` or `internal_error`, and the server keeps serving.
+- A crafted .NET assembly whose `TypeSpec` signature referred to itself made the metadata reader recurse until the stack overflowed. TypeSpec nesting and the work per signature are now bounded. Found by fuzzing.
 - **A patch revert could corrupt the target.** `patch::Revert` restored the original bytes without checking that the patched bytes were still in place, that no newer patch covered them, or that the write succeeded. `patch::RevertChecked` refuses with `patch_target_changed`, `patch_overlaps_newer` or `patch_write_failed`, and leaves the target and the registry untouched. `DELETE /patch/{id}` and `batch_run`'s `patch_revert` return these codes; there is no force option.
 - **A reused PID kept the previous process's state in the desktop.** The Memory, Project, RE and Trace workspaces compared target ids only, and a reused PID has the same id. They now compare id + generation. A value scan finishing after the target changed is discarded instead of shown for the new process; a pointer scan from a previous process is labelled so it gets rescanned.
 

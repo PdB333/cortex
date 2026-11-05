@@ -9,6 +9,14 @@ namespace {
 
 constexpr uint32_t kMaxMetadata = 128u << 20;
 constexpr int kMaxSignatureDepth = 64;
+// A TypeSpec signature can name another TypeSpec (generic instances,
+// pointers, arrays), and a crafted file can make that a cycle. Depth inside
+// one signature is bounded by kMaxSignatureDepth; these bound the nesting of
+// TypeSpecs and the total work for one top-level signature.
+constexpr int kMaxTypeSpecNesting = 8;
+constexpr int kSignatureWorkBudget = 4096;
+thread_local int g_typeSpecNesting = 0;
+thread_local int g_signatureWork = 0;
 constexpr uint8_t kNone = 0xFF;
 
 enum Coded : uint8_t {
@@ -445,7 +453,8 @@ std::string Metadata::TypeDefOrRefEncoded(uint32_t value) const {
 }
 
 std::string Metadata::TypeFromSignature(const uint8_t*& p, const uint8_t* end, int depth) const {
-    if (depth > kMaxSignatureDepth || p >= end) return "?";
+    if (depth == 0 && g_typeSpecNesting == 0) g_signatureWork = 0;  // a top-level signature
+    if (depth > kMaxSignatureDepth || p >= end || ++g_signatureWork > kSignatureWorkBudget) return "?";
     const uint8_t element = *p++;
     static const char* const primitives[] = {nullptr,  "void",   "bool",   "char",  "int8",   "uint8",
                                              "int16",  "uint16", "int32",  "uint32", "int64", "uint64",
@@ -533,7 +542,11 @@ std::string Metadata::FieldSignature(uint32_t blob) const {
 std::string Metadata::TypeSpecSignature(uint32_t blob) const {
     const uint8_t* p = nullptr;
     uint32_t size = 0;
-    if (!Blob(blob, p, size) || size == 0) return "?";
+    if (!Blob(blob, p, size) || size == 0 || g_typeSpecNesting >= kMaxTypeSpecNesting) return "?";
+    struct Nesting {
+        Nesting() { ++g_typeSpecNesting; }
+        ~Nesting() { --g_typeSpecNesting; }
+    } nesting;
     return TypeFromSignature(p, p + size, 0);
 }
 
