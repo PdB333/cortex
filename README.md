@@ -98,7 +98,7 @@ Each row lists how its validation is done. "Validated" means checked in CI again
 | **Decompiled Java** | Java sources | [Vineflower](https://github.com/Vineflower/vineflower) 1.11 and a JDK | Sources recompile; `javap -p` signatures match |
 | **Live Node.js** | Scripts, sources, log breakpoints with stack and locals, console | `node --inspect` on 127.0.0.1 | Real Node 22 (`tests/live_e2e.py`). Electron itself is not validated |
 | **Live Python** | Log breakpoints with stack and locals | [debugpy](https://github.com/microsoft/debugpy) | Real debugpy 1.8 against `tests/fixtures/python-live` |
-| **Live .NET** | Log breakpoints with stack and locals | [netcoredbg](https://github.com/Samsung/netcoredbg) 3.1, started by Cortex in stdio mode | Linux validated; Windows stdio mode in CI |
+| **Live .NET** | Log breakpoints with stack and locals | [netcoredbg](https://github.com/Samsung/netcoredbg) 3.1, started by Cortex in stdio mode | Real netcoredbg 3.1.2 against `tests/fixtures/dotnet-live`, on Windows (stdio mode) and Linux |
 | **Live Java** | Log breakpoints with stack and locals | A JVM started with JDWP | Real JVM against `tests/fixtures/java-live` |
 
 Live providers never evaluate code. At a log breakpoint they record the stack and locals and resume at once, and a pause Cortex did not set is resumed too. Python bytecode, Unity/IL2CPP and WebAssembly are planned; see the [roadmap](docs/cortex-2-roadmap.md).

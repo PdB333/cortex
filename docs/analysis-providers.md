@@ -382,7 +382,9 @@ and its `--artifact-root`. `cortex_live_scripts` is CDP-only.
     `attach` and `configurationDone` in 0.5 s.
 
   `cortex_dap_tests` runs stdio mode on every system, and the `--server`
-  mode on non-Windows systems only.
+  mode on non-Windows systems only. Windows CI (`analysis-engines`,
+  netcoredbg-win64 3.1.2) attaches in stdio mode and records the fixture's
+  hits with their locals.
 - **JDWP (Java live) is a separate provider;** see below.
 
 ## Live provider: JDWP (Java)
