@@ -1,8 +1,10 @@
 <div align="center">
 
-<img src="docs/images/brand/cortex-logo.png" alt="Cortex" width="112">
-
-# Cortex
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/brand/cortex-banner-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/brand/cortex-banner-light.png">
+  <img src="docs/images/brand/cortex-banner-dark.png" alt="Cortex: find what changed it, show the evidence" width="720">
+</picture>
 
 **See a value change in a program you own. Find the instruction that changed it. Show the evidence.**
 
