@@ -753,6 +753,45 @@ if(BUILD_TESTING)
     add_test(NAME cortex_dap_tests COMMAND cortex_dap_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/python-live/app.py)
     set_tests_properties(cortex_dap_tests PROPERTIES TIMEOUT 300)
 
+    # Contract tests that contracts.yml used to compile by hand. They are
+    # self-contained (headers only, or a few core sources) and now run with
+    # every `ctest`.
+    foreach(contract request_id pagination mcp_protocol mcp_pipe_protocol mcp_schema
+                     mcp_query_schema mcp_bridge_policy)
+        add_executable(cortex_${contract}_tests tests/${contract}_tests.cpp)
+        target_include_directories(cortex_${contract}_tests PRIVATE core)
+        target_link_libraries(cortex_${contract}_tests PRIVATE nlohmann_json::nlohmann_json)
+        add_test(NAME cortex_${contract}_tests COMMAND cortex_${contract}_tests)
+    endforeach()
+
+    add_executable(cortex_mcp_authority_tests tests/mcp_authority_tests.cpp)
+    target_include_directories(cortex_mcp_authority_tests PRIVATE core)
+    target_link_libraries(cortex_mcp_authority_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_mcp_authority_tests
+             COMMAND cortex_mcp_authority_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mcp_tool_risks.json)
+
+    add_executable(cortex_semantic_tools_tests tests/semantic_tools_tests.cpp)
+    target_include_directories(cortex_semantic_tools_tests PRIVATE core)
+    target_link_libraries(cortex_semantic_tools_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_semantic_tools_tests
+             COMMAND cortex_semantic_tools_tests ${CMAKE_CURRENT_SOURCE_DIR}/core/api/routes_status.cpp)
+
+    add_executable(cortex_action_transaction_tests
+        tests/action_transaction_tests.cpp core/action/action.cpp core/events/events.cpp)
+    target_include_directories(cortex_action_transaction_tests PRIVATE core)
+    target_link_libraries(cortex_action_transaction_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_action_transaction_tests COMMAND cortex_action_transaction_tests)
+
+    if(WIN32)
+        add_executable(cortex_call_scheduler_tests tests/call_scheduler_tests.cpp core/call/call.cpp)
+        target_include_directories(cortex_call_scheduler_tests PRIVATE core)
+        target_link_libraries(cortex_call_scheduler_tests PRIVATE nlohmann_json::nlohmann_json user32)
+        if(MINGW)
+            target_link_options(cortex_call_scheduler_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        endif()
+        add_test(NAME cortex_call_scheduler_tests COMMAND cortex_call_scheduler_tests)
+    endif()
+
     add_executable(cortex_process_tree_tests tests/process_tree_tests.cpp core/target/process_tree.cpp)
     target_link_libraries(cortex_process_tree_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_process_tree_tests COMMAND cortex_process_tree_tests)
@@ -787,7 +826,8 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests
+                        cortex_request_id_tests cortex_pagination_tests cortex_mcp_protocol_tests cortex_mcp_pipe_protocol_tests cortex_mcp_schema_tests cortex_mcp_query_schema_tests cortex_mcp_bridge_policy_tests cortex_mcp_authority_tests cortex_semantic_tools_tests cortex_action_transaction_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

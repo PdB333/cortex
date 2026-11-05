@@ -141,7 +141,7 @@ States:
 | Project persistence | functional, **hardened in step 1** | Atomic replace (`ReplaceFile`/`MoveFileEx` with write-through) and `.bak`; schema migration to v3. A damaged file is now quarantined (§5.3) |
 | Desktop settings / `cortex.ini` | **fixed in step 1** | Were rewritten in place with `trunc` (§5.2) |
 | Test-runner records | functional | tmp + `std::filesystem::rename` |
-| Ad hoc test builds | debt | `action_transaction`, `semantic_tools`, `mcp_protocol`, `mcp_authority`, `mcp_schema`, `mcp_query_schema`, `mcp_pipe_protocol`, `call_scheduler`, `mcp_bridge_policy`, `request_id`, `pagination` are compiled by inline `c++` commands in `contracts.yml`, not by CMake, so `ctest` alone does not run them (step 9.6) |
+| Ad hoc test builds | fixed (step 9.1) | `action_transaction`, `semantic_tools`, `mcp_protocol`, `mcp_authority`, `mcp_schema`, `mcp_query_schema`, `mcp_pipe_protocol`, `call_scheduler`, `mcp_bridge_policy`, `request_id`, `pagination` are CMake targets registered with `ctest` (x64 and x86). `contracts.yml` runs them through `ctest`; its small `p1-contracts` job still builds `request_id` and `pagination` alone, and `full-windows-build.yml` still ships `cortex_semantic_tools_tests.exe` as an artifact |
 
 ### 3.5 Obsolete or duplicated, kept for now
 

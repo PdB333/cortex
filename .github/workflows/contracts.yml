@@ -114,38 +114,9 @@ jobs:
         shell: msys2 {0}
         run: cmake --build build/p1-${{ matrix.arch }} --parallel 2
 
-      - name: Run existing CTest suite
+      - name: Run CTest suite (includes the action transaction and semantic plan tests)
         shell: msys2 {0}
         run: ctest --test-dir build/p1-${{ matrix.arch }} --output-on-failure
-
-      - name: Build action transaction tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2
-          tests/action_transaction_tests.cpp
-          core/action/action.cpp
-          core/events/events.cpp
-          -Icore
-          -o build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
-          -static -static-libgcc -static-libstdc++
-
-      - name: Run action transaction tests
-        shell: msys2 {0}
-        run: build/p1-${{ matrix.arch }}/cortex_action_transaction_tests.exe
-
-      - name: Build semantic plan tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
-          -Ibuild/p1-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
-          -static -static-libgcc -static-libstdc++
-
-      - name: Run semantic plan tests
-        shell: msys2 {0}
-        run: >-
-          build/p1-${{ matrix.arch }}/cortex_semantic_tools_tests.exe
-          core/api/routes_status.cpp
 
   # ---- P2 Contracts (was .github/workflows/p2-contracts.yml)
   p2-contracts:
@@ -202,85 +173,9 @@ jobs:
           path: build/p2-${{ matrix.arch }}/compile.log
           if-no-files-found: warn
 
-      - name: Run core tests
+      - name: Run CTest suite (includes the MCP protocol, authority, pipe, schema, scheduler, bridge policy, request id and pagination tests)
         shell: msys2 {0}
         run: ctest --test-dir build/p2-${{ matrix.arch }} --output-on-failure
-
-      - name: Build and run MCP protocol tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/mcp_protocol_tests.cpp
-          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_protocol_tests.exe
-
-      - name: Build and run MCP write-authority tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 -Icore tests/mcp_authority_tests.cpp
-          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p2-${{ matrix.arch }}/mcp_authority_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_authority_tests.exe
-
-      - name: Build and run native pipe contract tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/mcp_pipe_protocol_tests.cpp
-          -o build/p2-${{ matrix.arch }}/mcp_pipe_protocol_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_pipe_protocol_tests.exe
-
-      - name: Build and run semantic execution contract tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/semantic_tools_tests.cpp
-          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p2-${{ matrix.arch }}/semantic_tools_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/semantic_tools_tests.exe core/api/routes_status.cpp
-
-      - name: Build and run MCP schema tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/mcp_schema_tests.cpp
-          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_schema_tests.exe
-          && c++ -std=c++17 -O2 tests/mcp_query_schema_tests.cpp
-          -Ibuild/p2-${{ matrix.arch }}/_deps/json-src/include
-          -o build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_query_schema_tests.exe
-
-      - name: Build and run game-thread call scheduler tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/call_scheduler_tests.cpp core/call/call.cpp
-          -o build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
-          -static -static-libgcc -static-libstdc++ -luser32
-          && build/p2-${{ matrix.arch }}/call_scheduler_tests.exe
-      - name: Build and run MCP bridge policy tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/mcp_bridge_policy_tests.cpp
-          -o build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/mcp_bridge_policy_tests.exe
-
-      - name: Build and run inherited request tests
-        shell: msys2 {0}
-        run: >-
-          c++ -std=c++17 -O2 tests/request_id_tests.cpp
-          -o build/p2-${{ matrix.arch }}/request_id_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/request_id_tests.exe
-          && c++ -std=c++17 -O2 tests/pagination_tests.cpp
-          -o build/p2-${{ matrix.arch }}/pagination_tests.exe
-          -static -static-libgcc -static-libstdc++
-          && build/p2-${{ matrix.arch }}/pagination_tests.exe
 
   # ---- P3 Probe Build (was .github/workflows/p3-probe-build.yml)
   p3-probe-build:
