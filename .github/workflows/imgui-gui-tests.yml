@@ -51,6 +51,16 @@ concurrency:
   group: imgui-gui-suite-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
+# ccache for the MinGW builds: restored per job from the latest cache, so a
+# pull request recompiles only what changed. It hashes the preprocessed
+# source and the compiler, so a stale cache cannot change a build.
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPILERCHECK: content
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_MAXSIZE: 700M
+
 jobs:
   source-contracts:
     runs-on: ubuntu-latest
@@ -130,6 +140,14 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-analysis-engines-${{ github.sha }}
+          restore-keys: ccache-analysis-engines-
 
       - uses: actions/setup-java@v4
         with:
@@ -181,8 +199,9 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/analysis --target cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_target --parallel 2
+          ccache -s || true
 
       - name: Download x86 GUI fixture
         uses: actions/download-artifact@v4
@@ -255,13 +274,22 @@ jobs:
             mingw-w64-i686-gcc
             mingw-w64-i686-cmake
             mingw-w64-i686-ninja
+            mingw-w64-i686-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-x86-fixture-${{ github.sha }}
+          restore-keys: ccache-x86-fixture-
 
       - name: Build x86 runtime and target
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build/gui-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake -S . -B build/gui-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-x86 --target core cortex_test_target --parallel 2
+          ccache -s || true
           c++ -std=c++17 -O2 -municode runtime_helper/main.cpp             -o build/gui-x86/cortex_runtime_helper.exe             -static -static-libgcc -static-libstdc++
 
       - name: Stage x86 GUI fixture
@@ -299,13 +327,22 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-debug-ui-${{ github.sha }}
+          restore-keys: ccache-windows-debug-ui-
 
       - name: Build Debug UI
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S app_imgui -B build/gui-debug -G Ninja             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake -S app_imgui -B build/gui-debug -G Ninja             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-debug --parallel 2
+          ccache -s || true
 
       - name: Run Debug GUI CTest suite
         shell: msys2 {0}
@@ -330,13 +367,22 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-release-full-${{ github.sha }}
+          restore-keys: ccache-windows-release-full-
 
       - name: Build Release GUI
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S app_imgui -B build/gui-release -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake -S app_imgui -B build/gui-release -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-release --parallel 2
+          ccache -s || true
 
       - name: Run targetless GUI CTest suite
         shell: msys2 {0}
@@ -359,8 +405,9 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build/runtime-x64 -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake -S . -B build/runtime-x64 -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+          ccache -s || true
 
       - name: Download x86 GUI fixture
         uses: actions/download-artifact@v4
