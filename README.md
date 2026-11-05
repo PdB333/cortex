@@ -18,7 +18,7 @@ It reads files as well as live processes, can use Ghidra, ILSpy and live debugge
 ![MCP](https://img.shields.io/badge/MCP-native%20stdio-2EA44F?style=flat-square)
 [![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
 
-[Quick start](#quick-start) · [See it work](#see-it-work) · [What you can analyze](#what-you-can-analyze) · [AI & MCP](#ai--mcp) · [Safety](#safety-model) · [FAQ](#faq) · [Docs](#documentation)
+[Two ways to use it](#two-ways-to-use-cortex) · [Quick start](#quick-start) · [See it work](#see-it-work) · [What you can analyze](#what-you-can-analyze) · [AI & MCP](#ai--mcp) · [Safety](#safety-model) · [FAQ](#faq) · [Docs](#documentation)
 
 <br>
 
@@ -41,18 +41,79 @@ It reads files as well as live processes, can use Ghidra, ILSpy and live debugge
 - **Built for agents, watched by people.** `cortex.exe mcp` is a native MCP server. Each tool call an agent makes shows up live in the desktop's **AI Activity** panel.
 - **Claims come with evidence.** Results record where they came from, their status (`observed`, `validated`…) and their limits. An observation is never presented as an explanation of the code.
 
+## Two ways to use Cortex
+
+One `cortex.exe` and one engine, with two ways to drive it. Both share the same targets, projects and evidence, so you can switch between them in the middle of an investigation.
+
+<table>
+<tr>
+<th width="50%">🧑‍💻 You drive it: desktop and command line</th>
+<th width="50%">🤖 An AI agent drives it: MCP, under your control</th>
+</tr>
+<tr>
+<td valign="top">
+
+**Desktop (GUI):** run `cortex.exe`. Attach to a process, scan, debug, disassemble and inspect files in dockable workspaces. Everything is clicks and right-click menus.
+
+**Command line (CLI):** the same engine from a terminal or a script, with nothing to click:
+- `cortex.exe inspect app.asar` to analyze a file;
+- `cortex.exe provider run ghidra …` to decompile;
+- `cortex.exe live watch …` for a live debugger;
+- `cortex.exe evidence export` to export the evidence.
+
+Use it for automation, CI or quick checks.
+
+**Who decides:** you. A session starts **Read-only**; switch to **Writes allowed** only when you mean to change the target.
+
+</td>
+<td valign="top">
+
+**MCP server:** your AI client (Claude Code, Cursor, any MCP client) starts `cortex.exe mcp` in the background and calls Cortex's tools: scan, read memory, breakpoints, inspect, Ghidra and ILSpy, live debuggers.
+
+**You stay in control:**
+- **You** choose what the agent may do, in the client's configuration: read-only by default, `--allow-writes` only if you add it. The agent cannot change this.
+- Every change must also be requested explicitly (`mutation_permission: true`).
+- Open the desktop to **watch** every call live in **AI Activity**.
+- Right-click an address and choose *Share with investigation context* to **give** the agent the address you selected.
+- **Approve or reject** each step of an investigation (desktop, or `cortex.exe investigation approve`).
+
+</td>
+</tr>
+</table>
+
+A typical session mixes the two: the agent narrows down a value and finds the instruction that writes it, then you open that address in the desktop and check it yourself.
+
 ## Quick start
 
-1. Download **`cortex-v1.0.1-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive.
-2. Run **`cortex.exe`**, click **Select process** and attach to your target.
-3. In **Memory › Value scan**, enter the current value and run **First scan**. Change the value in the target, then run **Next scan**.
-4. Double-click a result to keep it. Right-click it to open it in the Memory viewer, Disassembler or Debugger, or to *find out what writes to this address*.
-5. Switch the header to **Writes allowed** only when you mean to change something.
+Download **`cortex-v1.0.1-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive (or use the `cortex-imgui-gui-tested-portable` artifact of a green CI run for the current branch).
+
+**By hand (desktop):**
+
+1. Run **`cortex.exe`**, click **Select process** and attach to your target.
+2. In **Memory › Value scan**, enter the current value and run **First scan**. Change the value in the target, then run **Next scan**.
+3. Double-click a result to keep it. Right-click it to open it in the Memory viewer, Disassembler or Debugger, or to *find out what writes to this address*.
+4. Switch the header to **Writes allowed** only when you mean to change something.
+
+**From the command line:**
+
+```powershell
+cortex.exe inspect C:\path\to\app.asar      # analyze a file; nothing runs
+cortex.exe probe --pid 1234                 # read-only health of a running target
+```
+
+**With an AI agent (MCP):** add Cortex to your client's MCP configuration, then ask the agent for something like *"attach to PID 1234 (my own test program), find the address of the health value and what writes it"*:
+
+```json
+{
+  "mcpServers": {
+    "cortex": { "command": "C:/Cortex/cortex.exe", "args": ["mcp"] }
+  }
+}
+```
+
+This configuration is read-only. Add `"--allow-writes"` to `args` only if you want the agent to be able to change the target (breakpoints, writes, loading the runtime). See [AI & MCP](#ai--mcp).
 
 New to Cortex? Follow the [illustrated walkthrough](docs/ui-walkthrough.md) ([français](docs/ui-walkthrough-fr.md)) or the [manual workflow demo](docs/demo-manual.md).
-
-> [!NOTE]
-> **Cortex 2.0 is in development** on [PdB333/cortex#43](https://github.com/PdB333/cortex/pull/43) and not yet released. It adds static analysis of files, evidence records, investigations, the AI Investigation workspace, external engines and live providers. v1.0.1 has the native engine and MCP server. To try 2.0 now, use the `cortex-imgui-gui-tested-portable` artifact of a green CI run.
 
 ## See it work
 
