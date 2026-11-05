@@ -122,6 +122,13 @@ bool DapSession::Attach(uint16_t port, const std::string& adapter, uint64_t proc
         if (body.is_object() && body.contains("error") && body["error"].is_object())
             detail += " " + body["error"].value("format", std::string());
         error = "dap_attach_failed: " + detail;
+        // What the adapter said meanwhile (output events), for the operator.
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::string said;
+            for (const auto& entry : output_) said += entry.value("text", std::string());
+            if (!said.empty()) error += " | adapter output: " + Clip(said, 1500);
+        }
         Detach();
         return false;
     }

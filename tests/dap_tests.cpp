@@ -202,11 +202,16 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         cortex::providers::RunProcess(spec, &stop);
     });
     const uint16_t port = static_cast<uint16_t>(6400 + Pid() % 500);
+    const fs::path engineLog = fs::temp_directory_path() / ("cortex-netcoredbg-" + std::to_string(Pid()) + ".log");
+    fs::remove(engineLog);
     cortex::providers::ProcessOutcome adapterOutcome;
     std::atomic<bool> adapterDone{false};
     std::thread adapter([&] {
         cortex::providers::ProcessSpec spec;
-        spec.argv = {netcoredbg, "--interpreter=vscode", "--server=" + std::to_string(port)};
+        // --engineLogging: netcoredbg's own protocol/engine log, printed when
+        // the attach fails (its "current folder" log is the work folder).
+        spec.argv = {netcoredbg, "--interpreter=vscode", "--server=" + std::to_string(port),
+                     "--engineLogging=" + engineLog.u8string()};
         spec.workingDirectory = fs::u8path(netcoredbg).parent_path().u8string();
         spec.timeout = std::chrono::minutes(5);
         adapterOutcome = cortex::providers::RunProcess(spec, &stop);
@@ -241,6 +246,10 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
         std::cerr << "netcoredbg exited=" << adapterDone.load() << " code=" << adapterOutcome.exitCode
                   << " started=" << adapterOutcome.started << " error=" << adapterOutcome.error << "\n"
                   << adapterOutcome.output.substr(0, 4000) << std::endl;
+        std::ifstream log(engineLog);
+        const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
+        std::cerr << "netcoredbg engine log (" << text.size() << " bytes):\n"
+                  << (text.size() > 12000 ? text.substr(text.size() - 12000) : text) << std::endl;
         app.join();
         return;
     }
@@ -281,6 +290,8 @@ void TestDotnet(const std::string& dll, const std::string& netcoredbg, const std
     app.join();
     adapter.join();
     fs::remove(pidFile);
+    std::error_code ignored;
+    fs::remove(engineLog, ignored);
 }
 
 std::string JavaTool(const char* name) {
