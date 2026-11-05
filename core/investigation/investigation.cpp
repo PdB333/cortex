@@ -200,11 +200,46 @@ json Templates() {
     });
 }
 
+// The structure every other function relies on. A record file can be edited
+// or damaged on disk; one that does not have it is treated as unreadable
+// rather than reaching code that indexes its fields.
+static bool WellFormed(const json& record, const std::string& id) {
+    auto isString = [](const json& o, const char* k) { return o.contains(k) && o[k].is_string(); };
+    auto isInt = [](const json& o, const char* k) { return o.contains(k) && o[k].is_number_integer(); };
+    auto optional = [](const json& o, const char* k, bool (json::*kind)() const noexcept) {
+        return !o.contains(k) || (o[k].*kind)();
+    };
+    if (!record.is_object() || !isString(record, "id") || record["id"].get<std::string>() != id) return false;
+    if (!isString(record, "state") || !kStates.count(record["state"].get<std::string>())) return false;
+    if (!isInt(record, "revision") || record["revision"].get<int64_t>() < 1) return false;
+    if (!isInt(record, "live_steps_approved") || !isInt(record, "deadline_ms")) return false;
+    if (!record.contains("limits") || !record["limits"].is_object() || !isInt(record["limits"], "max_live_steps"))
+        return false;
+    for (const char* key : {"title", "question", "workflow"})
+        if (record.contains(key) && !record[key].is_string() && !record[key].is_null()) return false;
+    if (!record.contains("evidence") || !record["evidence"].is_array() || !record.contains("journal") ||
+        !record["journal"].is_array())
+        return false;
+    for (const auto& reference : record["evidence"])
+        if (!reference.is_string()) return false;
+    if (!optional(record, "conclusion", &json::is_object)) return false;
+    if (!record.contains("plan") || !record["plan"].is_array() || record["plan"].size() > kMaxSteps) return false;
+    for (const auto& step : record["plan"]) {
+        if (!step.is_object()) return false;
+        for (const char* key : {"title", "tool", "capability", "effect", "status", "runner"})
+            if (!isString(step, key)) return false;
+        if (!isInt(step, "index") || !step.contains("arguments") || !step["arguments"].is_object()) return false;
+        if (!optional(step, "result", &json::is_object) || !optional(step, "approval", &json::is_object)) return false;
+        if (step.contains("hop") && !step["hop"].is_string() && !step["hop"].is_null()) return false;
+    }
+    return true;
+}
+
 json Store::Load(const std::string& id) const {
     if (!ValidId(id)) return nullptr;
     std::ifstream in(directory_ / (id + ".json"), std::ios::binary);
     json record = json::parse(in, nullptr, false);
-    return record.is_object() && record.value("id", std::string()) == id ? record : json(nullptr);
+    return WellFormed(record, id) ? record : json(nullptr);
 }
 
 json Store::Save(json record) {

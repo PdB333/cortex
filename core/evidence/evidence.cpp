@@ -159,6 +159,33 @@ const char* ClassForKnowledgeStatus(const std::string& knowledgeStatus) {
 
 std::filesystem::path Store::FileFor(const std::string& id) const { return directory_ / (id + ".json"); }
 
+// The structure the store's functions rely on. A record file can be edited
+// or damaged on disk; one that does not have it is skipped as unreadable.
+static bool WellFormed(const json& record, const std::string& id) {
+    auto has = [&](const char* key, bool (json::*kind)() const noexcept) {
+        return record.contains(key) && (record[key].*kind)();
+    };
+    auto optional = [&](const char* key, bool (json::*kind)() const noexcept) {
+        return !record.contains(key) || (record[key].*kind)();
+    };
+    if (!record.is_object() || !has("id", &json::is_string) || record["id"].get<std::string>() != id) return false;
+    if (!has("revision", &json::is_number_integer) || record["revision"].get<int64_t>() < 1) return false;
+    if (!has("class", &json::is_string) || !ValidClass(record["class"].get<std::string>())) return false;
+    if (!has("origin", &json::is_string) || !has("statement", &json::is_string)) return false;
+    if (!has("subject", &json::is_object) || !has("verification", &json::is_object)) return false;
+    if (!has("references", &json::is_array) || !has("history", &json::is_array)) return false;
+    if (!has("created_ms", &json::is_number_integer)) return false;
+    if (!optional("relations", &json::is_array) || !optional("updated_ms", &json::is_number_integer) ||
+        !optional("stale", &json::is_boolean) || !optional("produced_by", &json::is_object) ||
+        !optional("knowledge_status", &json::is_string))
+        return false;
+    const json& trials = record["verification"];
+    if (trials.contains("trials") && !trials["trials"].is_array()) return false;
+    for (const auto& reference : record["references"])
+        if (!reference.is_object()) return false;
+    return true;
+}
+
 std::vector<json> Store::LoadAll() const {
     std::vector<json> records;
     std::error_code error;
@@ -169,7 +196,7 @@ std::vector<json> Store::LoadAll() const {
         if (name.size() != 28 || name.substr(23) != ".json" || !ValidId(name.substr(0, 23)) || entry.is_symlink()) continue;
         std::ifstream in(entry.path(), std::ios::binary);
         json record = json::parse(in, nullptr, false);
-        if (record.is_object() && record.value("id", std::string()) == name.substr(0, 23)) records.push_back(std::move(record));
+        if (WellFormed(record, name.substr(0, 23))) records.push_back(std::move(record));
     }
     std::sort(records.begin(), records.end(), [](const json& a, const json& b) {
         return a.value("created_ms", int64_t{0}) != b.value("created_ms", int64_t{0})
@@ -397,7 +424,7 @@ json Store::Reverify(const std::string& id, const Checks& checks) {
     std::ifstream in(FileFor(id), std::ios::binary);
     json record = json::parse(in, nullptr, false);
     in.close();
-    if (!record.is_object()) return Fail("evidence_not_found");
+    if (!WellFormed(record, id)) return Fail("evidence_not_found");
     if (!record.contains("produced_by") && record["verification"].value("trials", json::array()).empty())
         return Fail("nothing_to_verify");
     json previous = record;
@@ -423,7 +450,7 @@ json Store::Get(const std::string& id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ifstream in(FileFor(id), std::ios::binary);
     json record = json::parse(in, nullptr, false);
-    if (!record.is_object()) return Fail("evidence_not_found");
+    if (!WellFormed(record, id)) return Fail("evidence_not_found");
     return {{"ok", true}, {"record", record}};
 }
 

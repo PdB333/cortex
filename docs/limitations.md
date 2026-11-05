@@ -76,8 +76,8 @@ in the "Limits", "Limits (CDP)" and "Limits (DAP)" sections.
 - Python bytecode and PyInstaller, Unity/IL2CPP, a native Java class-file
   parser, and WebAssembly (roadmap priorities 2 and 3).
 - Android APK, Mach-O and other platforms (planned, not scheduled).
-- Fuzzing of the live protocol decoders (WebSocket, DAP, JDWP) and of the
-  project, knowledge and evidence files. The file parsers are fuzzed
-  ([tests/fuzz](../tests/fuzz/README.md)).
+- Fuzzing of the project store (Windows-only). File parsers, live protocol
+  framing, evidence and investigation records and knowledge input are
+  fuzzed ([tests/fuzz](../tests/fuzz/README.md)).
 - The robustness end-to-end tests (target killed mid-operation, module
   unloaded, provider crashed): step 9 ([roadmap](cortex-2-roadmap.md)).

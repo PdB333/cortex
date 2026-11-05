@@ -1,4 +1,5 @@
 #include "websocket.h"
+#include "protocol_frames.h"
 
 #include <algorithm>
 #include <chrono>
@@ -360,53 +361,10 @@ bool WebSocket::Receive(std::string& text, int timeoutMs, bool& timedOut) {
     timedOut = false;
     text.clear();
     if (socket_ == kInvalid) return false;
-    bool first = true;
-    for (;;) {
-        uint8_t head[2];
-        // Only the first byte may time out; a started frame is read in full.
-        if (!ReadExact(head, 2, first ? timeoutMs : 10000, timedOut)) {
-            if (!first) timedOut = false;
-            return false;
-        }
-        first = false;
-        const bool fin = head[0] & 0x80;
-        const uint8_t opcode = head[0] & 0x0F;
-        uint64_t size = head[1] & 0x7F;
-        bool ignored = false;
-        if (size == 126) {
-            uint8_t ext[2];
-            if (!ReadExact(ext, 2, 10000, ignored)) return false;
-            size = (static_cast<uint64_t>(ext[0]) << 8) | ext[1];
-        } else if (size == 127) {
-            uint8_t ext[8];
-            if (!ReadExact(ext, 8, 10000, ignored)) return false;
-            size = 0;
-            for (uint8_t b : ext) size = (size << 8) | b;
-        }
-        if (size > (64u << 20) || text.size() + size > (64u << 20)) return false;  // bounded
-        uint8_t mask[4] = {0, 0, 0, 0};
-        const bool masked = head[1] & 0x80;
-        if (masked && !ReadExact(mask, 4, 10000, ignored)) return false;
-        std::string payload(static_cast<size_t>(size), '\0');
-        if (size && !ReadExact(payload.data(), payload.size(), 10000, ignored)) return false;
-        if (masked)
-            for (size_t i = 0; i < payload.size(); ++i) payload[i] = static_cast<char>(payload[i] ^ mask[i % 4]);
-        if (opcode == 0x8) {  // close
-            SendFrame(0x8, payload.substr(0, 2));
-            return false;
-        }
-        if (opcode == 0x9) {  // ping
-            SendFrame(0xA, payload);
-            first = text.empty();
-            continue;
-        }
-        if (opcode == 0xA) {
-            first = text.empty();
-            continue;
-        }
-        text += payload;
-        if (fin) return true;
-    }
+    frames::FrameIo io;
+    io.read = [this](void* data, size_t size, int wait, bool& expired) { return ReadExact(data, size, wait, expired); };
+    io.send = [this](uint8_t opcode, const std::string& payload) { SendFrame(opcode, payload); };
+    return frames::ReceiveMessage(io, text, timeoutMs, timedOut);
 }
 
 void WebSocket::Close() {

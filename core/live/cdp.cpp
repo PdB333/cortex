@@ -1,4 +1,7 @@
 #include "cdp.h"
+#include "json_safe.h"
+
+#include <type_traits>
 
 #include <algorithm>
 #include <chrono>
@@ -14,10 +17,9 @@ constexpr size_t kMaxForeignPauses = 200;
 constexpr size_t kMaxText = 512;
 constexpr size_t kMaxLocals = 48;
 
-std::string Clip(std::string text, size_t size = kMaxText) {
-    if (text.size() > size) text = text.substr(0, size) + "...";
-    return text;
-}
+// Cut at a character boundary, and keep only valid UTF-8: the text goes into
+// JSON, whose serialization throws on an invalid byte.
+std::string Clip(std::string text, size_t size = kMaxText) { return jsafe::Clip(text, size); }
 
 std::string Now() {
     const auto now = std::chrono::system_clock::now();
@@ -78,17 +80,17 @@ json ListTargets(uint16_t port) {
     for (const auto& row : list.is_array() ? list : json::array()) {
         if (!row.is_object()) continue;
         std::string path;
-        const std::string ws = row.value("webSocketDebuggerUrl", std::string());
-        targets.push_back({{"id", row.value("id", std::string())},
-                           {"type", row.value("type", std::string())},
-                           {"title", Clip(row.value("title", std::string()))},
-                           {"url", Clip(row.value("url", std::string()), 2048)},
+        const std::string ws = jsafe::Str(row, "webSocketDebuggerUrl");
+        targets.push_back({{"id", jsafe::Str(row, "id")},
+                           {"type", jsafe::Str(row, "type")},
+                           {"title", Clip(jsafe::Str(row, "title"))},
+                           {"url", Clip(jsafe::Str(row, "url"), 2048)},
                            {"attachable", LoopbackPath(ws, port, path)}});
     }
     return {{"ok", true},
             {"port", port},
-            {"browser", version.value("Browser", std::string())},
-            {"protocol", version.value("Protocol-Version", std::string())},
+            {"browser", jsafe::Str(version, "Browser")},
+            {"protocol", jsafe::Str(version, "Protocol-Version")},
             {"targets", targets}};
 }
 
@@ -114,8 +116,8 @@ json CdpSession::Call(const std::string& method, const json& params, int timeout
 
 bool CdpSession::Attach(uint16_t port, const std::string& targetId, std::string& error) {
     const json listed = ListTargets(port);
-    if (!listed.value("ok", false)) {
-        error = listed.value("error", std::string("inspector_unreachable"));
+    if (!jsafe::Bool(listed, "ok", false)) {
+        error = jsafe::Str(listed, "error", "inspector_unreachable");
         return false;
     }
     std::string body;
@@ -124,8 +126,8 @@ bool CdpSession::Attach(uint16_t port, const std::string& targetId, std::string&
     json chosen;
     for (const auto& row : list.is_array() ? list : json::array()) {
         if (!row.is_object()) continue;
-        if (!targetId.empty() ? row.value("id", std::string()) == targetId
-                              : (row.value("type", std::string()) == "node" || row.value("type", std::string()) == "page")) {
+        if (!targetId.empty() ? jsafe::Str(row, "id") == targetId
+                              : (jsafe::Str(row, "type") == "node" || jsafe::Str(row, "type") == "page")) {
             chosen = row;
             break;
         }
@@ -135,20 +137,38 @@ bool CdpSession::Attach(uint16_t port, const std::string& targetId, std::string&
         return false;
     }
     std::string path;
-    if (!LoopbackPath(chosen.value("webSocketDebuggerUrl", std::string()), port, path)) {
+    if (!LoopbackPath(jsafe::Str(chosen, "webSocketDebuggerUrl"), port, path)) {
         error = "target_not_loopback";
         return false;
     }
     if (!socket_.Connect(port, path, error)) return false;
     port_ = port;
-    target_ = {{"id", chosen.value("id", std::string())},
-               {"type", chosen.value("type", std::string())},
-               {"title", Clip(chosen.value("title", std::string()))},
-               {"url", Clip(chosen.value("url", std::string()), 2048)}};
+    target_ = {{"id", jsafe::Str(chosen, "id")},
+               {"type", jsafe::Str(chosen, "type")},
+               {"title", Clip(jsafe::Str(chosen, "title"))},
+               {"url", Clip(jsafe::Str(chosen, "url"), 2048)}};
     connected_ = true;
     stopping_ = false;
-    reader_ = std::thread([this] { ReadLoop(); });
-    events_ = std::thread([this] { EventLoop(); });
+    // Data from the debug interface is untrusted: an exception in a reader or
+    // event thread ends this session (protocol_error), never the process.
+    auto guarded = [this](void (std::remove_pointer_t<decltype(this)>::*loop)()) {
+        try {
+            (this->*loop)();
+            return;
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = std::string("protocol_error: ") + e.what();
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = "protocol_error";
+        }
+        stopping_ = true;
+        connected_ = false;
+        responded_.notify_all();
+        queued_.notify_all();
+    };
+    reader_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::ReadLoop); });
+    events_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::EventLoop); });
     for (const auto& [method, params] : std::vector<std::pair<std::string, json>>{
              {"Runtime.enable", json::object()},
              {"Debugger.enable", json::object()},
@@ -217,7 +237,7 @@ void CdpSession::ReadLoop() {
 }
 
 json CdpSession::Describe(const json& remote) const {
-    json out{{"type", remote.value("type", std::string())}};
+    json out{{"type", jsafe::Str(remote, "type")}};
     if (remote.contains("subtype")) out["subtype"] = remote["subtype"];
     if (remote.contains("value")) {
         const json& value = remote["value"];
@@ -225,18 +245,18 @@ json CdpSession::Describe(const json& remote) const {
     } else if (remote.contains("unserializableValue")) {
         out["value"] = remote["unserializableValue"];
     } else if (remote.contains("description")) {
-        out["description"] = Clip(remote.value("description", std::string()));
+        out["description"] = Clip(jsafe::Str(remote, "description"));
     }
     if (remote.contains("preview") && remote["preview"].is_object()) {
         json properties = json::array();
-        for (const auto& p : remote["preview"].value("properties", json::array())) {
+        for (const auto& p : jsafe::Arr(remote["preview"], "properties")) {
             if (properties.size() >= 24) break;
-            properties.push_back({{"name", p.value("name", std::string())},
-                                  {"type", p.value("type", std::string())},
-                                  {"value", Clip(p.value("value", std::string()))}});
+            properties.push_back({{"name", jsafe::Str(p, "name")},
+                                  {"type", jsafe::Str(p, "type")},
+                                  {"value", Clip(jsafe::Str(p, "value"))}});
         }
         out["preview"] = properties;
-        if (remote["preview"].value("overflow", false)) out["preview_overflow"] = true;
+        if (jsafe::Bool(remote["preview"], "overflow", false)) out["preview_overflow"] = true;
     }
     return out;
 }
@@ -244,28 +264,28 @@ json CdpSession::Describe(const json& remote) const {
 std::string CdpSession::UrlOf(const std::string& scriptId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = scripts_.find(scriptId);
-    return it == scripts_.end() ? std::string() : it->second.value("url", std::string());
+    return it == scripts_.end() ? std::string() : jsafe::Str(it->second, "url");
 }
 
 json CdpSession::CaptureFrame(const json& frame, bool withLocals) {
-    const json location = frame.value("location", json::object());
-    json out{{"function", frame.value("functionName", std::string())},
-             {"url", UrlOf(location.value("scriptId", std::string()))},
-             {"line", location.value("lineNumber", 0) + 1},
-             {"column", location.value("columnNumber", 0) + 1}};
+    const json location = jsafe::Obj(frame, "location");
+    json out{{"function", jsafe::Str(frame, "functionName")},
+             {"url", UrlOf(jsafe::Str(location, "scriptId"))},
+             {"line", jsafe::Int(location, "lineNumber", 0) + 1},
+             {"column", jsafe::Int(location, "columnNumber", 0) + 1}};
     if (!withLocals) return out;
     json locals = json::object();
-    for (const auto& scope : frame.value("scopeChain", json::array())) {
-        if (scope.value("type", std::string()) != "local") continue;
-        const std::string objectId = scope.value("object", json::object()).value("objectId", std::string());
+    for (const auto& scope : jsafe::Arr(frame, "scopeChain")) {
+        if (jsafe::Str(scope, "type") != "local") continue;
+        const std::string objectId = jsafe::Str(jsafe::Obj(scope, "object"), "objectId");
         if (objectId.empty()) continue;
         // Own properties of the scope object; accessors are listed, not run.
         const json reply = Call("Runtime.getProperties",
                                 {{"objectId", objectId}, {"ownProperties", true}, {"generatePreview", true}});
-        for (const auto& property : reply.value("result", json::object()).value("result", json::array())) {
+        for (const auto& property : jsafe::Arr(jsafe::Obj(reply, "result"), "result")) {
             if (locals.size() >= kMaxLocals) break;
             if (!property.contains("value")) continue;
-            locals[property.value("name", std::string())] = Describe(property["value"]);
+            locals[jsafe::Str(property, "name")] = Describe(jsafe::Any(property, "value"));
         }
     }
     out["locals"] = locals;
@@ -278,15 +298,15 @@ void CdpSession::OnPaused(const json& params) {
     std::vector<int> ours;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& hit : params.value("hitBreakpoints", json::array()))
+        for (const auto& hit : jsafe::Arr(params, "hitBreakpoints"))
             for (auto& [id, bp] : breakpoints_)
                 if (bp.cdpId == hit.get<std::string>() && bp.active) ours.push_back(id);
     }
-    const json frames = params.value("callFrames", json::array());
+    const json frames = jsafe::Arr(params, "callFrames");
     if (ours.empty()) {
         // Not Cortex's pause (a `debugger;` statement, another client):
         // recorded, then resumed so the program behaves as without Cortex.
-        json record{{"time", Now()}, {"reason", params.value("reason", std::string())}};
+        json record{{"time", Now()}, {"reason", jsafe::Str(params, "reason")}};
         if (!frames.empty()) record["frame"] = CaptureFrame(frames[0], false);
         std::lock_guard<std::mutex> lock(mutex_);
         foreignPauses_.push_back(record);
@@ -328,47 +348,47 @@ void CdpSession::EventLoop() {
             event = std::move(eventQueue_.front());
             eventQueue_.pop_front();
         }
-        const std::string method = event.value("method", std::string());
-        const json params = event.value("params", json::object());
+        const std::string method = jsafe::Str(event, "method");
+        const json params = jsafe::Obj(event, "params");
         if (method == "Debugger.paused") {
             if (connected_) OnPaused(params);
         } else if (method == "Debugger.scriptParsed") {
             std::lock_guard<std::mutex> lock(mutex_);
             if (scripts_.size() < kMaxScripts)
-                scripts_[params.value("scriptId", std::string())] = {
-                    {"script_id", params.value("scriptId", std::string())},
-                    {"url", params.value("url", std::string())},
-                    {"lines", params.value("endLine", 0) + 1},
-                    {"hash", params.value("hash", std::string())},
-                    {"source_map_url", Clip(params.value("sourceMapURL", std::string()), 2048)}};
+                scripts_[jsafe::Str(params, "scriptId")] = {
+                    {"script_id", jsafe::Str(params, "scriptId")},
+                    {"url", jsafe::Str(params, "url")},
+                    {"lines", jsafe::Int(params, "endLine", 0) + 1},
+                    {"hash", jsafe::Str(params, "hash")},
+                    {"source_map_url", Clip(jsafe::Str(params, "sourceMapURL"), 2048)}};
         } else if (method == "Debugger.breakpointResolved") {
             std::lock_guard<std::mutex> lock(mutex_);
             for (auto& [id, bp] : breakpoints_)
-                if (bp.cdpId == params.value("breakpointId", std::string())) {
-                    const json location = params.value("location", json::object());
-                    bp.locations.push_back({{"line", location.value("lineNumber", 0) + 1},
-                                            {"column", location.value("columnNumber", 0) + 1}});
+                if (bp.cdpId == jsafe::Str(params, "breakpointId")) {
+                    const json location = jsafe::Obj(params, "location");
+                    bp.locations.push_back({{"line", jsafe::Int(location, "lineNumber", 0) + 1},
+                                            {"column", jsafe::Int(location, "columnNumber", 0) + 1}});
                 }
         } else if (method == "Runtime.consoleAPICalled" || method == "Runtime.exceptionThrown") {
             json entry{{"time", Now()}};
             if (method == "Runtime.consoleAPICalled") {
-                entry["type"] = params.value("type", std::string());
+                entry["type"] = jsafe::Str(params, "type");
                 std::string text;
-                for (const auto& argument : params.value("args", json::array())) {
+                for (const auto& argument : jsafe::Arr(params, "args")) {
                     const json d = Describe(argument);
                     text += (text.empty() ? "" : " ") +
                             (d.contains("value") ? (d["value"].is_string() ? d["value"].get<std::string>() : d["value"].dump())
-                                                 : d.value("description", d.value("type", std::string())));
+                                                 : jsafe::Str(d, "description", jsafe::Str(d, "type")));
                 }
                 entry["text"] = Clip(text, 2048);
-                const auto frames = params.value("stackTrace", json::object()).value("callFrames", json::array());
+                const auto frames = jsafe::Arr(jsafe::Obj(params, "stackTrace"), "callFrames");
                 if (!frames.empty())
-                    entry["at"] = frames[0].value("url", std::string()) + ":" + std::to_string(frames[0].value("lineNumber", 0) + 1);
+                    entry["at"] = jsafe::Str(frames[0], "url") + ":" + std::to_string(jsafe::Int(frames[0], "lineNumber", 0) + 1);
             } else {
-                const json details = params.value("exceptionDetails", json::object());
+                const json details = jsafe::Obj(params, "exceptionDetails");
                 entry["type"] = "exception";
-                entry["text"] = Clip(details.value("exception", json::object()).value("description", details.value("text", std::string())), 2048);
-                entry["at"] = details.value("url", std::string()) + ":" + std::to_string(details.value("lineNumber", 0) + 1);
+                entry["text"] = Clip(jsafe::Str(jsafe::Obj(details, "exception"), "description", jsafe::Str(details, "text")), 2048);
+                entry["at"] = jsafe::Str(details, "url") + ":" + std::to_string(jsafe::Int(details, "lineNumber", 0) + 1);
             }
             std::lock_guard<std::mutex> lock(mutex_);
             console_.push_back(entry);
@@ -404,7 +424,7 @@ json CdpSession::Scripts(const std::string& query, size_t offset, size_t limit) 
     json rows = json::array();
     size_t total = 0;
     for (const auto& [id, script] : scripts_) {
-        if (!needle.empty() && Lower(script.value("url", std::string())).find(needle) == std::string::npos) continue;
+        if (!needle.empty() && Lower(jsafe::Str(script, "url")).find(needle) == std::string::npos) continue;
         if (total >= offset && rows.size() < limit) rows.push_back(script);
         ++total;
     }
@@ -418,12 +438,12 @@ json CdpSession::Source(const std::string& key, size_t firstLine, size_t lineCou
         if (scripts_.count(key)) scriptId = key;
         else
             for (const auto& [id, script] : scripts_)
-                if (script.value("url", std::string()) == key) scriptId = id;
+                if (jsafe::Str(script, "url") == key) scriptId = id;
     }
     if (scriptId.empty()) return {{"ok", false}, {"error", "script_not_found"}};
     const json reply = Call("Debugger.getScriptSource", {{"scriptId", scriptId}}, 10000);
-    if (reply.contains("error")) return {{"ok", false}, {"error", "cdp_failed"}, {"message", reply["error"].value("message", std::string())}};
-    const std::string source = reply.value("result", json::object()).value("scriptSource", std::string());
+    if (reply.contains("error")) return {{"ok", false}, {"error", "cdp_failed"}, {"message", jsafe::Str(reply["error"], "message")}};
+    const std::string source = jsafe::Str(jsafe::Obj(reply, "result"), "scriptSource");
     std::string text;
     size_t line = 1, total = 1;
     for (size_t i = 0; i < source.size(); ++i) {
@@ -441,19 +461,19 @@ json CdpSession::SetLogBreakpoint(const std::string& url, uint32_t line, uint32_
     // No "condition": CDP evaluates it inside the target.
     const json reply = Call("Debugger.setBreakpointByUrl", params, 10000);
     if (reply.contains("error"))
-        return {{"ok", false}, {"error", "cdp_failed"}, {"message", reply["error"].value("message", std::string())}};
-    const json result = reply.value("result", json::object());
+        return {{"ok", false}, {"error", "cdp_failed"}, {"message", jsafe::Str(reply["error"], "message")}};
+    const json result = jsafe::Obj(reply, "result");
     std::lock_guard<std::mutex> lock(mutex_);
     Breakpoint bp;
     bp.id = ++nextBreakpoint_;
-    bp.cdpId = result.value("breakpointId", std::string());
+    bp.cdpId = jsafe::Str(result, "breakpointId");
     bp.url = url;
     bp.line = line;
     bp.column = column;
     bp.maxHits = maxHits;
     bp.maxFrames = maxFrames;
-    for (const auto& location : result.value("locations", json::array()))
-        bp.locations.push_back({{"line", location.value("lineNumber", 0) + 1}, {"column", location.value("columnNumber", 0) + 1}});
+    for (const auto& location : jsafe::Arr(result, "locations"))
+        bp.locations.push_back({{"line", jsafe::Int(location, "lineNumber", 0) + 1}, {"column", jsafe::Int(location, "columnNumber", 0) + 1}});
     const json locations = bp.locations;
     breakpoints_[bp.id] = std::move(bp);
     return {{"ok", true}, {"breakpoint", nextBreakpoint_}, {"resolved", locations},

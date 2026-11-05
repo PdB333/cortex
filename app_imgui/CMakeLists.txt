@@ -198,6 +198,7 @@ add_executable(cortex_imgui WIN32
     ../core/providers/ilspy_provider.cpp
     ../core/providers/vineflower_provider.cpp
     ../core/live/websocket.cpp
+    ../core/live/protocol_frames.cpp
     ../core/live/cdp.cpp
     ../core/live/dap.cpp
     ../core/live/jdwp.cpp

@@ -80,6 +80,7 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/providers/ilspy_provider.cpp
     ${CORTEX_ROOT}/core/providers/vineflower_provider.cpp
     ${CORTEX_ROOT}/core/live/websocket.cpp
+    ${CORTEX_ROOT}/core/live/protocol_frames.cpp
     ${CORTEX_ROOT}/core/live/cdp.cpp
     ${CORTEX_ROOT}/core/live/dap.cpp
     ${CORTEX_ROOT}/core/live/jdwp.cpp

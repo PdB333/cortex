@@ -1,4 +1,8 @@
 #include "jdwp.h"
+#include "json_safe.h"
+#include "protocol_frames.h"
+
+#include <type_traits>
 
 #include <algorithm>
 #include <chrono>
@@ -40,10 +44,9 @@ void PutString(JdwpSession::Bytes& out, const std::string& s) {
     out.insert(out.end(), s.begin(), s.end());
 }
 
-std::string Clip(std::string text, size_t size = 512) {
-    if (text.size() > size) text = text.substr(0, size) + "...";
-    return text;
-}
+// Cut at a character boundary, and keep only valid UTF-8: the text goes into
+// JSON, whose serialization throws on an invalid byte.
+std::string Clip(std::string text, size_t size = 512) { return jsafe::Clip(text, size); }
 
 // "Lcortex/fixture/LiveApp;" -> "cortex.fixture.LiveApp"
 std::string ClassName(const std::string& signature) {
@@ -83,7 +86,7 @@ struct JdwpSession::Reader {
         }
         std::string s(reinterpret_cast<const char*>(data.data() + pos), n);
         pos += n;
-        return s;
+        return jsafe::ValidUtf8(s);  // JDWP strings are modified UTF-8
     }
 };
 
@@ -139,8 +142,26 @@ bool JdwpSession::Attach(uint16_t port, std::string& error) {
     port_ = port;
     connected_ = true;
     stopping_ = false;
-    reader_ = std::thread([this] { ReadLoop(); });
-    events_ = std::thread([this] { EventLoop(); });
+    // Data from the debug interface is untrusted: an exception in a reader or
+    // event thread ends this session (protocol_error), never the process.
+    auto guarded = [this](void (std::remove_pointer_t<decltype(this)>::*loop)()) {
+        try {
+            (this->*loop)();
+            return;
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = std::string("protocol_error: ") + e.what();
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = "protocol_error";
+        }
+        stopping_ = true;
+        connected_ = false;
+        responded_.notify_all();
+        queued_.notify_all();
+    };
+    reader_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::ReadLoop); });
+    events_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::EventLoop); });
     const Reply version = Command(1, 1, {});
     const Reply sizes = Command(1, 7, {});
     if (!version.ok || !sizes.ok) {
@@ -197,29 +218,27 @@ void JdwpSession::ReadLoop() {
         if (got == 0) continue;
         if (got < 0) break;
         buffer.insert(buffer.end(), chunk, chunk + got);
-        while (buffer.size() >= 11) {
-            const uint32_t length = (uint32_t{buffer[0]} << 24) | (uint32_t{buffer[1]} << 16) | (uint32_t{buffer[2]} << 8) | buffer[3];
-            if (length < 11 || length > (64u << 20)) {
-                buffer.clear();
-                stopping_ = true;
-                break;
-            }
-            if (buffer.size() < length) break;
-            const uint32_t id = (uint32_t{buffer[4]} << 24) | (uint32_t{buffer[5]} << 16) | (uint32_t{buffer[6]} << 8) | buffer[7];
-            const uint8_t flags = buffer[8];
+        frames::JdwpPacket packet;
+        frames::Take taken;
+        while ((taken = frames::TakeJdwpPacket(buffer, packet)) == frames::Take::Message) {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (flags & 0x80) {
+            if (packet.IsReply()) {
                 Reply reply;
-                reply.error = static_cast<uint16_t>((buffer[9] << 8) | buffer[10]);
+                reply.error = static_cast<uint16_t>((packet.high << 8) | packet.low);
                 reply.ok = reply.error == 0;
-                reply.data.assign(buffer.begin() + 11, buffer.begin() + length);
-                replies_[id] = std::move(reply);
+                reply.data = std::move(packet.data);
+                replies_[packet.id] = std::move(reply);
                 responded_.notify_all();
-            } else if (buffer[9] == 64 && buffer[10] == 100) {  // Event.Composite
-                eventQueue_.emplace_back(buffer.begin() + 11, buffer.begin() + length);
+            } else if (packet.high == 64 && packet.low == 100) {  // Event.Composite
+                eventQueue_.push_back(std::move(packet.data));
                 queued_.notify_all();
             }
-            buffer.erase(buffer.begin(), buffer.begin() + length);
+            packet = frames::JdwpPacket();
+        }
+        if (taken == frames::Take::Fatal) {
+            buffer.clear();
+            stopping_ = true;
+            break;
         }
     }
     {

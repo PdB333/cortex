@@ -41,7 +41,8 @@ set(ARTIFACT_SOURCES
     ${ROOT}/core/artifacts/dotnet_metadata.cpp ${ROOT}/core/artifacts/cil.cpp
     ${ROOT}/core/artifacts/dotnet_provider.cpp ${ROOT}/core/artifacts/native_code.cpp
     ${ROOT}/core/artifacts/annotations.cpp)
-add_library(cortex_fuzz_parsers STATIC ${ARTIFACT_SOURCES})
+add_library(cortex_fuzz_parsers STATIC ${ARTIFACT_SOURCES} ${ROOT}/core/live/protocol_frames.cpp
+    ${ROOT}/core/evidence/evidence.cpp ${ROOT}/core/investigation/investigation.cpp)
 target_include_directories(cortex_fuzz_parsers PUBLIC ${ROOT}/core)
 target_link_libraries(cortex_fuzz_parsers PUBLIC nlohmann_json::nlohmann_json Zydis)
 
@@ -52,7 +53,7 @@ else()
 endif()
 target_compile_options(cortex_fuzz_parsers PRIVATE ${SAN} -g -O1)
 
-foreach(harness fuzz_artifact fuzz_pe_code fuzz_text)
+foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores)
     if(CORTEX_FUZZ_REPLAY)
         add_executable(${harness} ${harness}.cpp replay_main.cpp)
         target_compile_options(${harness} PRIVATE ${SAN} -g -O1)
@@ -68,7 +69,7 @@ target_link_options(cortex_fuzz_parsers INTERFACE $<IF:$<BOOL:${CORTEX_FUZZ_REPL
 
 if(CORTEX_FUZZ_REPLAY)
     enable_testing()
-    foreach(harness fuzz_artifact fuzz_pe_code fuzz_text)
+    foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores)
         add_test(NAME ${harness}_regressions COMMAND ${harness} ${CMAKE_CURRENT_SOURCE_DIR}/regressions/${harness})
     endforeach()
 endif()

@@ -8,6 +8,8 @@ file parsers under AddressSanitizer and UndefinedBehaviorSanitizer:
 | `fuzz_artifact` | The provider registry as `cortex.exe inspect` uses it: detection, `Inspect`, the list of children and up to six children two levels deep (PE, .NET, ZIP/JAR with DEFLATE, ASAR, JavaScript/TypeScript, source maps). The first byte picks the file name, since some providers also look at the extension. |
 | `fuzz_pe_code` | `ParsePe`, CLR metadata and the CIL of up to 16 methods, and the native-code index (Zydis): functions, strings, xrefs, CFG and fingerprints of the first functions. Inputs are capped at 1 MiB. |
 | `fuzz_text` | The JavaScript lexer and analysis, source maps, base64 data URLs and DEFLATE. The first byte picks the decoder. |
+| `fuzz_protocols` | The live debug protocols as the sessions decode them (`core/live/protocol_frames`): WebSocket messages for CDP, DAP's `Content-Length` framing, JDWP packets, and the typed accessors (`core/live/json_safe.h`) applied at every node of each message. Also checks properties: cleaned text always serializes, `ValidUtf8` is idempotent, `Clip` respects its bound. |
+| `fuzz_stores` | Evidence and investigation records read from disk (list, get, export, start, approve), and knowledge records a client sends (`Validate`, `Prepare` with a fuzzed previous revision). No exception may leave a store. |
 
 ## Running
 
@@ -31,11 +33,10 @@ plain executables, and `ctest` replays every file there on each run.
 
 ## Not covered
 
-- The live protocol decoders (WebSocket frames for CDP, DAP's
-  `Content-Length` framing, JDWP packets) read from sockets inside a session
-  and are not fuzzed. They talk only to a debug interface on 127.0.0.1 that
-  the operator started.
-- Project, knowledge and evidence files are parsed with nlohmann/json, with
-  Cortex's checks on top. They are covered by unit tests, not by a fuzzer.
+- The project store (`core/project/project.cpp`) is Windows-only; its loader
+  is covered by unit tests, not by a fuzzer.
+- The capture code that runs at a breakpoint hit (stack and locals requests)
+  sends requests to the debugger, so it is exercised by the live tests, not
+  by `fuzz_protocols`. It reads replies through the same typed accessors.
 - Python bytecode, Unity `global-metadata.dat`, class files and WebAssembly
   have no parser yet.

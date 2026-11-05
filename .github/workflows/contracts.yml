@@ -342,12 +342,12 @@ jobs:
           cmake --build build/fuzz-replay --parallel
           ctest --test-dir build/fuzz-replay --output-on-failure
           python3 tests/fuzz/make_seeds.py build/fuzz-seeds
-          for harness in artifact pe_code text; do build/fuzz-replay/fuzz_$harness build/fuzz-seeds/$harness; done
+          for harness in artifact pe_code text protocols stores; do build/fuzz-replay/fuzz_$harness build/fuzz-seeds/$harness; done
 
       - name: Fuzz each harness for 60 s
         run: |
           mkdir -p build/fuzz-findings
-          for harness in artifact pe_code text; do
+          for harness in artifact pe_code text protocols stores; do
             mkdir -p build/fuzz-work/$harness
             build/fuzz/fuzz_$harness -max_total_time=60 -max_len=65536 -timeout=10 -rss_limit_mb=2048 \
               -artifact_prefix=build/fuzz-findings/$harness- build/fuzz-work/$harness build/fuzz-seeds/$harness

@@ -1,4 +1,8 @@
 #include "dap.h"
+#include "json_safe.h"
+#include "protocol_frames.h"
+
+#include <type_traits>
 
 #include <algorithm>
 #include <chrono>
@@ -14,10 +18,9 @@ constexpr size_t kMaxOutput = 2000;
 constexpr size_t kMaxForeign = 200;
 constexpr size_t kMaxLocals = 48;
 
-std::string Clip(std::string text, size_t size = 512) {
-    if (text.size() > size) text = text.substr(0, size) + "...";
-    return text;
-}
+// Cut at a character boundary, and keep only valid UTF-8: the text goes into
+// JSON, whose serialization throws on an invalid byte.
+std::string Clip(std::string text, size_t size = 512) { return jsafe::Clip(text, size); }
 
 std::string Now() {
     const auto now = std::chrono::system_clock::now();
@@ -135,18 +138,36 @@ bool DapSession::Handshake(const std::string& adapter, uint64_t processId, std::
     processId_ = processId;
     connected_ = true;
     stopping_ = false;
-    reader_ = std::thread([this] { ReadLoop(); });
-    events_ = std::thread([this] { EventLoop(); });
+    // Data from the debug interface is untrusted: an exception in a reader or
+    // event thread ends this session (protocol_error), never the process.
+    auto guarded = [this](void (std::remove_pointer_t<decltype(this)>::*loop)()) {
+        try {
+            (this->*loop)();
+            return;
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = std::string("protocol_error: ") + e.what();
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = "protocol_error";
+        }
+        stopping_ = true;
+        connected_ = false;
+        responded_.notify_all();
+        queued_.notify_all();
+    };
+    reader_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::ReadLoop); });
+    events_ = std::thread([guarded, this] { guarded(&std::remove_pointer_t<decltype(this)>::EventLoop); });
     const json init = Request("initialize", {{"clientID", "cortex"}, {"clientName", "Cortex"}, {"adapterID", adapter},
                                              {"linesStartAt1", true}, {"columnsStartAt1", true}, {"pathFormat", "path"},
                                              {"supportsVariableType", true}, {"supportsRunInTerminalRequest", false}},
                               60000);  // a first start can be slow (netcoredbg loads its managed part)
-    if (!init.value("success", false)) {
-        error = "dap_initialize_failed: " + init.value("message", std::string());
+    if (!jsafe::Bool(init, "success", false)) {
+        error = "dap_initialize_failed: " + jsafe::Str(init, "message");
         Detach();
         return false;
     }
-    capabilities_ = init.value("body", json::object());
+    capabilities_ = jsafe::Obj(init, "body");
     // debugpy answers attach only after configurationDone; netcoredbg
     // answers it first. Send it, then complete the configuration.
     json attach = json::object();
@@ -158,24 +179,24 @@ bool DapSession::Handshake(const std::string& adapter, uint64_t processId, std::
     WaitEvent("initialized", 60000);
     const json done = Request("configurationDone", json::object(), 60000);
     const json attached = Wait(attachSeq, 60000);
-    if (!attached.value("success", false)) {
+    if (!jsafe::Bool(attached, "success", false)) {
         // The adapter's own explanation (message, and body.error.format).
-        std::string detail = attached.value("message", std::string());
-        const json body = attached.value("body", json::object());
+        std::string detail = jsafe::Str(attached, "message");
+        const json body = jsafe::Obj(attached, "body");
         if (body.is_object() && body.contains("error") && body["error"].is_object())
-            detail += " " + body["error"].value("format", std::string());
+            detail += " " + jsafe::Str(body["error"], "format");
         error = "dap_attach_failed: " + detail;
         // What the adapter said meanwhile (output events), for the operator.
         {
             std::lock_guard<std::mutex> lock(mutex_);
             std::string said;
-            for (const auto& entry : output_) said += entry.value("text", std::string());
+            for (const auto& entry : output_) said += jsafe::Str(entry, "text");
             if (!said.empty()) error += " | adapter output: " + Clip(said, 1500);
         }
         Detach();
         return false;
     }
-    if (!done.value("success", false) && capabilities_.value("supportsConfigurationDoneRequest", false)) {
+    if (!jsafe::Bool(done, "success", false) && jsafe::Bool(capabilities_, "supportsConfigurationDoneRequest", false)) {
         error = "dap_configuration_failed";
         Detach();
         return false;
@@ -217,34 +238,29 @@ void DapSession::ReadLoop() {
         if (got == 0) continue;
         if (got < 0) break;
         buffer.append(chunk, static_cast<size_t>(got));
-        if (buffer.size() > (64u << 20)) break;  // bounded
-        for (;;) {
-            const size_t end = buffer.find("\r\n\r\n");
-            if (end == std::string::npos) break;
-            size_t length = 0;
-            const std::string header = buffer.substr(0, end);
-            const size_t at = header.find("Content-Length:");
-            if (at == std::string::npos) {
-                buffer.erase(0, end + 4);
-                continue;
-            }
-            length = static_cast<size_t>(std::strtoull(header.c_str() + at + 15, nullptr, 10));
-            if (buffer.size() < end + 4 + length) break;
-            json message = json::parse(buffer.substr(end + 4, length), nullptr, false);
-            buffer.erase(0, end + 4 + length);
+        json message;
+        frames::Take taken;
+        while ((taken = frames::TakeDapMessage(buffer, message)) == frames::Take::Message) {
             if (!message.is_object()) continue;
             std::lock_guard<std::mutex> lock(mutex_);
-            const std::string type = message.value("type", std::string());
+            const std::string type = jsafe::Str(message, "type");
             if (type == "response") {
-                const int64_t seq = message.value("request_seq", int64_t{0});
+                const int64_t seq = jsafe::Int(message, "request_seq", 0);
                 responses_[seq] = std::move(message);
                 responded_.notify_all();
             } else if (type == "event") {
-                ++eventsSeen_[message.value("event", std::string())];
+                ++eventsSeen_[jsafe::Str(message, "event")];
                 responded_.notify_all();
                 eventQueue_.push_back(std::move(message));
                 queued_.notify_all();
             }
+            message = json();
+        }
+        if (taken == frames::Take::Fatal) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            lastError_ = "adapter_protocol_error";
+            stopping_ = true;
+            break;
         }
     }
     {
@@ -258,29 +274,29 @@ void DapSession::ReadLoop() {
 
 void DapSession::OnStopped(const json& body) {
     ++stops_;
-    const int64_t thread = body.value("threadId", int64_t{0});
+    const int64_t thread = jsafe::Int(body, "threadId", 0);
     const json trace = Request("stackTrace", {{"threadId", thread}, {"startFrame", 0}, {"levels", 32}});
-    const json frames = trace.value("body", json::object()).value("stackFrames", json::array());
+    const json frames = jsafe::Arr(jsafe::Obj(trace, "body"), "stackFrames");
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (const auto& frame : frames)
             if (frame.is_object() && knownPaths_.size() < 10000) {
-                const std::string path = frame.value("source", json::object()).value("path", std::string());
+                const std::string path = jsafe::Str(jsafe::Obj(frame, "source"), "path");
                 if (!path.empty()) knownPaths_.insert(PathKey(path));
             }
     }
     auto frameJson = [](const json& frame) {
-        return json{{"function", Clip(frame.value("name", std::string()))},
-                    {"path", frame.value("source", json::object()).value("path", std::string())},
-                    {"line", frame.value("line", 0)},
-                    {"column", frame.value("column", 0)}};
+        return json{{"function", Clip(jsafe::Str(frame, "name"))},
+                    {"path", jsafe::Str(jsafe::Obj(frame, "source"), "path")},
+                    {"line", jsafe::Int(frame, "line", 0)},
+                    {"column", jsafe::Int(frame, "column", 0)}};
     };
     int ours = 0;
     if (!frames.empty() && frames[0].is_object()) {
-        const std::string key = PathKey(frames[0].value("source", json::object()).value("path", std::string()));
-        const int line = frames[0].value("line", 0);
+        const std::string key = PathKey(jsafe::Str(jsafe::Obj(frames[0], "source"), "path"));
+        const int line = jsafe::Int(frames[0], "line", 0);
         std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& hit : body.value("hitBreakpointIds", json::array()))
+        for (const auto& hit : jsafe::Arr(body, "hitBreakpointIds"))
             for (auto& [id, bp] : breakpoints_)
                 if (bp.active && bp.dapId >= 0 && hit.is_number_integer() && hit.get<int64_t>() == bp.dapId) ours = id;
         if (!ours)
@@ -290,7 +306,7 @@ void DapSession::OnStopped(const json& body) {
                     ours = id;
     }
     if (!ours) {
-        json record{{"time", Now()}, {"reason", body.value("reason", std::string())}};
+        json record{{"time", Now()}, {"reason", jsafe::Str(body, "reason")}};
         if (!frames.empty() && frames[0].is_object()) record["frame"] = frameJson(frames[0]);
         std::lock_guard<std::mutex> lock(mutex_);
         foreignStops_.push_back(record);
@@ -307,15 +323,15 @@ void DapSession::OnStopped(const json& body) {
         if (!stack.empty()) {
             // The first scope of the top frame (Locals); one level only.
             json locals = json::object();
-            const json scopes = Request("scopes", {{"frameId", frames[0].value("id", 0)}});
-            const json list = scopes.value("body", json::object()).value("scopes", json::array());
+            const json scopes = Request("scopes", {{"frameId", jsafe::Int(frames[0], "id", 0)}});
+            const json list = jsafe::Arr(jsafe::Obj(scopes, "body"), "scopes");
             if (!list.empty() && list[0].is_object()) {
-                const json variables = Request("variables", {{"variablesReference", list[0].value("variablesReference", 0)}, {"count", kMaxLocals}});
-                for (const auto& variable : variables.value("body", json::object()).value("variables", json::array())) {
+                const json variables = Request("variables", {{"variablesReference", jsafe::Int(list[0], "variablesReference", 0)}, {"count", kMaxLocals}});
+                for (const auto& variable : jsafe::Arr(jsafe::Obj(variables, "body"), "variables")) {
                     if (locals.size() >= kMaxLocals || !variable.is_object()) break;
-                    const std::string name = variable.value("name", std::string());
+                    const std::string name = jsafe::Str(variable, "name");
                     if (name.rfind("special variables", 0) == 0 || name.rfind("function variables", 0) == 0) continue;
-                    locals[name] = {{"value", Clip(variable.value("value", std::string()))}, {"type", variable.value("type", std::string())}};
+                    locals[name] = {{"value", Clip(jsafe::Str(variable, "value"))}, {"type", jsafe::Str(variable, "type")}};
                 }
             }
             stack[0]["locals"] = locals;
@@ -346,24 +362,24 @@ void DapSession::EventLoop() {
             event = std::move(eventQueue_.front());
             eventQueue_.pop_front();
         }
-        const std::string name = event.value("event", std::string());
-        const json body = event.value("body", json::object());
+        const std::string name = jsafe::Str(event, "event");
+        const json body = jsafe::Obj(event, "body");
         if (name == "stopped") {
             if (connected_) OnStopped(body);
         } else if (name == "output") {
-            const std::string category = body.value("category", std::string());
+            const std::string category = jsafe::Str(body, "category");
             if (category == "telemetry") continue;
             std::lock_guard<std::mutex> lock(mutex_);
-            output_.push_back({{"time", Now()}, {"type", category}, {"text", Clip(body.value("output", std::string()), 2048)}});
+            output_.push_back({{"time", Now()}, {"type", category}, {"text", Clip(jsafe::Str(body, "output"), 2048)}});
             ++outputTotal_;
             while (output_.size() > kMaxOutput) output_.pop_front();
         } else if (name == "breakpoint") {
-            const json changed = body.value("breakpoint", json::object());
+            const json changed = jsafe::Obj(body, "breakpoint");
             std::lock_guard<std::mutex> lock(mutex_);
             for (auto& [id, bp] : breakpoints_)
-                if (bp.dapId >= 0 && changed.value("id", int64_t{-2}) == bp.dapId) {
-                    bp.verified = changed.value("verified", bp.verified);
-                    if (changed.contains("line")) bp.resolvedLine = changed.value("line", 0u);
+                if (bp.dapId >= 0 && jsafe::Int(changed, "id", -2) == bp.dapId) {
+                    bp.verified = jsafe::Bool(changed, "verified", bp.verified);
+                    if (changed.contains("line")) bp.resolvedLine = jsafe::Int(changed, "line", 0);
                 }
         } else if (name == "terminated" || name == "exited") {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -386,13 +402,13 @@ json DapSession::SyncSource(const std::string& path) {
             }
     }
     const json reply = Request("setBreakpoints", {{"source", {{"path", path}}}, {"breakpoints", requested}, {"sourceModified", false}});
-    const json answered = reply.value("body", json::object()).value("breakpoints", json::array());
+    const json answered = jsafe::Arr(jsafe::Obj(reply, "body"), "breakpoints");
     std::lock_guard<std::mutex> lock(mutex_);
     for (size_t i = 0; i < ids.size() && i < answered.size(); ++i) {
         auto& bp = breakpoints_[ids[i]];
-        bp.verified = answered[i].value("verified", false);
-        bp.dapId = answered[i].value("id", int64_t{-1});
-        bp.resolvedLine = answered[i].value("line", 0u);
+        bp.verified = jsafe::Bool(answered[i], "verified", false);
+        bp.dapId = jsafe::Int(answered[i], "id", -1);
+        bp.resolvedLine = jsafe::Int(answered[i], "line", 0);
     }
     return reply;
 }
@@ -412,10 +428,10 @@ json DapSession::SetLogBreakpoint(const std::string& path, uint32_t line, uint32
         breakpoints_[id] = std::move(bp);
     }
     const json reply = SyncSource(path);
-    if (!reply.value("success", false)) {
+    if (!jsafe::Bool(reply, "success", false)) {
         std::lock_guard<std::mutex> lock(mutex_);
         breakpoints_.erase(id);
-        return {{"ok", false}, {"error", "dap_failed"}, {"message", reply.value("message", std::string())}};
+        return {{"ok", false}, {"error", "dap_failed"}, {"message", jsafe::Str(reply, "message")}};
     }
     std::lock_guard<std::mutex> lock(mutex_);
     const auto& bp = breakpoints_[id];
@@ -434,7 +450,7 @@ json DapSession::RemoveBreakpoint(int id) {
         path = it->second.path;
     }
     const json reply = SyncSource(path);
-    return {{"ok", reply.value("success", false)}, {"breakpoint", id}};
+    return {{"ok", jsafe::Bool(reply, "success", false)}, {"breakpoint", id}};
 }
 
 json DapSession::Breakpoints() const {

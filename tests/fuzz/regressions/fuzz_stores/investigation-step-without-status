@@ -1,0 +1,1 @@
+{"id": "inv_00000000000000000000", "state": "planned", "revision": 1, "title": "x", "steps": [{"kind": "static", "tool": "cortex_artifact_inspect", "state": "pending", "needs_approval": true}], "journal": []}
