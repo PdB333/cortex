@@ -33,6 +33,60 @@ std::string ReadTokenFile(const std::filesystem::path& path) {
     return token.size() >= 32 ? token : std::string();
 }
 
+#if defined(_WIN32)
+uint64_t FileTimeValue(const FILETIME& time) {
+    return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+
+// The creation time of a process (FILETIME, UTC). 0 when it cannot be read;
+// `exists` is false only when Windows says there is no such process.
+uint64_t ProcessCreationTime(uint64_t processId, bool& exists) {
+    exists = true;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(processId));
+    if (!process) {
+        if (GetLastError() == ERROR_INVALID_PARAMETER) exists = false;
+        return 0;
+    }
+    FILETIME created{}, exited{}, kernel{}, user{};
+    uint64_t value = 0;
+    if (GetProcessTimes(process, &created, &exited, &kernel, &user)) value = FileTimeValue(created);
+    DWORD code = 0;
+    if (GetExitCodeProcess(process, &code) && code != STILL_ACTIVE) exists = false;
+    CloseHandle(process);
+    return value;
+}
+
+// A token written before its process was created was left by an earlier
+// process that had the same PID and was killed (a killed runtime cannot
+// delete its token). Two seconds of tolerance for clock and file-time
+// granularity.
+bool TokenIsStale(const std::filesystem::path& path, uint64_t processId) {
+    bool exists = true;
+    const uint64_t created = ProcessCreationTime(processId, exists);
+    if (!exists) return true;
+    if (created == 0) return false;  // not readable (another user): leave it
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.wstring().c_str(), GetFileExInfoStandard, &data)) return false;
+    constexpr uint64_t kTolerance = 2ull * 10'000'000ull;
+    return FileTimeValue(data.ftLastWriteTime) + kTolerance < created;
+}
+#endif
+
+// The token of `processId` in `path`, or "" when there is none, or when it
+// belongs to an earlier process with the same PID (then it is deleted).
+std::string ReadProcessTokenFile(const std::filesystem::path& path, uint64_t processId) {
+#if defined(_WIN32)
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec) && TokenIsStale(path, processId)) {
+        std::filesystem::remove(path, ec);
+        return {};
+    }
+#else
+    (void)processId;
+#endif
+    return ReadTokenFile(path);
+}
+
 std::string MakeClientSessionId() {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     std::ostringstream out;
@@ -322,13 +376,13 @@ bool PayloadClient::ConnectExisting(const target::TargetDescriptor& target, std:
     const auto assetDirectory = RuntimeAssetDirectory(runtimeDirectory, target.architecture);
     const std::string tokenFileName =
         "cortex.mcp." + std::to_string(target.processId) + ".token";
-    std::string token = ReadTokenFile(assetDirectory / tokenFileName);
+    std::string token = ReadProcessTokenFile(assetDirectory / tokenFileName, target.processId);
     // The runtime writes its token beside the DLL that was injected. A runtime
     // injected from the application root (`cortex inject`, older layouts)
     // therefore leaves it there even when runtime/<arch> exists.
     const auto applicationDirectory = std::filesystem::u8path(runtimeDirectory);
     if (token.empty() && assetDirectory != applicationDirectory)
-        token = ReadTokenFile(applicationDirectory / tokenFileName);
+        token = ReadProcessTokenFile(applicationDirectory / tokenFileName, target.processId);
     if (token.empty()) token = ReadTokenFile(assetDirectory / "cortex.token"); // pre-multi-target runtime compatibility
     if (token.empty()) {
         SetError(error, "payload_token_unavailable");
@@ -635,6 +689,29 @@ bool PayloadClient::ForwardMcp(const json& message,
         return false;
     }
     return true;
+}
+
+size_t RemoveStaleRuntimeTokens(const std::filesystem::path& directory) {
+    size_t removed = 0;
+#if defined(_WIN32)
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        const std::string prefix = "cortex.mcp.", suffix = ".token";
+        if (name.size() <= prefix.size() + suffix.size() || name.compare(0, prefix.size(), prefix) != 0 ||
+            name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+            continue;
+        const std::string digits = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+        if (digits.empty() || digits.size() > 10 || digits.find_first_not_of("0123456789") != std::string::npos) continue;
+        const uint64_t processId = std::stoull(digits);
+        std::error_code removeError;
+        if (processId != 0 && TokenIsStale(it->path(), processId) && std::filesystem::remove(it->path(), removeError))
+            ++removed;
+    }
+#else
+    (void)directory;
+#endif
+    return removed;
 }
 
 } // namespace cortex::services

@@ -139,6 +139,40 @@ def main():
     processes = []
     server = None
     try:
+        # Stale runtime tokens: a killed runtime cannot delete its
+        # cortex.mcp.<pid>.token. The server removes those of processes that
+        # are gone, or that were written before the process with that PID
+        # started; a live runtime's token stays.
+        ghost = os.path.join(bundle, "cortex.mcp.4000000000.token")
+        with open(ghost, "w") as handle:
+            handle.write("0" * 64 + "\n")
+        process, manifest = start_target(runner, target, workdir, "stale")
+        processes.append(process)
+        old = os.path.join(bundle, "cortex.mcp.%d.token" % manifest["pid"])
+        with open(old, "w") as handle:
+            handle.write("1" * 64 + "\n")
+        an_hour_ago = time.time() - 3600
+        os.utime(old, (an_hour_ago, an_hour_ago))
+        sweeper = Client(runner + [cortex, "mcp", "--tools", "all"], bundle)
+        sweeper.initialize()
+        check(not os.path.exists(ghost), "the token of a process that no longer exists is removed")
+        check(not os.path.exists(old), "a token older than the live process with that PID is removed")
+        _, _, error, content = sweeper.call("cortex_attach", {"pid": manifest["pid"]})
+        check(error or not content.get("ok"), "attach without a runtime still fails cleanly", content)
+        sweeper.close()
+        subprocess.run(runner + [cortex, "inject", str(manifest["pid"])], cwd=bundle, capture_output=True, timeout=120)
+        check(wait_for_runtime(bundle, manifest["pid"]), "the runtime starts and writes a fresh token")
+        tokens = [os.path.join(folder, "cortex.mcp.%d.token" % manifest["pid"])
+                  for folder in (bundle, os.path.join(bundle, "runtime", "x64"), os.path.join(bundle, "runtime", "x86"))]
+        live = [path for path in tokens if os.path.exists(path)]
+        sweeper = Client(runner + [cortex, "mcp", "--tools", "all"], bundle)
+        sweeper.initialize()
+        check(live and all(os.path.exists(path) for path in live), "a live runtime's token is kept")
+        _, _, error, content = sweeper.call("cortex_attach", {"pid": manifest["pid"]})
+        check(not error and content.get("ok"), "attach after the fresh token", content)
+        sweeper.close()
+        process.kill()
+
         # Target a: malformed requests, then killed during a request.
         process, manifest = launch("a")
         processes.append(process)

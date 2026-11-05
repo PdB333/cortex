@@ -6,7 +6,9 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -212,5 +214,11 @@ private:
     std::atomic<bool> injectionAllowed_{true};
     std::atomic<bool> desktopChannel_{false};
 };
+
+// Deletes the cortex.mcp.<pid>.token files in `directory` that belong to a
+// process that no longer exists, or to an earlier process with the same PID.
+// A runtime deletes its own token when it stops; a killed one cannot. Returns
+// the number removed. Tokens of live processes are left alone.
+size_t RemoveStaleRuntimeTokens(const std::filesystem::path& directory);
 
 } // namespace cortex::services

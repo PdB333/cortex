@@ -127,6 +127,23 @@ int RunX86Helper(const std::wstring& helper, DWORD pid, const std::wstring& dll)
     return wait == WAIT_OBJECT_0 && exitCode == 0 ? 0 : 1;
 }
 
+// A killed runtime cannot delete its cortex.mcp.<pid>.token. If an earlier
+// process had this PID, its token would make a client think the new runtime
+// is already listening. Remove a token written before this process started.
+void RemoveTokenOfEarlierProcess(const std::wstring& directory, DWORD pid) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) return;
+    FILETIME created{}, exited{}, kernel{}, user{};
+    const bool timed = GetProcessTimes(process, &created, &exited, &kernel, &user) != 0;
+    CloseHandle(process);
+    if (!timed) return;
+    const std::wstring path = directory + L"\\cortex.mcp." + std::to_wstring(pid) + L".token";
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return;
+    auto value = [](const FILETIME& t) { return (static_cast<unsigned long long>(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+    if (value(data.ftLastWriteTime) + 2ull * 10000000ull < value(created)) DeleteFileW(path.c_str());
+}
+
 } // namespace
 
 int CortexInjectMain(int argc, char** argv) {
@@ -200,6 +217,13 @@ int CortexInjectMain(int argc, char** argv) {
                       << Narrow(candidates.front()) << "\n";
             return 1;
         }
+    }
+
+    RemoveTokenOfEarlierProcess(root, pid);
+    RemoveTokenOfEarlierProcess(archDirectory, pid);
+    {
+        const size_t slash = dll.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) RemoveTokenOfEarlierProcess(dll.substr(0, slash), pid);
     }
 
     const Machine dllMachine = cortex::remote_loader::FileMachine(dll);
