@@ -179,10 +179,43 @@ static bool WellFormed(const json& record, const std::string& id) {
         !optional("stale", &json::is_boolean) || !optional("produced_by", &json::is_object) ||
         !optional("knowledge_status", &json::is_string))
         return false;
-    const json& trials = record["verification"];
-    if (trials.contains("trials") && !trials["trials"].is_array()) return false;
+    // Every field the read paths (list, get, export) take with value() or
+    // operator[] has the type they expect, down to the array elements: a
+    // record file can be edited by hand.
+    auto text = [](const json& object, const char* key) {
+        return !object.contains(key) || object[key].is_string();
+    };
+    // A trial row keeps the run's status and outcome as found, null when the
+    // run had none.
+    auto nullableText = [](const json& object, const char* key) {
+        return !object.contains(key) || object[key].is_string() || object[key].is_null();
+    };
+    if (!text(record, "recorded_by")) return false;
+    const json& subject = record["subject"];
+    if (!text(subject, "location") || !text(subject, "sha256") || !text(subject, "name") || !text(subject, "format") ||
+        !text(subject, "identity"))
+        return false;
+    if (record.contains("produced_by") && !text(record["produced_by"], "tool")) return false;
+    const json& verification = record["verification"];
+    if (!text(verification, "status")) return false;
+    if (verification.contains("trials")) {
+        if (!verification["trials"].is_array()) return false;
+        for (const auto& trial : verification["trials"])
+            if (!trial.is_object() || !text(trial, "id") || !nullableText(trial, "outcome") ||
+                !nullableText(trial, "status") ||
+                (trial.contains("valid") && !trial["valid"].is_boolean()))
+                return false;
+    }
     for (const auto& reference : record["references"])
-        if (!reference.is_object()) return false;
+        if (!reference.is_object() || !text(reference, "kind") || !text(reference, "id")) return false;
+    if (record.contains("relations")) {
+        for (const auto& relation : record["relations"]) {
+            if (!relation.is_object() || !text(relation, "type") || !text(relation, "origin")) return false;
+            if (!relation.contains("to") || !relation["to"].is_object()) return false;
+            const json& to = relation["to"];
+            if (!text(to, "evidence") || !text(to, "sha256") || !text(to, "location")) return false;
+        }
+    }
     return true;
 }
 
@@ -504,7 +537,10 @@ json Store::Export(const json& filter, const std::string& format) const {
             md << "\n";
             for (const auto& trial : verification.value("trials", json::array()))
                 md << "- Trial `" << trial.value("id", std::string()) << "`: "
-                   << (trial.value("valid", false) ? "completed, " + trial.value("outcome", std::string()) : std::string("not usable"))
+                   << (trial.value("valid", false)
+                           ? "completed, " + (trial.contains("outcome") && trial["outcome"].is_string()
+                                                  ? trial["outcome"].get<std::string>() : std::string("no outcome"))
+                           : std::string("not usable"))
                    << "\n";
             for (const auto& reference : record.value("references", json::array()))
                 md << "- Reference: " << reference.value("kind", std::string()) << " `" << reference.value("id", std::string())
