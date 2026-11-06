@@ -2,7 +2,7 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [v2.0.0] - not yet released
+## [v2.0.0] - 2026-11-06
 
 Cortex 2.0. Highlights:
 
@@ -24,6 +24,8 @@ The plan, what each step validated and its limits: `docs/cortex-2-roadmap.md` an
   - The **Help** menu opens the getting started, desktop, MCP and limitations guides.
   - Without a process, a panel that needs one says so and offers **Select a process...** or **Analyze a file instead**. The bottom panel shows only AI Activity, and the status line names the panel in use.
   - The Artifacts capability table says what to do (for example "Decompile it from the Engines tab") instead of naming MCP tools.
+  - The keyboard is enough for a first session: the process picker focuses its search field and Enter attaches the first match; after an attach, the scanner's value field takes the keyboard, so a value and Enter run a first scan. The command palette opens the guides (`Help:`).
+- **Desktop acceptance on a real Windows session** (`tests/desktop_acceptance.py`, workflow `desktop-acceptance.yml`). It drives the shipped `cortex.exe` with real input on the runner's desktop: the icon, the system file dialog, a guide opened by the shell, attach and scan from the keyboard, an MCP client read-only and with `--allow-writes`, and a clean close. Screenshots are kept with the run.
 - **Quality (step 9).**
   - Contract tests are now in CTest.
   - Fuzzing of the file parsers (`tests/fuzz`, CI job `fuzz-parsers`).
