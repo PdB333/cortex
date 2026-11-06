@@ -861,7 +861,7 @@ The full description is in `docs/investigations.md`.
   - compare against §4 baselines;
   - benchmark fixtures against CE/Ghidra, measured per dimension.
 
-**Status (in progress):**
+**Status (done, with the open items listed last):**
 
 | Item | Result | Validation |
 |---|---|---|
@@ -871,7 +871,9 @@ The full description is in `docs/investigations.md`.
 | 9.4 Flaky test, faster CI | The access-finder check waits for the breakpoint to be applied, then for a write, on time budgets; ccache on the four Windows builds of the GUI suite | Passes 3/3 locally; CI green. The ccache gain is measured from the second run |
 | 9.5 Stale runtime tokens | Tokens of dead processes, or older than the process with their PID, are removed by `cortex.exe mcp` and `cortex inject` and never used | `robustness_e2e.py` (3 cases) |
 | 9.6 Protocol and store fuzzing | `fuzz_protocols` (WebSocket, DAP, JDWP framing, typed accessors, UTF-8 properties) and `fuzz_stores` (evidence and investigation files, knowledge input) | Found: `Clip` could exceed its bound after UTF-8 repair, and damaged evidence or investigation files reached unchecked indexing. Fixed; the inputs are kept as regressions. Then 753,656 and 1,174,921 inputs without a finding |
-| Baselines, benchmarks | Open | Need a Windows host |
+| 9.7 Live baselines, comparison with Ghidra | `tests/live_baseline.py` (artifact `cortex-live-baseline-windows`) and `analysis_e2e.py --compare-out` (artifact `cortex-vs-ghidra-functions`) on the Windows runner | Run 155 (Windows Server 2025): exact i32 scan 85-112 ms (x86 target); unknown i32 scan 128 ms first, then rising to about 1.7 s (x86) / 1.9 s (x64) while earlier sessions are held, flat once four are kept; MCP round trip p50/p95: memory_read 2.0/3.8-4.0 ms, disasm 2.0-3.8/4.0 ms, tools/list (300 tools) 19-23 ms. Same test target: Ghidra 11.4.2 4052 functions in 135.6 s; Cortex's offline catalog 6197 starts in 0.14 s; 3941 in both, so Cortex finds 97.3% of Ghidra's starts and 63.6% of its own are confirmed by Ghidra (the rest are mostly its `after_ret` heuristic); all 7 exported functions in both. Found and fixed on the way: scan sessions never evicted (target memory grew with each scan) and a target crash at thread exit (`thread_local` with a destructor in the MinGW DLL); 4/4 local robustness runs and CI pass after the fix |
+| CI time | ccache on the four Windows builds | Second run: Release GUI 9 min 30 s to 2 min 06 s, x64 runtime 8 min 38 s to 2 min 03 s, x86 runtime 9 min to 1 min 50 s, Debug UI 6 min 38 s to 1 min 10 s; the GUI suite went from about 64 to 39 min |
+| Still open | The unknown-value scan slows while earlier sessions are held (bounded, not explained); comparison with Cheat Engine (needs a licensed desktop run, not CI); fuzzing of the Windows-only project store | |
 
 ### Step 10: product
 
