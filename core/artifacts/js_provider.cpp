@@ -83,7 +83,7 @@ std::vector<Capability> JavaScriptProvider::Capabilities() const {
              "and BrowserWindow options, bundler signatures, source map URL"},
             {"decompile", CapabilityStatus::Unavailable, "",
              "the file is already source; no beautifier or deobfuscator is provided"},
-            {"live", CapabilityStatus::Unavailable, "", "Node/Electron inspector (CDP) is planned for step 8"}};
+            {"live", CapabilityStatus::Unavailable, "", "not from the file: a running Node.js or Electron process is followed by the CDP live provider (cortex_live_attach)"}};
 }
 
 int JavaScriptProvider::Detect(const ByteSource& source) const {

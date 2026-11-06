@@ -1,4 +1,5 @@
 #include "diagnostics_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -8,7 +9,7 @@ namespace cortex::ui {
 void DiagnosticsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.diagnosticsModel) {
-        HintText("Select a process to inspect runtime diagnostics.");
+        NoTargetHint(context, "A running process is needed to inspect runtime diagnostics.");
         return;
     }
     if (targetId_ != session->Target().id) {

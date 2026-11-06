@@ -371,7 +371,14 @@ bool ValidateGuiRegistry(AppState& app, std::string& error) {
 bool ExerciseGuiPresets(AppState& app, std::string& error) {
     for (const auto preset : kGuiPresets) {
         app.workspaces.ApplyPreset(preset);
-        if (!app.workspaces.IsOpen("bottom")) {
+        // The start page fills the window; every other layout keeps the
+        // bottom panel.
+        if (preset == cortex::ui::WorkspacePreset::Home) {
+            if (!app.workspaces.IsOpen("overview") || app.workspaces.IsOpen("bottom")) {
+                error = "home_layout_wrong";
+                return false;
+            }
+        } else if (!app.workspaces.IsOpen("bottom")) {
             error = std::string("bottom_panel_closed:") +
                     cortex::ui::WorkspaceRegistry::PresetName(preset);
             return false;
@@ -1360,6 +1367,53 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
     return RenderGuiStable(app, error, true);
 }
 
+// Cortex opens on the start page, every workspace has a View menu group,
+// and the start page's file entry inspects the file in the Files layout.
+bool ExerciseStartPage(AppState& app, std::string& error) {
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Home || !app.workspaces.IsOpen("overview")) {
+        error = "start_page_not_home";
+        return false;
+    }
+    for (const auto& id : app.workspaces.Ids()) {
+        if (cortex::ui::WorkspaceRegistry::ViewGroupOf(id) == "Other") {
+            error = "view_menu_group_missing:" + id;
+            return false;
+        }
+    }
+    if (!RenderGuiStable(app, error, true)) {
+        error = "start_page_render:" + error;
+        return false;
+    }
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) {
+        error = "module_path_failed";
+        return false;
+    }
+    executable.resize(length);
+    app.ui.commands.push_back("home_open " + std::filesystem::path(executable).u8string());
+    for (int frame = 0; frame < 3; ++frame)
+        if (!RenderGuiFrame(app, error, false)) return false;
+    if (!RenderGuiStable(app, error, true)) {
+        error = "files_layout_render:" + error;
+        return false;
+    }
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Files || !app.workspaces.IsOpen("artifacts") ||
+        app.ui.status.rfind("Inspected ", 0) != 0) {
+        error = "home_open_failed:" + app.ui.status;
+        return false;
+    }
+    app.ui.commands.push_back("home_ai");
+    for (int frame = 0; frame < 2; ++frame)
+        if (!RenderGuiFrame(app, error, false)) return false;
+    if (!RenderGuiStable(app, error, true)) return false;
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Ai || !app.workspaces.IsOpen("ai-investigation")) {
+        error = "home_ai_failed";
+        return false;
+    }
+    return true;
+}
+
 int RunGuiWorkspaceSuite() {
     AppState app;
     std::string error;
@@ -1369,6 +1423,10 @@ int RunGuiWorkspaceSuite() {
     }
 
     HeadlessGuiContext gui;
+    if (!ExerciseStartPage(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 8;
+    }
     if (!ExerciseGuiPresets(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 3;

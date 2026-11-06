@@ -1,4 +1,5 @@
 #include "memory_workspace.h"
+#include "workspace_registry.h"
 #include "memory_workspace_internal.h"
 #include "address_resolver.h"
 #include "widgets.h"
@@ -425,17 +426,18 @@ void MemoryWorkspace::CopyResults(const std::vector<size_t>& rows) const {
 void MemoryWorkspace::DrawWelcome(UiContext& context) {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float cardWidth = std::min(Px(540.0f), available.x - Px(30.0f));
-    const float cardHeight = Px(220.0f);
+    const float cardHeight = Px(250.0f);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (available.x - cardWidth) * 0.5f));
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(20.0f, (available.y - cardHeight) * 0.28f));
 
     ImGui::BeginChild("WelcomeCard", ImVec2(cardWidth, cardHeight), ImGuiChildFlags_Borders);
     ImGui::Dummy(ImVec2(0, Px(10)));
     ImGui::SetWindowFontScale(1.35f);
-    ImGui::TextUnformatted("Cortex Memory");
+    ImGui::TextUnformatted("Memory scanner");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Spacing();
-    HintText("Select a process, scan a value, then keep useful addresses below.");
+    HintText("Memory scanning works on a program that runs now: select it, scan a value, then keep the useful "
+             "addresses.");
     ImGui::Dummy(ImVec2(0, Px(18)));
 
     const float width = ImGui::GetContentRegionAvail().x;
@@ -445,6 +447,8 @@ void MemoryWorkspace::DrawWelcome(UiContext& context) {
 
     ImGui::Dummy(ImVec2(0, Px(12)));
     HintText("Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
+    if (ImGui::SmallButton("Analyze a file instead"))
+        context.requestPreset = static_cast<int>(WorkspacePreset::Files);
     ImGui::EndChild();
 }
 

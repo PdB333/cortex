@@ -1,4 +1,5 @@
 #include "runtime_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include "api/mcp_contract.h"
@@ -174,7 +175,7 @@ void RuntimeWorkspace::CallSelected(UiContext& context) {
 void RuntimeWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.payload) {
-        HintText("Select a process to use advanced runtime tools.");
+        NoTargetHint(context, "A running process is needed to use advanced runtime tools.");
         return;
     }
 

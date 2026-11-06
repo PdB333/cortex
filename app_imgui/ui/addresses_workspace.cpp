@@ -1,4 +1,5 @@
 #include "addresses_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -298,7 +299,7 @@ void AddressesWorkspace::HandleShortcuts(UiContext& context) {
 void AddressesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.projectModel || !context.watchesModel) {
-        HintText("Select a process to use persistent Addresses.");
+        NoTargetHint(context, "A running process is needed to use persistent Addresses.");
         return;
     }
 

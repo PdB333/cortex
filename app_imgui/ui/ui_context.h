@@ -137,11 +137,16 @@ struct UiContext {
     std::vector<PendingAddressEntry> pendingAddresses;
     std::vector<AccessFinderRequest> accessFinderRequests;
     std::string toolsTabRequest;
-    std::string status = "Select a process to begin";
+    std::string status = "Open a file, select a process or connect an AI agent to begin";
 
     // Lightweight cross-workspace navigation. A workspace can request another
     // workspace and optionally pass one address without depending on its class.
     std::string requestWorkspace;
+    // Whether inspected files join the persisted recent files list (the
+    // interactive desktop only).
+    bool rememberRecentFiles = false;
+    // A layout (WorkspacePreset value) to apply after this frame, or -1.
+    int requestPreset = -1;
     // Runs a long runtime operation (loading the runtime, captures, diffs,
     // exports) away from the UI thread. While it runs the window stays
     // responsive and shows progress instead of freezing; no workspace is

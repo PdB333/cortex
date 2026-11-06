@@ -89,7 +89,7 @@ Download **`cortex-v<version>-windows-portable.zip`** from the [latest release](
 
 **By hand (desktop):**
 
-1. Run **`cortex.exe`**, click **Select process** and attach to your target.
+1. Run **`cortex.exe`**. The start page offers **Analyze a file**, **Inspect a running program** and **Work with an AI agent**; for memory, click **Select a process...** and attach to your target.
 2. In **Memory › Value scan**, enter the current value and run **First scan**. Change the value in the target, then run **Next scan**.
 3. Double-click a result to keep it. Right-click it to open it in the Memory viewer, Disassembler or Debugger, or to *find out what writes to this address*.
 4. Switch the header to **Writes allowed** only when you mean to change something.
@@ -246,7 +246,7 @@ An address list with freezes, `module+offset` and pointer entries, groups and ho
 </tr>
 </table>
 
-Every panel is a dockable window. Six presets (**Memory**, **Debug**, **RE**, **Trace**, **Automation** and **Runtime**) arrange them for the task, and the layout is remembered. Keyboard: `Ctrl+G` go to · `Ctrl+Shift+P` command palette · `Alt+←/→` history · `Space` freeze · `F2` edit · `Ctrl+B` breakpoint.
+Every panel is a dockable window. Presets arrange them for the task: **Home**, **Files** and **AI** need no process; **Memory**, **Debug**, **RE**, **Trace**, **Automation** and **Runtime** work on one. Keyboard: `Ctrl+O` open a file · `Ctrl+G` go to · `Ctrl+Shift+P` command palette · `Alt+←/→` history · `Space` freeze · `F2` edit · `Ctrl+B` breakpoint.
 
 <table>
 <tr>

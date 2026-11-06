@@ -156,6 +156,10 @@ void ArtifactsWorkspace::Inspect(UiContext& context, const std::string& path, co
         engineDetail_ = nullptr;
         inspectedPath_ = path;
         inspectedChild_ = child;
+        if (result_.value("ok", false) && child.empty() && context.settings && context.rememberRecentFiles) {
+            application::RememberRecentFile(context.settings->Values(), path);
+            context.settings->Save();
+        }
         context.status = result_.value("ok", false)
             ? "Inspected " + name + " (" + result_.value("format", std::string("?")) + ")"
             : "Inspect failed: " + result_.value("error", std::string("unknown"));
@@ -259,6 +263,21 @@ void ArtifactsWorkspace::HandleCommand(UiContext& context, const std::string& co
     Inspect(context, path, {});
 }
 
+// What a capability row means for the person at the desktop.
+static std::string CapabilityHint(const std::string& capability, const std::string& status) {
+    const bool available = status == "validated" || status == "available";
+    if (capability == "static")
+        return available ? "Structure, strings, imports and code are read by Cortex itself (tabs below)."
+                         : "Cortex cannot read this format by itself.";
+    if (capability == "decompile")
+        return available ? "Decompile it from the Engines tab."
+                         : "Not built in. For .exe, .dll and .jar files, an external engine (Ghidra, ILSpy, "
+                           "Vineflower) can do it from the Engines tab.";
+    (void)available;
+    return "Not from the file: attach to the running program instead (the Live (CDP) tab of AI Investigation for "
+           "Node.js and Electron, cortex.exe live for the others).";
+}
+
 int ArtifactsWorkspace::TabFlags(const char* name) const {
     return selectTab_ == name ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
 }
@@ -282,8 +301,8 @@ void ArtifactsWorkspace::Draw(UiContext& context) {
     if (ImGui::Button("Inspect") || enter) Inspect(context, path_.data(), child_.data());
     ImGui::SetNextItemWidth(std::min(Px(420), ImGui::GetContentRegionAvail().x));
     ImGui::InputTextWithHint("##ArtifactChild", "entry inside a container (nested: a.asar!b.js)", child_.data(), child_.size());
-    HintText("Static analysis of files: nothing is executed or loaded. The same providers answer cortex.exe inspect "
-             "and the cortex_artifact_* MCP tools.");
+    HintText("Static analysis: the file is read, never run or loaded. The command line (cortex.exe inspect) and "
+             "AI agents see the same results.");
     ImGui::Separator();
     DrawResult(context);
 }
@@ -339,17 +358,23 @@ void ArtifactsWorkspace::DrawResult(UiContext& context) {
         ImGui::TableSetupColumn("Note", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         const json capabilities = result.value("capabilities", json::object());
-        for (const char* name : {"static", "decompile", "live"}) {
+        static const std::pair<const char*, const char*> kCapabilities[] = {
+            {"static", "Read"}, {"decompile", "Decompile"}, {"live", "Debug live"}};
+        for (const auto& [name, label] : kCapabilities) {
             const json row = capabilities.value(name, json::object());
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::TextUnformatted(name);
+            ImGui::TextUnformatted(label);
             ImGui::TableSetColumnIndex(1);
             const std::string status = row.value("status", std::string("unavailable"));
             if (status == "validated") ImGui::TextColored(ImVec4(0.35f, 0.78f, 0.45f, 1.0f), "%s", status.c_str());
             else ImGui::TextDisabled("%s", status.c_str());
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextWrapped("%s", row.value("note", std::string()).c_str());
+            // The provider's note is written for agents (it names MCP tools);
+            // the desktop says where to go, with the note as a tooltip.
+            ImGui::TextWrapped("%s", CapabilityHint(name, status).c_str());
+            const std::string note = row.value("note", std::string());
+            if (!note.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", note.c_str());
         }
         ImGui::EndTable();
     }

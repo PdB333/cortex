@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <vector>
+
 #include <filesystem>
 #include <map>
 #include <string>
@@ -52,7 +55,22 @@ struct Settings {
     // separated by commas or semicolons) and nothing is attached.
     bool autoAttachEnabled = false;
     std::string autoAttachProcesses;
+    // Files inspected from the desktop, most recent first (File > Recent
+    // files and the start page).
+    std::vector<std::string> recentFiles;
 };
+
+inline constexpr size_t kMaxRecentFiles = 8;
+
+// Puts `path` first in the recent files, without duplicates, keeping at most
+// kMaxRecentFiles.
+inline void RememberRecentFile(Settings& settings, const std::string& path) {
+    if (path.empty()) return;
+    auto& list = settings.recentFiles;
+    list.erase(std::remove(list.begin(), list.end(), path), list.end());
+    list.insert(list.begin(), path);
+    if (list.size() > kMaxRecentFiles) list.resize(kMaxRecentFiles);
+}
 
 class SettingsStore {
 public:

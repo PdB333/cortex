@@ -1,4 +1,5 @@
 #include "memory_browser_workspace.h"
+#include "target_hint.h"
 #include "address_resolver.h"
 #include "widgets.h"
 #include "address_context_menu.h"
@@ -695,7 +696,7 @@ void MemoryBrowserWorkspace::DrawEditPopup(UiContext& context) {
 void MemoryBrowserWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to browse memory.");
+        NoTargetHint(context, "A running process is needed to browse memory.");
         return;
     }
     if (TargetKey(session->Target()) != targetId_) {

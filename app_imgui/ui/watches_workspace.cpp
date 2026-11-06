@@ -1,4 +1,5 @@
 #include "watches_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -35,7 +36,7 @@ void WatchesWorkspace::Refresh(UiContext& context, bool reportStatus) {
 void WatchesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.watchesModel) {
-        HintText("Select a process to use runtime watches.");
+        NoTargetHint(context, "A running process is needed to use runtime watches.");
         return;
     }
 

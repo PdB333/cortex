@@ -1,4 +1,5 @@
 #include "tools_workspace.h"
+#include "target_hint.h"
 #include "file_dialog.h"
 #include "tools_tabs.h"
 #include "address_resolver.h"
@@ -2479,7 +2480,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
     PollPointerScan(context);
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to use the memory tools.");
+        NoTargetHint(context, "A running process is needed to use the memory tools.");
         return;
     }
     if (session->Target().id != targetId_) {

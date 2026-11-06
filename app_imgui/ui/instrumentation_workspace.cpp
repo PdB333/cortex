@@ -1,4 +1,5 @@
 #include "instrumentation_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -24,7 +25,7 @@ bool InstrumentationWorkspace::Navigate(UiContext& context,
 void InstrumentationWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.instrumentationModel) {
-        HintText("Select a process to use instrumentation.");
+        NoTargetHint(context, "A running process is needed to use instrumentation.");
         return;
     }
 

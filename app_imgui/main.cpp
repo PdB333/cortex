@@ -191,6 +191,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     AppState app;
     app.window = hwnd;
     if (!windowSmoke) {
+        // Only the interactive desktop keeps a recent files list: test modes
+        // must not write their fixtures into the person's settings.
+        app.ui.rememberRecentFiles = true;
         app.ui.runInBackground = [&app](std::string label, std::function<void()> work) {
             // A task started while another runs (not reachable from the UI,
             // which is hidden meanwhile) simply runs inline.

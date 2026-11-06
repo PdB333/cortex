@@ -15,6 +15,13 @@
 namespace cortex::ui {
 
 enum class WorkspacePreset {
+    // The start page: a target-neutral choice between a file, a process and
+    // an AI agent. It is the only layout without the bottom panel.
+    Home,
+    // Static analysis of files: nothing runs, no process is needed.
+    Files,
+    // Following agents: investigations, evidence and AI activity.
+    Ai,
     Memory,
     Debug,
     ReverseEngineering,
@@ -132,6 +139,15 @@ public:
         for (auto& entry : entries_) entry.open = false;
 
         switch (preset) {
+            case WorkspacePreset::Home:
+                OpenMany({"overview"});
+                break;
+            case WorkspacePreset::Files:
+                OpenMany({"artifacts", "ai-investigation"});
+                break;
+            case WorkspacePreset::Ai:
+                OpenMany({"ai-investigation", "artifacts"});
+                break;
             case WorkspacePreset::Memory:
                 OpenMany({"memory", "addresses", "memory-browser", "tools", "modules", "watches"});
                 break;
@@ -154,7 +170,7 @@ public:
                 break;
         }
 
-        SetOpen("bottom", true);
+        if (preset != WorkspacePreset::Home) SetOpen("bottom", true);
         preset_ = preset;
         RequestFocus(PrimaryWorkspace(preset));
         if (rebuildLayout) layoutDirty_ = true;
@@ -164,6 +180,9 @@ public:
 
     static const char* PresetName(WorkspacePreset preset) {
         switch (preset) {
+            case WorkspacePreset::Home: return "Home";
+            case WorkspacePreset::Files: return "Files";
+            case WorkspacePreset::Ai: return "AI";
             case WorkspacePreset::Memory: return "Memory";
             case WorkspacePreset::Debug: return "Debug";
             case WorkspacePreset::ReverseEngineering: return "RE";
@@ -171,11 +190,14 @@ public:
             case WorkspacePreset::Automation: return "Automation";
             case WorkspacePreset::Runtime: return "Runtime";
         }
-        return "Memory";
+        return "Home";
     }
 
     void DrawPresetButtons() {
         constexpr WorkspacePreset presets[] = {
+            WorkspacePreset::Home,
+            WorkspacePreset::Files,
+            WorkspacePreset::Ai,
             WorkspacePreset::Memory,
             WorkspacePreset::Debug,
             WorkspacePreset::ReverseEngineering,
@@ -198,19 +220,88 @@ public:
         ImGui::PopID();
     }
 
+    // The View menu groups the workspaces by task. Files and AI come first:
+    // they need no process. A workspace missing from the groups still shows,
+    // under "Other", so none can be lost from the menu.
+    struct ViewGroup {
+        const char* label;
+        std::vector<const char*> ids;
+    };
+    static const std::vector<ViewGroup>& ViewGroups() {
+        static const std::vector<ViewGroup> groups = {
+            {"", {"overview", "artifacts", "ai-investigation"}},
+            {"Memory", {"memory", "addresses", "memory-browser", "tools", "watches", "snapshots", "pointermaps",
+                        "structures"}},
+            {"Code and debugging", {"disassembly", "debugger", "access-finder", "trace", "patches", "modules",
+                                    "symbols", "re"}},
+            {"Automation", {"lua", "scripts", "input", "actions", "events", "screenshots"}},
+            {"Runtime and system", {"runtime", "instrumentation", "network", "diagnostics", "sessions", "project",
+                                    "bottom", "settings"}},
+        };
+        return groups;
+    }
+
+    // The group a workspace belongs to in the View menu ("" for the top
+    // level, "Other" when it is in no group).
+    static std::string ViewGroupOf(const std::string& id) {
+        for (const auto& group : ViewGroups())
+            for (const char* member : group.ids)
+                if (id == member) return group.label;
+        return "Other";
+    }
+
     void DrawViewMenu() {
-        for (auto& entry : entries_) {
+        auto item = [this](Entry& entry) {
             bool open = entry.open;
             if (ImGui::MenuItem(entry.workspace->Title(), nullptr, &open)) {
                 const bool wasOpen = entry.open;
                 entry.open = open;
-                if (!wasOpen && open) layoutDirty_ = true;
+                if (!wasOpen && open) {
+                    layoutDirty_ = true;
+                    RequestFocus(entry.workspace->Id());
+                }
             }
+        };
+        auto find = [this](const char* id) -> Entry* {
+            for (auto& entry : entries_)
+                if (id == std::string(entry.workspace->Id())) return &entry;
+            return nullptr;
+        };
+        for (const auto& group : ViewGroups()) {
+            if (!*group.label) {
+                for (const char* id : group.ids)
+                    if (Entry* entry = find(id)) item(*entry);
+                ImGui::Separator();
+                continue;
+            }
+            if (!ImGui::BeginMenu(group.label)) continue;
+            for (const char* id : group.ids)
+                if (Entry* entry = find(id)) item(*entry);
+            ImGui::EndMenu();
         }
+        bool others = false;
+        for (const auto& entry : entries_)
+            if (ViewGroupOf(entry.workspace->Id()) == "Other") others = true;
+        if (others && ImGui::BeginMenu("Other")) {
+            for (auto& entry : entries_)
+                if (ViewGroupOf(entry.workspace->Id()) == "Other") item(entry);
+            ImGui::EndMenu();
+        }
+    }
+
+    // The window title of the workspace that last had keyboard focus, or
+    // nullptr before any has.
+    const char* FocusedTitle() const {
+        for (const auto& entry : entries_)
+            if (entry.open && focused_ == entry.workspace->Id()) return entry.workspace->Title();
+        return nullptr;
     }
 
     void DrawPresetMenu() {
         constexpr WorkspacePreset presets[] = {
+            WorkspacePreset::Home,
+            WorkspacePreset::Files,
+            WorkspacePreset::Ai,
             WorkspacePreset::Memory,
             WorkspacePreset::Debug,
             WorkspacePreset::ReverseEngineering,
@@ -218,7 +309,9 @@ public:
             WorkspacePreset::Automation,
             WorkspacePreset::Runtime
         };
+        ImGui::SeparatorText("No process needed");
         for (const auto preset : presets) {
+            if (preset == WorkspacePreset::Memory) ImGui::SeparatorText("With a process");
             const bool selected = preset == preset_;
             if (ImGui::MenuItem(PresetName(preset), nullptr, selected))
                 ApplyPreset(preset);
@@ -242,6 +335,17 @@ public:
         ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspaceId, dockspaceSize);
 
+        std::vector<std::string> docked;
+        if (preset_ == WorkspacePreset::Home) {
+            // The start page fills the window; anything opened from it joins
+            // the same node until another layout is chosen.
+            for (const auto& entry : entries_)
+                if (entry.open) ImGui::DockBuilderDockWindow(entry.workspace->Title(), dockspaceId);
+            ImGui::DockBuilderFinish(dockspaceId);
+            layoutDirty_ = false;
+            return;
+        }
+
         ImGuiID center = dockspaceId;
         const ImGuiID bottom =
             ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.27f, nullptr, &center);
@@ -249,14 +353,27 @@ public:
             ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
         // The debugger (threads, registers, stack) needs a wider side column.
         const bool wideRight =
-            preset_ == WorkspacePreset::Debug || preset_ == WorkspacePreset::Trace;
+            preset_ == WorkspacePreset::Debug || preset_ == WorkspacePreset::Trace ||
+            preset_ == WorkspacePreset::Files || preset_ == WorkspacePreset::Ai;
         const ImGuiID right = ImGui::DockBuilderSplitNode(
             center, ImGuiDir_Right, wideRight ? 0.40f : 0.28f, nullptr, &center);
 
-        std::vector<std::string> docked;
         DockMany(bottom, {"bottom"}, docked);
 
         switch (preset_) {
+            case WorkspacePreset::Home:
+                break;
+
+            case WorkspacePreset::Files:
+                DockMany(center, {"artifacts"}, docked);
+                DockMany(right, {"ai-investigation"}, docked);
+                break;
+
+            case WorkspacePreset::Ai:
+                DockMany(center, {"ai-investigation"}, docked);
+                DockMany(right, {"artifacts"}, docked);
+                break;
+
             case WorkspacePreset::Memory:
                 DockMany(left, {"addresses", "modules"}, docked);
                 DockMany(center, {"memory", "memory-browser", "tools"}, docked);
@@ -329,6 +446,10 @@ public:
                 for (auto& entry : entries_) entry.workspace->HandleCommand(context, command);
         }
         for (auto& entry : entries_) entry.workspace->Tick(context);
+        if (context.requestPreset >= 0) {
+            ApplyPreset(static_cast<WorkspacePreset>(context.requestPreset));
+            context.requestPreset = -1;
+        }
         if (!context.requestWorkspace.empty()) {
             Select(context.requestWorkspace);
             context.requestWorkspace.clear();
@@ -350,6 +471,8 @@ public:
                 ImGuiCond_FirstUseEver);
             if (ImGui::Begin(entry.workspace->Title(), &entry.open,
                              ImGuiWindowFlags_NoCollapse)) {
+                if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+                    focused_ = entry.workspace->Id();
                 entry.workspace->Draw(context);
             }
             ImGui::End();
@@ -371,6 +494,9 @@ private:
 
     static const char* PrimaryWorkspace(WorkspacePreset preset) {
         switch (preset) {
+            case WorkspacePreset::Home: return "overview";
+            case WorkspacePreset::Files: return "artifacts";
+            case WorkspacePreset::Ai: return "ai-investigation";
             case WorkspacePreset::Memory: return "memory";
             case WorkspacePreset::Debug: return "disassembly";
             case WorkspacePreset::ReverseEngineering: return "re";
@@ -404,7 +530,8 @@ private:
     }
 
     std::vector<Entry> entries_;
-    WorkspacePreset preset_ = WorkspacePreset::Memory;
+    WorkspacePreset preset_ = WorkspacePreset::Home;
+    std::string focused_;
     std::string pendingFocus_;
     int pendingFocusFrames_ = 0;
     bool initialLayoutChecked_ = false;

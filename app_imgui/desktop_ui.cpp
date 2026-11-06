@@ -5,6 +5,10 @@
 #include "ui/tools_tabs.h"
 #include "ui/address_resolver.h"
 #include "../core/version.h"
+#include "ui/file_dialog.h"
+#include "ui/target_hint.h"
+
+#include <shellapi.h>
 
 #include <tlhelp32.h>
 
@@ -128,6 +132,12 @@ enum class CommandAction {
     PresetMemory,
     PresetDebug,
     PresetRE,
+    PresetHome,
+    PresetFiles,
+    PresetAi,
+    OpenFile,
+    ViewArtifacts,
+    ViewAiInvestigation,
     PresetTrace,
     PresetAutomation,
     PresetRuntime,
@@ -173,6 +183,10 @@ struct CommandEntry {
 };
 
 constexpr CommandEntry kCommands[] = {
+    {"File: Open a file...", CommandAction::OpenFile},
+    {"Workspace: Home", CommandAction::PresetHome},
+    {"Workspace: Files", CommandAction::PresetFiles},
+    {"Workspace: AI", CommandAction::PresetAi},
     {"Workspace: Memory", CommandAction::PresetMemory},
     {"Workspace: Debug", CommandAction::PresetDebug},
     {"Workspace: RE", CommandAction::PresetRE},
@@ -183,6 +197,8 @@ constexpr CommandEntry kCommands[] = {
     {"Target: Detach active target", CommandAction::Detach},
     {"Safety: Toggle write permission", CommandAction::ToggleWrites},
     {"Runtime: Enable instrumentation", CommandAction::EnableRuntime},
+    {"View: Artifacts (files)", CommandAction::ViewArtifacts},
+    {"View: AI Investigation", CommandAction::ViewAiInvestigation},
     {"View: Addresses", CommandAction::ViewAddresses},
     {"View: Memory scanner", CommandAction::ViewMemory},
     {"View: Memory viewer", CommandAction::ViewMemoryBrowser},
@@ -223,6 +239,37 @@ constexpr CommandEntry kCommands[] = {
     {"Address list: Freeze / unfreeze all", CommandAction::Dispatch, "freeze_toggle_all"}
 };
 
+// Asks for a file and inspects it in the Files layout (the start page's
+// "home_open" command, so both paths are the same).
+void OpenFile(AppState& app) {
+    std::string chosen;
+    if (cortex::ui::ShowOpenFileDialog(L"All files\0*.*\0Executables and libraries\0*.exe;*.dll\0"
+                                       L"Electron archives\0*.asar\0",
+                                       chosen))
+        app.ui.commands.push_back("home_open " + chosen);
+}
+
+// Opens a guide shipped in the archive's docs folder, or the same page on
+// GitHub when Cortex runs from a build tree without it.
+void OpenGuide(AppState& app, const char* name) {
+    std::wstring module(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size()));
+    std::wstring target;
+    if (length && length < module.size()) {
+        module.resize(length);
+        const std::filesystem::path local =
+            std::filesystem::path(module).parent_path() / "docs" / std::filesystem::u8path(name);
+        std::error_code ec;
+        if (std::filesystem::exists(local, ec)) target = local.wstring();
+    }
+    if (target.empty())
+        target = std::filesystem::u8path(std::string("https://github.com/PdB333/cortex/blob/main/docs/") + name)
+                     .wstring();
+    const auto result = reinterpret_cast<INT_PTR>(
+        ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+    if (result <= 32) app.ui.status = std::string("Could not open docs/") + name;
+}
+
 bool CommandMatches(const char* label, const char* filter) {
     if (!filter || !*filter) return true;
     return Lower(label ? label : "").find(Lower(filter)) != std::string::npos;
@@ -234,6 +281,12 @@ void ExecuteCommand(AppState& app, CommandAction action, const char* command = n
         case CommandAction::Dispatch:
             if (command) DispatchCommand(app, command);
             break;
+        case CommandAction::PresetHome: app.workspaces.ApplyPreset(WorkspacePreset::Home); break;
+        case CommandAction::PresetFiles: app.workspaces.ApplyPreset(WorkspacePreset::Files); break;
+        case CommandAction::PresetAi: app.workspaces.ApplyPreset(WorkspacePreset::Ai); break;
+        case CommandAction::OpenFile: OpenFile(app); break;
+        case CommandAction::ViewArtifacts: app.workspaces.Select("artifacts"); break;
+        case CommandAction::ViewAiInvestigation: app.workspaces.Select("ai-investigation"); break;
         case CommandAction::PresetMemory: app.workspaces.ApplyPreset(WorkspacePreset::Memory); break;
         case CommandAction::PresetDebug: app.workspaces.ApplyPreset(WorkspacePreset::Debug); break;
         case CommandAction::PresetRE: app.workspaces.ApplyPreset(WorkspacePreset::ReverseEngineering); break;
@@ -311,6 +364,8 @@ void HandleGlobalShortcuts(AppState& app) {
     } else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_K, false)) {
         app.requestCommandPalette = true;
     }
+
+    if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_O, false)) OpenFile(app);
 
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false) && app.sessions.Active())
         app.requestGoTo = true;
@@ -903,14 +958,33 @@ void DrawHeader(AppState& app) {
     const ImGuiStyle& style = ImGui::GetStyle();
 
     // Row 1: identity, target, and the right-aligned safety/AI cluster.
-    ImGui::AlignTextToFramePadding();
+    // The mark and name lead back to the start page.
     {
-        cortex::ui::HeadingFont heading;
-        ImGui::TextUnformatted("CORTEX");
+        const float mark = ImGui::GetFrameHeight();
+        const ImVec2 start = ImGui::GetCursorPos();
+        cortex::ui::CortexMark(mark);
+        ImGui::SameLine(0.0f, style.ItemSpacing.x);
+        ImGui::AlignTextToFramePadding();
+        {
+            cortex::ui::HeadingFont heading;
+            ImGui::TextUnformatted("Cortex");
+        }
+        const ImVec2 end(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x, start.y + mark);
+        ImGui::SetCursorPos(start);
+        if (ImGui::InvisibleButton("##Home", ImVec2(end.x - start.x, mark)))
+            app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Home);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Home: open a file, select a process or connect an AI agent");
     }
     ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
+    if (ImGui::Button("Open a file..."))
+        OpenFile(app);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Analyze an .exe, .dll, .asar, script or archive without running it (Ctrl+O)");
+    ImGui::SameLine();
     if (ImGui::Button(session ? "Change process" : "Select process"))
         app.ui.requestProcessPicker = true;
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Attach to a running program to inspect its memory and code");
 
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
@@ -1093,6 +1167,24 @@ void DrawApp(AppState& app) {
 
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Open a file...", "Ctrl+O"))
+                OpenFile(app);
+            auto& recent = app.settings.Values().recentFiles;
+            if (ImGui::BeginMenu("Recent files", !recent.empty())) {
+                std::string chosen;
+                for (size_t i = 0; i < recent.size(); ++i) {
+                    const std::string label = recent[i] + "##recent" + std::to_string(i);
+                    if (ImGui::MenuItem(label.c_str())) chosen = recent[i];
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Clear the list")) {
+                    recent.clear();
+                    app.settings.Save();
+                }
+                if (!chosen.empty()) app.ui.commands.push_back("home_open " + chosen);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Select process..."))
                 app.ui.requestProcessPicker = true;
             if (ImGui::MenuItem("Attach to foreground process", nullptr, false, app.lastForegroundPid != 0))
@@ -1108,6 +1200,9 @@ void DrawApp(AppState& app) {
                 ResetTargetState(app);
             }
             ImGui::EndDisabled();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Home"))
+                app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Home);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
@@ -1184,12 +1279,21 @@ void DrawApp(AppState& app) {
             }
             if (ImGui::MenuItem("Modules"))
                 app.workspaces.Select("modules");
-            if (ImGui::MenuItem("Sessions"))
-                app.workspaces.Select("sessions");
-            if (ImGui::MenuItem("Runtime"))
-                app.workspaces.Select("runtime");
-            if (ImGui::MenuItem("Diagnostics"))
-                app.workspaces.Select("diagnostics");
+            ImGui::Separator();
+            if (ImGui::MenuItem("File analysis (Artifacts)"))
+                app.workspaces.Select("artifacts");
+            if (ImGui::MenuItem("AI Investigation"))
+                app.workspaces.Select("ai-investigation");
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Advanced")) {
+                if (ImGui::MenuItem("Sessions"))
+                    app.workspaces.Select("sessions");
+                if (ImGui::MenuItem("Runtime"))
+                    app.workspaces.Select("runtime");
+                if (ImGui::MenuItem("Diagnostics"))
+                    app.workspaces.Select("diagnostics");
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Workspace")) {
@@ -1212,10 +1316,18 @@ void DrawApp(AppState& app) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::TextDisabled("Cortex v%s", cortex::kVersion);
+            if (ImGui::MenuItem("Start page"))
+                app.workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Home);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Getting started")) OpenGuide(app, "getting-started.md");
+            if (ImGui::MenuItem("Desktop guide")) OpenGuide(app, "ui-guide.md");
+            if (ImGui::MenuItem("Connecting an AI agent (MCP)")) OpenGuide(app, "mcp.md");
+            if (ImGui::MenuItem("Known limitations")) OpenGuide(app, "limitations.md");
             ImGui::Separator();
             if (ImGui::MenuItem("Diagnostics"))
                 app.workspaces.Select("diagnostics");
+            ImGui::Separator();
+            ImGui::TextDisabled("Cortex v%s", cortex::kVersion);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1232,9 +1344,14 @@ void DrawApp(AppState& app) {
     ImGui::DockSpace(dockspaceId, dockSize, ImGuiDockNodeFlags_None);
 
     ImGui::Separator();
-    ImGui::TextDisabled("[%s]  %s",
-                        cortex::ui::WorkspaceRegistry::PresetName(app.workspaces.Preset()),
-                        app.ui.status.c_str());
+    // The layout, then the panel in use, so the bar never names a layout
+    // ("Memory") while the person works in an unrelated panel.
+    const char* focused = app.workspaces.FocusedTitle();
+    const char* layout = cortex::ui::WorkspaceRegistry::PresetName(app.workspaces.Preset());
+    if (focused && std::string(focused) != layout)
+        ImGui::TextDisabled("[%s > %s]  %s", layout, focused, app.ui.status.c_str());
+    else
+        ImGui::TextDisabled("[%s]  %s", layout, app.ui.status.c_str());
 
     DrawProcessPicker(app);
     DrawCommandPalette(app);

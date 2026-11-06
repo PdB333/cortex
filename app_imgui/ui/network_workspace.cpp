@@ -1,4 +1,5 @@
 #include "network_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -24,7 +25,7 @@ void NetworkWorkspace::Refresh(UiContext& context, bool reportStatus) {
 void NetworkWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.networkModel) {
-        HintText("Select a process to inspect runtime network traffic.");
+        NoTargetHint(context, "A running process is needed to inspect runtime network traffic.");
         return;
     }
     if (targetId_ != session->Target().id) {

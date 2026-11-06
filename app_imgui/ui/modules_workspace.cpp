@@ -1,4 +1,5 @@
 #include "modules_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -37,7 +38,7 @@ void ModulesWorkspace::Refresh(UiContext& context) {
 void ModulesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to inspect modules.");
+        NoTargetHint(context, "A running process is needed to inspect modules.");
         return;
     }
 

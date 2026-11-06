@@ -14,15 +14,17 @@ Extract the entire archive and keep its directory structure intact. Cortex needs
 
 Run `cortex.exe`.
 
-The header shows the target, the **Read-only / Writes allowed** toggle, **Detach**, the six workspace presets and **Go to...**. Leave it on **Read-only** while you are only observing.
+Cortex opens on **Home**: **Analyze a file** (nothing runs), **Inspect a running program**, or **Work with an AI agent** (copies the MCP client configuration). This guide follows the running-program path; for files see the [UI guide](ui-guide.md#start-page) and [analysis providers](analysis-providers.md).
+
+The header shows **Open a file...**, **Select process**, the target, **Go to...**, the **Read-only / Writes allowed** toggle and **Detach**; the layouts are in the **Workspace** menu. Leave it on **Read-only** while you are only observing.
 
 Settings and the window layout are kept in `%LOCALAPPDATA%\Cortex`. To keep them beside `cortex.exe` instead (portable use), create an empty file named `cortex.portable` next to it.
 
 ## 3. Select and attach a target
 
-Click **Select process** (or **File > Select process...**), use **Refresh** if necessary, then select the authorized process and click **Attach** or double-click it.
+Click **Select a process...** on Home, **Select process** in the header (or **File > Select process...**), use **Refresh** if necessary, then select the authorized process and click **Attach** or double-click it.
 
-After attach, the header shows the process, PID and architecture, and the **Memory** preset opens. Cortex starts in observation mode; the runtime is loaded into the target only when a feature that needs it is used with writes allowed.
+After attach, the header shows the process, PID and architecture, and the **Memory** preset opens (from Home; in another layout the Memory panel joins it). Cortex starts in observation mode; the runtime is loaded into the target only when a feature that needs it is used with writes allowed.
 
 You may attach another process from the same picker. Cortex keeps both sessions; selecting an already attached process switches the UI back to it without reattaching. Workspaces always follow the active target. **Detach** in the header or **File > Detach active target** detaches the active one.
 

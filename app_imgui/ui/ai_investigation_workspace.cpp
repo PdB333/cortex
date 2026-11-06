@@ -78,8 +78,9 @@ void AiInvestigationWorkspace::HandleCommand(UiContext& context, const std::stri
 }
 
 void AiInvestigationWorkspace::Draw(UiContext& context) {
-    HintText("Agents work through MCP; this is where you follow them, approve or reject what touches the target, "
-             "and check what they recorded. No AI runs inside Cortex.");
+    HintText("No AI runs inside Cortex: an agent connects through your MCP client (Home > Work with an AI agent). "
+             "Here you follow its investigations, approve or reject the steps that touch a program, and check the "
+             "evidence it recorded.");
     if (ImGui::BeginTabBar("AiTabs")) {
         if (ImGui::BeginTabItem("Investigations", nullptr, TabFlags("Investigations"))) {
             DrawInvestigations(context);

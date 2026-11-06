@@ -41,15 +41,20 @@ targets, projects and evidence.
 FIRST SESSION (DESKTOP)
 -----------------------
 
-1. Click "Select process" in the header (or File > Select process...).
+Cortex opens on its start page: Analyze a file (nothing runs), Inspect a
+running program, or Work with an AI agent (copies the MCP configuration).
+For memory:
+
+1. Click "Select a process..." (or File > Select process...).
 2. Select the target and click Attach (or double-click the row).
 3. Use the "Value scan" panel of the Memory workspace to scan a value
    (First scan, then Next scan).
 4. Double-click a useful result to keep it in the address list.
 5. Right-click an address to open it in the Memory viewer, the Disassembler
    or the Debugger, or to find out what writes to it.
-6. The Memory, Debug, RE, Trace, Automation and Runtime buttons in the header
-   rearrange the workspaces for each task.
+6. The Workspace menu rearranges the panels for each task: Home, Files and
+   AI need no process; Memory, Debug, RE, Trace, Automation and Runtime
+   work on one.
 7. Switch the header toggle from "Read-only" to "Writes allowed" only when you
    intend an operation that changes the target or persistent state.
 

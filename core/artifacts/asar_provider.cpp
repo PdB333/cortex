@@ -148,7 +148,7 @@ std::vector<Capability> AsarProvider::Capabilities() const {
              "file tree, sizes, unpacked and link entries, per-file integrity check, header SHA-256, package.json, "
              "module graph and static Electron view (windows, preload, IPC channels, bridge)"},
             {"decompile", CapabilityStatus::Unavailable, "", "scripts inside are source; see the javascript provider"},
-            {"live", CapabilityStatus::Unavailable, "", "Electron processes through CDP (step 8)"}};
+            {"live", CapabilityStatus::Unavailable, "", "not from the file: a running Electron process is followed by the CDP live provider (cortex_live_attach)"}};
 }
 
 int AsarProvider::Detect(const ByteSource& source) const {

@@ -1,4 +1,5 @@
 #include "trace_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -189,7 +190,7 @@ bool TraceWorkspace::DeleteTrace(UiContext& context, int traceId) {
 void TraceWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to trace execution.");
+        NoTargetHint(context, "A running process is needed to trace execution.");
         return;
     }
 

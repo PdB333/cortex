@@ -17,6 +17,13 @@ The plan, what each step validated and its limits: `docs/cortex-2-roadmap.md` an
 
 ### Added
 
+- **A desktop that is not only about processes.**
+  - Cortex opens on a **Home** page with three ways in: **Analyze a file** (with recent files), **Inspect a running program** and **Work with an AI agent** (copies the MCP client configuration).
+  - **File > Open a file...** (`Ctrl+O`), **File > Recent files** and an **Open a file...** header button.
+  - Three layouts that need no process: **Home**, **Files** and **AI**. The **View** menu is grouped by task, and developer panels are under **Tools > Advanced**.
+  - The **Help** menu opens the getting started, desktop, MCP and limitations guides.
+  - Without a process, a panel that needs one says so and offers **Select a process...** or **Analyze a file instead**. The bottom panel shows only AI Activity, and the status line names the panel in use.
+  - The Artifacts capability table says what to do (for example "Decompile it from the Engines tab") instead of naming MCP tools.
 - **Quality (step 9).**
   - Contract tests are now in CTest.
   - Fuzzing of the file parsers (`tests/fuzz`, CI job `fuzz-parsers`).

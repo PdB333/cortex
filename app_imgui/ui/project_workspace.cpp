@@ -1,4 +1,5 @@
 #include "project_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -118,7 +119,7 @@ bool ProjectWorkspace::Navigate(UiContext& context, const std::string& expressio
 void ProjectWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.projectModel) {
-        HintText("Select a process to use persistent project knowledge.");
+        NoTargetHint(context, "A running process is needed to use persistent project knowledge.");
         return;
     }
 

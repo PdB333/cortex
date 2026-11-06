@@ -292,7 +292,9 @@ struct AppState {
         workspaces.Add<cortex::ui::LuaWorkspace>();
         workspaces.Add<cortex::ui::ArtifactsWorkspace>();
         workspaces.Add<cortex::ui::AiInvestigationWorkspace>();
-        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
+        // Cortex opens on the start page; a layout saved by an earlier
+        // version is rebuilt so the page is docked, not floating.
+        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Home, true);
     }
 
     ~AppState() {
@@ -324,7 +326,13 @@ struct AppState {
         ui.mutationAllowed = false;
         ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
-        if (selectMemory) ui.requestWorkspace = "memory";
+        if (selectMemory) {
+            // From the start page, attaching opens the memory layout; in
+            // another layout the scanner joins it.
+            if (workspaces.Preset() == cortex::ui::WorkspacePreset::Home)
+                workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
+            ui.requestWorkspace = "memory";
+        }
 
         if (settings.Values().autoLoadRuntimeOnAttach) {
             ui.RunInBackground("Loading the Cortex runtime into the target", [this]() {
@@ -380,6 +388,9 @@ bool ParseAddressToken(const std::string& text, uint64_t& value, int defaultBase
 
 // Every workspace preset, in header order.
 inline constexpr cortex::ui::WorkspacePreset kGuiPresets[] = {
+    cortex::ui::WorkspacePreset::Home,
+    cortex::ui::WorkspacePreset::Files,
+    cortex::ui::WorkspacePreset::Ai,
     cortex::ui::WorkspacePreset::Memory,
     cortex::ui::WorkspacePreset::Debug,
     cortex::ui::WorkspacePreset::ReverseEngineering,
