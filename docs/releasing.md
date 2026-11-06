@@ -34,14 +34,23 @@ The archive is checked before it is zipped:
 
 1. Every workflow is green on the commit to release, including the GUI suite
    with `analysis-engines`.
-2. The `## [v2.0.0]` section of `CHANGELOG.md` is final. Replace "not yet
-   released" with the date.
-3. Someone has tried the archive on a real Windows desktop:
-   - the icon in Explorer and the taskbar;
-   - attaching and scanning;
-   - an MCP client with and without `--allow-writes`.
+2. The `## [v2.0.0]` section of `CHANGELOG.md` is final, with the release
+   date in its heading.
+3. The **Desktop acceptance** workflow (`desktop-acceptance.yml`) is green.
+   It drives the built `cortex.exe` on the runner's real Windows desktop
+   with keyboard and mouse input (`tests/desktop_acceptance.py`):
+   - the icon of the executable and of the window (Explorer, taskbar);
+   - Ctrl+O, the system file dialog and the recent files;
+   - Help > Getting started opened by the shell;
+   - attaching from the process picker and a first scan from the keyboard;
+   - an MCP client read-only and with `--allow-writes`, next to the desktop;
+   - a clean close.
 
-   CI cannot check these.
+   Its screenshots are in the run's `desktop-acceptance` artifact. Attach and
+   scan, and the AI status, are confirmed by reading them: the window draws
+   with Dear ImGui and exposes no accessibility tree. The runner is Windows
+   Server at 1024x768 and 100 % scale; other scales and multi-monitor setups
+   are not covered.
 4. `docs/limitations.md` matches what is shipped.
 
 ## Publishing (maintainer)
