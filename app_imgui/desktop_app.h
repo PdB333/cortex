@@ -332,6 +332,8 @@ struct AppState {
             if (workspaces.Preset() == cortex::ui::WorkspacePreset::Home)
                 workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
             ui.requestWorkspace = "memory";
+            // The value field takes the keyboard: type a value, Enter scans.
+            ui.commands.push_back("scan_focus");
         }
 
         if (settings.Values().autoLoadRuntimeOnAttach) {

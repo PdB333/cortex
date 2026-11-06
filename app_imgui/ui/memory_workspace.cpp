@@ -159,6 +159,7 @@ void MemoryWorkspace::NewScan(UiContext& context) {
         compare_ = ScanCompare::Exact;
     compareToFirst_ = false;
     focusValue_ = true;
+    focusValueFrames_ = 1;
     context.status = "Ready for a new scan";
 }
 
@@ -782,14 +783,12 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
         ImGui::Checkbox("Hex", &hex_);
     }
     ImGui::BeginDisabled(!needsValue);
-    if (focusValue_) {
-        ImGui::SetKeyboardFocusHere();
-        focusValue_ = false;
-    }
+    if (focusValue_) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
     const char* hint = type == ScanDataType::ByteArray ? "8B 05 ?? ?? 4? 00" : (type == ScanDataType::String ? "text" : "100");
     bool submit = ImGui::InputTextWithHint("##ScanValue", hint, scanValue_, sizeof(scanValue_),
                                            ImGuiInputTextFlags_EnterReturnsTrue);
+    if (focusValue_ && (ImGui::IsItemActive() || --focusValueFrames_ <= 0)) focusValue_ = false;
     if (compare_ == ScanCompare::Between) {
         ImGui::SetNextItemWidth(-1);
         submit |= ImGui::InputTextWithHint("##ScanValue2", "and", scanValue2_, sizeof(scanValue2_),
@@ -901,6 +900,13 @@ void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& comma
     }
     if (command == "scan_cancel") {
         CancelScan();
+        return;
+    }
+    if (command == "scan_focus") {
+        if (!scan_) {
+            focusValue_ = true;
+            focusValueFrames_ = 30;
+        }
         return;
     }
     if (command == "scan_undo") {

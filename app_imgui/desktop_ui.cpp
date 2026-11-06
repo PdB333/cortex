@@ -136,6 +136,7 @@ enum class CommandAction {
     PresetFiles,
     PresetAi,
     OpenFile,
+    OpenGuide,
     ViewArtifacts,
     ViewAiInvestigation,
     PresetTrace,
@@ -236,7 +237,11 @@ constexpr CommandEntry kCommands[] = {
     {"Scan: Next scan, unchanged value", CommandAction::Dispatch, "scan_unchanged"},
     {"Scan: Undo the last scan", CommandAction::Dispatch, "scan_undo"},
     {"Scan: Cancel the running scan", CommandAction::Dispatch, "scan_cancel"},
-    {"Address list: Freeze / unfreeze all", CommandAction::Dispatch, "freeze_toggle_all"}
+    {"Address list: Freeze / unfreeze all", CommandAction::Dispatch, "freeze_toggle_all"},
+    {"Help: Getting started", CommandAction::OpenGuide, "getting-started.md"},
+    {"Help: Desktop guide", CommandAction::OpenGuide, "ui-guide.md"},
+    {"Help: Connecting an AI agent (MCP)", CommandAction::OpenGuide, "mcp.md"},
+    {"Help: Known limitations", CommandAction::OpenGuide, "limitations.md"}
 };
 
 // Asks for a file and inspects it in the Files layout (the start page's
@@ -285,6 +290,9 @@ void ExecuteCommand(AppState& app, CommandAction action, const char* command = n
         case CommandAction::PresetFiles: app.workspaces.ApplyPreset(WorkspacePreset::Files); break;
         case CommandAction::PresetAi: app.workspaces.ApplyPreset(WorkspacePreset::Ai); break;
         case CommandAction::OpenFile: OpenFile(app); break;
+        case CommandAction::OpenGuide:
+            if (command) OpenGuide(app, command);
+            break;
         case CommandAction::ViewArtifacts: app.workspaces.Select("artifacts"); break;
         case CommandAction::ViewAiInvestigation: app.workspaces.Select("ai-investigation"); break;
         case CommandAction::PresetMemory: app.workspaces.ApplyPreset(WorkspacePreset::Memory); break;
@@ -496,10 +504,15 @@ void DrawProcessPicker(AppState& app) {
     if (ImGui::Button("Refresh")) app.RefreshTargets();
     ImGui::Spacing();
 
+    // Type to filter, Enter attaches the selected row or, with none, the
+    // first one the filter shows.
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##ProcessFilter", "Search process, window title or PID...",
-                             app.processFilter, sizeof(app.processFilter));
+    const bool enter = ImGui::InputTextWithHint("##ProcessFilter", "Search process, window title or PID...",
+                                                app.processFilter, sizeof(app.processFilter),
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::Spacing();
+    int firstVisible = -1;
 
     const float footerHeight = 54.0f;
     if (cortex::ui::BeginDataTable("ProcessTable", 5,
@@ -516,6 +529,7 @@ void DrawProcessPicker(AppState& app) {
         for (size_t i = 0; i < app.targets.size(); ++i) {
             const auto& target = app.targets[i];
             if (!MatchesFilter(target, app.processFilter)) continue;
+            if (firstVisible < 0) firstVisible = static_cast<int>(i);
 
             ImGui::PushID(static_cast<int>(i));
             ImGui::TableNextRow();
@@ -547,6 +561,16 @@ void DrawProcessPicker(AppState& app) {
 
     const bool validSelection =
         app.selectedTarget >= 0 && app.selectedTarget < static_cast<int>(app.targets.size());
+    if (enter) {
+        const int row = validSelection && MatchesFilter(app.targets[static_cast<size_t>(app.selectedTarget)],
+                                                        app.processFilter)
+                            ? app.selectedTarget : firstVisible;
+        if (row >= 0) {
+            AttachTarget(app, app.targets[static_cast<size_t>(row)]);
+            ImGui::EndPopup();
+            return;
+        }
+    }
 
     ImGui::BeginDisabled(!validSelection);
     if (ImGui::Button("Attach", ImVec2(cortex::ui::Px(150), cortex::ui::Px(38))) && validSelection) {

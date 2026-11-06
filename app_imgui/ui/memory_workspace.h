@@ -232,6 +232,9 @@ private:
     std::vector<target::ModuleInfo> modules_;
     std::chrono::steady_clock::time_point lastModuleRefresh_{};
     bool focusValue_ = false;
+    // Frames left to give the value field the keyboard: a closing popup
+    // (the process picker) hands focus back to its parent window first.
+    int focusValueFrames_ = 0;
 
     // Address list
     std::vector<AddressEntry> addresses_;
