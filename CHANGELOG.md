@@ -2,6 +2,165 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v2.0.0] - 2026-11-06
+
+Cortex 2.0. Highlights:
+
+- **Two ways to work.** The desktop and the command line for a person; `cortex.exe mcp` for an AI agent, which is read-only unless the operator starts it with `--allow-writes` and whose every tool call appears in the desktop's AI Activity panel.
+- **Files as well as processes.** Static analysis of PE and native code, .NET metadata and CIL, Electron ASAR, JavaScript/TypeScript with source maps, and ZIP/JAR, without running anything.
+- **External engines.** Ghidra (PE x64/x86, ELF), ILSpy (C#) and Vineflower (Java) as separate processes, with results cached by SHA-256 and mapped back to the live module by RVA.
+- **Live providers.** Log breakpoints for Node.js (CDP), Python (debugpy), .NET (netcoredbg, stdio mode on Windows) and Java (JDWP), with no evaluation of code.
+- **Evidence and investigations.** Records with provenance, class and status; supervised investigations with a plan, journal, report and approval by the person; an AI Investigation workspace.
+- **Quality.** Parser and protocol fuzzing, robustness tests against killed targets and failing engines, live baselines and a comparison with Ghidra measured in CI. Fixes include a target crash at thread exit, a scan-session leak in the target and several ways a malformed request could end the MCP server.
+
+The plan, what each step validated and its limits: `docs/cortex-2-roadmap.md` and `docs/limitations.md`. Steps 1 to 10.
+
+### Added
+
+- **A desktop that is not only about processes.**
+  - Cortex opens on a **Home** page with three ways in: **Analyze a file** (with recent files), **Inspect a running program** and **Work with an AI agent** (copies the MCP client configuration).
+  - **File > Open a file...** (`Ctrl+O`), **File > Recent files** and an **Open a file...** header button.
+  - Three layouts that need no process: **Home**, **Files** and **AI**. The **View** menu is grouped by task, and developer panels are under **Tools > Advanced**.
+  - The **Help** menu opens the getting started, desktop, MCP and limitations guides.
+  - Without a process, a panel that needs one says so and offers **Select a process...** or **Analyze a file instead**. The bottom panel shows only AI Activity, and the status line names the panel in use.
+  - The Artifacts capability table says what to do (for example "Decompile it from the Engines tab") instead of naming MCP tools.
+  - The keyboard is enough for a first session: the process picker focuses its search field and Enter attaches the first match; after an attach, the scanner's value field takes the keyboard, so a value and Enter run a first scan. The command palette opens the guides (`Help:`).
+- **Desktop acceptance on a real Windows session** (`tests/desktop_acceptance.py`, workflow `desktop-acceptance.yml`). It drives the shipped `cortex.exe` with real input on the runner's desktop: the icon, the system file dialog, a guide opened by the shell, attach and scan from the keyboard, an MCP client read-only and with `--allow-writes`, and a clean close. Screenshots are kept with the run.
+- **Quality (step 9).**
+  - Contract tests are now in CTest.
+  - Fuzzing of the file parsers (`tests/fuzz`, CI job `fuzz-parsers`).
+  - Robustness end-to-end tests (`tests/robustness_e2e.py`).
+- **Product documentation (step 10, in progress).**
+  - The README is reorganized around what Cortex does. It has three GIFs recorded from the real app against the test target and fixtures, an architecture diagram, a table of what can be analyzed with each row's validation, a safety model and an FAQ.
+  - New: `CONTRIBUTING.md`, `SECURITY.md`, issue and pull request templates, and `docs/limitations.md`.
+- **netcoredbg in stdio mode.**
+  - Cortex starts the operator's netcoredbg (`--netcoredbg`, `CORTEX_NETCOREDBG`) and speaks DAP over its pipes. This works around the Windows 3.1.2 `--server` mode, which reads no request after `initialize`.
+  - `cortex_live_attach` with `adapter: "netcoredbg"` and no port uses this mode.
+- **External analysis engines (step 8).** One `AnalysisProvider` interface for engines that run as separate processes, never linked.
+  - **Ghidra** headless: a Cortex-owned temporary project and an embedded post-script. It exports functions, imports, calls, types and decompiled C keyed by RVA, and checks that the imported bytes have Cortex's SHA-256.
+  - **ILSpy** (`ilspycmd`): the C# project or one type, and the type list.
+  - Jobs can be cancelled (the engine's process tree is killed) and results are cached by SHA-256, engine version and options.
+  - New: MCP tools `cortex_analysis_*`, `cortex.exe provider list|run`, the Artifacts **Engines** tab, the options `--ghidra-dir`, `--ilspycmd`, `--dotnet` and `--analysis-cache`, and the CI job `analysis-engines` with pinned Ghidra 11.4.2 and ilspycmd 9.1.
+  - **Vineflower** for Java (.jar/.class), and Ghidra on ELF.
+  - `cortex_analysis_map` maps analysis RVAs to the live target's module whose file has the same SHA-256.
+  - **Live providers** behind one interface (`cortex_live_*`, `cortex.exe live`, AI Investigation › Live):
+    - CDP for Node.js/Electron;
+    - DAP for Python (debugpy) and .NET (netcoredbg);
+    - JDWP for Java.
+
+    All three use log breakpoints only: Cortex records the stack and locals, then resumes. There is no evaluation and no method invocation, and a pause Cortex did not set is resumed.
+  - Ports are allowed with `--inspect-port`. Breakpoints need `mutation_permission` and `--allow-writes`.
+  - See `docs/analysis-providers.md` and `docs/third-party.md`.
+
+- **AI Investigation workspace (step 7).**
+  - Investigations with their plan, journal, evidence and report, plus **Approve/Reject** by the person (actor `desktop`).
+  - Every evidence record, with **Live** and **Static** navigation.
+  - The process tree of a multi-process target with Electron/Chromium roles, also available as the read-only MCP tool `cortex_process_tree`.
+
+  module+RVA navigation in both directions:
+  - the address menu has **Open in Artifacts (static code)**;
+  - the Code tab has **Show in live disassembly** and **Record as evidence**.
+
+  Live and static are linked only through a loaded module whose file has the same SHA-256.
+- **Investigations (step 6).** A host-side journal (`cortex.investigation.v1`) with a testable question, a plan of tool calls, limits, approvals, evidence and a conclusion. It is not a second agent: the AI client runs the tools.
+  - Cortex enforces the states, runs read-only static steps itself, and checks cited trials and evidence. It refuses to record input or mutating steps until the person approves them with `cortex.exe investigation approve`; there is no MCP approval tool.
+  - Templates: `function_static`, `memory_value`, `electron_ipc_native`.
+  - New: 11 MCP tools, `--investigation-store`, `cortex.exe investigation`. See `docs/investigations.md`.
+- **Evidence records (step 5).** One host-side record type (`cortex.evidence.v1`) for trials, scans, breakpoints and static results, readable without the target process.
+  - Subjects are artifact SHA-256 plus a location. Relations are typed and can cross runtimes.
+  - The class is enforced by Cortex: `verified_observation` only when Cortex reruns the static tool and reproduces the expected values, or when the runner reports the trial completed. Later checks mark records stale; they never upgrade or downgrade them silently.
+  - Builds can be compared with position-independent code fingerprints (unchanged, moved, not found).
+  - Export as JSON or Markdown.
+  - New: MCP tools `cortex_evidence_*`, `cortex.exe evidence export|list`, `--evidence-store`, and the Artifacts **Evidence** tab. See `docs/evidence.md`.
+- **Native code analysis of files, offline (step 4d).** For x86 and x64 PEs:
+  - a function catalog where each start states its provenance (entry, export, pdata, TLS, call target, after-ret heuristic);
+  - a cross-reference index (calls, jumps, memory and address operands) and strings with their references;
+  - CFGs with optional coverage from a trace.
+
+  The runtime's CFG algorithm now lives in `core/analysis/cfg_builder.h` and is shared by live and offline analysis.
+
+  New **annotations** (names and comments per artifact SHA-256) with revisions. The desktop can rename functions; agents use `cortex_artifact_annotate`, which needs `--allow-state` and `mutation_permission`.
+
+  New: MCP tools `cortex_artifact_functions`, `_xrefs`, `_strings`, `_cfg`, `_annotations` and `_annotate`; `inspect --functions/--strings/--xrefs/--cfg`; the Artifacts **Code** tab. Checked against objdump and the runtime's unwind reader.
+- **.NET assemblies and ZIP containers, static (step 4c).**
+  - The `dotnet` provider reads the CLR header, the metadata streams and all 45 table layouts. It reports the assembly, references, types, fields, methods with ilasm-style signatures, member references, resources and P/Invoke. Its CIL disassembler covers the full opcode table and exception clauses.
+  - The `zip` provider (with JAR, APK, NuGet and wheel recognition) uses a bounded DEFLATE decoder and checks CRC-32.
+  - New: the MCP tool `cortex_artifact_cil`, `cortex.exe inspect --cil`, and the Artifacts **.NET** tab.
+  - Validated against `System.Reflection.Metadata` and the runtime's `OpCodes` table on a C# fixture. CI rebuilds the fixture with the SDK.
+- **JavaScript, TypeScript and Electron, static (step 4b).** New providers:
+  - `javascript`: a tokenizer that knows strings, templates, regexes and comments. It reports ESM, CommonJS and dynamic dependencies, exports, Electron IPC uses and `BrowserWindow` options, bundler signatures and minification;
+  - `sourcemap`: VLQ decoding and position lookup. On an esbuild bundle it matches Node's `findEntry` on every column.
+
+  ASAR archives now get:
+  - a per-file integrity check;
+  - the header SHA-256;
+  - a module graph;
+  - a static Electron view: main, preload and renderer files, IPC channels paired by handler and caller, `contextBridge` keys.
+
+  New: the read-only MCP tool `cortex_artifact_source_position`, `cortex.exe inspect --position`, and the **Electron**, **Modules** and **Source position** tabs in the Artifacts workspace. The validation fixture is a real Electron app, bundled by esbuild and packed by `@electron/asar`.
+- **Static artifact analysis (step 4a).** A provider system in `core/artifacts/` identifies a file and reports its structure. It returns the SHA-256 and a separate status for static parsing, decompilation and live debugging. Providers:
+  - offline PE: sections, imports, exports, relocations, CodeView, TLS, exceptions, CLR header, certificate, overlay;
+  - Electron ASAR: file tree, `package.json`, nested entries.
+
+  It is reachable three ways:
+  - `cortex.exe inspect <file>`;
+  - the read-only MCP tools `cortex_artifact_inspect` / `_children` / `_read`, limited to the operator's `--artifact-root` directories;
+  - the new **Artifacts** workspace, which can record an inspected artifact in the investigation context.
+
+  Nothing is executed or loaded. See `docs/mcp.md`.
+- **Shared investigation context.** The runtime in each target now keeps one context that the desktop and MCP clients share. It holds:
+  - pid and process generation;
+  - modules and `module+RVA` locations;
+  - the address the person selected;
+  - observations with their provenance;
+  - recent tool calls.
+
+  MCP tools: `context_get` and `context_events` (observe), and `context_observation_add` (state: `mutation_permission` plus `--allow-state` or `--allow-writes`). In the desktop, right-click an address and choose **Share with investigation context**; only the desktop can make a selection. The Project workspace gains **Knowledge** (the agent's `project_knowledge_put` records) and **Investigation context** tabs, refreshed when an agent writes. Records are caller assertions, never upgraded to facts. See `docs/mcp.md`.
+- **Typed events with gap reporting.** New types:
+  - `runtime.started`;
+  - `module.loaded` / `module.unloaded`;
+  - `context.address_selected` / `context.observation_added`;
+  - `knowledge.updated` and `evidence.created`;
+  - `agent.action_requested` / `agent.action_completed` / `agent.action_failed`, published for an agent's state-changing tools, with argument names only.
+
+  `/ui/events` and `context_events` report `oldest_id`, `missed` and `gap`, so a consumer knows when events were evicted.
+- **Desktop state shared with agents.** Each finished value scan (query, count, up to 256 results) and the external debugger's breakpoints, hit counters and paused threads reach `context_get` under `shared_state`, through a desktop-only route. The memory workspace has a switch to stop sharing scans.
+- **`breakpoint.hit` events** for the runtime and desktop debuggers, derived from hit counters when state is refreshed (never from the exception path).
+- **Pointer path stability.** The pointer scanner records, per process generation, whether each path led to the value (`Validate here` in the desktop). Paths are `stable` once confirmed in two processes, `invalidated` after one miss, `candidate` otherwise. Unlike Rescan, nothing is dropped. The history is saved (pointer-scan file v2; v1 still loads).
+- **Memory viewer capture comparison.** **Capture**, **Compare with capture** and **Next change**: differences from a capture stay highlighted until the next one.
+- **Demonstration actor in the test program** and `docs/demo-manual.md`. The scripted version, `tests/manual_demo_e2e.py`, runs in CI for x64 and x86.
+- **Common result contract** (`api::response::Operation`): `status`, `error`, `cause`, `target`, `duration_ms`, `limits`, `data`, `evidence`, `permissions_required` and `rollback`. The new context routes use it, and `scan_new`, `scan_next` and `debug_breakpoint_add` gain its fields without changing the ones they already returned.
+
+### Fixed
+
+- `cortex.exe mcp` no longer exits when a client sends a wrongly typed argument to one of its own tools (for example `cortex_analysis_get {"job_id": null}`), a `tools/call` whose `params` is not an object, or a notification whose `method` is not a string. The request gets `invalid_arguments` or `internal_error`, and the server keeps serving.
+- A killed runtime left its `cortex.mcp.<pid>.token` behind. When the PID was reused, that old token made clients try a pipe that did not exist. `cortex.exe mcp` now removes, at startup, tokens of processes that are gone or that were written before the process with that PID started; `cortex inject` removes such a token for its target; and a token older than its process is never used.
+- Live providers: a debug interface that sent a field of an unexpected type (for example a DAP message with `"type": 5`), or a string that `Clip` cut inside a UTF-8 character, could end `cortex.exe mcp` (the exception left a reader thread, or a record later failed to serialize). Messages are read through typed accessors that never throw (`core/live/json_safe.h`), text is cleaned to valid UTF-8 and cut on a character boundary, and an exception in a session's thread ends that session (`protocol_error`) instead of the process. The framing of WebSocket, DAP and JDWP is in `core/live/protocol_frames` and fuzzed.
+- An evidence or investigation file edited or damaged on disk (a step without `status`, a record without `subject`) reached code that indexed its fields. Records are now checked against their structure when read, and a damaged one is skipped as unreadable. Found by fuzzing. The check now covers array elements and the fields the export reads (a trial that is not an object, a relation without an object `to`, a field of the wrong type), and a trial with no outcome no longer breaks the Markdown export.
+- Scan sessions were never evicted from the target's memory: every scan stayed (an unknown-value scan holds up to 3 million candidates with values and types), so repeated scans grew the target and slowed each next scan. At most the four most recent are kept; an evicted scan answers like a deleted one.
+- The runtime could crash the target when one of its threads exited: the per-thread caller identity was a `thread_local` with a destructor in a MinGW DLL, which can run after its storage was freed (`~CallerInfo` reading freed memory, found by `robustness_e2e.py` and Cortex's own crash report). The slot no longer has a destructor.
+- A crafted .NET assembly whose `TypeSpec` signature referred to itself made the metadata reader recurse until the stack overflowed. TypeSpec nesting and the work per signature are now bounded. Found by fuzzing.
+- **A patch revert could corrupt the target.** `patch::Revert` restored the original bytes without checking that the patched bytes were still in place, that no newer patch covered them, or that the write succeeded. `patch::RevertChecked` refuses with `patch_target_changed`, `patch_overlaps_newer` or `patch_write_failed`, and leaves the target and the registry untouched. `DELETE /patch/{id}` and `batch_run`'s `patch_revert` return these codes; there is no force option.
+- **A reused PID kept the previous process's state in the desktop.** The Memory, Project, RE and Trace workspaces compared target ids only, and a reused PID has the same id. They now compare id + generation. A value scan finishing after the target changed is discarded instead of shown for the new process; a pointer scan from a previous process is labelled so it gets rescanned.
+
+### Security
+
+- **PID reuse.** `status` reports the runtime's process `generation`. The desktop and `cortex.exe mcp` now refuse a runtime with the right PID but another generation (`payload_target_generation_mismatch`). Context routes refuse a stale `expected_generation` with `stale_target_generation`.
+
+### Fixed
+
+- **Session manager races.** The desktop frame loop, its background workers and the debugger backend share one `SessionManager`, which had no lock. Under ThreadSanitizer, the previous code showed data races and heap-use-after-free when sessions were attached or detached while another thread read them. All members are now synchronized. `ActiveTargetId()` returns a copy, and `ActiveTarget()` / `ActiveCapabilities()` return `std::optional` snapshots instead of pointers into a session a detach could free.
+- **Settings could be truncated.** `cortex-ui-settings.json` and the runtime `cortex.ini` were rewritten in place; a crash or full disk mid-write left a truncated file. Both are now written to a temporary file and replaced atomically (`services::WriteFileAtomically`).
+- **A damaged project file could be lost.** When `<process>.json` did not parse, the runtime fell back to `.bak` or to defaults, and the next saves rotated the damaged bytes away. With a good `.bak`, the first save destroyed that backup. Damaged files are now copied to `<file>.damaged-<stamp>` first. The damaged primary is no longer rotated over a good backup. If an unreadable file cannot be copied (locked, access denied), saves fail instead of replacing it. `project::LoadStatus()` (logged at start-up) reports where the project was loaded from.
+
+### Tests and CI
+
+- `cortex_session_manager_tests` checks that snapshots outlive a detach, and that reads stay consistent while another thread attaches, detaches and prunes. The Ubuntu contracts job also runs it under ThreadSanitizer.
+- New `cortex_settings_store_tests` (atomic replace, round trip, `.ini` key preservation) and `cortex_project_store_{backup,damaged,fresh,locked}` (damaged project recovery).
+- New `tests/context_isolation_e2e.py`: two injected targets on one `cortex.exe mcp`. It checks identity, no cross-talk, stale generations, detach/reattach, a target killed and agent action events. It runs in the GUI suite workflow for x64 and x86.
+- New `cortex_investigation_context_tests` (portable, also under ThreadSanitizer in CI), `cortex_events_tests`, and investigation-context checks in `cortex_app_models_tests` and `tests/native_mcp_stdio_e2e.ps1`.
+- New `cortex_baseline_bench` (scanner, pointer scanner, reads, Zydis) with a `--quick` CTest smoke. The GUI release job uploads a Windows run as the `cortex-baseline-windows-x64` artifact.
+
 ## [v1.0.1] - 2026-10-16
 
 Security release. It also publishes the agent test layer that was merged into `main` after v1.0.0 (launch profiles, bounded input trials, a persistent knowledge graph; pull requests #17 to #39).

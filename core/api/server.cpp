@@ -259,6 +259,7 @@ bool Start(int port, const std::string& configuredToken, bool httpEnabled) {
     RegisterBatchRoutes(routes);
     RegisterActionRoutes(routes);
     RegisterEventRoutes(routes);
+    RegisterContextRoutes(routes);
     RegisterPointerMapRoutes(routes);
     RegisterTraceRoutes(routes);
     RegisterGhidraRoutes(routes);

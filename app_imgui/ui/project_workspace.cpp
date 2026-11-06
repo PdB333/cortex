@@ -1,4 +1,5 @@
 #include "project_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -118,18 +119,24 @@ bool ProjectWorkspace::Navigate(UiContext& context, const std::string& expressio
 void ProjectWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.projectModel) {
-        HintText("Select a process to use persistent project knowledge.");
+        NoTargetHint(context, "A running process is needed to use persistent project knowledge.");
         return;
     }
 
-    if (targetId_ != session->Target().id) {
-        targetId_ = session->Target().id;
+    if (targetId_ != TargetKey(session->Target())) {
+        targetId_ = TargetKey(session->Target());
         context.projectModel->Reset();
         ClearAddressForm();
         ClearPointerForm();
         ClearNoteForm();
-        if (context.payload && context.payload->Ready()) Refresh(context);
+        lastEventSeen_ = context.runtimeEventsModel ? context.runtimeEventsModel->LastEventId() : 0;
+        if (context.contextModel) context.contextModel->Reset();
+        if (context.payload && context.payload->Ready()) {
+            Refresh(context);
+            RefreshContext(context);
+        }
     }
+    FollowRuntimeEvents(context);
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Persistent target knowledge");
@@ -410,7 +417,153 @@ void ProjectWorkspace::Draw(UiContext& context) {
             }
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("Knowledge")) {
+            DrawKnowledgeTab(context);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Investigation context")) {
+            DrawContextTab(context);
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
+    }
+}
+
+void ProjectWorkspace::FollowRuntimeEvents(UiContext& context) {
+    if (!context.runtimeEventsModel || !context.payload || !context.payload->Ready()) return;
+    bool knowledgeChanged = false, contextChanged = false;
+    uint64_t newest = lastEventSeen_;
+    for (const auto& event : context.runtimeEventsModel->Events()) {
+        if (event.id <= lastEventSeen_) continue;
+        newest = std::max(newest, event.id);
+        if (event.type == "knowledge.updated" || event.type == "evidence.created") knowledgeChanged = true;
+        if (event.type.rfind("context.", 0) == 0 || event.type.rfind("agent.action_", 0) == 0) contextChanged = true;
+    }
+    lastEventSeen_ = newest;
+    if (knowledgeChanged) Refresh(context);
+    if (contextChanged) RefreshContext(context);
+}
+
+void ProjectWorkspace::RefreshContext(UiContext& context) {
+    if (!context.contextModel || !context.sessions) return;
+    const auto target = context.sessions->ActiveTarget();
+    std::string error;
+    if (!context.contextModel->Refresh(target ? target->generation : 0, &error))
+        context.status = "Investigation context refresh failed: " + error;
+}
+
+void ProjectWorkspace::DrawKnowledgeTab(UiContext& context) {
+    HintText("Revisioned claims saved by you or an agent (project_knowledge_put). A status is what its author "
+             "asserted; Cortex never upgrades a claim on its own.");
+    const auto& rows = context.projectModel->Knowledge();
+    if (rows.empty()) {
+        ImGui::TextDisabled("No knowledge records in this project yet.");
+        return;
+    }
+    if (!BeginDataTable("ProjectKnowledgeTable", 7, ImGuiTableFlags_ScrollY, ImGui::GetContentRegionAvail())) return;
+    ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, Px(150));
+    ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(90));
+    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, Px(90));
+    ImGui::TableSetupColumn("Statement", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Rev", ImGuiTableColumnFlags_WidthFixed, Px(45));
+    ImGui::TableSetupColumn("Evidence", ImGuiTableColumnFlags_WidthFixed, Px(70));
+    ImGui::TableSetupColumn("Byte check", ImGuiTableColumnFlags_WidthFixed, Px(90));
+    ImGui::TableHeadersRow();
+    for (const auto& row : rows) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(row.id.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(row.kind.c_str());
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(row.status.c_str());
+        ImGui::TableSetColumnIndex(3);
+        ImGui::TextWrapped("%s", row.statement.c_str());
+        ImGui::TableSetColumnIndex(4);
+        ImGui::Text("%d", row.revision);
+        ImGui::TableSetColumnIndex(5);
+        ImGui::Text("%d", row.evidenceCount);
+        ImGui::TableSetColumnIndex(6);
+        ImGui::TextUnformatted(row.verification.c_str());
+    }
+    ImGui::EndTable();
+}
+
+void ProjectWorkspace::DrawContextTab(UiContext& context) {
+    if (!context.contextModel) return;
+    auto& model = *context.contextModel;
+    if (ImGui::Button("Refresh context")) RefreshContext(context);
+    ImGui::SameLine();
+    if (model.Pid())
+        ImGui::TextDisabled("PID %llu, generation %llu%s", static_cast<unsigned long long>(model.Pid()),
+                            static_cast<unsigned long long>(model.Generation()),
+                            model.DroppedEntries() ? " (older entries dropped)" : "");
+    HintText("Shared with MCP clients (context_get). Right-click any address > Share with investigation context. "
+             "Agent entries are assertions with their session as provenance, not verified facts.");
+
+    if (BeginDataTable("ProjectContextTable", 6, ImGuiTableFlags_ScrollY,
+                       ImVec2(0.0f, ImGui::GetContentRegionAvail().y * 0.62f))) {
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, Px(45));
+        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(220));
+        ImGui::TableSetupColumn("Text", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        ImGui::TableHeadersRow();
+        const auto& entries = model.Entries();
+        for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+            ImGui::PushID(it->id.c_str());
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%llu", static_cast<unsigned long long>(it->sequence));
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(it->kind.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(it->source.c_str());
+            ImGui::TableSetColumnIndex(3);
+            const std::string where = it->location.empty() ? it->address : it->location;
+            if (!it->address.empty()) {
+                if (ImGui::Selectable(where.c_str())) {
+                    try {
+                        context.NavigateTo("memory-browser", std::stoull(it->address, nullptr, 0));
+                    } catch (...) {
+                        context.status = "Invalid context address " + it->address;
+                    }
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s - click to open in the memory viewer", it->address.c_str());
+            }
+            ImGui::TableSetColumnIndex(4);
+            ImGui::TextWrapped("%s", it->text.c_str());
+            ImGui::TableSetColumnIndex(5);
+            ImGui::TextUnformatted(it->status.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::TextDisabled("Recent tool calls");
+    if (BeginDataTable("ProjectContextHistory", 5, ImGuiTableFlags_ScrollY, ImGui::GetContentRegionAvail())) {
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, Px(45));
+        ImGui::TableSetupColumn("Tool", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Risk", ImGuiTableColumnFlags_WidthFixed, Px(90));
+        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, Px(80));
+        ImGui::TableSetupColumn("Result", ImGuiTableColumnFlags_WidthFixed, Px(110));
+        ImGui::TableHeadersRow();
+        const auto& history = model.History();
+        for (auto it = history.rbegin(); it != history.rend(); ++it) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%llu", static_cast<unsigned long long>(it->sequence));
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(it->tool.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(it->risk.c_str());
+            ImGui::TableSetColumnIndex(3);
+            ImGui::TextUnformatted(it->source.c_str());
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%s %llums", it->status.c_str(), static_cast<unsigned long long>(it->durationMs));
+        }
+        ImGui::EndTable();
     }
 }
 

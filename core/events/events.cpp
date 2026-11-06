@@ -8,7 +8,6 @@
 
 namespace events {
 namespace {
-    constexpr size_t kMaxEvents = 2048;
     std::mutex g_mutex;
     std::condition_variable g_changed;
     std::deque<Event> g_events;
@@ -45,6 +44,20 @@ std::vector<Event> WaitSince(uint64_t lastId, uint32_t timeoutMs, size_t maxCoun
     if (g_events.empty() || g_events.back().id <= lastId)
         g_changed.wait_for(lock, std::chrono::milliseconds(timeoutMs));
     return SinceLocked(lastId, maxCount);
+}
+
+Page Read(uint64_t lastId, size_t maxCount) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    Page page;
+    page.events = SinceLocked(lastId, maxCount);
+    page.latestId = g_nextId - 1;
+    page.oldestId = g_events.empty() ? 0 : g_events.front().id;
+    // Ids after lastId that were evicted before this read: everything below
+    // the oldest held id, or everything published if the ring is empty.
+    const uint64_t firstKept = g_events.empty() ? g_nextId : g_events.front().id;
+    if (firstKept > lastId + 1) page.missed = firstKept - (lastId + 1);
+    page.gap = page.missed > 0;
+    return page;
 }
 
 uint64_t LatestId() {

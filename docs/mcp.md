@@ -285,9 +285,261 @@ A tool with no explicit risk classification is refused (`tool_not_classified`), 
 
 `cortex.exe mcp` publishes session and tool-call lifecycle events (session started/ended, tool started/completed/failed) on a local per-user Windows mailslot. A running Cortex desktop shows them in the **AI Activity** tab of the bottom panel and in the header status, so the person at the screen can follow what an agent is doing. The events carry tool names and request ids, not tool arguments or results.
 
+## Shared investigation context
+
+The runtime in each target keeps one **investigation context**
+(`core/context/`). The desktop and every MCP client read and write the same
+object, so there is no second source of truth.
+
+| Tool | Risk | What it does |
+|---|---|---|
+| `context_get` | observe | Returns pid and process generation, modules, the address the person last selected in the desktop, observations with provenance, and the recent tool-call history. Query: `limit`, `since`, `expected_generation`. |
+| `context_events` | observe | Returns typed events after `since` with `latest_id`, `oldest_id`, `missed` and `gap`. With `gap: true`, events were evicted from the 2048-entry ring, so resynchronize with `context_get`. |
+| `context_observation_add` | state | Records a `statement` (`kind`: observation, correlation, hypothesis or note), optionally with an `address`, bounded `data` and up to 16 evidence references. It needs `mutation_permission` and `--allow-state` or `--allow-writes`. |
+
+**Selections come from the person only.** In the desktop, right-click any
+address and choose **Share with investigation context**. The selection goes
+through the desktop's private channel (`POST /context/select`). That route is
+not in the MCP manifest, and it refuses any caller but the desktop. An agent
+can therefore read the person's selection but cannot fake one.
+
+**Desktop state reaches agents too.** The value scanner and the external
+debugger run in the desktop process, outside the runtime. The desktop
+shares their state through `POST /context/share`, which is desktop-only and
+not an MCP tool:
+
+- the latest scan: query, result count and up to 256 listed results with
+  their values as hex bytes. The memory workspace has a **Share results with
+  the investigation context** switch, on by default;
+- the debugger's breakpoints (with hit counters) and paused threads, at most
+  once a second when they change.
+
+`context_get` returns both under `shared_state`, with every address given its
+`module+RVA` location. A share is pinned to the generation of the process
+that produced it.
+
+**Provenance comes from the transport.** The pipe dispatcher labels each
+request `desktop` or `agent` from the authenticated envelope. Tool arguments
+cannot set it. An agent's records carry its MCP session id. Every entry has a
+`status`:
+
+- `pointer_only` for a selection;
+- `client_assertion` for an observation.
+
+Neither is ever upgraded to a verified fact. Durable claims still belong in
+`project_knowledge_put`.
+
+**Results use the common contract** (`core/api/response_contract.h`):
+`ok`, `status`, `error`, `cause`, `target {pid, generation}`, `duration_ms`,
+`limits`, `data`, `evidence`, `permissions_required` and `rollback`.
+`scan_new`, `scan_next` and `debug_breakpoint_add` carry the same fields
+through `response::Annotate`. Their own fields are unchanged; only missing
+contract fields are added. For example, `debug_breakpoint_add` returns
+`permissions_required: ["control"]` and a `rollback` naming
+`debug_breakpoint_delete`.
+
+**Process isolation.** Every context route accepts `expected_generation`. A
+request pinned to another process lifetime (a reused PID) is refused with
+`stale_target_generation` (HTTP 409) before anything is recorded. `status`
+now reports the runtime's `generation`, and the desktop and `cortex.exe mcp`
+refuse a runtime whose generation differs from the target they attached to
+(`payload_target_generation_mismatch`).
+
+**Events.** The runtime publishes:
+
+- `runtime.started`;
+- `module.loaded` and `module.unloaded`, seen when the module list is
+  refreshed (each context route), not at load time;
+- `context.address_selected` and `context.observation_added`;
+- `context.state_shared` when the desktop shares a scan or debugger state;
+- `breakpoint.hit` with `debugger` (`runtime` for the in-process VEH
+  debugger, `desktop` for the external one), `id`, `address`, `location`,
+  `hits` and `new_hits`. Counters are compared when the state is refreshed
+  (each context route, each desktop share), never from the exception path.
+  One event can therefore stand for several hits, and the first refresh is
+  the baseline;
+- `knowledge.updated` and `evidence.created`, carrying identifiers only;
+- `agent.action_requested`, `agent.action_completed` and
+  `agent.action_failed` for an agent's state, control, mutate or
+  native-call tools. These carry argument names, never values.
+
+The desktop's Project workspace refreshes its **Knowledge** and
+**Investigation context** tabs when these events arrive.
+
+**Limits.**
+
+- The context lives in memory and dies with the process. That is the
+  lifetime of the generation it describes.
+- In the default `--tools compact` profile, `context_get` and
+  `context_events` are reachable as steps of `capture_runtime_state`.
+  Writing an observation needs `--tools all`, because semantic execution
+  only runs state tools with a rollback contract.
+- Module and breakpoint events are observed at refresh time, not at the
+  moment they happen.
+- Long desktop operations that run in the background block target switching
+  until they finish. The value scan, which keeps the UI live, is bound to the
+  process it started on: a result that finishes after the target changed
+  (including a reused PID) is discarded. A pointer scan from a previous
+  process is kept, because its paths are module-relative, but it is labelled
+  so it gets rescanned.
+
+## Static artifact tools
+
+`cortex.exe mcp` has three read-only host tools that analyse files without a
+target process: `cortex_artifact_inspect`, `cortex_artifact_children` and
+`cortex_artifact_read`. They only reach files inside the directories the
+operator passes at start-up:
+
+```bash
+cortex.exe mcp --artifact-root D:\samples --artifact-root D:\builds
+```
+
+- With no `--artifact-root`, every call returns `artifact_roots_not_configured`.
+- A root that does not exist stops the host (exit code 2).
+- Paths are made canonical (`..` and links resolved) before the check, so an
+  escape returns `path_outside_artifact_roots`. An agent cannot add a root.
+- `child` names an entry inside a container; nested containers are joined
+  with `!` (`app.asar!vendor.asar!index.js`, at most 8 levels).
+- `cortex_artifact_read` returns at most 64 KiB per call (`offset`,
+  `length`, `encoding`: `hex` or `utf8`).
+- `max_entries` bounds long listings; truncation is reported.
+
+`cortex_artifact_source_position` takes `path`, optional `child`, and 1-based
+`line` and `column` of a generated script. It returns the original source,
+line, column and name, plus the original line's text when the map embeds its
+sources. The map is the script's inline `data:` URL or its `sourceMappingURL`
+file. That file is looked up beside the script, or beside the entry in the
+same container; the root rules apply to it too. The path may also be the
+`.map` itself. The same lookup is available as
+`cortex.exe inspect <file> [--child …] --position LINE:COLUMN`.
+
+`cortex_artifact_cil` takes `path`, optional `child` and `method`: a MethodDef
+token (`0x06000009`), `Namespace.Type::Method` (every overload) or a method
+name. It returns, for each match:
+- the header, max stack and locals signature;
+- the exception clauses;
+- the instructions, with branch targets as `IL_xxxx` and metadata tokens
+  resolved to names.
+
+This is CIL disassembly, not decompilation. A method without a body
+(abstract, P/Invoke) says so. The CLI equivalent is
+`cortex.exe inspect <file> --cil METHOD`.
+
+Native code of a PE (x86 or x64), offline, with addresses as RVAs:
+- `cortex_artifact_functions`: the function catalog. Every start says where
+  it comes from: `entry`, `export`, `pdata`, `tls`, `call_target` or
+  `after_ret` (heuristic).
+- `cortex_artifact_xrefs`: references to a target, given as an RVA,
+  `va:0x…`, `sub_XXXX`, an export or an annotated name.
+- `cortex_artifact_strings`: strings with the instructions that reference
+  them.
+- `cortex_artifact_cfg`: a function's blocks and instructions, the same
+  algorithm as the runtime's `analysis_cfg`. `covered_rvas` marks what a
+  trace hit.
+
+`cortex_artifact_annotations` reads the names and comments kept for an
+artifact, keyed by its SHA-256. `cortex_artifact_annotate` writes one. It
+is Cortex state, so it needs `mutation_permission=true`, the operator's
+`--allow-state`, and ideally `expected_revision`. Records are stored under
+the user data folder, or under `--annotation-store <dir>`. They are what
+someone wrote, never facts Cortex derived.
+
+Every result uses the schema `cortex.artifact.v1`: identity (name, size,
+SHA-256), the provider and its version, and the status of three separate
+capabilities: `static`, `decompile` and `live`. Each is `validated`
+(against the fixture it names), `experimental` or `unavailable`. Today the
+providers are:
+- PE: static validated; `pe-dotnet` is detected, its metadata comes in step 4c.
+- Electron ASAR: file tree, per-file integrity check, `header_sha256`, the
+  module graph and a static Electron view (windows and `webPreferences`,
+  preload, IPC channels paired by handler and caller, `contextBridge` keys,
+  main/preload/renderer files).
+- JavaScript/TypeScript: dependencies, exports, IPC uses, bundler signatures,
+  minification, source map URL.
+- Source maps.
+- .NET assemblies (`dotnet`): the PE view plus the metadata. That covers the
+  assembly, references, types, fields, methods with signatures, member
+  references, resources, P/Invoke and table row counts.
+- ZIP containers (`zip`), recognised as `jar`, `apk`, `nupkg` or `wheel`. A
+  NuGet package's `lib/net8.0/x.dll` can be inspected and disassembled with
+  `child`.
+
+Static results say what the source names, not what runs. Decompilation is
+unavailable for all of them. The same providers answer `cortex.exe inspect <file>` and the
+desktop's **Artifacts** workspace.
+
+## Evidence records
+
+Evidence about artifacts and runs is kept by the host and stays readable
+without the target. See `docs/evidence.md`.
+- Writers, which need `mutation_permission` and `--allow-state`:
+  `cortex_evidence_record`, `cortex_evidence_update`, `cortex_evidence_verify`.
+- Readers: `cortex_evidence_get`, `cortex_evidence_list`,
+  `cortex_evidence_export` (JSON or Markdown) and `cortex_evidence_compare`.
+
+The class is enforced: `verified_observation` requires a static result Cortex
+reruns and reproduces, or a completed and decided trial. Anything else is
+refused with the reason. The store is the user data folder, or
+`--evidence-store <dir>`.
+
+## Investigations
+
+A journal of one investigation: question, plan, approvals, evidence and
+conclusion. See `docs/investigations.md`.
+
+The tools are `cortex_investigation_templates`, `_create`, `_get`, `_list`,
+`_report`, `_start`, `_run_step`, `_step_result`, `_skip`, `_conclude` and
+`_cancel`; the writers need `mutation_permission` and `--allow-state`.
+- Cortex runs read-only static steps itself.
+- Steps with effect `target_input` or `mutation` wait for the person's
+  `cortex.exe investigation approve`. There is no MCP approval tool.
+
+## Process tree
+
+`cortex_process_tree {pid}` (read-only) returns a process and its
+descendants, with parent links, command lines and, for Chromium and
+Electron apps, each process's role: main, renderer, gpu-process,
+`utility:<service>` or crashpad-handler. Use it to choose which Electron
+process to attach to.
+
+## External analysis engines
+
+`cortex_analysis_providers`, `cortex_analysis_start`, `cortex_analysis_get`,
+`cortex_analysis_cancel` and `cortex_analysis_jobs` run Ghidra headless
+(native PE) and ILSpy (C#) as separate processes on files inside
+`--artifact-root`.
+- The engines are configured by the operator with `--ghidra-dir`,
+  `--ilspycmd` and `--dotnet`, or with `GHIDRA_INSTALL_DIR` and
+  `CORTEX_ILSPYCMD`.
+- Results are cached by SHA-256 in `--analysis-cache`.
+- They are read-only for targets; `cortex_analysis_cancel` stops only
+  Cortex's own engine process.
+
+`cortex_analysis_map` (read-only) maps a job's RVAs to the selected target's
+loaded module whose file has the job's SHA-256.
+
+## Live debug interfaces
+
+The `cortex_live_*` tools reach debug endpoints on 127.0.0.1 ports the
+operator allows with `--inspect-port`:
+- the CDP inspector of Node.js and Electron;
+- DAP adapters: debugpy (Python), and netcoredbg (.NET), which attaches to a
+  process id and needs `--allow-writes`;
+- JDWP (Java).
+
+The tools:
+- **reads** (targets, status, scripts, source, console, hits) are read-only;
+- **`cortex_live_breakpoint_set/_remove`** set log breakpoints: Cortex records
+  the stack and locals and resumes at once. They need `mutation_permission`
+  and `--allow-writes`;
+- **`cortex_live_detach`** removes Cortex's breakpoints and leaves the program
+  running.
+
+Nothing is evaluated in the program. See `docs/analysis-providers.md`.
+
 ## Server metadata
 
-`initialize` and `server/discover` report the server name and version `1.0.1`. `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
+`initialize` and `server/discover` report the server name and version (`core/version.h`, 2.0.0). `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
 
 ## Compatibility
 

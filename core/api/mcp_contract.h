@@ -54,7 +54,7 @@ inline const std::set<std::string>& StateTools() {
     static const std::set<std::string> names = {
         "project_knowledge_put", "project_knowledge_verify", "project_address_set", "project_address_delete",
         "project_pointer_path_set", "project_pointer_path_delete", "project_note_add", "project_note_delete",
-        "re_session_fact_set", "re_session_fact_delete", "re_object_delete"};
+        "re_session_fact_set", "re_session_fact_delete", "re_object_delete", "context_observation_add"};
     return names;
 }
 

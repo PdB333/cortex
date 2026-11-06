@@ -1,4 +1,5 @@
 #include "structures_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -30,7 +31,7 @@ void StructuresWorkspace::SyncSelection(UiContext& context) {
 void StructuresWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.structuresModel) {
-        HintText("Select a process to inspect structures.");
+        NoTargetHint(context, "A running process is needed to inspect structures.");
         return;
     }
 

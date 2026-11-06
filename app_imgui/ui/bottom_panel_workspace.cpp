@@ -1,4 +1,5 @@
 #include "bottom_panel_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -39,42 +40,58 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
     }
 
     if (context.aiActivityModel) {
-        ImGui::Text("AI: %zu session(s), %zu active",
-                    context.aiActivityModel->SessionCount(),
-                    context.aiActivityModel->ActiveTaskCount());
-        FlowSameLine(std::max(TextWidth("listener ready"), TextWidth("listener unavailable")));
-        ImGui::TextDisabled(context.aiActivityModel->Listening()
-                                ? "listener ready" : "listener unavailable");
+        const size_t sessions = context.aiActivityModel->SessionCount();
+        const size_t active = context.aiActivityModel->ActiveTaskCount();
+        if (sessions > 0) {
+            ImGui::Text("AI agents: %zu connected, %zu working", sessions, active);
+        } else {
+            ImGui::TextDisabled(context.aiActivityModel->Listening()
+                                    ? "AI agents: none connected"
+                                    : "AI agents: activity unavailable");
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Agents connect through an MCP client that starts \"cortex.exe mcp\".\n"
+                              "Each of their calls is listed in AI Activity.");
     } else {
-        ImGui::TextDisabled("AI activity model unavailable");
+        ImGui::TextDisabled("AI agents: activity unavailable");
     }
-    FlowSameLine(CheckboxWidth("Auto refresh runtime"));
-    ImGui::Checkbox("Auto refresh runtime", &autoRefresh_);
-    FlowSameLine(ButtonWidth("Refresh runtime"));
-    ImGui::BeginDisabled(!session || !context.payload || !context.payload->Ready());
-    if (ImGui::Button("Refresh runtime"))
-        RefreshRuntime(context, true);
-    ImGui::EndDisabled();
 
-    // A summary tab is hidden while its full workspace is open elsewhere in
-    // the layout, so the same list is never shown twice.
-    const bool showEvents = !context.WorkspaceOpen("events");
-    const bool showBreakpoints = !context.WorkspaceOpen("debugger");
-    const bool showWatches = !context.WorkspaceOpen("watches");
-    const bool showDiagnostics = !context.WorkspaceOpen("diagnostics");
-    std::string hidden;
-    auto noteHidden = [&hidden](bool shown, const char* name) {
-        if (shown) return;
-        if (!hidden.empty()) hidden += ", ";
-        hidden += name;
-    };
-    noteHidden(showEvents, "Events, Console");
-    noteHidden(showBreakpoints, "Breakpoints");
-    noteHidden(showWatches, "Watches");
-    noteHidden(showDiagnostics, "Diagnostics");
-    if (!hidden.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("|  open as full panels: %s", hidden.c_str());
+    // The runtime summaries (events, console, breakpoints, watches,
+    // diagnostics) all come from an attached process: without one only AI
+    // Activity is shown, instead of a row of tabs that each ask for one.
+    const bool showEvents = session && !context.WorkspaceOpen("events");
+    const bool showBreakpoints = session && !context.WorkspaceOpen("debugger");
+    const bool showWatches = session && !context.WorkspaceOpen("watches");
+    const bool showDiagnostics = session && !context.WorkspaceOpen("diagnostics");
+    if (session) {
+        FlowSameLine(CheckboxWidth("Auto refresh"));
+        ImGui::Checkbox("Auto refresh", &autoRefresh_);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Refresh the events and console of the Cortex runtime in the target.");
+        FlowSameLine(ButtonWidth("Refresh"));
+        ImGui::BeginDisabled(!context.payload || !context.payload->Ready());
+        if (ImGui::Button("Refresh"))
+            RefreshRuntime(context, true);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Needs the Cortex runtime loaded in the target (Runtime workspace).");
+
+        // A summary tab is hidden while its full workspace is open elsewhere
+        // in the layout, so the same list is never shown twice.
+        std::string hidden;
+        auto noteHidden = [&hidden](bool shown, const char* name) {
+            if (shown) return;
+            if (!hidden.empty()) hidden += ", ";
+            hidden += name;
+        };
+        noteHidden(showEvents, "Events");
+        noteHidden(showBreakpoints, "Breakpoints");
+        noteHidden(showWatches, "Watches");
+        noteHidden(showDiagnostics, "Diagnostics");
+        if (!hidden.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("|  In their own panels: %s", hidden.c_str());
+        }
     }
 
     ImGui::Separator();
@@ -83,7 +100,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (showEvents && ImGui::BeginTabItem("Events")) {
         if (!session) {
-            HintText("Select a process to inspect runtime events.");
+            NoTargetHint(context, "A running process is needed to inspect runtime events.");
         } else if (!context.runtimeEventsModel) {
             ImGui::TextDisabled("Runtime event model unavailable.");
         } else if (BeginDataTable(
@@ -119,7 +136,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (showEvents && ImGui::BeginTabItem("Console")) {
         if (!session) {
-            HintText("Select a process to inspect the runtime API log.");
+            NoTargetHint(context, "A running process is needed to inspect the runtime API log.");
         } else if (context.runtimeEventsModel) {
             ImGui::BeginChild("BottomConsole", ImVec2(0, 0), ImGuiChildFlags_Borders);
             for (const auto& line : context.runtimeEventsModel->ApiLog())
@@ -131,7 +148,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (showBreakpoints && ImGui::BeginTabItem("Breakpoints")) {
         if (!session || !context.debuggerModel) {
-            HintText("Select a process to inspect breakpoints.");
+            NoTargetHint(context, "A running process is needed to inspect breakpoints.");
         } else {
             const auto& rows = context.debuggerModel->Breakpoints();
             ImGui::Text("%zu breakpoint(s)", rows.size());
@@ -169,7 +186,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (showWatches && ImGui::BeginTabItem("Watches")) {
         if (!session || !context.watchesModel) {
-            HintText("Select a process to inspect watches.");
+            NoTargetHint(context, "A running process is needed to inspect watches.");
         } else {
             if (ImGui::Button("Refresh watches")) {
                 std::string error;
@@ -264,7 +281,7 @@ void BottomPanelWorkspace::Draw(UiContext& context) {
 
     if (showDiagnostics && ImGui::BeginTabItem("Diagnostics")) {
         if (!session || !context.diagnosticsModel) {
-            HintText("Select a process to inspect diagnostics.");
+            NoTargetHint(context, "A running process is needed to inspect diagnostics.");
         } else {
             if (ImGui::Button("Refresh diagnostics")) {
                 std::string error;

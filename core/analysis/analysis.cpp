@@ -1,4 +1,5 @@
 #include "analysis.h"
+#include "cfg_builder.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
 
@@ -278,90 +279,21 @@ CfgResult BuildCFG(uintptr_t address, bool& ok) {
     if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &probe, sizeof(probe)) != sizeof(probe)) return result;
     if (probe.State != MEM_COMMIT || (probe.Protect & PAGE_NOACCESS) || (probe.Protect & PAGE_GUARD)) return result;
 
-    ZydisDecoder decoder = MakeDecoder();
-    std::set<uintptr_t> leaders{address};
-    std::set<uintptr_t> visited;
-    std::vector<uintptr_t> worklist{address};
-
-    while (!worklist.empty()) {
-        if (result.blocks.size() >= kMaxCfgBlocks) {
-            result.truncated = true;
-            break;
-        }
-        uintptr_t blockStart = worklist.back();
-        worklist.pop_back();
-        if (visited.count(blockStart)) continue;
-        visited.insert(blockStart);
-
-        MEMORY_BASIC_INFORMATION mbi;
-        if (VirtualQuery(reinterpret_cast<LPCVOID>(blockStart), &mbi, sizeof(mbi)) != sizeof(mbi)) continue;
-        if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_NOACCESS) || (mbi.Protect & PAGE_GUARD)) continue;
-        uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-        if (blockStart >= regionEnd) continue;
-
-        size_t wantSize = (std::min)(static_cast<size_t>(kMaxCfgInstructionsPerBlock) * 16,
-                                      static_cast<size_t>(regionEnd - blockStart));
+    // The algorithm is shared with offline analysis of files (cfg_builder.h);
+    // here the bytes come from this process's committed memory.
+    const ZydisDecoder decoder = MakeDecoder();
+    auto fetch = [](uintptr_t blockStart, size_t maxBytes) {
         std::vector<uint8_t> buf;
-        if (!memory::ReadBytes(blockStart, wantSize, buf)) continue;
-
-        size_t offset = 0;
-        uintptr_t curAddr = blockStart;
-        uintptr_t blockEnd = blockStart;
-        size_t instrCount = 0;
-
-        while (offset < buf.size() && instrCount < kMaxCfgInstructionsPerBlock) {
-            if (curAddr != blockStart && leaders.count(curAddr)) {
-                result.edges.push_back({blockStart, curAddr, "fallthrough"});
-                if (!visited.count(curAddr)) worklist.push_back(curAddr);
-                break;
-            }
-
-            ZydisDecodedInstruction instr;
-            ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-            ZyanStatus status = ZydisDecoderDecodeFull(&decoder, buf.data() + offset, buf.size() - offset,
-                                                        &instr, operands);
-            if (!ZYAN_SUCCESS(status)) break; // undecodable -- end block here, no successors
-
-            blockEnd = curAddr + instr.length;
-            instrCount++;
-            auto category = instr.meta.category;
-
-            if (category == ZYDIS_CATEGORY_RET) {
-                break;
-            }
-            if (category == ZYDIS_CATEGORY_COND_BR) {
-                uintptr_t fallAddr = curAddr + instr.length;
-                leaders.insert(fallAddr);
-                if (!visited.count(fallAddr)) worklist.push_back(fallAddr);
-                result.edges.push_back({blockStart, fallAddr, "cond_false"});
-
-                uintptr_t target = 0;
-                if (ResolveBranchTarget(instr, operands, curAddr, target)) {
-                    leaders.insert(target);
-                    if (!visited.count(target)) worklist.push_back(target);
-                    result.edges.push_back({blockStart, target, "cond_true"});
-                }
-                break;
-            }
-            if (category == ZYDIS_CATEGORY_UNCOND_BR) {
-                uintptr_t target = 0;
-                if (ResolveBranchTarget(instr, operands, curAddr, target)) {
-                    leaders.insert(target);
-                    if (!visited.count(target)) worklist.push_back(target);
-                    result.edges.push_back({blockStart, target, "jump"});
-                } else {
-                    result.edges.push_back({blockStart, 0, "indirect"});
-                }
-                break;
-            }
-
-            offset += instr.length;
-            curAddr += instr.length;
-        }
-
-        result.blocks.push_back({blockStart, blockEnd});
-    }
-
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(reinterpret_cast<LPCVOID>(blockStart), &mbi, sizeof(mbi)) != sizeof(mbi)) return buf;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_NOACCESS) || (mbi.Protect & PAGE_GUARD)) return buf;
+        const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (blockStart >= regionEnd) return buf;
+        const size_t wantSize = (std::min)(maxBytes, static_cast<size_t>(regionEnd - blockStart));
+        if (!memory::ReadBytes(blockStart, wantSize, buf)) buf.clear();
+        return buf;
+    };
+    result = BuildCfgFrom(address, decoder, fetch, kMaxCfgBlocks, kMaxCfgInstructionsPerBlock);
     ok = true;
     return result;
 }

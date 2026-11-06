@@ -1,0 +1,16 @@
+{
+  "format": "elf",
+  "functions": {
+    "CortexDemoApplyDamage": "0x1169",
+    "CortexNativeAdd": "0x11b7",
+    "__do_global_dtors_aux": "0x1120",
+    "_fini": "0x1278",
+    "_init": "0x1000",
+    "_start": "0x1080",
+    "deregister_tm_clones": "0x10b0",
+    "frame_dummy": "0x1160",
+    "main": "0x11c3",
+    "register_tm_clones": "0x10e0"
+  },
+  "machine": "x86-64"
+}

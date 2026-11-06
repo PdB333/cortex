@@ -30,6 +30,7 @@ void ProjectModel::Reset() {
     addresses_.clear();
     pointerPaths_.clear();
     notes_.clear();
+    knowledge_.clear();
 }
 
 
@@ -87,6 +88,29 @@ bool ProjectModel::Refresh(std::string* error) {
             notes_.push_back(std::move(row));
         }
     }
+
+    // Revisioned claims written by the person or an agent
+    // (project_knowledge_put). Shown as stored; nothing is upgraded here.
+    knowledge_.clear();
+    const json knowledge = result.value("knowledge", json::object());
+    if (knowledge.is_object()) {
+        for (auto it = knowledge.begin(); it != knowledge.end(); ++it) {
+            if (!it.value().is_object()) continue;
+            ProjectKnowledge row;
+            row.id = it.key();
+            row.kind = it.value().value("kind", std::string());
+            row.status = it.value().value("status", std::string());
+            row.statement = it.value().value("statement", std::string());
+            row.origin = it.value().value("origin", std::string());
+            row.revision = it.value().value("revision", 0);
+            const json evidence = it.value().value("evidence", json::array());
+            row.evidenceCount = evidence.is_array() ? static_cast<int>(evidence.size()) : 0;
+            const json verification = it.value().value("last_verification", json::object());
+            row.verification = verification.is_object() ? verification.value("status", std::string()) : std::string();
+            knowledge_.push_back(std::move(row));
+        }
+    }
+    std::sort(knowledge_.begin(), knowledge_.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
 
     std::sort(addresses_.begin(), addresses_.end(),
               [](const auto& a, const auto& b) { return a.name < b.name; });

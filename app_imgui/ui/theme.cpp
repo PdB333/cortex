@@ -14,6 +14,9 @@ void ApplyCortexTheme() {
     style.ScrollbarSize = 13.0f;
     style.GrabMinSize = 10.0f;
 
+    // Disabled controls (Go to, Pause target without a process) must read as
+    // unavailable at a glance; the default 0.6 kept them close to enabled.
+    style.DisabledAlpha = 0.38f;
     style.WindowRounding = 8.0f;
     style.ChildRounding = 7.0f;
     style.FrameRounding = 6.0f;

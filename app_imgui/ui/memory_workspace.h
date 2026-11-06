@@ -115,6 +115,7 @@ private:
     // Scanning
     void ApplyDefaults(UiContext& context);
     void ResetForTarget(UiContext& context, const std::string& targetId);
+    void ShareScan(UiContext& context);
     void PollScan(UiContext& context);
     void StartScan(UiContext& context);
     void NewScan(UiContext& context);
@@ -213,7 +214,14 @@ private:
     std::future<ScanTask> scanFuture_;
     std::shared_ptr<std::atomic_bool> scanCancel_;
     std::shared_ptr<services::ScanProgress> scanProgress_;
-    std::string activeTargetId_;
+    std::string activeTargetId_;  // TargetKey of the target the workspace shows
+    // The target a running scan started on, and its query: a result that
+    // finishes after the target changed is discarded, never shown for the
+    // new process.
+    std::string scanTargetKey_;
+    uint64_t scanTargetGeneration_ = 0;
+    services::ScanQuery scanQuery_;
+    bool shareScans_ = true;
     std::string lastScanError_;
 
     // Results view
@@ -224,6 +232,9 @@ private:
     std::vector<target::ModuleInfo> modules_;
     std::chrono::steady_clock::time_point lastModuleRefresh_{};
     bool focusValue_ = false;
+    // Frames left to give the value field the keyboard: a closing popup
+    // (the process picker) hands focus back to its parent window first.
+    int focusValueFrames_ = 0;
 
     // Address list
     std::vector<AddressEntry> addresses_;

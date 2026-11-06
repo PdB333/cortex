@@ -124,6 +124,7 @@ add_executable(cortex_imgui WIN32
     application/input_model.cpp
     application/screenshot_model.cpp
     application/runtime_events_model.cpp
+    application/context_model.cpp
     ui/bottom_panel_workspace.cpp
     ui/addresses_workspace.cpp
     ui/memory_workspace.cpp
@@ -133,6 +134,8 @@ add_executable(cortex_imgui WIN32
     ui/overview_workspace.cpp
     ui/patches_workspace.cpp
     ui/project_workspace.cpp
+    ui/artifacts_workspace.cpp
+    ui/ai_investigation_workspace.cpp
     ui/symbols_workspace.cpp
     ui/structures_workspace.cpp
     ui/pointer_maps_workspace.cpp
@@ -166,6 +169,40 @@ add_executable(cortex_imgui WIN32
     ../mcp_bridge/host_mode.cpp
     ../tools/diagnostics_host/main.cpp
     ../tools/symbolize_main.cpp
+    ../tools/inspect_main.cpp
+    ../tools/evidence_main.cpp
+    ../tools/investigation_main.cpp
+    ../tools/provider_main.cpp
+    ../tools/live_main.cpp
+    ../core/artifacts/artifact.cpp
+    ../core/artifacts/pe_provider.cpp
+    ../core/artifacts/asar_provider.cpp
+    ../core/artifacts/registry_default.cpp
+    ../core/artifacts/js_lexer.cpp
+    ../core/artifacts/js_analysis.cpp
+    ../core/artifacts/js_provider.cpp
+    ../core/artifacts/source_map.cpp
+    ../core/artifacts/inflate.cpp
+    ../core/artifacts/zip_provider.cpp
+    ../core/artifacts/dotnet_metadata.cpp
+    ../core/artifacts/cil.cpp
+    ../core/artifacts/dotnet_provider.cpp
+    ../core/artifacts/native_code.cpp
+    ../core/artifacts/annotations.cpp
+    ../core/evidence/evidence.cpp
+    ../core/investigation/investigation.cpp
+    ../core/target/process_tree.cpp
+    ../core/providers/process_runner.cpp
+    ../core/providers/analysis_provider.cpp
+    ../core/providers/ghidra_provider.cpp
+    ../core/providers/ilspy_provider.cpp
+    ../core/providers/vineflower_provider.cpp
+    ../core/live/websocket.cpp
+    ../core/live/protocol_frames.cpp
+    ../core/live/cdp.cpp
+    ../core/live/dap.cpp
+    ../core/live/jdwp.cpp
+    ../core/live/live_service.cpp
     ../host/diagnostics/external_host.cpp
     ../host/diagnostics/analyzer.cpp
     ../core/symbols/symbols.cpp
@@ -284,10 +321,15 @@ if(BUILD_TESTING)
         application/snapshots_model.cpp
         application/symbols_model.cpp
         application/watches_model.cpp
+        application/context_model.cpp
+        ../core/context/investigation_context.cpp
+        ../core/context/context_api.cpp
+        ../core/services/value_scanner.cpp
     )
     target_include_directories(cortex_app_models_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../core
+        ${CMAKE_CURRENT_SOURCE_DIR}/../host/debugger
     )
     target_link_libraries(cortex_app_models_tests PRIVATE nlohmann_json::nlohmann_json)
     if(MINGW)
@@ -295,6 +337,38 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME cortex_app_models_tests COMMAND cortex_app_models_tests)
     set_tests_properties(cortex_app_models_tests PROPERTIES TIMEOUT 30)
+
+    # Desktop settings and cortex.ini persistence (atomic replace, round trip).
+    add_executable(cortex_settings_store_tests
+        ../tests/settings_store_tests.cpp
+        application/settings.cpp
+    )
+    target_include_directories(cortex_settings_store_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../core
+    )
+    target_link_libraries(cortex_settings_store_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_settings_store_tests PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_settings_store_tests COMMAND cortex_settings_store_tests)
+    set_tests_properties(cortex_settings_store_tests PROPERTIES TIMEOUT 30)
+
+    # Baseline benchmarks (docs/cortex-2-roadmap.md, step 1.3). The CTest
+    # entry is the --quick correctness smoke; run the executable without
+    # arguments for the reference measurement.
+    add_executable(cortex_baseline_bench
+        ../tests/bench/cortex_baseline_bench.cpp
+        ../core/services/value_scanner.cpp
+        ../core/services/pointer_scanner.cpp
+    )
+    target_include_directories(cortex_baseline_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core)
+    target_link_libraries(cortex_baseline_bench PRIVATE Zydis nlohmann_json::nlohmann_json)
+    if(MINGW)
+        target_link_options(cortex_baseline_bench PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+    add_test(NAME cortex_baseline_bench_smoke COMMAND cortex_baseline_bench --quick)
+    set_tests_properties(cortex_baseline_bench_smoke PROPERTIES TIMEOUT 120)
 
     # Value scanner against an in-memory fake process.
     add_executable(cortex_value_scanner_tests

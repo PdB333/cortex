@@ -112,6 +112,8 @@ private:
     int pointerMaxResults_ = 100000;
     bool pointerMapped_ = false;
     bool pointerRunning_ = false;
+    std::string pointerTargetKey_;  // TargetKey of the process the running pointer scan reads
+    uint64_t pointerTargetGeneration_ = 0;
     std::future<std::pair<bool, std::string>> pointerFuture_;
     std::shared_ptr<services::PointerScanResult> pointerPending_;
     std::shared_ptr<std::atomic_bool> pointerCancel_;

@@ -295,7 +295,10 @@ json RunOp(const json& step) {
 
     if (op == "patch_revert") {
         int id = step.at("id").get<int>();
-        if (!patch::Revert(id)) return {{"ok", false}, {"error", "unknown_patch"}};
+        std::string detail;
+        const auto result = patch::RevertChecked(id, &detail);
+        if (result != patch::RevertResult::Reverted)
+            return {{"ok", false}, {"error", patch::RevertResultName(result)}, {"cause", detail}};
         return {{"ok", true}};
     }
 

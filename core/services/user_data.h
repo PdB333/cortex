@@ -2,9 +2,59 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <string>
 #include <system_error>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace cortex::services {
+
+// Replaces `path` with `text` so a crash or full disk during the write leaves
+// either the previous file or the new one, never a truncated mix: the text
+// goes to `path.tmp`, is flushed, and only then renamed over `path`.
+inline bool WriteFileAtomically(const std::filesystem::path& path, const std::string& text,
+                                std::string* error = nullptr) {
+    std::filesystem::path temporary = path;
+    temporary += ".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output || !output.write(text.data(), static_cast<std::streamsize>(text.size())) ||
+            !output.flush()) {
+            std::error_code ignored;
+            output.close();
+            std::filesystem::remove(temporary, ignored);
+            if (error) *error = "write_failed:" + temporary.u8string();
+            return false;
+        }
+    }
+#if defined(_WIN32)
+    if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD code = GetLastError();
+        DeleteFileW(temporary.c_str());
+        if (error) *error = "replace_failed:" + std::to_string(code) + ":" + path.u8string();
+        return false;
+    }
+#else
+    std::error_code renameError;
+    std::filesystem::rename(temporary, path, renameError);
+    if (renameError) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        if (error) *error = "replace_failed:" + renameError.message() + ":" + path.u8string();
+        return false;
+    }
+#endif
+    return true;
+}
 
 // Name of the marker file that keeps desktop settings beside cortex.exe
 // (portable installs on removable media, CI bundles).

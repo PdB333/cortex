@@ -1,5 +1,6 @@
 #pragma once
 
+#include "code_navigation.h"
 #include "ui_context.h"
 
 #include <imgui.h>
@@ -65,6 +66,14 @@ inline void RuntimeDisabledHint(bool disabled, const std::string& reason) {
     }
 }
 
+// Opens the module's file in the Artifacts workspace at address - base.
+inline void OpenStaticCode(UiContext& context, const LiveModule& module, uint64_t address) {
+    char rva[24];
+    std::snprintf(rva, sizeof(rva), "0x%llx", static_cast<unsigned long long>(address - module.base));
+    context.commands.push_back("artifact_open " + module.path + "|" + rva);
+    context.requestWorkspace = "artifacts";
+}
+
 inline void DrawAddressContextActions(
         UiContext& context, uint64_t address,
         const AddressContextOptions& options = {}) {
@@ -90,6 +99,14 @@ inline void DrawAddressContextActions(
             context.NavigateTo("pointermaps", address);
         if (ImGui::MenuItem("Structures"))
             context.NavigateTo("structures", address);
+        // module+RVA in the module's file on disk: offline catalog, CFG,
+        // references, annotations and evidence.
+        const auto module = ModuleAt(context, address);
+        ImGui::BeginDisabled(!module);
+        if (ImGui::MenuItem("Open in Artifacts (static code)") && module) OpenStaticCode(context, *module, address);
+        ImGui::EndDisabled();
+        if (!module && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("The address is not inside a loaded module with a file on disk.");
         ImGui::Separator();
         if (ImGui::MenuItem("Pointer scan for this address")) {
             context.toolsTabRequest = "pointers";
@@ -100,6 +117,26 @@ inline void DrawAddressContextActions(
             context.NavigateTo("tools", address);
         }
         ImGui::EndMenu();
+    }
+
+    // The person points an agent at this address: it becomes the desktop's
+    // current selection in the investigation context MCP clients read
+    // (context_get). It records Cortex's own state only, so it needs a
+    // connected runtime but not Writes allowed, and never loads the runtime.
+    {
+        const bool shareDisabled = !context.contextModel || !runtimeConnected;
+        ImGui::BeginDisabled(shareDisabled);
+        if (ImGui::MenuItem("Share with investigation context")) {
+            const auto target = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+            std::string error;
+            if (context.contextModel->SelectAddress(address, label, {}, target ? target->generation : 0, &error))
+                context.status = "Shared " + addressText + " with the investigation context";
+            else
+                context.status = "Share failed: " + error;
+        }
+        ImGui::EndDisabled();
+        if (shareDisabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Connect the Cortex runtime first (Project > Connect existing runtime).");
     }
 
     if (ImGui::BeginMenu("Monitor")) {

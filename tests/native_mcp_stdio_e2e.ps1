@@ -191,6 +191,60 @@ try {
     Assert-True ($missingStepsResult.structuredContent.error -eq "missing_execution_steps") `
         "missing execution steps returned wrong error"
 
+    # Shared investigation context on the live runtime: readable from the
+    # compact profile, common result contract, the earlier primitive calls in
+    # its history as agent operations, and no way to reach the desktop-only
+    # selection route as a step.
+    $contextCall = Invoke-Mcp -Process $process -Payload ([ordered]@{
+        jsonrpc = "2.0"
+        id = 7
+        method = "tools/call"
+        params = [ordered]@{
+            name = "capture_runtime_state"
+            arguments = [ordered]@{
+                objective = "Read the shared investigation context"
+                execute = $true
+                timeout_ms = 5000
+                steps = @(
+                    [ordered]@{ tool = "context_get"; arguments = @{} },
+                    [ordered]@{ tool = "context_events"; arguments = @{ _query = @{ since = 0; limit = 16 } } }
+                )
+            }
+        }
+    })
+    $contextResult = Get-McpResult -Response $contextCall -Phase "context tools/call"
+    Assert-True (-not [bool]$contextResult.isError) "context read through capture_runtime_state returned isError"
+    $contextEvidence = @($contextResult.structuredContent.evidence)
+    Assert-True ($contextEvidence.Count -eq 2) "context read did not run both steps"
+    $snapshot = $contextEvidence[0].output.result
+    Assert-True ([int]$contextEvidence[0].output.status -eq 200) "context_get did not answer 200"
+    Assert-True ([bool]$snapshot.ok -and $snapshot.status -eq "completed") "context_get broke the result contract"
+    Assert-True ([uint64]$snapshot.target.pid -gt 0 -and [uint64]$snapshot.target.generation -gt 0) `
+        "context_get did not report pid and generation"
+    Assert-True ($snapshot.data.schema -eq "cortex.context.v1") "context_get schema mismatch"
+    Assert-True (@($snapshot.data.modules).Count -gt 0) "context_get listed no modules"
+    $agentHealth = @($snapshot.data.history | Where-Object { $_.tool -eq "health" -and $_.provenance.source -eq "agent" })
+    Assert-True ($agentHealth.Count -ge 1) "earlier agent primitive calls are missing from the context history"
+    $eventsPage = $contextEvidence[1].output.result
+    Assert-True ([bool]$eventsPage.ok) "context_events failed"
+    Assert-True ($null -ne $eventsPage.data.gap -and $null -ne $eventsPage.data.latest_id) "context_events lacks gap reporting"
+
+    $selectCall = Invoke-Mcp -Process $process -Payload ([ordered]@{
+        jsonrpc = "2.0"
+        id = 8
+        method = "tools/call"
+        params = [ordered]@{
+            name = "capture_runtime_state"
+            arguments = [ordered]@{
+                objective = "An agent must not fake the person's selection"
+                execute = $true
+                steps = @([ordered]@{ tool = "context_select"; arguments = @{ address = "0x1000" } })
+            }
+        }
+    })
+    $selectResult = Get-McpResult -Response $selectCall -Phase "context select tools/call"
+    Assert-True ([bool]$selectResult.isError) "an agent reached the desktop-only selection route"
+
     Write-Host "PASS: native MCP stdio -> named pipe -> semantic executor -> native route dispatcher"
 } finally {
     try { $process.StandardInput.Close() } catch {}

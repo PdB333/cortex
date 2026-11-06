@@ -3,6 +3,12 @@
 
 #include "desktop_app.h"
 #include "ui/address_resolver.h"
+#include "../core/artifacts/pe_provider.h"
+#include "ui/address_context_menu.h"
+#include "ui/code_navigation.h"
+#include "ui/desktop_stores.h"
+#include "../core/providers/process_runner.h"
+#include "../mcp_bridge/evidence_tools.h"
 
 #include "services/assembler.h"
 #include "services/auto_assembler.h"
@@ -13,7 +19,12 @@
 #include "ui/auto_assembler_host.h"
 #include "process/remote_memory.h"
 
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <thread>
+#include <atomic>
 
 namespace cortex::desktop {
 
@@ -277,7 +288,7 @@ constexpr const char* kGuiRequiredWorkspaces[] = {
     "symbols", "structures", "pointermaps", "snapshots", "re",
     "instrumentation", "watches", "actions", "network", "diagnostics",
     "scripts", "input", "screenshots", "patches", "events", "trace", "tools",
-    "access-finder", "lua"
+    "access-finder", "lua", "artifacts", "ai-investigation"
 };
 
 
@@ -360,7 +371,14 @@ bool ValidateGuiRegistry(AppState& app, std::string& error) {
 bool ExerciseGuiPresets(AppState& app, std::string& error) {
     for (const auto preset : kGuiPresets) {
         app.workspaces.ApplyPreset(preset);
-        if (!app.workspaces.IsOpen("bottom")) {
+        // The start page fills the window; every other layout keeps the
+        // bottom panel.
+        if (preset == cortex::ui::WorkspacePreset::Home) {
+            if (!app.workspaces.IsOpen("overview") || app.workspaces.IsOpen("bottom")) {
+                error = "home_layout_wrong";
+                return false;
+            }
+        } else if (!app.workspaces.IsOpen("bottom")) {
             error = std::string("bottom_panel_closed:") +
                     cortex::ui::WorkspaceRegistry::PresetName(preset);
             return false;
@@ -386,6 +404,304 @@ bool ExerciseEveryWorkspace(AppState& app, std::string& error) {
             error = std::string("workspace_render_failed:") + id + ":" + error;
             return false;
         }
+    }
+    return true;
+}
+
+// A real inspection through the Artifacts workspace: the suite's own
+// executable, which is a PE the providers must identify.
+bool ExerciseArtifactsWorkspace(AppState& app, std::string& error) {
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) {
+        error = "module_path_failed";
+        return false;
+    }
+    executable.resize(length);
+    app.workspaces.CloseAll();
+    app.workspaces.Select("artifacts");
+    app.ui.commands.push_back("inspect_artifact " + std::filesystem::path(executable).u8string());
+    // Headless: the background runner is absent, so the inspection is inline.
+    if (!RenderGuiStable(app, error, true)) {
+        error = "artifacts_render:" + error;
+        return false;
+    }
+    if (app.ui.status.rfind("Inspected ", 0) != 0 || app.ui.status.find("(pe)") == std::string::npos) {
+        error = "artifacts_inspect:" + app.ui.status;
+        return false;
+    }
+    if (!RenderGuiStable(app, error, true)) return false;
+
+    // Code tab: the catalog of the system's kernel32.dll (small enough for a
+    // Debug build to analyse quickly, unlike cortex.exe itself), its entry
+    // point's CFG, and a name recorded then removed.
+    {
+        wchar_t system[MAX_PATH];
+        const UINT systemLength = GetSystemDirectoryW(system, MAX_PATH);
+        const std::filesystem::path library =
+            std::filesystem::path(std::wstring(system, systemLength < MAX_PATH ? systemLength : 0)) / L"kernel32.dll";
+        std::string peError;
+        cortex::artifacts::PeFile pe;
+        const auto self = cortex::artifacts::OpenFile(library.u8string(), &peError);
+        if (!self || !cortex::artifacts::ParsePe(*self, pe, peError) || !pe.entryRva) {
+            error = "artifacts_kernel32:" + peError;
+            return false;
+        }
+        app.ui.commands.push_back("inspect_artifact " + library.u8string());
+        if (!RenderGuiStable(app, error, true)) return false;
+        char entry[24];
+        std::snprintf(entry, sizeof(entry), "0x%x", pe.entryRva);
+        const std::vector<std::pair<std::string, std::string>> steps = {
+            {"artifact_tab Code", ""},
+            {"artifact_functions", "Code analysed: "},
+            {std::string("artifact_function ") + entry, "Function "},
+            {std::string("artifact_rename ") + entry + " suite_entry", std::string("Renamed ") + entry + " to suite_entry"},
+            {std::string("artifact_rename ") + entry, "Name removed"},
+            {"artifact_record_function", "Evidence recorded: "},
+            {"artifact_tab Evidence", ""},
+            {"artifact_evidence", "Evidence: "},
+        };
+        for (const auto& [command, expected] : steps) {
+            app.ui.commands.push_back(command);
+            if (!RenderGuiStable(app, error, true)) return false;
+            if (!expected.empty() && app.ui.status.rfind(expected, 0) != 0) {
+                error = "artifacts_code:" + command + ":" + app.ui.status;
+                return false;
+            }
+        }
+    }
+
+    // A generated script with an inline source map and an IPC call: the
+    // Electron and Source position tabs are drawn, and the position maps.
+    const auto script = std::filesystem::temp_directory_path() /
+                        ("cortex-gui-suite-" + std::to_string(GetCurrentProcessId()) + ".js");
+    {
+        // {"version":3,"sources":["suite.ts"],"names":[],"mappings":"AAAA;AACA","sourcesContent":["first\nsecond"]}
+        std::ofstream out(script, std::ios::binary);
+        out << "const { ipcRenderer } = require('electron');\nipcRenderer.invoke('suite:ping');\n"
+               "//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbInN1aXRlLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQUFBO0FBQ0EiLCJzb3VyY2VzQ29udGVudCI6WyJmaXJzdFxuc2Vjb25kIl19\n";
+    }
+    app.ui.commands.push_back("inspect_artifact " + script.u8string());
+    bool ok = RenderGuiStable(app, error, true) && app.ui.status.find("(javascript)") != std::string::npos;
+    if (!ok && error.empty()) error = "artifacts_script:" + app.ui.status;
+    for (const char* tab : {"Electron", "Source position", "Structure"}) {
+        if (!ok) break;
+        app.ui.commands.push_back(std::string("artifact_tab ") + tab);
+        ok = RenderGuiStable(app, error, true);
+    }
+    if (ok) {
+        app.ui.commands.push_back("artifact_position 2:5");
+        ok = RenderGuiStable(app, error, true) && app.ui.status == "Mapped to suite.ts:2:1";
+        if (!ok && error.empty()) error = "artifacts_position:" + app.ui.status;
+    }
+    std::error_code ignored;
+    std::filesystem::remove(script, ignored);
+    // A .NET assembly when one is given (CI passes the C# fixture): the
+    // .NET tab is drawn and a method's CIL is disassembled.
+    const char* assembly = std::getenv("CORTEX_GUI_SUITE_DOTNET");
+    if (ok && assembly && *assembly) {
+        app.ui.commands.push_back(std::string("inspect_artifact ") + assembly);
+        ok = RenderGuiStable(app, error, true) && app.ui.status.find("(dotnet)") != std::string::npos;
+        if (!ok && error.empty()) error = "artifacts_dotnet:" + app.ui.status;
+        if (ok) {
+            app.ui.commands.push_back("artifact_tab .NET");
+            app.ui.commands.push_back("artifact_cil Cortex.Fixture.Actor::Heal");
+            ok = RenderGuiStable(app, error, true) && RenderGuiStable(app, error, true) &&
+                 app.ui.status == "Disassembled 1 method(s): Cortex.Fixture.Actor::Heal";
+            if (!ok && error.empty()) error = "artifacts_cil:" + app.ui.status;
+        }
+        // The Engines tab with a real ILSpy (CI sets CORTEX_ILSPYCMD and
+        // CORTEX_GUI_SUITE_ILSPY): decompile the assembly, open one file.
+        const char* ilspy = std::getenv("CORTEX_GUI_SUITE_ILSPY");
+        if (ok && ilspy && *ilspy) {
+            app.ui.commands.push_back("artifact_tab Engines");
+            app.ui.commands.push_back("artifact_engine_start ilspy");
+            ok = RenderGuiStable(app, error, true);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+            while (ok && app.ui.status.find(": completed (") == std::string::npos &&
+                   app.ui.status.find(": failed") == std::string::npos && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                ok = RenderGuiFrame(app, error, false);
+            }
+            ok = ok && app.ui.status.find(": completed (") != std::string::npos;
+            if (!ok && error.empty()) error = "artifacts_ilspy:" + app.ui.status;
+            if (ok) {
+                app.ui.commands.push_back("artifact_engine_open Cortex.Fixture/Actor.cs");
+                ok = RenderGuiStable(app, error, true) && app.ui.status == "Engine: opened Cortex.Fixture/Actor.cs";
+                if (!ok && error.empty()) error = "artifacts_ilspy_open:" + app.ui.status;
+            }
+        }
+    }
+    return ok;
+}
+
+// The AI Investigation workspace against the real stores: an investigation
+// an agent created waits for approval; the person approves from the
+// workspace (actor "desktop"); evidence and the process tree load.
+bool ExerciseAiInvestigationWorkspace(AppState& app, std::string& error) {
+    using json = nlohmann::json;
+    auto& investigations = cortex::ui::DesktopInvestigations();
+    const json created = investigations.Create({{"title", "GUI suite"}, {"question", "Which instruction writes the value?"},
+                                                {"workflow", "memory_value"}, {"parameters", {{"value", "100"}}}}, "agent");
+    const std::string id = created.value("investigation", json::object()).value("id", std::string());
+    if (id.empty() || !investigations.Start(id, 1, "agent").value("ok", false) ||
+        !investigations.StepResult({{"id", id}, {"index", 0}, {"expected_revision", 2}, {"status", "done"}, {"summary", "scan"}},
+                                   "agent", {}).value("ok", false)) {
+        error = "ai_setup:" + created.dump();
+        return false;
+    }
+    app.workspaces.CloseAll();
+    app.workspaces.Select("ai-investigation");
+    const std::vector<std::pair<std::string, std::string>> steps = {
+        {"ai_tab Investigations", ""},
+        {"ai_investigations_refresh", "Investigations: "},
+        {"ai_investigation_open " + id, "Investigation GUI suite: awaiting_approval"},
+        {"ai_investigation_approve " + id + " 1", "Approved step 1 of " + id},
+        {"ai_tab Evidence", ""},
+        {"ai_evidence_refresh", "Evidence: "},
+        {"ai_tab Process tree", ""},
+        {"ai_process_tree " + std::to_string(GetCurrentProcessId()), "Process tree: "},
+    };
+    for (const auto& [command, expected] : steps) {
+        app.ui.commands.push_back(command);
+        if (!RenderGuiStable(app, error, true)) return false;
+        if (!expected.empty() && app.ui.status.rfind(expected, 0) != 0) {
+            error = "ai_workspace:" + command + ":" + app.ui.status;
+            return false;
+        }
+    }
+    const json after = investigations.Get(id)["investigation"];
+    if (after["plan"][1].value("status", std::string()) != "approved" || after["plan"][1]["approval"].value("by", std::string()) != "desktop") {
+        error = "ai_approval_not_recorded:" + after["plan"][1].dump();
+        return false;
+    }
+    investigations.Cancel(id, after["revision"].get<int64_t>(), "GUI suite", "desktop");
+    // The Live (CDP) tab against a real node (CI sets CORTEX_GUI_SUITE_NODE_FIXTURE
+    // to tests/fixtures/node-live/app.js): attach, open the script, a log
+    // breakpoint on the health write, hits, detach.
+    const char* fixture = std::getenv("CORTEX_GUI_SUITE_NODE_FIXTURE");
+    if (fixture && *fixture) {
+        // CORTEX_GUI_SUITE_INSPECT_PORT: a fixture already started elsewhere.
+        const char* external = std::getenv("CORTEX_GUI_SUITE_INSPECT_PORT");
+        const std::string node = external ? std::string() : cortex::providers::FindOnPath("node");
+        if (!external && node.empty()) {
+            error = "ai_live:node_not_on_path";
+            return false;
+        }
+        const int port = external ? std::atoi(external) : 9700 + static_cast<int>(GetCurrentProcessId() % 200);
+        std::atomic<bool> stop{false};
+        std::thread runner([&] {
+            if (external) return;
+            cortex::providers::ProcessSpec spec;
+            spec.argv = {node, "--inspect=127.0.0.1:" + std::to_string(port), fixture};
+            spec.timeout = std::chrono::minutes(3);
+            cortex::providers::RunProcess(spec, &stop);
+        });
+        auto finish = [&](bool result) {
+            stop = true;
+            runner.join();
+            return result;
+        };
+        // node needs a moment to open its inspector (longer on a busy
+        // runner): retry the attach for up to 20 s.
+        app.ui.commands.push_back("ai_tab Live (CDP)");
+        bool attachedOk = false;
+        const auto attachDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        while (!attachedOk && std::chrono::steady_clock::now() < attachDeadline) {
+            app.ui.commands.push_back("ai_live_attach " + std::to_string(port));
+            if (!RenderGuiStable(app, error, true)) return finish(false);
+            attachedOk = app.ui.status.rfind("Live: attached", 0) == 0;
+            if (!attachedOk) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+        if (!attachedOk) {
+            if (error.empty()) error = "ai_live_attach:" + app.ui.status;
+            return finish(false);
+        }
+        std::string url;
+        int line = 0;
+        for (int attempt = 0; attempt < 50 && url.empty(); ++attempt) {
+            const json sessions = cortex::ui::DesktopLive().Sessions();
+            for (const auto& row : sessions["sessions"]) {
+                auto session = cortex::ui::DesktopLive().Get(row.value("session_id", std::string()));
+                const json scripts = session ? session->Scripts("app.js", 0, 5) : json();
+                if (session && scripts.value("total", 0) == 1) url = scripts["scripts"][0].value("url", std::string());
+            }
+            if (url.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        {
+            std::ifstream source(fixture);
+            std::string text;
+            for (int n = 1; std::getline(source, text); ++n)
+                if (text.find("CORTEX_HEALTH_WRITE") != std::string::npos) line = n;
+        }
+        const bool writes = app.ui.mutationAllowed;
+        app.ui.mutationAllowed = true;
+        app.ui.commands.push_back("ai_live_script " + url);
+        app.ui.commands.push_back("ai_live_breakpoint " + std::to_string(line));
+        bool ok = RenderGuiStable(app, error, true) && app.ui.status.rfind("Live: breakpoint 1 at ", 0) == 0;
+        if (!ok && error.empty()) error = "ai_live_breakpoint:" + app.ui.status + " url=" + url;
+        for (int attempt = 0; ok && attempt < 100; ++attempt) {
+            app.ui.commands.push_back("ai_live_hits");
+            ok = RenderGuiFrame(app, error, false);
+            if (app.ui.status.rfind("Live: ", 0) == 0 && std::atoi(app.ui.status.c_str() + 6) >= 3) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (ok && std::atoi(app.ui.status.c_str() + 6) < 3) {
+            ok = false;
+            error = "ai_live_hits:" + app.ui.status;
+        }
+        app.ui.commands.push_back("ai_live_detach");
+        ok = ok && RenderGuiStable(app, error, true) && app.ui.status == "Live: detached";
+        if (!ok && error.empty()) error = "ai_live_detach:" + app.ui.status;
+        app.ui.mutationAllowed = writes;
+        return finish(ok);
+    }
+    return true;
+}
+
+// Live <-> static by module+RVA on an attached target: the address menu's
+// static view of the module that holds `address`, back to the same live
+// address, and evidence recorded on that location shown live.
+bool ExerciseLiveStaticNavigation(AppState& app, uint64_t address, std::string& error) {
+    using json = nlohmann::json;
+    const auto module = cortex::ui::ModuleAt(app.ui, address);
+    if (!module) {
+        error = "navigation_no_module_for_address";
+        return false;
+    }
+    cortex::ui::OpenStaticCode(app.ui, *module, address);
+    if (!RenderGuiStable(app, error, true) || !RenderGuiStable(app, error, true)) return false;
+    if (app.ui.status.rfind("Opened ", 0) != 0) {
+        error = "navigation_static:" + app.ui.status;
+        return false;
+    }
+    app.ui.commands.push_back("artifact_show_live");
+    if (!RenderGuiStable(app, error, true)) return false;
+    // The disassembly view takes over the status line once it draws; the
+    // navigation itself is what is checked.
+    if (app.ui.navigationCurrent.workspace != "disassembly" || app.ui.navigationCurrent.address != address) {
+        error = "navigation_live:" + app.ui.status;
+        return false;
+    }
+    // Evidence on that module+RVA, then Live from the AI workspace.
+    char rva[24];
+    std::snprintf(rva, sizeof(rva), "0x%llx", static_cast<unsigned long long>(address - module->base));
+    const json recorded = mcp_bridge::evidence::Handle(
+        "cortex_evidence_record",
+        {{"statement", "GUI suite: the target was executing here"}, {"class", "hypothesis"}, {"origin", "observed"},
+         {"subject", {{"path", module->path}, {"location", std::string("rva:") + rva}}}, {"mutation_permission", true}},
+        &cortex::ui::DesktopEvidence(), {std::filesystem::u8path(module->path).parent_path()}, nullptr, "desktop");
+    const std::string id = recorded.value("record", json::object()).value("id", std::string());
+    if (id.empty()) {
+        error = "navigation_evidence:" + recorded.dump();
+        return false;
+    }
+    app.ui.NavigateTo("memory-browser", 0x1000);
+    app.ui.commands.push_back("ai_evidence_live " + id);
+    if (!RenderGuiStable(app, error, true)) return false;
+    if (app.ui.navigationCurrent.workspace != "disassembly" || app.ui.navigationCurrent.address != address) {
+        error = "navigation_evidence_live:" + app.ui.status;
+        return false;
     }
     return true;
 }
@@ -520,20 +836,55 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
         app.ui.mutationAllowed = true;
         app.ui.accessFinderRequests.push_back({frame, 4, true});
         app.workspaces.Select("access-finder");
+        // Two phases with time budgets rather than a fixed number of frames:
+        // on a loaded runner the debugger can take seconds to apply the
+        // breakpoint, which used to use up the whole wait. The test still
+        // requires at least one recorded write once it is applied.
         size_t hits = 0;
-        for (int attempt = 0; attempt < 80 && hits == 0; ++attempt) {
+        const DebugBreakpointInfo* installed = nullptr;
+        auto findBreakpoint = [&]() -> const DebugBreakpointInfo* {
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+                if (breakpoint.address == frame && breakpoint.kind == "hw_write") return &breakpoint;
+            return nullptr;
+        };
+        const auto installStart = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - installStart < std::chrono::seconds(30)) {
+            if (!RenderGuiStable(app, error, true)) return false;
+            installed = findBreakpoint();
+            if (installed && installed->appliedThreads > 0) break;
+            Sleep(100);
+        }
+        const auto installMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - installStart).count();
+        if (!installed || installed->appliedThreads == 0) {
+            error = "access_finder_breakpoint_not_applied: present=" + std::string(installed ? "yes" : "no") +
+                    " applied_threads=" + std::to_string(installed ? installed->appliedThreads : 0) + "/" +
+                    std::to_string(installed ? installed->totalThreads : 0) + " waited_ms=" + std::to_string(installMs);
+            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
+                if (breakpoint.address == frame) app.debuggerModel.RemoveBreakpoint(breakpoint.id, nullptr);
+            app.ui.mutationAllowed = false;
+            return false;
+        }
+        size_t logEntries = 0;
+        uint64_t hitCount = 0;
+        const auto hitStart = std::chrono::steady_clock::now();
+        while (hits == 0 && std::chrono::steady_clock::now() - hitStart < std::chrono::seconds(20)) {
             if (!RenderGuiStable(app, error, true)) return false;
             Sleep(150);
-            for (const auto& breakpoint : app.debuggerModel.Breakpoints())
-                if (breakpoint.address == frame && breakpoint.kind == "hw_write") hits = breakpoint.hitCount;
+            if (const auto* breakpoint = findBreakpoint()) hitCount = breakpoint->hitCount;
+            hits = static_cast<size_t>(hitCount);
             std::vector<DebugBreakpointLogEntry> entries;
             for (const auto& breakpoint : app.debuggerModel.Breakpoints()) {
                 if (breakpoint.address != frame) continue;
                 std::string logError;
-                if (app.debuggerModel.LoadBreakpointLog(breakpoint.id, 0, 16, entries, &logError))
+                if (app.debuggerModel.LoadBreakpointLog(breakpoint.id, 0, 16, entries, &logError)) {
+                    logEntries = entries.size();
                     hits = std::max(hits, entries.size());
+                }
             }
         }
+        const auto hitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - hitStart).count();
         for (const auto& breakpoint : app.debuggerModel.Breakpoints())
             if (breakpoint.address == frame) app.debuggerModel.RemoveBreakpoint(breakpoint.id, nullptr);
         // Hits still queued for the removed breakpoint must not reach the
@@ -545,7 +896,9 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
             return false;
         }
         if (hits == 0) {
-            error = "access_finder_recorded_no_write";
+            error = "access_finder_recorded_no_write: hit_count=" + std::to_string(hitCount) +
+                    " log_entries=" + std::to_string(logEntries) + " applied_after_ms=" + std::to_string(installMs) +
+                    " waited_ms=" + std::to_string(hitMs);
             return false;
         }
         summary += " frame_writes=" + std::to_string(hits);
@@ -1014,6 +1367,53 @@ bool ExerciseMemoryTools(AppState& app, uint64_t codeAddress, std::string& summa
     return RenderGuiStable(app, error, true);
 }
 
+// Cortex opens on the start page, every workspace has a View menu group,
+// and the start page's file entry inspects the file in the Files layout.
+bool ExerciseStartPage(AppState& app, std::string& error) {
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Home || !app.workspaces.IsOpen("overview")) {
+        error = "start_page_not_home";
+        return false;
+    }
+    for (const auto& id : app.workspaces.Ids()) {
+        if (cortex::ui::WorkspaceRegistry::ViewGroupOf(id) == "Other") {
+            error = "view_menu_group_missing:" + id;
+            return false;
+        }
+    }
+    if (!RenderGuiStable(app, error, true)) {
+        error = "start_page_render:" + error;
+        return false;
+    }
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (!length || length >= executable.size()) {
+        error = "module_path_failed";
+        return false;
+    }
+    executable.resize(length);
+    app.ui.commands.push_back("home_open " + std::filesystem::path(executable).u8string());
+    for (int frame = 0; frame < 3; ++frame)
+        if (!RenderGuiFrame(app, error, false)) return false;
+    if (!RenderGuiStable(app, error, true)) {
+        error = "files_layout_render:" + error;
+        return false;
+    }
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Files || !app.workspaces.IsOpen("artifacts") ||
+        app.ui.status.rfind("Inspected ", 0) != 0) {
+        error = "home_open_failed:" + app.ui.status;
+        return false;
+    }
+    app.ui.commands.push_back("home_ai");
+    for (int frame = 0; frame < 2; ++frame)
+        if (!RenderGuiFrame(app, error, false)) return false;
+    if (!RenderGuiStable(app, error, true)) return false;
+    if (app.workspaces.Preset() != cortex::ui::WorkspacePreset::Ai || !app.workspaces.IsOpen("ai-investigation")) {
+        error = "home_ai_failed";
+        return false;
+    }
+    return true;
+}
+
 int RunGuiWorkspaceSuite() {
     AppState app;
     std::string error;
@@ -1023,6 +1423,10 @@ int RunGuiWorkspaceSuite() {
     }
 
     HeadlessGuiContext gui;
+    if (!ExerciseStartPage(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 8;
+    }
     if (!ExerciseGuiPresets(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 3;
@@ -1034,6 +1438,14 @@ int RunGuiWorkspaceSuite() {
     if (!ExerciseNavigationContract(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 5;
+    }
+    if (!ExerciseArtifactsWorkspace(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 6;
+    }
+    if (!ExerciseAiInvestigationWorkspace(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 7;
     }
 
     std::printf(
@@ -1103,6 +1515,10 @@ int RunGuiAttachedSuite(const std::vector<std::string>& args) {
     if (!ExerciseEveryWorkspace(app, error)) {
         std::fprintf(stderr, "gui attached suite: workspace render failed: %s\n", error.c_str());
         return 9;
+    }
+    if (!ExerciseLiveStaticNavigation(app, address, error)) {
+        std::fprintf(stderr, "gui attached suite: live/static navigation failed: %s\n", error.c_str());
+        return 13;
     }
 
     // Give the panel-local live refresh loops enough time to execute at least

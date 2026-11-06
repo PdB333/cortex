@@ -1,17 +1,21 @@
-CORTEX v1.0.1 - INSTALLATION AND QUICK START
+CORTEX v2.0.0 - INSTALLATION AND QUICK START
 ============================================
 
-Cortex v1.0.1 ships as a single portable Windows application: cortex.exe.
-The x64 and x86 instrumentation runtimes live in the runtime folder and are
-selected automatically for each target. Nothing else has to be installed
-(no Qt, no Visual C++ runtime).
+Cortex ships as a single portable Windows application: cortex.exe. The x64
+and x86 runtimes live in the runtime folder and are selected automatically
+for each target. Nothing else has to be installed (no Qt, no Visual C++
+runtime). External analysis engines are optional (see below).
+
+Use Cortex only on software and systems you own or are authorized to
+inspect. Anti-cheat, DRM and access-control bypass, and interference with
+online services, are outside the scope of this project.
 
 INSTALLATION
 ------------
 
 1. Download the archive:
 
-       cortex-v1.0.1-windows-portable.zip
+       cortex-v2.0.0-windows-portable.zip
 
 2. Extract the whole archive into a normal, writable folder, for example:
 
@@ -24,74 +28,110 @@ INSTALLATION
 
        .\cortex.exe
 
-FIRST SESSION
--------------
+TWO WAYS TO USE CORTEX
+----------------------
 
-1. Click "Select process" in the header (or File > Select process...).
+You drive it: the desktop (cortex.exe) and the command line.
+An AI agent drives it: your MCP client starts "cortex.exe mcp". The server
+is read-only unless YOU add --allow-writes to its arguments; every change
+must also be asked for explicitly by the agent (mutation_permission), and
+the desktop's AI Activity panel shows each call. Both share the same
+targets, projects and evidence.
+
+FIRST SESSION (DESKTOP)
+-----------------------
+
+Cortex opens on its start page: Analyze a file (nothing runs), Inspect a
+running program, or Work with an AI agent (copies the MCP configuration).
+For memory:
+
+1. Click "Select a process..." (or File > Select process...).
 2. Select the target and click Attach (or double-click the row).
 3. Use the "Value scan" panel of the Memory workspace to scan a value
    (First scan, then Next scan).
-4. Double-click a useful result to prepare an Addresses entry.
-5. Use an address's context menu to jump to the Memory viewer, the
-   Disassembler, RE, Pointer Maps, Structures or debugger actions.
-6. The Memory, Debug, RE, Trace, Automation and Runtime buttons in the header
-   rearrange the workspaces for each task.
+4. Double-click a useful result to keep it in the address list.
+5. Right-click an address to open it in the Memory viewer, the Disassembler
+   or the Debugger, or to find out what writes to it.
+6. The Workspace menu rearranges the panels for each task: Home, Files and
+   AI need no process; Memory, Debug, RE, Trace, Automation and Runtime
+   work on one.
 7. Switch the header toggle from "Read-only" to "Writes allowed" only when you
    intend an operation that changes the target or persistent state.
 
-COMMAND-LINE MODES
-------------------
-
-Help:
+COMMAND LINE
+------------
 
        .\cortex.exe --help
-
-Version:
-
        .\cortex.exe --version
 
-Persistent MCP server over stdio (targetless; attach from the AI client):
+Files, without running them (PE, .NET, Electron .asar, JavaScript, ZIP):
 
-       .\cortex.exe mcp
+       .\cortex.exe inspect C:\path\to\app.asar
+       .\cortex.exe inspect C:\path\to\Library.dll --cil Namespace.Type::Method
 
-Attach MCP to a PID or a process at startup:
+Running processes:
 
-       .\cortex.exe mcp --pid 1234
-       .\cortex.exe mcp --process game.exe
+       .\cortex.exe probe --pid 1234       (read-only health)
+       .\cortex.exe diagnose --pid 1234    (crash and hang watcher)
+       .\cortex.exe inject <target>        (loads the runtime: a change)
 
-Also expose the low-level primitive tools:
+Engines, live debuggers, evidence and investigations:
 
-       .\cortex.exe mcp --tools all
+       .\cortex.exe provider list|run ...
+       .\cortex.exe live targets|scripts|watch ...
+       .\cortex.exe evidence export|list
+       .\cortex.exe investigation list|show|approve|reject ...
 
-Other built-in commands:
+MCP SERVER (FOR AN AI CLIENT)
+-----------------------------
 
-       .\cortex.exe probe --pid 1234
-       .\cortex.exe diagnose --pid 1234
-       .\cortex.exe analyze <directory>
-       .\cortex.exe symbolize [options]
-       .\cortex.exe inject <target> [dll]
+Add to your client's MCP configuration (read-only):
+
+       { "mcpServers": { "cortex": { "command": "C:/Cortex/cortex.exe",
+                                     "args": ["mcp"] } } }
+
+Useful arguments, all chosen by you, never by the agent:
+
+       --allow-writes          let the agent change targets (each call must
+                               still say mutation_permission: true)
+       --allow-state           let it save only its own records
+       --tools all             expose every primitive tool
+       --pid 1234              attach at startup
+       --artifact-root <dir>   folders whose files the agent may inspect
+       --launch-config <file>  programs the agent may start (allowlist)
+
+In MCP mode, stdout is reserved for JSON-RPC; diagnostics go to stderr.
+
+OPTIONAL ENGINES
+----------------
+
+Cortex does not bundle these. Install them yourself and point Cortex at them:
+
+       Ghidra 11.x + JDK 21      --ghidra-dir <dir>  (or GHIDRA_INSTALL_DIR)
+       ILSpy ilspycmd 9.x        --ilspycmd <path>   (or CORTEX_ILSPYCMD)
+       Vineflower 1.11 + a JDK   --vineflower <jar>  (or CORTEX_VINEFLOWER)
+       netcoredbg 3.1            --netcoredbg <path> (or CORTEX_NETCOREDBG)
+       Node --inspect, debugpy, a JVM with JDWP: allow their port with
+                                 --inspect-port <port>
+
+Live debuggers only set log breakpoints: they record the stack and locals
+and resume; they never evaluate code. See docs/analysis-providers.md.
 
 WHAT IS IN THE ARCHIVE
 ----------------------
 
 cortex.exe
-    The Cortex application (desktop UI and CLI/MCP modes).
+    The Cortex application (desktop, command line and MCP server).
 
-runtime\x64\cortex_core.dll
-    Instrumentation runtime for 64-bit targets.
-
-runtime\x86\cortex_core.dll
-    Instrumentation runtime for 32-bit targets.
+runtime\x64\cortex_core.dll, runtime\x86\cortex_core.dll
+    Runtimes for 64-bit and 32-bit targets.
 
 runtime\x86\cortex_runtime_helper.exe
     Private helper used automatically for 32-bit targets.
 
-    You never choose between x64 and x86: Cortex reads the target's
-    architecture and uses the matching runtime, including for
-    "cortex.exe inject <pid>".
-
-README.md, CHANGELOG.md, LICENSE, docs
-    Documentation, history, license and technical guides.
+README.md, README_INSTALL.txt, CHANGELOG.md, LICENSE, docs
+    Documentation, history, licence and guides (docs/limitations.md lists
+    what Cortex does not do or has not validated).
 
 TROUBLESHOOTING
 ---------------
@@ -101,18 +141,10 @@ TROUBLESHOOTING
 - If a target cannot be opened, check its architecture and the process's
   Windows rights. Only use elevated privileges when the target requires them.
 - If a write, breakpoint or control operation is refused, switch the header
-  to "Writes allowed" first.
+  to "Writes allowed" (desktop) or start the MCP server with --allow-writes.
 - Settings and the window layout are saved in %LOCALAPPDATA%\Cortex. To keep
-  them next to cortex.exe instead (USB stick, sandbox), create an empty file
-  named cortex.portable next to the executable.
-- In MCP mode, stdout is reserved for JSON-RPC for the whole session;
-  diagnostics go to stderr.
-- See docs/getting-started.md, docs/ui-guide.md and docs/ui-walkthrough.md
-  for the complete workflow.
-
-AUTHORIZATION
--------------
-
-Use Cortex only on software and systems you own or are authorized to inspect.
-Anti-cheat bypass, unauthorized access and interference with online services
-are outside the scope of this project.
+  them next to cortex.exe instead, create an empty file named cortex.portable
+  next to the executable.
+- Engines show as unavailable with the reason: "cortex.exe provider list".
+- Guides: docs/getting-started.md, docs/ui-guide.md, docs/ui-walkthrough.md,
+  docs/mcp.md, docs/analysis-providers.md.

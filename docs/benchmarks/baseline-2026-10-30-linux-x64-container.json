@@ -1,0 +1,121 @@
+{
+  "environment": {
+    "compiler": "gcc 13.3.0",
+    "hardware_threads": 4,
+    "optimized": true,
+    "os": "linux",
+    "pointer_bits": 64
+  },
+  "failures": 0,
+  "fixture": {
+    "heap_mib": 256,
+    "planted_values": 1000,
+    "repeat": 5
+  },
+  "results": [
+    {
+      "max_ms": 183.126275,
+      "median_ms": 163.100488,
+      "min_ms": 162.616119,
+      "name": "scan.first.exact_i32.threads_1",
+      "results": 1000,
+      "samples": 5,
+      "threads": 1,
+      "throughput_mib_s": 1575.715702334379
+    },
+    {
+      "max_ms": 49.780194,
+      "median_ms": 46.622397,
+      "min_ms": 43.044504,
+      "name": "scan.first.exact_i32.threads_4",
+      "results": 1000,
+      "samples": 5,
+      "threads": 4,
+      "throughput_mib_s": 5512.3720901780325
+    },
+    {
+      "max_ms": 0.978324,
+      "median_ms": 0.599931,
+      "min_ms": 0.563319,
+      "name": "scan.next.changed_i32.listed_1000",
+      "results": 500,
+      "samples": 5
+    },
+    {
+      "max_ms": 364.005362,
+      "median_ms": 364.005362,
+      "min_ms": 359.96512,
+      "name": "scan.first.unknown_i32",
+      "samples": 2,
+      "throughput_mib_s": 706.033555626579
+    },
+    {
+      "max_ms": 87.711049,
+      "median_ms": 87.711049,
+      "min_ms": 85.544816,
+      "name": "scan.next.decreased_i32.from_snapshot",
+      "results": 1000,
+      "samples": 2,
+      "throughput_mib_s": 2930.075548406678
+    },
+    {
+      "max_ms": 16.1172,
+      "median_ms": 14.593025,
+      "min_ms": 14.034624,
+      "name": "scan.first.aob_wildcards",
+      "results": 16,
+      "samples": 5,
+      "throughput_mib_s": 17611.153273567335
+    },
+    {
+      "max_ms": 57.448726,
+      "median_ms": 57.448726,
+      "min_ms": 55.597165,
+      "name": "pointer.scan.level4_offset400",
+      "noise_pointers": 129024,
+      "paths": 1,
+      "pointers_indexed": 133058,
+      "samples": 2,
+      "truncated": false
+    },
+    {
+      "max_ms": 6.29381,
+      "median_ms": 4.178462,
+      "min_ms": 2.617801,
+      "name": "memory.read.chunk_4096",
+      "samples": 5,
+      "throughput_mib_s": 15316.640428942515
+    },
+    {
+      "max_ms": 3.547542,
+      "median_ms": 3.208995,
+      "min_ms": 3.13214,
+      "name": "memory.read.chunk_65536",
+      "samples": 5,
+      "throughput_mib_s": 19943.93883443259
+    },
+    {
+      "instructions": 2515452,
+      "instructions_per_second": 5296258.867157689,
+      "max_ms": 510.626215,
+      "median_ms": 474.948839,
+      "min_ms": 473.208599,
+      "name": "disasm.decode_format.x86",
+      "samples": 5,
+      "sink": 1361136670,
+      "throughput_mib_s": 16.84388935812359
+    },
+    {
+      "instructions": 2127397,
+      "instructions_per_second": 4456141.388718645,
+      "max_ms": 490.255478,
+      "median_ms": 477.407877,
+      "min_ms": 451.839494,
+      "name": "disasm.decode_format.x64",
+      "samples": 5,
+      "sink": 1141127045,
+      "throughput_mib_s": 16.75713365373292
+    }
+  ],
+  "schema": "cortex.baseline.v1"
+}

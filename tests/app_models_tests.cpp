@@ -2,6 +2,7 @@
 // runtime transport so they need no target process, pipe or Windows API.
 
 #include "application/actions_model.h"
+#include "application/context_model.h"
 #include "application/cheat_table.h"
 #include "application/hotkeys.h"
 #include "application/patches_model.h"
@@ -11,6 +12,8 @@
 #include "application/symbols_model.h"
 #include "application/watches_model.h"
 #include "services/runtime_transport.h"
+#include "context/context_api.h"
+#include "context/investigation_context.h"
 
 #include <nlohmann/json.hpp>
 
@@ -547,6 +550,133 @@ nop 5
         check(!actions.Clear(false, &error), "clear requires write permission");
         check(!transport.Called("actions_rollback") && !transport.Called("actions_clear"),
               "denied rollback and clear send nothing");
+    }
+
+    // Investigation context: the desktop's model against the runtime's real
+    // route semantics (context_api). The person's selection is what an agent
+    // reads, and an agent's observation is what the desktop shows.
+    {
+        context::InvestigationContext shared;
+        shared.SetIdentity({777, 9001, "x64", "fixture.exe", ""});
+        shared.UpdateModules({{"fixture.exe", 0x400000, 0x10000}});
+
+        FakeTransport transport;
+        transport.routeHandler = [&shared](const std::string& method, const std::string& path, const json& body) {
+            // The private channel is the desktop's, as mcp_pipe marks it.
+            const context::CallerInfo desktop{context::Caller::Desktop, "desktop"};
+            if (method == "POST" && path == "/context/select")
+                return context::api::SelectAddress(shared, desktop, body.dump()).body;
+            if (method == "POST" && path == "/context/share")
+                return context::api::ShareState(shared, desktop, body.dump()).body;
+            if (method == "POST" && path == "/context/observation")
+                return context::api::AddObservation(shared, desktop, body.dump()).body;
+            if (method == "GET" && path.rfind("/context?", 0) == 0) {
+                uint64_t expected = 0;
+                const auto at = path.find("expected_generation=");
+                if (at != std::string::npos) expected = std::stoull(path.substr(at + 20));
+                return context::api::GetContext(shared, 200, 0, expected, 0).body;
+            }
+            return json{{"ok", false}, {"error", "unexpected_route"}};
+        };
+        InvestigationContextModel model(transport);
+
+        std::string error;
+        check(!model.SelectAddress(0x401234, "health", {}, 9001, &error) && error == "runtime_not_connected",
+              "context selection never loads the runtime");
+        check(transport.injections == 0 && transport.routes.empty(), "no route without a runtime");
+
+        transport.loaded = transport.connected = true;
+        check(model.SelectAddress(0x401234, "health", "from the scan", 9001, &error), "desktop selects an address");
+        check(!transport.routes.empty() && transport.routes.back().path == "/context/select" &&
+              transport.routes.back().body.value("address", std::string()) == "0x401234" &&
+              transport.routes.back().body.value("expected_generation", uint64_t{0}) == 9001,
+              "selection carries the address and the target generation");
+        check(!model.LastSelectedEntry().empty(), "selection entry id kept");
+
+        // What an MCP client reads with context_get.
+        const json agentView = context::api::GetContext(shared, 100, 0, 9001, 0).body;
+        check(agentView["data"]["selections"]["desktop"]["location"]["expression"] == "fixture.exe+0x1234",
+              "agent sees the person's selection as module+RVA");
+
+        // The agent records an observation through context_observation_add.
+        const context::CallerInfo agent{context::Caller::Agent, "mcp-1"};
+        check(context::api::AddObservation(shared, agent,
+                  R"({"statement":"decrements on hit","kind":"correlation","address":"0x401234"})").status == 200,
+              "agent records an observation");
+        check(model.Refresh(9001, &error), "desktop refreshes the context");
+        check(model.Pid() == 777 && model.Generation() == 9001, "context identity");
+        check(model.Entries().size() == 2 && model.Entries()[0].kind == "selection" &&
+              model.Entries()[0].source == "desktop" && model.Entries()[1].source == "agent" &&
+              model.Entries()[1].session == "mcp-1" && model.Entries()[1].status == "client_assertion" &&
+              model.Entries()[1].location == "fixture.exe+0x1234" && model.Entries()[1].text == "decrements on hit",
+              "desktop shows the agent's observation with its provenance");
+
+        // A desktop still showing a process whose PID was reused.
+        check(!model.Refresh(9000, &error) && error == "stale_target_generation",
+              "a stale generation is refused");
+        check(!model.SelectAddress(0x401234, "x", {}, 9000, &error) && error == "stale_target_generation",
+              "a stale selection is refused");
+        // The desktop's scan results and debugger state, which the runtime
+        // cannot see by itself, reach the agent through the same context.
+        cortex::services::ScanState scan;
+        scan.type = cortex::services::ScanDataType::Int32;
+        scan.valueSize = 4;
+        scan.count = 3;
+        scan.addresses = {0x401000, 0x401010, 0x401020};
+        scan.values = {0x64, 0, 0, 0, 0x5a, 0, 0, 0, 0x01, 0, 0, 0};
+        cortex::services::ScanQuery query;
+        query.value = "100";
+        const json summary = InvestigationContextModel::ScanSummary(scan, query, 2);
+        check(summary["result_count"] == 3 && summary["results"].size() == 2 && summary["results_truncated"] == true &&
+              summary["results"][0]["value"] == "64000000" && summary["value_type"] == "4 Bytes" &&
+              summary["compare"] == "Exact value" && summary["value"] == "100",
+              "scan summary is bounded and carries values as hex bytes");
+        check(model.Share("scan", summary, 9001, &error), "desktop shares its scan");
+        const size_t routesAfterShare = transport.routes.size();
+        check(model.Share("scan", summary, 9001, &error) && transport.routes.size() == routesAfterShare,
+              "an unchanged share is not sent again");
+        const json shared_state = context::api::GetContext(shared, 10, 0, 9001, 0).body["data"]["shared_state"];
+        check(shared_state["scan"]["data"]["results"][0]["location"]["expression"] == "fixture.exe+0x1000" &&
+              shared_state["scan"]["provenance"]["source"] == "desktop",
+              "agent reads the person's scan results as module+RVA");
+
+        DebugBreakpointInfo breakpoint;
+        breakpoint.id = 4;
+        breakpoint.kind = "hw_write";
+        breakpoint.address = 0x401000;
+        breakpoint.hitCount = 2;
+        DebugPausedThread paused;
+        paused.threadId = 88;
+        paused.breakpointId = 4;
+        const json debuggerState = InvestigationContextModel::DebuggerSummary("windows", {breakpoint}, {paused});
+        check(debuggerState["breakpoints"][0]["hit_count"] == 2 && debuggerState["paused_threads"][0]["thread_id"] == 88,
+              "debugger summary carries hit counters and paused threads");
+        check(model.Share("debugger", debuggerState, 9001, &error), "desktop shares its debugger state");
+        check(!model.Share("debugger", InvestigationContextModel::DebuggerSummary("windows", {}, {}), 9000, &error) &&
+                  error == "stale_target_generation",
+              "debugger state of another process is refused");
+
+        // An artifact inspected in the Artifacts workspace, handed to agents.
+        const json artifact = {{"artifact", {{"name", "fixture.exe"}, {"sha256", std::string(64, 'a')}}}};
+        check(model.Observe("Inspected artifact fixture.exe", artifact,
+                            json::array({{{"source", "artifact"}, {"reference", "sha256:" + std::string(64, 'a')}}}), 9001,
+                            &error),
+              "desktop records an artifact observation");
+        check(transport.routes.back().path == "/context/observation" &&
+                  transport.routes.back().body.value("kind", std::string()) == "observation",
+              "artifact observation uses the observation route");
+        const json withArtifact = context::api::GetContext(shared, 100, 0, 9001, 0).body;
+        bool seen = false;
+        for (const auto& entry : withArtifact["data"]["entries"])
+            if (entry.value("statement", std::string()) == "Inspected artifact fixture.exe" &&
+                entry.value("provenance", json::object()).value("source", std::string()) == "desktop")
+                seen = true;
+        check(seen, "agents read the artifact observation with desktop provenance");
+        check(!model.Observe("stale", artifact, json::array(), 9000, &error) && error == "stale_target_generation",
+              "artifact observation for another process is refused");
+
+        model.Reset();
+        check(model.Entries().empty() && model.Pid() == 0, "context model reset");
     }
 
     if (failures) {

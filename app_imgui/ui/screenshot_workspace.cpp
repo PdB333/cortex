@@ -1,4 +1,5 @@
 #include "screenshot_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -202,7 +203,7 @@ bool ScreenshotWorkspace::UpdateTexture(UiContext& context, std::string& error) 
 void ScreenshotWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.screenshotModel) {
-        HintText("Select a process to capture its visual state.");
+        NoTargetHint(context, "A running process is needed to capture its visual state.");
         return;
     }
 

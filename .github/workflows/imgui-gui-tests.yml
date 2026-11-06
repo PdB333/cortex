@@ -15,6 +15,26 @@ on:
       - "runtime_helper/**"
       - "tests/gui/**"
       - "tests/security_no_writes_regression.py"
+      - "tests/context_isolation_e2e.py"
+      - "tests/robustness_e2e.py"
+      - "tests/live_baseline.py"
+      - "tests/manual_demo_e2e.py"
+      - "tests/artifact_mcp_e2e.py"
+      - "tests/dotnet_e2e.py"
+      - "tests/native_static_e2e.py"
+      - "tests/evidence_e2e.py"
+      - "tests/investigation_e2e.py"
+      - "tests/analysis_e2e.py"
+      - "tests/analysis_provider_tests.cpp"
+      - "core/providers/**"
+      - "core/live/**"
+      - "tests/live_e2e.py"
+      - "tests/cdp_tests.cpp"
+      - "core/investigation/**"
+      - "core/evidence/**"
+      - "core/analysis/**"
+      - "tests/fixtures/**"
+      - "core/artifacts/**"
       - "tests/fixtures/mcp_tool_risks.json"
       - "core/security/**"
       - "mcp_bridge/**"
@@ -32,6 +52,16 @@ concurrency:
   group: imgui-gui-suite-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
+# ccache for the MinGW builds: restored per job from the latest cache, so a
+# pull request recompiles only what changed. It hashes the preprocessed
+# source and the compiler, so a stale cache cannot change a build.
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPILERCHECK: content
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_MAXSIZE: 700M
+
 jobs:
   source-contracts:
     runs-on: ubuntu-latest
@@ -44,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           count="$(grep -c 'workspaces.Add<cortex::ui::' app_imgui/desktop_app.h)"
-          test "$count" -eq 31
+          test "$count" -eq 33
           grep -q 'GUI workspace suite' app_imgui/smoke_modes.cpp
           grep -q 'ValidateOpenWindowsDocked' app_imgui/ui/workspace_registry.h
           grep -q -- '--gui-cross-bitness-suite' app_imgui/cli.cpp
@@ -81,6 +111,162 @@ jobs:
             throw "GUI suite PowerShell parser reported $($errors.Count) error(s)"
           }
 
+  # Real external engines (step 8): Ghidra headless (pinned release, JDK 21)
+  # and ilspycmd on the test targets and the C# fixture. Slow (Ghidra's
+  # auto-analysis takes minutes per binary), so it has its own job.
+  analysis-engines:
+    needs:
+      - windows-release-full
+      - x86-fixture
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      GHIDRA_VERSION: "11.4.2"
+      GHIDRA_BUILD: "20250826"
+      VINEFLOWER_VERSION: "1.11.1"
+      VINEFLOWER_SHA1: "77767cdbc76d116c6d5e1565ec387e531085b9f4"
+      NETCOREDBG_RELEASE: "3.1.2-1054"
+      NETCOREDBG_SHA256: "09b4385fd556014a8a96df7a368d4937f4fc9e06f031365d41a288aabd2d78f9"
+      DEBUGPY_VERSION: "1.8.22"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-analysis-engines-${{ github.sha }}
+          restore-keys: ccache-analysis-engines-
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache Ghidra
+        id: ghidra-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ghidra
+          key: ghidra-${{ env.GHIDRA_VERSION }}-${{ env.GHIDRA_BUILD }}
+
+      - name: Download Ghidra (Apache-2.0, external process)
+        if: steps.ghidra-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/ghidra.zip"
+          $url = "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${env:GHIDRA_VERSION}_build/ghidra_${env:GHIDRA_VERSION}_PUBLIC_${env:GHIDRA_BUILD}.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP/ghidra" -Force
+          Remove-Item $zip
+
+      - name: Locate engines
+        shell: pwsh
+        run: |
+          $ghidra = (Get-ChildItem "$env:RUNNER_TEMP/ghidra" -Directory | Select-Object -First 1).FullName
+          if (-not (Test-Path "$ghidra/support/analyzeHeadless.bat")) { throw "Ghidra not found under $env:RUNNER_TEMP/ghidra" }
+          "GHIDRA_INSTALL_DIR=$ghidra" | Add-Content $env:GITHUB_ENV
+          dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path "$env:RUNNER_TEMP/ilspy"
+          if ($LASTEXITCODE -ne 0) { throw "ilspycmd install failed" }
+          "CORTEX_ILSPYCMD=$env:RUNNER_TEMP\ilspy\ilspycmd.exe" | Add-Content $env:GITHUB_ENV
+          # Vineflower (Apache-2.0) from Maven Central, checked against its SHA-1.
+          $jar = "$env:RUNNER_TEMP\vineflower-$env:VINEFLOWER_VERSION.jar"
+          Invoke-WebRequest -Uri "https://repo1.maven.org/maven2/org/vineflower/vineflower/$env:VINEFLOWER_VERSION/vineflower-$env:VINEFLOWER_VERSION.jar" -OutFile $jar
+          if ((Get-FileHash $jar -Algorithm SHA1).Hash.ToLower() -ne $env:VINEFLOWER_SHA1) { throw "vineflower hash mismatch" }
+          "CORTEX_VINEFLOWER=$jar" | Add-Content $env:GITHUB_ENV
+          # netcoredbg (MIT), the .NET debug adapter, checked against its SHA-256.
+          $zip = "$env:RUNNER_TEMP\netcoredbg.zip"
+          Invoke-WebRequest -Uri "https://github.com/Samsung/netcoredbg/releases/download/$env:NETCOREDBG_RELEASE/netcoredbg-win64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $env:NETCOREDBG_SHA256) { throw "netcoredbg hash mismatch" }
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\netcoredbg" -Force
+          "CORTEX_NETCOREDBG=$env:RUNNER_TEMP\netcoredbg\netcoredbg\netcoredbg.exe" | Add-Content $env:GITHUB_ENV
+          # debugpy (MIT) for the Python live fixture.
+          python -m pip install "debugpy==$env:DEBUGPY_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "debugpy install failed" }
+
+      - name: Build provider tests and the x64 target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S . -B build/analysis -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/analysis --target cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_target --parallel 2
+          ccache -s || true
+
+      - name: Download x86 GUI fixture
+        uses: actions/download-artifact@v4
+        with:
+          name: imgui-gui-x86-fixture
+          path: build/x86-fixture
+
+      - name: Provider tests with Ghidra and ILSpy (x64 and x86 targets)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_ENGINES: "1"
+        run: |
+          $tests = "build/analysis/cortex_analysis_provider_tests.exe"
+          & $tests "build/analysis/cortex_test_target_x64.exe" "tests/fixtures/dotnet/Cortex.Fixture.dll" "tests/fixtures/java/Cortex.Fixture.jar" "tests/fixtures/elf/actor.elf"
+          if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x64 target)" }
+          & $tests "build/x86-fixture/e2e/cortex_test_target_x86.exe"
+          if ($LASTEXITCODE -ne 0) { throw "provider tests failed (x86 target)" }
+
+      - name: CDP tests against a real node (Winsock client)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_NODE: "1"
+        run: |
+          build/analysis/cortex_cdp_tests.exe tests/fixtures/node-live/app.js
+          if ($LASTEXITCODE -ne 0) { throw "CDP tests failed" }
+
+      - name: DAP and JDWP tests (Python through debugpy, .NET through netcoredbg, Java through JDWP)
+        shell: pwsh
+        env:
+          CORTEX_REQUIRE_DEBUGPY: "1"
+          CORTEX_REQUIRE_NETCOREDBG: "1"
+          CORTEX_REQUIRE_JDWP: "1"
+        run: |
+          dotnet build tests/fixtures/dotnet-live/Cortex.LiveFixture.csproj -c Debug -o "$env:RUNNER_TEMP\dotnet-live"
+          if ($LASTEXITCODE -ne 0) { throw "building the .NET live fixture failed" }
+          $env:CORTEX_TEST_PYTHON = (Get-Command python).Source
+          build/analysis/cortex_dap_tests.exe tests/fixtures/python-live/app.py "$env:RUNNER_TEMP\dotnet-live\Cortex.LiveFixture.dll" "$env:CORTEX_NETCOREDBG" tests/fixtures/dotnet-live/Program.cs tests/fixtures/java-live/LiveApp.java
+          if ($LASTEXITCODE -ne 0) { throw "DAP tests failed" }
+
+      - name: Download tested portable bundle
+        if: success() || failure()
+        uses: actions/download-artifact@v4
+        with:
+          name: cortex-imgui-gui-tested-portable
+          path: stage/Cortex
+
+      - name: Ghidra and ILSpy through MCP
+        if: success() || failure()
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD" `
+            --ghidra-dir "$env:GHIDRA_INSTALL_DIR" --target "$bundle/e2e/cortex_test_target_x64.exe" `
+            --vineflower "$env:CORTEX_VINEFLOWER" --compare-out build/engines-comparison.json
+          if ($LASTEXITCODE -ne 0) { throw "analysis E2E failed" }
+
+      - name: Upload the Cortex vs Ghidra comparison
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-vs-ghidra-functions
+          path: build/engines-comparison.json
+          if-no-files-found: warn
+
   x86-fixture:
     runs-on: windows-2025
     timeout-minutes: 35
@@ -97,13 +283,22 @@ jobs:
             mingw-w64-i686-gcc
             mingw-w64-i686-cmake
             mingw-w64-i686-ninja
+            mingw-w64-i686-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-x86-fixture-${{ github.sha }}
+          restore-keys: ccache-x86-fixture-
 
       - name: Build x86 runtime and target
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build/gui-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake -S . -B build/gui-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-x86 --target core cortex_test_target --parallel 2
+          ccache -s || true
           c++ -std=c++17 -O2 -municode runtime_helper/main.cpp             -o build/gui-x86/cortex_runtime_helper.exe             -static -static-libgcc -static-libstdc++
 
       - name: Stage x86 GUI fixture
@@ -141,13 +336,22 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-debug-ui-${{ github.sha }}
+          restore-keys: ccache-windows-debug-ui-
 
       - name: Build Debug UI
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S app_imgui -B build/gui-debug -G Ninja             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+          cmake -S app_imgui -B build/gui-debug -G Ninja             -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-debug --parallel 2
+          ccache -s || true
 
       - name: Run Debug GUI CTest suite
         shell: msys2 {0}
@@ -172,24 +376,47 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-release-full-${{ github.sha }}
+          restore-keys: ccache-windows-release-full-
 
       - name: Build Release GUI
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S app_imgui -B build/gui-release -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake -S app_imgui -B build/gui-release -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/gui-release --parallel 2
+          ccache -s || true
 
       - name: Run targetless GUI CTest suite
         shell: msys2 {0}
         run: ctest --test-dir build/gui-release --output-on-failure
 
+      # Reference numbers for docs/cortex-2-roadmap.md (step 1.3). Shared
+      # runners are noisy: compare trends, not single runs.
+      - name: Record baseline benchmarks
+        shell: msys2 {0}
+        run: build/gui-release/cortex_baseline_bench.exe --json build/gui-release/cortex-baseline.json
+
+      - name: Upload baseline benchmarks
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-baseline-windows-x64
+          path: build/gui-release/cortex-baseline.json
+          if-no-files-found: error
+
       - name: Build x64 runtime and target
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          cmake -S . -B build/runtime-x64 -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake -S . -B build/runtime-x64 -G Ninja             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build/runtime-x64 --target core cortex_test_target --parallel 2
+          ccache -s || true
 
       - name: Download x86 GUI fixture
         uses: actions/download-artifact@v4
@@ -207,8 +434,20 @@ jobs:
           Copy-Item "build/x86-fixture/runtime/x86/cortex_core.dll" "$app/runtime/x86/cortex_core.dll" -Force
           Copy-Item "build/x86-fixture/runtime/x86/cortex_runtime_helper.exe" "$app/runtime/x86/cortex_runtime_helper.exe" -Force
 
+      # ILSpy (MIT) for the Engines tab of the GUI suite and the analysis
+      # E2E; pinned so results are reproducible.
+      - name: Install ilspycmd
+        shell: pwsh
+        run: |
+          dotnet tool install ilspycmd --version 9.1.0.7988 --tool-path "$env:RUNNER_TEMP/ilspy"
+          if ($LASTEXITCODE -ne 0) { throw "ilspycmd install failed" }
+          "CORTEX_ILSPYCMD=$env:RUNNER_TEMP\ilspy\ilspycmd.exe" | Add-Content $env:GITHUB_ENV
+
       - name: Run full GUI integration suite
         shell: pwsh
+        env:
+          CORTEX_GUI_SUITE_ILSPY: "1"
+          CORTEX_GUI_SUITE_NODE_FIXTURE: ${{ github.workspace }}\tests\fixtures\node-live\app.js
         run: |
           ./tests/gui/run_imgui_gui_suite.ps1             -CortexExe "build/gui-release/cortex.exe"             -X64Target "build/runtime-x64/cortex_test_target_x64.exe"             -X86Target "build/x86-fixture/e2e/cortex_test_target_x86.exe"             -ReportPath "build/gui-report-direct.json"
 
@@ -269,6 +508,147 @@ jobs:
             --target "$bundle/e2e/cortex_test_target_x86.exe"
           if ($LASTEXITCODE -ne 0) { $failed += "x86" }
           if ($failed.Count -gt 0) { throw "write-authority regression failed on: $($failed -join ', ')" }
+
+      - name: Investigation context isolation (two live targets)
+        shell: pwsh
+        run: |
+          # Two injected targets on one cortex.exe mcp: own pid/generation,
+          # no cross-talk, stale generations refused, reattach, one target
+          # killed. See tests/context_isolation_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/context_isolation_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "context isolation E2E failed on: $($failed -join ', ')" }
+
+      - name: Robustness (malformed requests, target killed mid-request, engines absent or failing)
+        shell: pwsh
+        run: |
+          # Every tool with wrongly typed arguments and malformed JSON-RPC:
+          # answered, nothing dies. A target killed during a request, and a
+          # debuggee killed with a hardware breakpoint: bounded errors, the
+          # server keeps serving new targets. Engines absent or failing mid-job.
+          # See tests/robustness_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/robustness_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "robustness E2E failed on: $($failed -join ', ')" }
+
+      - name: Manual workflow demo (scan, watch, find what writes, navigate, save)
+        shell: pwsh
+        run: |
+          # docs/demo-manual.md, scripted. Breakpoints need --allow-writes.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/manual_demo_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "manual workflow demo failed on: $($failed -join ', ')" }
+
+      - name: Static artifact analysis (inspect CLI and MCP artifact tools)
+        shell: pwsh
+        run: |
+          # No target process: PE fixtures, generated ASARs and the Electron
+          # fixture app, freshly packed by the real @electron/asar, inside a
+          # temporary --artifact-root. See tests/artifact_mcp_e2e.py.
+          npm install --prefix "$env:RUNNER_TEMP/asar" --no-audit --no-fund @electron/asar@4.3.1
+          if ($LASTEXITCODE -ne 0) { throw "npm install @electron/asar failed" }
+          node tests/fixtures/make_electron_fixture.mjs "$env:RUNNER_TEMP/asar/node_modules" --asar-only "$env:RUNNER_TEMP/electron-app.asar"
+          if ($LASTEXITCODE -ne 0) { throw "packing the Electron fixture failed" }
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/artifact_mcp_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe" `
+              --electron-asar "$env:RUNNER_TEMP/electron-app.asar"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "artifact E2E failed on: $($failed -join ', ')" }
+
+      - name: .NET metadata and CIL against System.Reflection.Metadata
+        shell: pwsh
+        run: |
+          # A fresh C# build and fresh oracle answers from this runner's SDK,
+          # then the committed fixture. See tests/dotnet_e2e.py.
+          python tests/fixtures/dotnet/make_dotnet_fixture.py --out "$env:RUNNER_TEMP/dotnet"
+          if ($LASTEXITCODE -ne 0) { throw "building the .NET fixture failed" }
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/dotnet_e2e.py --cortex "$bundle/cortex.exe" --fixtures "$env:RUNNER_TEMP/dotnet"
+          if ($LASTEXITCODE -ne 0) { throw ".NET E2E failed on the fresh build" }
+          python tests/dotnet_e2e.py --cortex "$bundle/cortex.exe"
+          if ($LASTEXITCODE -ne 0) { throw ".NET E2E failed on the committed fixture" }
+
+      - name: Native code analysis against objdump (catalog, xrefs, CFG, annotations)
+        shell: pwsh
+        run: |
+          # objdump comes from MSYS2's MinGW binutils, an independent
+          # disassembler. See tests/native_static_e2e.py.
+          $objdump = "$(msys2 -c 'cygpath -w /mingw64/bin/objdump.exe')".Trim()
+          if (-not (Test-Path $objdump)) { throw "objdump not found at '$objdump'" }
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/native_static_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe" `
+              --objdump $objdump
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "native static E2E failed on: $($failed -join ', ')" }
+
+      - name: Evidence records (class rules, restart without a process, export, compare)
+        shell: pwsh
+        run: |
+          # See tests/evidence_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          $failed = @()
+          foreach ($arch in @("x64", "x86")) {
+            python tests/evidence_e2e.py `
+              --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe"
+            if ($LASTEXITCODE -ne 0) { $failed += $arch }
+          }
+          if ($failed.Count -gt 0) { throw "evidence E2E failed on: $($failed -join ', ')" }
+
+      - name: Investigations (plan, server-run static steps, person approval through the CLI)
+        shell: pwsh
+        run: |
+          # See tests/investigation_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/investigation_e2e.py `
+            --cortex "$bundle/cortex.exe" `
+            --target "$bundle/e2e/cortex_test_target_x64.exe"
+          if ($LASTEXITCODE -ne 0) { throw "investigation E2E failed" }
+
+      - name: ILSpy through MCP (rebuilt decompiled project compared with the original)
+        shell: pwsh
+        run: |
+          # Ghidra runs in the analysis-engines job. See tests/analysis_e2e.py.
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/analysis_e2e.py --cortex "$bundle/cortex.exe" --ilspycmd "$env:CORTEX_ILSPYCMD"
+          if ($LASTEXITCODE -ne 0) { throw "analysis E2E (ILSpy) failed" }
+
+      - name: Node.js live through CDP (log breakpoints, console, write authority)
+        shell: pwsh
+        run: |
+          # See tests/live_e2e.py; node is preinstalled on the runner.
+          node --version
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          python tests/live_e2e.py --cortex "$bundle/cortex.exe" --node node
+          if ($LASTEXITCODE -ne 0) { throw "live E2E (CDP) failed" }
 
       - name: Which tool stalls the target? (diagnostic, only after a failure)
         if: failure()
@@ -331,6 +711,27 @@ jobs:
           } finally {
             Stop-Process -Id $target.Id -Force -ErrorAction SilentlyContinue
           }
+
+      # Step 9: live baselines on this Windows runner (scan time on a real
+      # process, MCP round-trip latency). Shared runners are noisy: compare
+      # trends, not single runs. See tests/live_baseline.py.
+      - name: Record live baselines (x64 and x86 targets)
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "stage/Cortex").Path
+          New-Item -ItemType Directory -Force -Path build/live-baseline | Out-Null
+          foreach ($arch in @("x64", "x86")) {
+            python tests/live_baseline.py --cortex "$bundle/cortex.exe" `
+              --target "$bundle/e2e/cortex_test_target_$arch.exe" --out "build/live-baseline/live-$arch.json"
+            if ($LASTEXITCODE -ne 0) { throw "live baseline failed on $arch" }
+          }
+
+      - name: Upload live baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-live-baseline-windows
+          path: build/live-baseline
+          if-no-files-found: error
 
       - name: Publish GUI test summary
         if: always()

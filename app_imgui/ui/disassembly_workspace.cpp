@@ -1,4 +1,5 @@
 #include "disassembly_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -99,7 +100,7 @@ void DisassemblyWorkspace::Analyze(
 void DisassemblyWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to disassemble memory.");
+        NoTargetHint(context, "A running process is needed to disassemble memory.");
         return;
     }
 

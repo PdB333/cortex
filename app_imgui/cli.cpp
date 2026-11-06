@@ -3,6 +3,7 @@
 
 #include "desktop_app.h"
 #include "../host/cli_entry_points.h"
+#include "../core/version.h"
 
 
 namespace cortex::desktop {
@@ -47,10 +48,10 @@ static int ForwardCli(CliEntryPoint entry, const char* programName,
 
 static void PrintCliUsage(FILE* out = stdout) {
     std::fputs(
-        "Cortex lightweight migration preview\n\n"
+        "Cortex: memory scanner, debugger, reverse engineering and MCP server\n\n"
         "Usage:\n"
         "  cortex                         Launch the ImGui desktop UI\n"
-        "  cortex --version               Print preview version\n"
+        "  cortex --version               Print the Cortex version\n"
         "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
         "  cortex --gui-workspace-suite   Render all workspaces/presets and validate docking\n"
         "  cortex --gui-attached-suite    Exercise GUI against a live --pid target\n"
@@ -65,7 +66,12 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex probe --pid <pid>       Inspect target/runtime health\n"
         "  cortex diagnose --pid <pid>    Watch crash/hang diagnostics\n"
         "  cortex analyze <directory>     Analyze a crash directory\n"
-        "  cortex symbolize [options]     Resolve PE symbols offline\n",
+        "  cortex symbolize [options]     Resolve PE symbols offline\n"
+        "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR, JS, .NET, ZIP)\n"
+        "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n"
+        "  cortex investigation ...       List, show, report, approve or reject investigation steps\n"
+        "  cortex provider list|run ...   External engines: Ghidra (native), ILSpy (C#), Vineflower (Java)\n"
+        "  cortex live targets|scripts|watch  Live debuggers (CDP, debugpy, netcoredbg, JDWP): log breakpoints\n",
         out);
 }
 
@@ -78,7 +84,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
         return 0;
     }
     if (command == "--version" || command == "version") {
-        std::puts("cortex 1.0.1");
+        std::printf("cortex %s\n", cortex::kVersion);
         return 0;
     }
 #if CORTEX_WITH_TEST_MODES
@@ -109,6 +115,11 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "mcp") return ForwardCli(CortexMcpMain, "cortex mcp", args, 2);
     if (command == "inject") return ForwardCli(CortexInjectMain, "cortex inject", args, 2);
     if (command == "probe") return ForwardCli(CortexProbeMain, "cortex probe", args, 2);
+    if (command == "inspect") return ForwardCli(CortexInspectMain, "cortex inspect", args, 2);
+    if (command == "evidence") return ForwardCli(CortexEvidenceMain, "cortex evidence", args, 2);
+    if (command == "investigation") return ForwardCli(CortexInvestigationMain, "cortex investigation", args, 2);
+    if (command == "provider") return ForwardCli(CortexProviderMain, "cortex provider", args, 2);
+    if (command == "live") return ForwardCli(CortexLiveMain, "cortex live", args, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
     if (command == "analyze" || command == "analyse") {

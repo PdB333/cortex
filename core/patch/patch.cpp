@@ -71,13 +71,57 @@ int Detour(uintptr_t address, uintptr_t target, int jmpSize, std::string& outErr
     return id;
 }
 
-bool Revert(int id) {
+const char* RevertResultName(RevertResult result) {
+    switch (result) {
+        case RevertResult::Reverted: return "";
+        case RevertResult::UnknownPatch: return "unknown_patch";
+        case RevertResult::TargetChanged: return "patch_target_changed";
+        case RevertResult::OverlapsNewerPatch: return "patch_overlaps_newer";
+        case RevertResult::WriteFailed: return "patch_write_failed";
+    }
+    return "patch_revert_failed";
+}
+
+RevertResult RevertChecked(int id, std::string* detail) {
+    if (detail) detail->clear();
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_patches.find(id);
-    if (it == g_patches.end()) return false;
-    memory::WriteBytes(it->second.address, it->second.originalBytes);
+    if (it == g_patches.end()) return RevertResult::UnknownPatch;
+    const Entry& entry = it->second;
+    const uintptr_t begin = entry.address;
+    const uintptr_t end = entry.address + entry.newBytes.size();
+
+    // A newer patch over the same bytes recorded *our* bytes as its
+    // originals; restoring ours first would leave its revert writing them
+    // back. Patches must be reverted newest first where they overlap.
+    for (auto newer = std::next(it); newer != g_patches.end(); ++newer) {
+        const uintptr_t otherBegin = newer->second.address;
+        const uintptr_t otherEnd = otherBegin + newer->second.newBytes.size();
+        if (otherBegin < end && begin < otherEnd) {
+            if (detail) *detail = std::to_string(newer->first);
+            return RevertResult::OverlapsNewerPatch;
+        }
+    }
+
+    std::vector<uint8_t> current;
+    if (!memory::ReadBytes(entry.address, entry.newBytes.size(), current)) {
+        if (detail) *detail = "patched bytes are no longer readable";
+        return RevertResult::TargetChanged;
+    }
+    if (current != entry.newBytes) {
+        if (detail) *detail = "patched bytes were changed after the patch was applied";
+        return RevertResult::TargetChanged;
+    }
+    if (!memory::WriteBytes(entry.address, entry.originalBytes)) {
+        if (detail) *detail = "original bytes could not be written";
+        return RevertResult::WriteFailed;
+    }
     g_patches.erase(it);
-    return true;
+    return RevertResult::Reverted;
+}
+
+bool Revert(int id) {
+    return RevertChecked(id) == RevertResult::Reverted;
 }
 
 std::vector<PatchInfo> List() {

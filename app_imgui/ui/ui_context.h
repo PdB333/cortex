@@ -5,6 +5,7 @@
 
 #include "application/actions_model.h"
 #include "application/address_expression.h"
+#include "application/context_model.h"
 #include "application/ai_activity_model.h"
 #include "application/diagnostics_model.h"
 #include "application/input_model.h"
@@ -69,6 +70,13 @@ struct AccessFinderRequest {
     bool instruction = false;
 };
 
+// Identifies one process lifetime: the target id plus its generation. A
+// workspace that keeps per-target state compares keys, not ids, so a reused
+// PID (same id, new generation) resets it like any other new process.
+inline std::string TargetKey(const target::TargetDescriptor& target) {
+    return target.id + "@" + std::to_string(target.generation);
+}
+
 struct UiContext {
     target::SessionManager* sessions = nullptr;
     services::MemoryService* memory = nullptr;
@@ -94,6 +102,7 @@ struct UiContext {
     application::InputModel* inputModel = nullptr;
     application::ScreenshotModel* screenshotModel = nullptr;
     application::RuntimeEventsModel* runtimeEventsModel = nullptr;
+    application::InvestigationContextModel* contextModel = nullptr;
     application::PatchesModel* patchesModel = nullptr;
     void* nativeRenderDevice = nullptr;
 
@@ -128,11 +137,16 @@ struct UiContext {
     std::vector<PendingAddressEntry> pendingAddresses;
     std::vector<AccessFinderRequest> accessFinderRequests;
     std::string toolsTabRequest;
-    std::string status = "Select a process to begin";
+    std::string status = "Open a file, select a process or connect an AI agent to begin";
 
     // Lightweight cross-workspace navigation. A workspace can request another
     // workspace and optionally pass one address without depending on its class.
     std::string requestWorkspace;
+    // Whether inspected files join the persisted recent files list (the
+    // interactive desktop only).
+    bool rememberRecentFiles = false;
+    // A layout (WorkspacePreset value) to apply after this frame, or -1.
+    int requestPreset = -1;
     // Runs a long runtime operation (loading the runtime, captures, diffs,
     // exports) away from the UI thread. While it runs the window stays
     // responsive and shows progress instead of freezing; no workspace is

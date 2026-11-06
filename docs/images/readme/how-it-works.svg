@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" font-family="'Segoe UI', 'DejaVu Sans', Arial, sans-serif">
+  <title>How Cortex fits together</title>
+  <desc>Three front ends (desktop, MCP server, command line) share one engine. The engine reads live processes through the in-target runtime, reads files through built-in parsers, and runs optional external engines and live debug providers as separate processes.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5eead4"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1115"/>
+      <stop offset="1" stop-color="#101a1f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="560" rx="18" fill="url(#bg)"/>
+
+  <!-- Column titles -->
+  <g font-size="13" fill="#7a8a93" letter-spacing="2">
+    <text x="60" y="52">YOU OR YOUR AGENT</text>
+    <text x="420" y="52">ONE ENGINE</text>
+    <text x="820" y="52">WHAT IT LOOKS AT</text>
+  </g>
+
+  <!-- Front ends -->
+  <g font-size="17" fill="#e6edf1">
+    <rect x="40" y="80" width="300" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="62" y="116" font-weight="700">Desktop</text>
+    <text x="62" y="142" font-size="14" fill="#9fb0b8">Dear ImGui · Direct3D 11</text>
+    <text x="62" y="162" font-size="14" fill="#9fb0b8">scan, debug, RE, AI Activity</text>
+
+    <rect x="40" y="200" width="300" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="62" y="236" font-weight="700">MCP server</text>
+    <text x="62" y="262" font-size="14" fill="#9fb0b8">cortex.exe mcp (stdio)</text>
+    <text x="62" y="282" font-size="14" fill="#9fb0b8">read-only unless --allow-writes</text>
+
+    <rect x="40" y="320" width="300" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="62" y="356" font-weight="700">Command line</text>
+    <text x="62" y="382" font-size="14" fill="#9fb0b8">inspect · provider · live</text>
+    <text x="62" y="402" font-size="14" fill="#9fb0b8">evidence · investigation</text>
+  </g>
+
+  <!-- Engine -->
+  <rect x="400" y="80" width="340" height="336" rx="14" fill="#0f2a2a" stroke="#0f766e" stroke-width="2"/>
+  <g font-size="17" fill="#e6edf1">
+    <text x="424" y="116" font-weight="700">Shared services</text>
+    <g font-size="14" fill="#b7c6cc">
+      <text x="424" y="150">• targets, sessions, process generations</text>
+      <text x="424" y="178">• write authority + mutation_permission</text>
+      <text x="424" y="206">• investigation context and evidence</text>
+      <text x="424" y="234">• projects, knowledge, reports</text>
+      <text x="424" y="262">• analysis jobs: queue, cancel, cache</text>
+      <text x="424" y="290">• module + RVA, checked by SHA-256</text>
+    </g>
+    <rect x="424" y="320" width="292" height="72" rx="10" fill="#0b1f20" stroke="#14524d"/>
+    <text x="440" y="350" font-size="14" fill="#5eead4" font-weight="700">Every result carries provenance,</text>
+    <text x="440" y="372" font-size="14" fill="#5eead4" font-weight="700">a status and its limits.</text>
+  </g>
+
+  <!-- Targets -->
+  <g font-size="17" fill="#e6edf1">
+    <rect x="800" y="80" width="360" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="822" y="116" font-weight="700">Running processes (x86 / x64)</text>
+    <text x="822" y="142" font-size="14" fill="#9fb0b8">cortex_core.dll over an authenticated pipe</text>
+    <text x="822" y="162" font-size="14" fill="#9fb0b8">memory, debugger, watches, traces</text>
+
+    <rect x="800" y="200" width="360" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="822" y="236" font-weight="700">Files, no process needed</text>
+    <text x="822" y="262" font-size="14" fill="#9fb0b8">PE · .NET/CIL · ASAR · JS/TS · ZIP</text>
+    <text x="822" y="282" font-size="14" fill="#9fb0b8">built-in, bounds-checked parsers</text>
+
+    <rect x="800" y="320" width="360" height="96" rx="12" fill="#13232a" stroke="#1f3b44"/>
+    <text x="822" y="356" font-weight="700">Optional engines and debuggers</text>
+    <text x="822" y="382" font-size="14" fill="#9fb0b8">Ghidra · ILSpy · Vineflower (separate processes)</text>
+    <text x="822" y="402" font-size="14" fill="#9fb0b8">CDP · debugpy · netcoredbg · JDWP (127.0.0.1)</text>
+  </g>
+
+  <!-- Arrows -->
+  <g stroke="#5eead4" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <path d="M340 128 C370 128 370 180 398 180"/>
+    <path d="M340 248 L398 248"/>
+    <path d="M340 368 C370 368 370 316 398 316"/>
+    <path d="M740 180 C770 180 770 128 798 128"/>
+    <path d="M740 248 L798 248"/>
+    <path d="M740 316 C770 316 770 368 798 368"/>
+  </g>
+
+  <!-- Footer -->
+  <rect x="40" y="452" width="1120" height="76" rx="12" fill="#1c1410" stroke="#6b3d1f"/>
+  <text x="62" y="484" font-size="15" fill="#fbbf77" font-weight="700">Only software you own or are authorized to analyze.</text>
+  <text x="62" y="508" font-size="14" fill="#d9b48f">Reading needs no permission. Changing a target needs the operator's write authority and an explicit request. No anti-cheat, DRM or access-control bypass.</text>
+</svg>

@@ -17,3 +17,4 @@ cortex_host.token
 .vscode/
 *.user
 Thumbs.db
+__pycache__/

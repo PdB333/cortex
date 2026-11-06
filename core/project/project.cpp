@@ -2,6 +2,7 @@
 #include "knowledge.h"
 #include "../memory/memory.h"
 #include "../process/modules.h"
+#include "../events/events.h"
 
 #include <windows.h>
 #include <mutex>
@@ -19,6 +20,8 @@ namespace {
 std::mutex g_mutex;
 json g_data;
 std::string g_path;
+json g_loadStatus = json::object();
+bool g_savesBlocked = false;
 bool g_initialized = false;
 
 HMODULE OwnModule() {
@@ -71,6 +74,7 @@ bool WriteFileDurably(const std::string& path, std::string_view data) {
 }
 
 bool SaveToDisk() {
+    if (g_savesBlocked) return false;
     const std::string tmp = g_path + ".tmp";
     const std::string backup = g_path + ".bak";
     const std::string serialized = g_data.dump(2);
@@ -97,7 +101,42 @@ json DefaultSkeleton() {
 bool LoadJsonFile(const std::string& path, json& out) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
-    try { f >> out; return out.is_object(); } catch (...) { return false; }
+    try {
+        json parsed;
+        f >> parsed;
+        if (!parsed.is_object()) return false;
+        out = std::move(parsed);
+        return true;
+    } catch (...) { return false; }
+}
+
+bool Exists(const std::string& path) {
+    return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// Copies a damaged project file to `<path>.damaged-<FILETIME>` and returns
+// the copy's path, or an empty string if it could not be copied.
+std::string Quarantine(const std::string& path) {
+    FILETIME now{};
+    GetSystemTimeAsFileTime(&now);
+    const uint64_t stamp = (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        const std::string copy = path + ".damaged-" + std::to_string(stamp + attempt);
+        if (CopyFileA(path.c_str(), copy.c_str(), TRUE)) return copy;
+        if (GetLastError() != ERROR_FILE_EXISTS) break;
+    }
+    return {};
+}
+
+// The desktop refreshes its project view on these; the record itself is
+// read back through project_knowledge_get, so only identifiers travel.
+void PublishKnowledgeEvent(const char* type, const json& record, const char* change) {
+    events::Publish(type, json{{"id", record.value("id", std::string())},
+                               {"revision", record.value("revision", 0)},
+                               {"status", record.value("status", std::string())},
+                               {"change", change},
+                               {"pid", GetCurrentProcessId()}}
+                              .dump());
 }
 
 void MigrateAndRepair(json& data) {
@@ -133,12 +172,51 @@ void Init(const std::string& directory) {
 
     g_path = (std::filesystem::path(projectsDir) / (ProcessBaseName() + ".json")).string();
 
-    if (!LoadJsonFile(g_path, g_data) && !LoadJsonFile(g_path + ".bak", g_data)) {
-        g_data = DefaultSkeleton();
+    // A project file that does not parse is never overwritten: its bytes are
+    // copied aside first, so a crash, a disk error or a hand edit cannot cost
+    // the investigation records it holds.
+    const std::string backupPath = g_path + ".bak";
+    std::string source = "primary";
+    json quarantined = json::array();
+    if (!LoadJsonFile(g_path, g_data)) {
+        source = "new";
+        if (Exists(g_path)) {
+            const std::string copy = Quarantine(g_path);
+            if (!copy.empty()) {
+                quarantined.push_back(copy);
+                // Without the damaged primary, the next save writes a fresh
+                // file and keeps the backup instead of rotating the damaged
+                // bytes into it.
+                DeleteFileA(g_path.c_str());
+            } else {
+                // Unreadable and not copied (locked, access denied): saving
+                // would replace bytes nobody has kept.
+                g_savesBlocked = true;
+            }
+            source = "defaults_after_damage";
+        }
+        if (LoadJsonFile(backupPath, g_data)) {
+            source = "backup";
+        } else {
+            if (Exists(backupPath)) {
+                const std::string copy = Quarantine(backupPath);
+                if (!copy.empty()) quarantined.push_back(copy);
+                source = "defaults_after_damage";
+            }
+            g_data = DefaultSkeleton();
+        }
     }
     MigrateAndRepair(g_data);
+    g_loadStatus = {{"path", g_path}, {"source", source}, {"quarantined", quarantined},
+                    {"saves_blocked", g_savesBlocked},
+                    {"schema_version", g_data.value("schema_version", 0)}};
 
     g_initialized = true;
+}
+
+json LoadStatus() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_loadStatus;
 }
 
 json GetAll() {
@@ -319,6 +397,7 @@ bool PutKnowledge(const json& input, json& stored, std::string& error) {
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::KnowledgeUpdated, stored, "put");
     return true;
 }
 
@@ -348,6 +427,7 @@ bool AppendKnowledgeCodeReferences(const std::string& id, int expectedRevision,
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::EvidenceCreated, stored, "code_references");
     return true;
 }
 
@@ -369,6 +449,7 @@ bool RecordKnowledgeVerification(const std::string& id, int expectedRevision,
         return false;
     }
     stored = g_data["knowledge"].at(id);
+    PublishKnowledgeEvent(events::types::EvidenceCreated, stored, "verification");
     return true;
 }
 

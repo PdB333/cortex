@@ -6,6 +6,8 @@
 #include "mcp_contract.h"
 #include "../action/action.h"
 #include "../security/denial_log.h"
+#include "../context/investigation_context.h"
+#include "../events/events.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -340,6 +342,65 @@ json DispatchPrimitive(const json& entry, const json& arguments) {
     return Dispatch(method, rendered.path, BodyPayload(arguments));
 }
 
+bool ChangesState(mcp_contract::ToolRisk risk) {
+    return risk == mcp_contract::ToolRisk::State || risk == mcp_contract::ToolRisk::Control ||
+           risk == mcp_contract::ToolRisk::Mutate || risk == mcp_contract::ToolRisk::NativeCall;
+}
+
+// agent.action_* event data: who asked for what, never the argument values
+// (they can be large or sensitive), only their names.
+json ActionEventData(const std::string& tool, mcp_contract::ToolRisk risk, const json& arguments,
+                     const context::CallerInfo& caller) {
+    json keys = json::array();
+    if (arguments.is_object())
+        for (auto it = arguments.begin(); it != arguments.end() && keys.size() < 32; ++it) keys.push_back(it.key());
+    json data = context::Global().TargetJson();
+    data["tool"] = tool;
+    data["risk"] = mcp_contract::RiskName(risk);
+    data["source"] = context::CallerName(caller.caller);
+    data["session"] = caller.session;
+    data["argument_names"] = std::move(keys);
+    return data;
+}
+
+// Every primitive call goes through here: it lands in the investigation
+// context's operation history, and a state-changing call by an agent is
+// announced as agent.action_requested, then agent.action_completed or
+// agent.action_failed, so the person sees it in the desktop as it happens.
+json RecordedDispatch(const std::string& tool, mcp_contract::ToolRisk risk, const json& manifest,
+                      const json& arguments, bool okFalseIsError) {
+    const context::CallerInfo caller = context::CurrentCaller();
+    const bool announce = caller.caller == context::Caller::Agent && ChangesState(risk);
+    if (announce) events::Publish(events::types::AgentActionRequested, ActionEventData(tool, risk, arguments, caller).dump());
+    const ULONGLONG started = GetTickCount64();
+    json output = DispatchPrimitive(manifest, arguments);
+    const uint64_t duration = GetTickCount64() - started;
+    const bool failed = IsToolError(output, okFalseIsError);
+    if (announce) {
+        json data = ActionEventData(tool, risk, arguments, caller);
+        data["duration_ms"] = duration;
+        if (failed) {
+            const json& nested = output.contains("result") && output["result"].is_object() ? output["result"] : output;
+            data["error"] = nested.value("error", std::string("tool_failed"));
+        }
+        events::Publish(failed ? events::types::AgentActionFailed : events::types::AgentActionCompleted, data.dump());
+    }
+    context::Global().RecordOperation(caller, tool, mcp_contract::RiskName(risk), failed ? "failed" : "completed",
+                                      duration);
+    return output;
+}
+
+// A call refused before dispatch (authority, hidden tool) is history too.
+void RecordRefusal(const std::string& tool, mcp_contract::ToolRisk risk, const json& arguments, const json& error) {
+    const context::CallerInfo caller = context::CurrentCaller();
+    if (caller.caller == context::Caller::Agent && ChangesState(risk)) {
+        json data = ActionEventData(tool, risk, arguments, caller);
+        data["error"] = error.value("error", std::string("refused"));
+        events::Publish(events::types::AgentActionFailed, data.dump());
+    }
+    context::Global().RecordOperation(caller, tool, mcp_contract::RiskName(risk), "refused", 0);
+}
+
 bool ResolveReferences(json& value, const json& evidence, std::string& error) {
     if (value.is_object() && value.contains("$from_step")) {
         if (!value["$from_step"].is_number_integer()) {
@@ -542,7 +603,8 @@ json ExecuteSemantic(const std::string& wanted,
             }
         }
 
-        json output = DispatchPrimitive(steps[index].manifest, resolvedArguments);
+        json output = RecordedDispatch(steps[index].canonicalName, steps[index].risk, steps[index].manifest,
+                                       resolvedArguments, steps[index].manifest.value("ok_false_is_error", true));
         evidence.push_back({
             {"step", index},
             {"tool", steps[index].canonicalName},
@@ -617,10 +679,17 @@ json CallToolScoped(const std::string& wanted,
         manifest.value("name", wanted),
         manifest.value("method", std::string("GET")),
         manifest.value("path", std::string()));
-    const Gate gate = CheckAuthority(manifest.value("name", wanted), risk, arguments,
+    const std::string canonical = manifest.value("name", wanted);
+    const Gate gate = CheckAuthority(canonical, risk, arguments,
                                      arguments.is_object() && arguments.value("mutation_permission", false), authority);
-    if (!gate.allowed) return ToolCallPayload(gate.error);
-    return ToolCallPayload(DispatchPrimitive(manifest, arguments), manifest.value("ok_false_is_error", true));
+    if (!gate.allowed) {
+        RecordRefusal(canonical, EffectiveRiskForCall(canonical, risk, arguments), arguments, gate.error);
+        return ToolCallPayload(gate.error);
+    }
+    const bool okFalseIsError = manifest.value("ok_false_is_error", true);
+    return ToolCallPayload(RecordedDispatch(canonical, EffectiveRiskForCall(canonical, risk, arguments), manifest,
+                                            arguments, okFalseIsError),
+                           okFalseIsError);
 }
 
 } // namespace

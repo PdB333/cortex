@@ -56,6 +56,35 @@ add_executable(cortex_host
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
+    ${CORTEX_ROOT}/core/artifacts/artifact.cpp
+    ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
+    ${CORTEX_ROOT}/core/artifacts/js_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/source_map.cpp
+    ${CORTEX_ROOT}/core/artifacts/inflate.cpp
+    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/dotnet_metadata.cpp
+    ${CORTEX_ROOT}/core/artifacts/cil.cpp
+    ${CORTEX_ROOT}/core/artifacts/dotnet_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/native_code.cpp
+    ${CORTEX_ROOT}/core/artifacts/annotations.cpp
+    ${CORTEX_ROOT}/core/evidence/evidence.cpp
+    ${CORTEX_ROOT}/core/investigation/investigation.cpp
+    ${CORTEX_ROOT}/core/target/process_tree.cpp
+    ${CORTEX_ROOT}/core/providers/process_runner.cpp
+    ${CORTEX_ROOT}/core/providers/analysis_provider.cpp
+    ${CORTEX_ROOT}/core/providers/ghidra_provider.cpp
+    ${CORTEX_ROOT}/core/providers/ilspy_provider.cpp
+    ${CORTEX_ROOT}/core/providers/vineflower_provider.cpp
+    ${CORTEX_ROOT}/core/live/websocket.cpp
+    ${CORTEX_ROOT}/core/live/protocol_frames.cpp
+    ${CORTEX_ROOT}/core/live/cdp.cpp
+    ${CORTEX_ROOT}/core/live/dap.cpp
+    ${CORTEX_ROOT}/core/live/jdwp.cpp
+    ${CORTEX_ROOT}/core/live/live_service.cpp
     ${CORTEX_DIAG_SOURCE}
     ${CORTEX_SYMBOLIZE_SOURCE}
     ${CORTEX_ROOT}/host/diagnostics/external_host.cpp

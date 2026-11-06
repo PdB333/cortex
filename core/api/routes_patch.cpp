@@ -206,9 +206,18 @@ void RegisterPatchRoutes(httplib::Server& svr) {
     svr.Delete(R"(/patch/(\d+))", [](const httplib::Request& req, httplib::Response& res) {
         auto mutation = action::LockMutations();
         int id = std::stoi(req.matches[1]);
-        bool ok = patch::Revert(id);
-        res.status = ok ? 200 : 404;
-        res.set_content(json{{"ok", ok}}.dump(), "application/json");
+        std::string detail;
+        const auto result = patch::RevertChecked(id, &detail);
+        const bool ok = result == patch::RevertResult::Reverted;
+        json out{{"ok", ok}};
+        if (!ok) {
+            out["error"] = patch::RevertResultName(result);
+            if (!detail.empty()) out["cause"] = detail;
+        }
+        res.status = ok ? 200
+                        : result == patch::RevertResult::UnknownPatch ? 404
+                        : result == patch::RevertResult::WriteFailed ? 500 : 409;
+        res.set_content(out.dump(), "application/json");
         overlay::LogApiCall("DELETE /patch/" + std::to_string(id));
     });
 

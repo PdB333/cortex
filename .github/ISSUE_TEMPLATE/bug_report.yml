@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in Cortex does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems go through SECURITY.md, not here.
+        Only report problems seen on software you own or are authorized to analyze.
+  - type: input
+    id: version
+    attributes:
+      label: Cortex version or commit
+      placeholder: v2.0.0, or the commit / CI artifact
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Windows version and target architecture
+      placeholder: Windows 11 24H2, target x86
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Desktop (scan, addresses, memory viewer)
+        - Debugger / breakpoints / traces
+        - Static analysis (inspect, artifacts)
+        - External engines (Ghidra, ILSpy, Vineflower)
+        - Live providers (CDP, debugpy, netcoredbg, JDWP)
+        - MCP server / agents
+        - Evidence, investigations, projects
+        - Install / portable bundle
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Ideally against the repository's test target or fixtures.
+      placeholder: |
+        1. cortex.exe mcp --pid ...
+        2. call ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Status line, MCP replies, cortex_denied_mutations.jsonl, cortex_debugger_events.jsonl. Remove private data first.
+      render: text

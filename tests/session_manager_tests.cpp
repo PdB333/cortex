@@ -1,8 +1,10 @@
 #include "target/session_manager.h"
 
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -129,6 +131,55 @@ int main() {
     const auto recycledSession = sessions.Active();
     check(recycledSession && recycledSession->Target().generation == 1002,
           "active session carries the new process generation");
+
+    // A target snapshot is a value: detaching the session afterwards must not
+    // invalidate what a caller already holds.
+    const auto snapshot = sessions.ActiveTarget();
+    const auto capabilities = sessions.ActiveCapabilities();
+    check(snapshot && snapshot->generation == 1002, "active target snapshot");
+    check(capabilities && capabilities->Has(Capability::MemoryRead), "active capabilities snapshot");
+    sessions.Detach(recycled.id);
+    check(snapshot && snapshot->name == "first.exe" && snapshot->processId == 101,
+          "snapshot outlives the detached session");
+    check(!sessions.ActiveTarget() && !sessions.ActiveCapabilities(), "no snapshot without an active target");
+
+    // The desktop frame loop, its background workers and the debugger backend
+    // share one manager. Readers racing attach/detach/prune must always see a
+    // consistent session or none.
+    {
+        std::atomic<bool> stop{false};
+        std::atomic<int> inconsistent{0};
+        std::vector<std::thread> readers;
+        for (int i = 0; i < 4; ++i) {
+            readers.emplace_back([&] {
+                while (!stop.load()) {
+                    const auto session = sessions.Active();
+                    if (session && session->Target().id != first.id && session->Target().id != second.id)
+                        ++inconsistent;
+                    const auto target = sessions.ActiveTarget();
+                    if (target && target->processId != 101 && target->processId != 202) ++inconsistent;
+                    for (const auto& attached : sessions.AttachedTargets())
+                        if (attached.name.empty()) ++inconsistent;
+                    (void)sessions.ActiveTargetId();
+                    (void)sessions.SessionCount();
+                }
+            });
+        }
+        std::thread writer([&] {
+            std::string writerError;
+            for (int i = 0; i < 2000; ++i) {
+                sessions.Attach(i % 2 ? first : second, &writerError);
+                if (i % 3 == 0) sessions.Activate(first.id);
+                if (i % 5 == 0) sessions.Detach(second.id);
+                if (i % 7 == 0) sessions.PruneDeadSessions();
+                if (i % 11 == 0) sessions.Detach();
+            }
+        });
+        writer.join();
+        stop = true;
+        for (auto& reader : readers) reader.join();
+        check(inconsistent.load() == 0, "concurrent readers see consistent sessions");
+    }
 
     sessions.DetachAll();
     check(sessions.SessionCount() == 0, "detach all clears every target");

@@ -1,0 +1,110 @@
+name: Desktop acceptance (real Windows desktop)
+
+# The shipped desktop driven on a real Windows session: the icon, the system
+# file dialog, a guide opened by the shell, attach and scan from the keyboard,
+# an MCP client next to the desktop, a clean close. See
+# tests/desktop_acceptance.py. Screenshots are uploaded and printed to the
+# log as base64 PNG.
+
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-acceptance-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_COMPILERCHECK: content
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_MAXSIZE: 700M
+
+jobs:
+  desktop:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install x64 MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-ccache
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-desktop-acceptance-${{ github.sha }}
+          restore-keys: |
+            ccache-desktop-acceptance-
+            ccache-windows-release-full-
+
+      - name: Build the desktop, the x64 runtime and the test target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S app_imgui -B build/gui -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCORTEX_IMGUI_TEST_MODES=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/gui --target cortex_imgui --parallel 2
+          cmake -S . -B build/runtime -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build/runtime --target core cortex_test_target --parallel 2
+          ccache -s || true
+
+      - name: Stage a portable folder
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          rm -rf stage/Cortex
+          mkdir -p stage/Cortex/runtime/x64 stage/Cortex/e2e
+          cp build/gui/cortex.exe stage/Cortex/cortex.exe
+          cp build/runtime/cortex_core.dll stage/Cortex/runtime/x64/cortex_core.dll
+          cp build/runtime/cortex_test_target_x64.exe stage/Cortex/e2e/cortex_test_target_x64.exe
+          cp -r docs stage/Cortex/docs
+          for pass in 1 2 3 4 5 6; do
+            copied=0
+            while IFS= read -r -d '' pe; do
+              while IFS= read -r dep; do
+                [ -n "$dep" ] || continue
+                base="$(basename "$dep")"
+                if [ ! -f "stage/Cortex/$base" ]; then cp "$dep" "stage/Cortex/$base"; copied=1; fi
+              done < <(ldd "$pe" 2>/dev/null | awk '/=> \/mingw64\/bin\// {print $3} /^\/mingw64\/bin\// {print $1}' | sort -u)
+            done < <(find stage/Cortex -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0)
+            [ "$copied" -eq 1 ] || break
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Drive the desktop
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pillow==11.0.0
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot;$(Split-Path (Get-Command python).Source)"
+          python tests/desktop_acceptance.py --bundle stage/Cortex --out build/desktop-acceptance
+          if ($LASTEXITCODE -ne 0) { throw "desktop acceptance failed" }
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-acceptance
+          path: build/desktop-acceptance
+          if-no-files-found: ignore

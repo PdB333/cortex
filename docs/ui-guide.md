@@ -1,24 +1,38 @@
 # Cortex UI guide
 
-This is the user-facing reference for the Cortex v1.0 desktop application (Dear ImGui on Win32 + Direct3D 11). For a first session, start with [Getting started](getting-started.md).
+This is the user-facing reference for the Cortex desktop application (Dear ImGui on Win32 + Direct3D 11). For a first session, start with [Getting started](getting-started.md).
 
 ## Layout
 
-Cortex has a menu bar, a two-row header, a dock area and a status line. The current target and the write permission stay visible while address-centric actions move between tools.
+Cortex has a menu bar, a header, a dock area and a status line. The current target and the write permission stay visible while address-centric actions move between tools.
+
+### Start page
+
+Cortex opens on **Home**, which offers three ways in that need nothing from each other:
+
+- **Analyze a file**: **Open a file...** (or `Ctrl+O`, **File > Open a file...**) reads an executable, DLL, .NET assembly, Electron `.asar`, script or ZIP without running it, in the **Files** layout. The last files opened are listed there and in **File > Recent files**.
+- **Inspect a running program**: **Select a process...** opens the process picker; attaching opens the **Memory** layout.
+- **Work with an AI agent**: **Copy the MCP configuration** puts the client configuration for this `cortex.exe` (read-only, no `--allow-writes`) on the clipboard; **Open the AI workspace** opens the **AI** layout.
+
+The Cortex mark in the header, **File > Home**, **Help > Start page** and **Workspace > Home** come back to it. Once a process is attached, Home shows its summary.
 
 ### Header
 
-- Row 1: **Select process** / **Change process** opens the process picker; the target (process, PID, architecture) and a chip per attached session follow. On the right: AI activity status, the **Read-only / Writes allowed** toggle and **Detach**.
-- Row 2: the workspace presets, **Go to...** and, once a debugger is attached, **Pause**, **Continue**, **Step** and **Over**.
+- The Cortex mark (back to Home), **Open a file...** (while no process is attached; `Ctrl+O` always works), then **Select process** / **Change process**, which opens the process picker; the target (process, PID, architecture) follows.
+- **Go to...**, **Pause target** (both greyed out without a process) and, once a debugger is attached, **Pause**, **Continue**, **Step** and **Over**, then a chip per attached session.
+- On the right: AI activity status, the **Read-only / Writes allowed** toggle and **Detach**. The layouts (presets) are in the **Workspace** menu.
 
 The picker filters by process name, window title or PID. Attaching another process keeps the existing sessions; a session chip's menu activates or detaches it.
 
 ### Dock area and presets
 
-Every workspace is a dockable window: drag its tab to move it, drag a splitter to resize, close it with its `x`. **View** opens or closes any workspace; **Workspace** or the header buttons apply a preset, which rebuilds the layout:
+Every workspace is a dockable window: drag its tab to move it, drag a splitter to resize, close it with its `x`. **View** opens or closes any workspace, grouped by task (Home, Artifacts and AI Investigation first, then Memory, Code and debugging, Automation, Runtime and system). **Workspace** applies a preset, which rebuilds the layout. The first three need no process:
 
 | Preset | Left | Center | Right |
 |---|---|---|---|
+| Home | | the start page, alone | |
+| Files | | Artifacts | AI Investigation |
+| AI | | AI Investigation | Artifacts |
 | Memory | Addresses, Modules | Memory, Memory viewer, Memory tools | Watches |
 | Debug | Modules, Watches | Disassembler, Memory viewer, What accesses | Debugger, Patches |
 | RE | Project, Symbols, Structures / Pointer Maps, Snapshots, Modules | Reverse Engineering, Disassembler, Memory viewer, Memory tools | Patches, Instrumentation / Advanced |
@@ -26,7 +40,7 @@ Every workspace is a dockable window: drag its tab to move it, drag a splitter t
 | Automation | Scripts, Input | Lua engine, Actions, Events / Console | Watches, Advanced |
 | Runtime | Modules, Sessions, Settings | Advanced, Diagnostics, Network | Screenshots, Instrumentation / Actions, Watches |
 
-The bottom panel is open in every preset. The layout is saved per user and restored at the next start.
+The bottom panel is open in every preset except Home. Without a process it shows only **AI Activity**; the runtime tabs (Events, Console, Breakpoints, Watches, Diagnostics) appear once a process is attached. A panel that needs a process says so and offers **Select a process...** or **Analyze a file instead**. The status line names the layout and the panel in use, for example `[Files > Artifacts]`. The layout is saved per user; Cortex starts on Home.
 
 ### Fonts and scaling
 

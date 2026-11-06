@@ -50,7 +50,7 @@ inline json Tool(const char* name, const char* description, json primitives) {
 
 inline json Catalog() {
     json tools = json::array();
-    tools.push_back(Tool("capture_runtime_state", "Plan a complete runtime inventory and checkpoint.", {"health","modules","memory_regions","debug_threads","project_get","window_get","actions_list","patch_list","freeze_list","session_export"}));
+    tools.push_back(Tool("capture_runtime_state", "Plan a complete runtime inventory and checkpoint.", {"health","modules","memory_regions","debug_threads","project_get","window_get","actions_list","patch_list","freeze_list","session_export","context_get","context_events"}));
     tools.push_back(Tool("observe_visual_state", "Plan screenshot and OCR observation without assuming any HUD concept.", {"screenshot","ocr","window_get"}));
     tools.push_back(Tool("record_interaction_window", "Plan a bounded observation window combining input, snapshots, watches, screenshots, and session export.", {"input_record_start","input_record_stop","snapshot_create","snapshot_diff","watch_events","screenshot","session_export"}));
     tools.push_back(Tool("discover_changing_values", "Plan unknown-value scans around labelled actions.", {"scan_new","scan_next","scan_results"}));

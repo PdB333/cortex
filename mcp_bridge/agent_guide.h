@@ -418,6 +418,15 @@ inline nlohmann::json CortexTestTools() {
 // Host tools that write Cortex's own journals, reports or knowledge. They need the person's --allow-state
 // (or --allow-writes) on top of the caller's mutation_permission declaration.
 inline bool IsCortexStateTool(const std::string& name) {
+    // The artifact annotation tool (mcp_bridge/artifact_tools.h) writes
+    // Cortex's annotation store.
+    if(name=="cortex_artifact_annotate")return true;
+    // So do the evidence writers (mcp_bridge/evidence_tools.h).
+    if(name=="cortex_evidence_record"||name=="cortex_evidence_update"||name=="cortex_evidence_verify")return true;
+    // And the investigation journal writers (mcp_bridge/investigation_tools.h).
+    if(name=="cortex_investigation_create"||name=="cortex_investigation_start"||name=="cortex_investigation_run_step"||
+       name=="cortex_investigation_step_result"||name=="cortex_investigation_skip"||name=="cortex_investigation_conclude"||
+       name=="cortex_investigation_cancel")return true;
     static const std::set<std::string> names=[]{
         std::set<std::string> result;
         for(const auto& tool:CortexTestTools())

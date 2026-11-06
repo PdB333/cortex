@@ -6,7 +6,9 @@
 #include <nlohmann/json.hpp>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <mutex>
 #include <string>
 
@@ -49,6 +51,18 @@ public:
     // allowed, EnsureReady only connects to a runtime that is already there
     // (for example one loaded beforehand with `cortex.exe inject <pid>`).
     void SetInjectionAllowed(bool allowed) { injectionAllowed_.store(allowed, std::memory_order_relaxed); }
+
+    // Marks every envelope from this client as coming from the desktop, so
+    // the runtime attributes the records it creates to the person instead
+    // of an agent. Provenance only: it grants no authority.
+    void SetDesktopChannel(bool desktop) { desktopChannel_.store(desktop, std::memory_order_relaxed); }
+
+    // A runtime answering for `expected` must report the same process
+    // generation. 0 means "unknown" on either side and is accepted, matching
+    // target::SessionManager.
+    static bool GenerationsCompatible(uint64_t expected, uint64_t reported) {
+        return expected == 0 || reported == 0 || expected == reported;
+    }
     bool InjectionAllowed() const { return injectionAllowed_.load(std::memory_order_relaxed); }
 
     // Checks whether the currently selected target can be instrumented with
@@ -198,6 +212,13 @@ private:
     std::atomic<bool> writesAuthority_{false};
     std::atomic<bool> stateAuthority_{false};
     std::atomic<bool> injectionAllowed_{true};
+    std::atomic<bool> desktopChannel_{false};
 };
+
+// Deletes the cortex.mcp.<pid>.token files in `directory` that belong to a
+// process that no longer exists, or to an earlier process with the same PID.
+// A runtime deletes its own token when it stops; a killed one cannot. Returns
+// the number removed. Tokens of live processes are left alone.
+size_t RemoveStaleRuntimeTokens(const std::filesystem::path& directory);
 
 } // namespace cortex::services

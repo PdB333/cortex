@@ -1,4 +1,5 @@
 #include "symbols_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -27,7 +28,7 @@ bool SymbolsWorkspace::Navigate(UiContext& context, const std::string& address,
 void SymbolsWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.symbolsModel) {
-        HintText("Select a process to resolve symbols.");
+        NoTargetHint(context, "A running process is needed to resolve symbols.");
         return;
     }
 

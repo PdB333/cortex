@@ -28,6 +28,8 @@ public:
     bool EnsureAttached(std::string* error = nullptr);
     bool Ready();
     const std::string& Backend();
+    // The backend of an existing provider, without creating one.
+    const std::string& ProviderBackend() const { return providerBackend_; }
 
     bool RefreshThreads(std::string* error = nullptr);
     bool SelectThread(uint64_t threadId, std::string* error = nullptr);

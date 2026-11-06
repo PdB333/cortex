@@ -20,6 +20,10 @@ private:
     void ClearAddressForm();
     void ClearPointerForm();
     void ClearNoteForm();
+    void FollowRuntimeEvents(UiContext& context);
+    void RefreshContext(UiContext& context);
+    void DrawKnowledgeTab(UiContext& context);
+    void DrawContextTab(UiContext& context);
 
     std::string targetId_;
     std::array<char, 128> addressName_ = {};
@@ -36,6 +40,10 @@ private:
 
     std::array<char, 512> noteText_ = {};
     std::array<char, 256> noteTags_ = {};
+
+    // Last runtime event id acted on, so an agent's knowledge.updated or
+    // context.* event refreshes the view once.
+    uint64_t lastEventSeen_ = 0;
 };
 
 } // namespace cortex::ui

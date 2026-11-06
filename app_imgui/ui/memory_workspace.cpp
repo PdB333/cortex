@@ -1,4 +1,5 @@
 #include "memory_workspace.h"
+#include "workspace_registry.h"
 #include "memory_workspace_internal.h"
 #include "address_resolver.h"
 #include "widgets.h"
@@ -158,6 +159,7 @@ void MemoryWorkspace::NewScan(UiContext& context) {
         compare_ = ScanCompare::Exact;
     compareToFirst_ = false;
     focusValue_ = true;
+    focusValueFrames_ = 1;
     context.status = "Ready for a new scan";
 }
 
@@ -177,6 +179,12 @@ void MemoryWorkspace::PollScan(UiContext& context) {
     scanCancel_.reset();
     scanProgress_.reset();
 
+    const auto active = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+    if (!active || TargetKey(*active) != scanTargetKey_) {
+        context.status = "Scan result discarded: the target changed while it ran";
+        return;
+    }
+
     if (!task.state) {
         lastScanError_ = task.error;
         context.status = task.error == "scan_cancelled"
@@ -193,6 +201,17 @@ void MemoryWorkspace::PollScan(UiContext& context) {
     if (!scan_->Listed()) context.status += " - narrow them down with a next scan";
     if (scan_->limitReached) context.status += " - limit reached, other matches were not kept";
     if (!task.pauseError.empty()) context.status += " (the target could not be paused: " + task.pauseError + ")";
+    ShareScan(context);
+}
+
+void MemoryWorkspace::ShareScan(UiContext& context) {
+    // Agents read the person's scan through context_get. Only with a runtime
+    // already connected: sharing never loads it into the target.
+    if (!shareScans_ || !scan_ || !context.contextModel || !context.payload || !context.payload->Ready()) return;
+    std::string error;
+    if (!context.contextModel->Share("scan", application::InvestigationContextModel::ScanSummary(*scan_, scanQuery_),
+                                     scanTargetGeneration_, &error))
+        context.status += " (not shared with the investigation context: " + error + ")";
 }
 
 void MemoryWorkspace::StartScan(UiContext& context) {
@@ -219,6 +238,9 @@ void MemoryWorkspace::StartScan(UiContext& context) {
 
     const bool pause = pauseWhileScanning_;
     const uint64_t pid = session->Target().processId;
+    scanTargetKey_ = TargetKey(session->Target());
+    scanTargetGeneration_ = session->Target().generation;
+    scanQuery_ = query;
     auto previous = scan_;
     scanCancel_ = std::make_shared<std::atomic_bool>(false);
     scanProgress_ = std::make_shared<services::ScanProgress>();
@@ -405,17 +427,18 @@ void MemoryWorkspace::CopyResults(const std::vector<size_t>& rows) const {
 void MemoryWorkspace::DrawWelcome(UiContext& context) {
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float cardWidth = std::min(Px(540.0f), available.x - Px(30.0f));
-    const float cardHeight = Px(220.0f);
+    const float cardHeight = Px(250.0f);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (available.x - cardWidth) * 0.5f));
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(20.0f, (available.y - cardHeight) * 0.28f));
 
     ImGui::BeginChild("WelcomeCard", ImVec2(cardWidth, cardHeight), ImGuiChildFlags_Borders);
     ImGui::Dummy(ImVec2(0, Px(10)));
     ImGui::SetWindowFontScale(1.35f);
-    ImGui::TextUnformatted("Cortex Memory");
+    ImGui::TextUnformatted("Memory scanner");
     ImGui::SetWindowFontScale(1.0f);
     ImGui::Spacing();
-    HintText("Select a process, scan a value, then keep useful addresses below.");
+    HintText("Memory scanning works on a program that runs now: select it, scan a value, then keep the useful "
+             "addresses.");
     ImGui::Dummy(ImVec2(0, Px(18)));
 
     const float width = ImGui::GetContentRegionAvail().x;
@@ -425,6 +448,8 @@ void MemoryWorkspace::DrawWelcome(UiContext& context) {
 
     ImGui::Dummy(ImVec2(0, Px(12)));
     HintText("Process  ->  Scan  ->  Address list  ->  Edit / Freeze");
+    if (ImGui::SmallButton("Analyze a file instead"))
+        context.requestPreset = static_cast<int>(WorkspacePreset::Files);
     ImGui::EndChild();
 }
 
@@ -703,6 +728,9 @@ void MemoryWorkspace::DrawScanOptions(UiContext& context) {
     ImGui::EndDisabled();
 
     ImGui::Checkbox("Pause the target while scanning", &pauseWhileScanning_);
+    ImGui::Checkbox("Share results with the investigation context", &shareScans_);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("When the Cortex runtime is connected, MCP agents can read the latest scan with context_get.");
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Suspends every thread of the target for the duration of each scan,\n"
                           "so values cannot change while they are read.");
@@ -755,14 +783,12 @@ void MemoryWorkspace::DrawScanPanel(UiContext& context, float height) {
         ImGui::Checkbox("Hex", &hex_);
     }
     ImGui::BeginDisabled(!needsValue);
-    if (focusValue_) {
-        ImGui::SetKeyboardFocusHere();
-        focusValue_ = false;
-    }
+    if (focusValue_) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(-1);
     const char* hint = type == ScanDataType::ByteArray ? "8B 05 ?? ?? 4? 00" : (type == ScanDataType::String ? "text" : "100");
     bool submit = ImGui::InputTextWithHint("##ScanValue", hint, scanValue_, sizeof(scanValue_),
                                            ImGuiInputTextFlags_EnterReturnsTrue);
+    if (focusValue_ && (ImGui::IsItemActive() || --focusValueFrames_ <= 0)) focusValue_ = false;
     if (compare_ == ScanCompare::Between) {
         ImGui::SetNextItemWidth(-1);
         submit |= ImGui::InputTextWithHint("##ScanValue2", "and", scanValue2_, sizeof(scanValue2_),
@@ -874,6 +900,13 @@ void MemoryWorkspace::HandleCommand(UiContext& context, const std::string& comma
     }
     if (command == "scan_cancel") {
         CancelScan();
+        return;
+    }
+    if (command == "scan_focus") {
+        if (!scan_) {
+            focusValue_ = true;
+            focusValueFrames_ = 30;
+        }
         return;
     }
     if (command == "scan_undo") {

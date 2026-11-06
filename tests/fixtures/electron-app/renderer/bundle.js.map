@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/greet.ts", "../src/math.ts", "../src/renderer.ts"],
+  "sourcesContent": ["export interface Greeting {\n  text: string;\n  level: number;\n}\n\nexport function greet(theme: string, level: number): Greeting {\n  const text = `Hello from the ${theme} theme`;\n  return { text, level };\n}\n", "export function clamp(value: number, min: number, max: number): number {\n  if (value < min) return min;\n  if (value > max) return max;\n  return value;\n}\n", "// Renderer code in TypeScript, bundled by esbuild into renderer/bundle.js.\nimport { greet, type Greeting } from './greet';\nimport { clamp } from './math';\n\ninterface Bridge {\n  getSetting(key: string): Promise<unknown>;\n  log(message: string): void;\n}\n\ndeclare global {\n  interface Window { cortexDemo: Bridge }\n}\n\nexport async function start(): Promise<Greeting> {\n  const theme = await window.cortexDemo.getSetting('theme');\n  const greeting = greet(String(theme), clamp(42, 0, 10));\n  window.cortexDemo.log(greeting.text);\n  return greeting;\n}\n\nstart();\n"],
+  "mappings": "MAKO,SAASA,EAAMC,EAAeC,EAAyB,CAE5D,MAAO,CAAE,KADI,kBAAkBD,CAAK,SACrB,MAAAC,CAAM,CACvB,CCRO,SAASC,EAAMC,EAAeC,EAAaC,EAAqB,CACrE,OAAIF,EAAQC,EAAYA,EACpBD,EAAQE,EAAYA,EACjBF,CACT,CCSA,eAAsBG,GAA2B,CAC/C,IAAMC,EAAQ,MAAM,OAAO,WAAW,WAAW,OAAO,EAClDC,EAAWC,EAAM,OAAOF,CAAK,EAAGG,EAAM,GAAI,EAAG,EAAE,CAAC,EACtD,cAAO,WAAW,IAAIF,EAAS,IAAI,EAC5BA,CACT,CAEAF,EAAM",
+  "names": ["greet", "theme", "level", "clamp", "value", "min", "max", "start", "theme", "greeting", "greet", "clamp"]
+}

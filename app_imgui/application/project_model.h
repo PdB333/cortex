@@ -30,6 +30,17 @@ struct ProjectNote {
     std::string tagsJson = "[]";
 };
 
+struct ProjectKnowledge {
+    std::string id;
+    std::string kind;
+    std::string status;     // hypothesis | observed | refuted | stale
+    std::string statement;
+    std::string origin;     // client_assertion
+    std::string verification;
+    int revision = 0;
+    int evidenceCount = 0;
+};
+
 class ProjectModel : public RuntimeModelBase {
 public:
     explicit ProjectModel(services::RuntimeTransport& payload) : RuntimeModelBase(payload) {}
@@ -40,6 +51,7 @@ public:
     const std::vector<ProjectAddress>& Addresses() const { return addresses_; }
     const std::vector<ProjectPointerPath>& PointerPaths() const { return pointerPaths_; }
     const std::vector<ProjectNote>& Notes() const { return notes_; }
+    const std::vector<ProjectKnowledge>& Knowledge() const { return knowledge_; }
 
     bool SetAddress(const std::string& name, const std::string& address,
                     const std::string& type, const std::string& notes,
@@ -67,6 +79,7 @@ private:
     std::vector<ProjectAddress> addresses_;
     std::vector<ProjectPointerPath> pointerPaths_;
     std::vector<ProjectNote> notes_;
+    std::vector<ProjectKnowledge> knowledge_;
 };
 
 } // namespace cortex::application

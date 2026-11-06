@@ -173,6 +173,7 @@ set(CORTEX_API_ROUTE_SOURCES
     core/api/routes_batch.cpp
     core/api/routes_actions.cpp
     core/api/routes_events.cpp
+    core/api/routes_context.cpp
     core/api/routes_pointermap.cpp
     core/api/routes_trace.cpp
     core/api/routes_ghidra.cpp
@@ -226,6 +227,8 @@ add_library(core SHARED
     core/dissect/dissect.cpp
     core/action/action.cpp
     core/events/events.cpp
+    core/context/investigation_context.cpp
+    core/context/context_api.cpp
     core/api/native_routes.cpp
     core/api/mcp_tools.cpp
     core/api/mcp_pipe.cpp
@@ -311,6 +314,35 @@ add_executable(cortex_host
     injector/main.cpp
     mcp_bridge/main.cpp
     mcp_bridge/host_mode.cpp
+    core/artifacts/artifact.cpp
+    core/artifacts/pe_provider.cpp
+    core/artifacts/asar_provider.cpp
+    core/artifacts/registry_default.cpp
+    core/artifacts/js_lexer.cpp
+    core/artifacts/js_analysis.cpp
+    core/artifacts/js_provider.cpp
+    core/artifacts/source_map.cpp
+    core/artifacts/inflate.cpp
+    core/artifacts/zip_provider.cpp
+    core/artifacts/dotnet_metadata.cpp
+    core/artifacts/cil.cpp
+    core/artifacts/dotnet_provider.cpp
+    core/artifacts/native_code.cpp
+    core/artifacts/annotations.cpp
+    core/evidence/evidence.cpp
+    core/investigation/investigation.cpp
+    core/target/process_tree.cpp
+    core/providers/process_runner.cpp
+    core/providers/analysis_provider.cpp
+    core/providers/ghidra_provider.cpp
+    core/providers/ilspy_provider.cpp
+    core/providers/vineflower_provider.cpp
+    core/live/websocket.cpp
+    core/live/protocol_frames.cpp
+    core/live/cdp.cpp
+    core/live/dap.cpp
+    core/live/jdwp.cpp
+    core/live/live_service.cpp
     tools/diagnostics_host/main.cpp
     tools/symbolize_main.cpp
     host/diagnostics/external_host.cpp
@@ -498,11 +530,305 @@ if(BUILD_TESTING)
     )
     target_include_directories(cortex_session_manager_tests PRIVATE core)
     add_test(NAME cortex_session_manager_tests COMMAND cortex_session_manager_tests)
+
+    # Project file recovery: one process per scenario because project::Init
+    # runs once.
+    add_executable(cortex_project_store_tests
+        tests/project_store_tests.cpp
+        core/project/project.cpp
+        core/memory/memory.cpp
+        core/memory/provenance.cpp
+        core/process/modules.cpp
+        core/events/events.cpp
+    )
+    target_include_directories(cortex_project_store_tests PRIVATE core)
+    target_compile_definitions(cortex_project_store_tests PRIVATE
+        _WIN32_WINNT=0x0601
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
+    target_link_libraries(cortex_project_store_tests PRIVATE nlohmann_json::nlohmann_json)
+    foreach(scenario backup damaged fresh locked)
+        add_test(NAME cortex_project_store_${scenario} COMMAND cortex_project_store_tests ${scenario})
+    endforeach()
+
+    # Shared investigation context and its route semantics (portable).
+    add_executable(cortex_investigation_context_tests
+        tests/investigation_context_tests.cpp
+        core/context/investigation_context.cpp
+        core/context/context_api.cpp
+    )
+    target_include_directories(cortex_investigation_context_tests PRIVATE core)
+    target_link_libraries(cortex_investigation_context_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_investigation_context_tests COMMAND cortex_investigation_context_tests)
+
+    # Artifact providers: SHA-256, offline PE (on the test target), ASAR,
+    # malformed and fuzzed inputs; and the MCP artifact tools' root limits.
+    add_executable(cortex_artifacts_tests
+        tests/artifacts_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+    )
+    target_include_directories(cortex_artifacts_tests PRIVATE core)
+    target_link_libraries(cortex_artifacts_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_artifacts_tests COMMAND cortex_artifacts_tests $<TARGET_FILE:cortex_test_target>)
+
+    add_executable(cortex_js_tests
+        tests/js_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+    )
+    target_include_directories(cortex_js_tests PRIVATE core)
+    target_link_libraries(cortex_js_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_js_tests COMMAND cortex_js_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+    add_executable(cortex_dotnet_tests
+        tests/dotnet_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+    )
+    target_include_directories(cortex_dotnet_tests PRIVATE core)
+    target_link_libraries(cortex_dotnet_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_dotnet_tests COMMAND cortex_dotnet_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dotnet)
+
+    add_executable(cortex_native_code_tests
+        tests/native_code_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+    )
+    target_include_directories(cortex_native_code_tests PRIVATE core)
+    target_link_libraries(cortex_native_code_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_native_code_tests COMMAND cortex_native_code_tests $<TARGET_FILE:cortex_test_target>)
+
+    # Two builds of one program for evidence comparison across versions.
+    add_executable(cortex_shift_fixture_a tests/fixtures/shift_fixture.c)
+    add_executable(cortex_shift_fixture_b tests/fixtures/shift_fixture.c)
+    target_compile_definitions(cortex_shift_fixture_b PRIVATE CORTEX_SHIFT)
+    foreach(shift cortex_shift_fixture_a cortex_shift_fixture_b)
+        target_compile_options(${shift} PRIVATE -O2)
+        target_link_options(${shift} PRIVATE -static -static-libgcc)
+    endforeach()
+
+    add_executable(cortex_evidence_tests
+        tests/evidence_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+        core/evidence/evidence.cpp
+    )
+    target_include_directories(cortex_evidence_tests PRIVATE core)
+    target_link_libraries(cortex_evidence_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_evidence_tests COMMAND cortex_evidence_tests $<TARGET_FILE:cortex_shift_fixture_a> $<TARGET_FILE:cortex_shift_fixture_b>)
+
+    add_executable(cortex_investigation_tests
+        tests/investigation_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+        core/evidence/evidence.cpp
+        core/investigation/investigation.cpp
+    )
+    target_include_directories(cortex_investigation_tests PRIVATE core)
+    target_link_libraries(cortex_investigation_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_investigation_tests COMMAND cortex_investigation_tests $<TARGET_FILE:cortex_test_target> ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/electron-app.asar $<TARGET_FILE:cortex_shift_fixture_a>)
+
+    add_executable(cortex_analysis_provider_tests
+        tests/analysis_provider_tests.cpp
+        core/providers/process_runner.cpp
+        core/providers/analysis_provider.cpp
+        core/providers/ghidra_provider.cpp
+        core/providers/ilspy_provider.cpp
+    core/providers/vineflower_provider.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp)
+    target_include_directories(cortex_analysis_provider_tests PRIVATE core)
+    target_link_libraries(cortex_analysis_provider_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    # Real engines run when GHIDRA_INSTALL_DIR / CORTEX_ILSPYCMD are set (CI
+    # sets them in the analysis-engines job); otherwise those parts skip.
+    add_test(NAME cortex_analysis_provider_tests COMMAND cortex_analysis_provider_tests
+             $<TARGET_FILE:cortex_test_target> ${CMAKE_SOURCE_DIR}/tests/fixtures/dotnet/Cortex.Fixture.dll
+             ${CMAKE_SOURCE_DIR}/tests/fixtures/java/Cortex.Fixture.jar ${CMAKE_SOURCE_DIR}/tests/fixtures/elf/actor.elf)
+    set_tests_properties(cortex_analysis_provider_tests PROPERTIES TIMEOUT 3600)
+
+    add_executable(cortex_cdp_tests tests/cdp_tests.cpp core/live/websocket.cpp core/live/protocol_frames.cpp core/live/cdp.cpp core/live/dap.cpp core/live/jdwp.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
+    target_include_directories(cortex_cdp_tests PRIVATE core)
+    target_link_libraries(cortex_cdp_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(cortex_cdp_tests PRIVATE ws2_32)
+    endif()
+    # Node runs the fixture when it is on PATH (CI); otherwise that part skips.
+    add_test(NAME cortex_cdp_tests COMMAND cortex_cdp_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/node-live/app.js)
+    set_tests_properties(cortex_cdp_tests PROPERTIES TIMEOUT 300)
+
+    add_executable(cortex_dap_tests tests/dap_tests.cpp core/live/websocket.cpp core/live/protocol_frames.cpp core/live/cdp.cpp core/live/dap.cpp core/live/jdwp.cpp core/live/live_service.cpp core/providers/process_runner.cpp)
+    target_include_directories(cortex_dap_tests PRIVATE core)
+    target_link_libraries(cortex_dap_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(cortex_dap_tests PRIVATE ws2_32)
+    endif()
+    # Python with debugpy runs the fixture when present (CI's analysis-engines
+    # job also passes the .NET fixture and netcoredbg); otherwise it skips.
+    add_test(NAME cortex_dap_tests COMMAND cortex_dap_tests ${CMAKE_SOURCE_DIR}/tests/fixtures/python-live/app.py)
+    set_tests_properties(cortex_dap_tests PROPERTIES TIMEOUT 300)
+
+    # Contract tests that contracts.yml used to compile by hand. They are
+    # self-contained (headers only, or a few core sources) and now run with
+    # every `ctest`.
+    foreach(contract request_id pagination mcp_protocol mcp_pipe_protocol mcp_schema
+                     mcp_query_schema mcp_bridge_policy)
+        add_executable(cortex_${contract}_tests tests/${contract}_tests.cpp)
+        target_include_directories(cortex_${contract}_tests PRIVATE core)
+        target_link_libraries(cortex_${contract}_tests PRIVATE nlohmann_json::nlohmann_json)
+        add_test(NAME cortex_${contract}_tests COMMAND cortex_${contract}_tests)
+    endforeach()
+
+    add_executable(cortex_mcp_authority_tests tests/mcp_authority_tests.cpp)
+    target_include_directories(cortex_mcp_authority_tests PRIVATE core)
+    target_link_libraries(cortex_mcp_authority_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_mcp_authority_tests
+             COMMAND cortex_mcp_authority_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mcp_tool_risks.json)
+
+    add_executable(cortex_semantic_tools_tests tests/semantic_tools_tests.cpp)
+    target_include_directories(cortex_semantic_tools_tests PRIVATE core)
+    target_link_libraries(cortex_semantic_tools_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_semantic_tools_tests
+             COMMAND cortex_semantic_tools_tests ${CMAKE_CURRENT_SOURCE_DIR}/core/api/routes_status.cpp)
+
+    add_executable(cortex_action_transaction_tests
+        tests/action_transaction_tests.cpp core/action/action.cpp core/events/events.cpp)
+    target_include_directories(cortex_action_transaction_tests PRIVATE core)
+    target_link_libraries(cortex_action_transaction_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_action_transaction_tests COMMAND cortex_action_transaction_tests)
+
+    if(WIN32)
+        add_executable(cortex_call_scheduler_tests tests/call_scheduler_tests.cpp core/call/call.cpp)
+        target_include_directories(cortex_call_scheduler_tests PRIVATE core)
+        target_link_libraries(cortex_call_scheduler_tests PRIVATE nlohmann_json::nlohmann_json user32)
+        if(MINGW)
+            target_link_options(cortex_call_scheduler_tests PRIVATE -static -static-libgcc -static-libstdc++)
+        endif()
+        add_test(NAME cortex_call_scheduler_tests COMMAND cortex_call_scheduler_tests)
+    endif()
+
+    add_executable(cortex_process_tree_tests tests/process_tree_tests.cpp core/target/process_tree.cpp)
+    target_link_libraries(cortex_process_tree_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_process_tree_tests COMMAND cortex_process_tree_tests)
+
+    add_executable(cortex_artifact_tools_tests
+        tests/artifact_tools_tests.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/pe_provider.cpp
+        core/artifacts/asar_provider.cpp
+        core/artifacts/registry_default.cpp
+        core/artifacts/js_lexer.cpp
+        core/artifacts/js_analysis.cpp
+        core/artifacts/js_provider.cpp
+        core/artifacts/source_map.cpp
+        core/artifacts/inflate.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/dotnet_metadata.cpp
+        core/artifacts/cil.cpp
+        core/artifacts/dotnet_provider.cpp
+        core/artifacts/native_code.cpp
+        core/artifacts/annotations.cpp
+    )
+    target_include_directories(cortex_artifact_tools_tests PRIVATE core)
+    target_link_libraries(cortex_artifact_tools_tests PRIVATE Zydis nlohmann_json::nlohmann_json)
+    add_test(NAME cortex_artifact_tools_tests COMMAND cortex_artifact_tools_tests $<TARGET_FILE:cortex_test_target>)
+
+    # Runtime event ring: bounded, contiguous ids, explicit gaps.
+    add_executable(cortex_events_tests tests/events_tests.cpp core/events/events.cpp)
+    target_include_directories(cortex_events_tests PRIVATE core)
+    add_test(NAME cortex_events_tests COMMAND cortex_events_tests)
 endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests)
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests
+                        cortex_request_id_tests cortex_pagination_tests cortex_mcp_protocol_tests cortex_mcp_pipe_protocol_tests cortex_mcp_schema_tests cortex_mcp_query_schema_tests cortex_mcp_bridge_policy_tests cortex_mcp_authority_tests cortex_semantic_tools_tests cortex_action_transaction_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()
 endif()

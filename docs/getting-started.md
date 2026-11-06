@@ -1,12 +1,12 @@
 # Getting started with Cortex UI
 
-This guide describes the Cortex v1.0 desktop application (Dear ImGui on Win32 + Direct3D 11).
+This guide describes the Cortex desktop application (Dear ImGui on Win32 + Direct3D 11).
 
 For a screenshot-based walkthrough, see [Illustrated UI walkthrough](ui-walkthrough.md). A [French translation](ui-walkthrough-fr.md) is also available.
 
 ## 1. Get a testable build
 
-Use the `cortex-v1.0.1-windows-portable.zip` release asset or, for a branch build, the `cortex-imgui-preview-windows-portable` artifact of the latest green **Lightweight ImGui UI** workflow run.
+Use the `cortex-v<version>-windows-portable.zip` asset of the latest release or, for a branch build, the `cortex-imgui-gui-tested-portable` artifact of the latest green **Cortex ImGui GUI Test Suite** run.
 
 Extract the entire archive and keep its directory structure intact. Cortex needs the `runtime/x64` and `runtime/x86` folders beside `cortex.exe`: one runtime per architecture, because Windows cannot load a 64-bit DLL into a 32-bit game or the reverse. Cortex picks the right one for each target. No Qt or other runtime has to be installed.
 
@@ -14,15 +14,17 @@ Extract the entire archive and keep its directory structure intact. Cortex needs
 
 Run `cortex.exe`.
 
-The header shows the target, the **Read-only / Writes allowed** toggle, **Detach**, the six workspace presets and **Go to...**. Leave it on **Read-only** while you are only observing.
+Cortex opens on **Home**: **Analyze a file** (nothing runs), **Inspect a running program**, or **Work with an AI agent** (copies the MCP client configuration). This guide follows the running-program path; for files see the [UI guide](ui-guide.md#start-page) and [analysis providers](analysis-providers.md).
+
+The header shows **Open a file...**, **Select process**, the target, **Go to...**, the **Read-only / Writes allowed** toggle and **Detach**; the layouts are in the **Workspace** menu. Leave it on **Read-only** while you are only observing.
 
 Settings and the window layout are kept in `%LOCALAPPDATA%\Cortex`. To keep them beside `cortex.exe` instead (portable use), create an empty file named `cortex.portable` next to it.
 
 ## 3. Select and attach a target
 
-Click **Select process** (or **File > Select process...**), use **Refresh** if necessary, then select the authorized process and click **Attach** or double-click it.
+Click **Select a process...** on Home, **Select process** in the header (or **File > Select process...**), use **Refresh** if necessary, then select the authorized process and click **Attach** or double-click it.
 
-After attach, the header shows the process, PID and architecture, and the **Memory** preset opens. Cortex starts in observation mode; the runtime is loaded into the target only when a feature that needs it is used with writes allowed.
+After attach, the header shows the process, PID and architecture, and the **Memory** preset opens (from Home; in another layout the Memory panel joins it). Cortex starts in observation mode; the runtime is loaded into the target only when a feature that needs it is used with writes allowed.
 
 You may attach another process from the same picker. Cortex keeps both sessions; selecting an already attached process switches the UI back to it without reattaching. Workspaces always follow the active target. **Detach** in the header or **File > Detach active target** detaches the active one.
 

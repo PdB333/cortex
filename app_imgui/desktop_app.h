@@ -56,6 +56,8 @@
 #include "ui/tools_workspace.h"
 #include "ui/access_finder_workspace.h"
 #include "ui/lua_workspace.h"
+#include "ui/artifacts_workspace.h"
+#include "ui/ai_investigation_workspace.h"
 #include "ui/watches_workspace.h"
 #include "ui/scripts_workspace.h"
 #include "ui/screenshot_workspace.h"
@@ -167,6 +169,7 @@ struct AppState {
     cortex::application::InputModel inputModel;
     cortex::application::ScreenshotModel screenshotModel;
     cortex::application::RuntimeEventsModel runtimeEventsModel;
+    cortex::application::InvestigationContextModel contextModel;
     cortex::application::PatchesModel patchesModel;
     cortex::application::PromptModel promptModel;
     cortex::ui::UiContext ui;
@@ -221,9 +224,12 @@ struct AppState {
           inputModel(payload),
           screenshotModel(payload),
           runtimeEventsModel(payload),
+          contextModel(payload),
           patchesModel(payload),
           promptModel(payload) {
         catalog.AddBackend(std::make_shared<cortex::target::LocalBackend>());
+        // Records this desktop creates in the runtime are the person's.
+        payload.SetDesktopChannel(true);
 
         ui.sessions = &sessions;
         ui.memory = &memory;
@@ -249,6 +255,7 @@ struct AppState {
         ui.inputModel = &inputModel;
         ui.screenshotModel = &screenshotModel;
         ui.runtimeEventsModel = &runtimeEventsModel;
+        ui.contextModel = &contextModel;
         ui.patchesModel = &patchesModel;
         ui.nativeRenderDevice = NativeRenderDevice();
 
@@ -283,7 +290,11 @@ struct AppState {
         workspaces.Add<cortex::ui::ToolsWorkspace>();
         workspaces.Add<cortex::ui::AccessFinderWorkspace>();
         workspaces.Add<cortex::ui::LuaWorkspace>();
-        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory, false);
+        workspaces.Add<cortex::ui::ArtifactsWorkspace>();
+        workspaces.Add<cortex::ui::AiInvestigationWorkspace>();
+        // Cortex opens on the start page; a layout saved by an earlier
+        // version is rebuilt so the page is docked, not floating.
+        workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Home, true);
     }
 
     ~AppState() {
@@ -309,12 +320,21 @@ struct AppState {
         inputModel.Reset();
         screenshotModel.Reset();
         runtimeEventsModel.Reset();
+        contextModel.Reset();
         patchesModel.Reset();
         promptModel.Reset();
         ui.mutationAllowed = false;
         ui.ResetNavigation();
         ui.status = "Attached to " + target.name;
-        if (selectMemory) ui.requestWorkspace = "memory";
+        if (selectMemory) {
+            // From the start page, attaching opens the memory layout; in
+            // another layout the scanner joins it.
+            if (workspaces.Preset() == cortex::ui::WorkspacePreset::Home)
+                workspaces.ApplyPreset(cortex::ui::WorkspacePreset::Memory);
+            ui.requestWorkspace = "memory";
+            // The value field takes the keyboard: type a value, Enter scans.
+            ui.commands.push_back("scan_focus");
+        }
 
         if (settings.Values().autoLoadRuntimeOnAttach) {
             ui.RunInBackground("Loading the Cortex runtime into the target", [this]() {
@@ -370,6 +390,9 @@ bool ParseAddressToken(const std::string& text, uint64_t& value, int defaultBase
 
 // Every workspace preset, in header order.
 inline constexpr cortex::ui::WorkspacePreset kGuiPresets[] = {
+    cortex::ui::WorkspacePreset::Home,
+    cortex::ui::WorkspacePreset::Files,
+    cortex::ui::WorkspacePreset::Ai,
     cortex::ui::WorkspacePreset::Memory,
     cortex::ui::WorkspacePreset::Debug,
     cortex::ui::WorkspacePreset::ReverseEngineering,

@@ -4,6 +4,7 @@
 
 #include "services/memory_tools.h"
 #include "services/pointer_scanner.h"
+#include "services/byte_diff.h"
 #include "services/signature.h"
 #include "services/instruction_operands.h"
 #include "fake_process.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -348,7 +350,117 @@ void TestGroupedScan() {
     CHECK(hits.size() == 1);
 }
 
+// Paths found in one process are only candidates; a check in another
+// process lifetime confirms or invalidates each one, and the history
+// survives Save/Load.
+void TestPointerPathValidation() {
+    auto first = std::make_shared<FakeProcess>();
+    first->Add(0x400000, 0x2000, true, false, MemoryRegionType::Image);
+    first->Add(0x10000000, 0x10000, true, false, MemoryRegionType::Private);
+    first->Put<uint64_t>(0x400100, 0x10000000);    // game.exe+100 -> object
+    first->Put<uint64_t>(0x10000020, 0x10001000);  // object+20 -> player
+    first->Put<uint64_t>(0x400200, 0x10001040);    // game.exe+200 -> near the player (coincidence)
+
+    PointerScanOptions options;
+    options.target = 0x10001048;
+    options.maxLevel = 3;
+    options.maxOffset = 0x100;
+    options.modules = {{"game.exe", 0x400000, 0x2000}};
+    PointerScanResult result;
+    std::string error;
+    CHECK(PointerScanner::Scan(first, options, result, &error));
+    result.scanGeneration = 1001;
+    CHECK(result.paths.size() == 2);
+    for (const auto& path : result.paths)
+        CHECK(PointerScanner::Status(result, path) == PointerPathStatus::Candidate);
+
+    // Next run: the module loads elsewhere and the player moves; only the
+    // two-level chain still leads to it.
+    auto second = std::make_shared<FakeProcess>();
+    second->Add(0x500000, 0x2000, true, false, MemoryRegionType::Image);
+    second->Add(0x20000000, 0x10000, true, false, MemoryRegionType::Private);
+    second->Put<uint64_t>(0x500100, 0x20000000);
+    second->Put<uint64_t>(0x20000020, 0x20003000);
+    second->Put<uint64_t>(0x500200, 0x20001040);
+    const std::vector<PointerModule> secondModules = {{"game.exe", 0x500000, 0x2000}};
+    auto summary = PointerScanner::Validate(second, result, 0x20003048, secondModules, 2002);
+    CHECK(summary.stable == 1 && summary.invalidated == 1 && summary.candidate == 0);
+    CHECK(result.paths.size() == 2);  // nothing dropped, unlike Rescan
+    for (const auto& path : result.paths) {
+        const auto status = PointerScanner::Status(result, path);
+        const std::string text = PointerScanner::Format(result, path);
+        if (text == "game.exe+100 -> 20 -> 48") CHECK(status == PointerPathStatus::Stable);
+        else CHECK(status == PointerPathStatus::Invalidated);
+    }
+
+    // Re-checking the same process replaces its entry, it does not count twice.
+    PointerScanner::Validate(second, result, 0x20003048, secondModules, 2002);
+    for (const auto& path : result.paths) CHECK(path.checks.size() == 1);
+
+    // A later miss invalidates a stable path for good.
+    auto third = std::make_shared<FakeProcess>();
+    third->Add(0x600000, 0x2000, true, false, MemoryRegionType::Image);
+    third->Add(0x30000000, 0x10000, true, false, MemoryRegionType::Private);
+    summary = PointerScanner::Validate(third, result, 0x30003048, {{"game.exe", 0x600000, 0x2000}}, 3003);
+    CHECK(summary.stable == 0 && summary.invalidated == 2);
+
+    // Saved and loaded with its history (format v2); v1 files still load.
+    const std::string file = (std::filesystem::temp_directory_path() / "cortex-pointer-checks.json").u8string();
+    CHECK(PointerScanner::Save(file, result, &error));
+    PointerScanResult loaded;
+    CHECK(PointerScanner::Load(file, loaded, &error));
+    CHECK(loaded.scanGeneration == 1001 && loaded.paths.size() == 2 && loaded.paths[0].checks.size() == 2);
+    for (const auto& path : loaded.paths) CHECK(PointerScanner::Status(loaded, path) == PointerPathStatus::Invalidated);
+    {
+        std::ofstream v1(std::filesystem::u8path(file), std::ios::trunc);
+        v1 << R"({"format":"cortex-pointer-scan","version":1,"target":1,"pointer_size":8,)"
+           << R"("modules":[{"name":"game.exe","base":4194304,"size":8192}],"paths":[{"m":0,"b":256,"o":[32,72]}]})";
+    }
+    CHECK(PointerScanner::Load(file, loaded, &error) && loaded.paths.size() == 1 && loaded.paths[0].checks.empty());
+    CHECK(PointerScanner::Status(loaded, loaded.paths[0]) == PointerPathStatus::Candidate);
+    std::filesystem::remove(std::filesystem::u8path(file));
+
+    // Without a known scan generation, two checks in two known processes
+    // are needed; checks of unknown generation never prove a second one.
+    PointerScanResult unknown;
+    unknown.modules = {{"game.exe", 0x400000, 0x2000}};
+    PointerPath path;
+    path.offsets = {0x20};
+    path.checks = {{0, true}, {0, true}, {77, true}};
+    unknown.paths = {path};
+    CHECK(PointerScanner::Status(unknown, unknown.paths[0]) == PointerPathStatus::Candidate);
+    unknown.paths[0].checks.push_back({78, true});
+    CHECK(PointerScanner::Status(unknown, unknown.paths[0]) == PointerPathStatus::Stable);
+    CHECK(std::string(PointerScanner::StatusName(PointerPathStatus::Invalidated)) == "invalidated");
+}
+
+// Capture comparison in the memory viewer.
+void TestByteDiff() {
+    std::vector<uint8_t> before(0x3000, 0), after(0x3000, 0);
+    after[0x10] = 1; after[0x11] = 2;      // one run of 2
+    after[0x20] = 7;                       // a run of 1
+    after[0x1800] = 9;                     // on page 1, unreadable below
+    after[0x2FFF] = 5;                     // last byte
+    bool truncated = true;
+    auto runs = DiffRuns(before, after, {}, {}, 0x1000, 100, &truncated);
+    CHECK(!truncated && runs.size() == 4);
+    CHECK(runs[0].offset == 0x10 && runs[0].length == 2 && runs[1].offset == 0x20 && runs[1].length == 1);
+    CHECK(ChangedBytes(runs) == 5);
+    // A page unreadable in either capture says nothing about its bytes.
+    runs = DiffRuns(before, after, {1, 1, 1}, {1, 0, 1}, 0x1000, 100, &truncated);
+    CHECK(runs.size() == 3 && ChangedBytes(runs) == 4);
+    // Bounded.
+    runs = DiffRuns(before, after, {}, {}, 0x1000, 2, &truncated);
+    CHECK(runs.size() == 2 && truncated);
+    // Next change, wrapping.
+    runs = DiffRuns(before, after, {}, {}, 0x1000, 100, &truncated);
+    CHECK(NextRun(runs, 0) == 0 && NextRun(runs, 0x10) == 1 && NextRun(runs, 0x2FFF) == 0);
+    CHECK(DiffRuns(before, before, {}, {}, 0x1000, 100).empty());
+}
+
 int main() {
+    TestByteDiff();
+    TestPointerPathValidation();
     TestGroupedScan();
     TestPeImage();
     TestStringsAndCaves();

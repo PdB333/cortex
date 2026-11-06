@@ -1,4 +1,5 @@
 #include "input_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -25,7 +26,7 @@ void InputWorkspace::SyncRecording(UiContext& context) {
 void InputWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.inputModel) {
-        HintText("Select a process to record or replay input.");
+        NoTargetHint(context, "A running process is needed to record or replay input.");
         return;
     }
     if (targetId_ != session->Target().id) {

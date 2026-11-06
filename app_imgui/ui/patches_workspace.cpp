@@ -1,4 +1,5 @@
 #include "patches_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 
 #include <imgui.h>
@@ -10,7 +11,7 @@ namespace cortex::ui {
 void PatchesWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.patchesModel) {
-        HintText("Select a process to inspect or apply patches.");
+        NoTargetHint(context, "A running process is needed to inspect or apply patches.");
         return;
     }
 

@@ -1,4 +1,5 @@
 #include "tools_workspace.h"
+#include "target_hint.h"
 #include "file_dialog.h"
 #include "tools_tabs.h"
 #include "address_resolver.h"
@@ -801,6 +802,7 @@ void ToolsWorkspace::PollPointerScan(UiContext& context) {
         return;
     }
     pointers_ = std::move(*pointerPending_);
+    pointers_.scanGeneration = pointerTargetGeneration_;
     pointerPending_.reset();
     pointersLoaded_ = true;
     pointerLive_.clear();
@@ -809,6 +811,11 @@ void ToolsWorkspace::PollPointerScan(UiContext& context) {
                   static_cast<unsigned long long>(pointers_.pointersIndexed), pointers_.milliseconds / 1000.0,
                   pointers_.truncated ? " - limit reached, shorter paths first" : "");
     pointerInfo_ = text;
+    // Paths are module-relative, so they stay usable on another process (the
+    // point of pointer maps), but they were found in the old one.
+    const auto active = context.sessions ? context.sessions->ActiveTarget() : std::nullopt;
+    if (!active || TargetKey(*active) != pointerTargetKey_)
+        pointerInfo_ += " - found in a previous process: Rescan before trusting them here";
     context.status = pointerInfo_;
 }
 
@@ -869,6 +876,8 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
             auto cancel = pointerCancel_;
             auto progress = pointerProgress_;
             pointerRunning_ = true;
+            pointerTargetKey_ = TargetKey(session->Target());
+            pointerTargetGeneration_ = session->Target().generation;
             pointerInfo_ = "Indexing pointers...";
             pointerFuture_ = std::async(std::launch::async, [session, options, pending, cancel, progress]() {
                 std::string error;
@@ -902,6 +911,29 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("After the game restarts, scan the value again and enter its new\n"
                               "address: only the paths that still reach it are kept.");
+        ImGui::SameLine();
+        ImGui::BeginDisabled(pointers_.paths.empty());
+        if (ImGui::Button("Validate here")) {
+            uint64_t target = 0;
+            lastModules_ = {};
+            RefreshModules(context);
+            if (!Resolve(context, pointerRescan_, target)) {
+                pointerInfo_ = "Enter the value's address in this process";
+            } else {
+                const auto summary = services::PointerScanner::Validate(
+                    session, pointers_, target, CurrentPointerModules(), session->Target().generation);
+                pointerInfo_ = std::to_string(summary.stable) + " stable, " + std::to_string(summary.candidate) +
+                               " candidate, " + std::to_string(summary.invalidated) + " invalidated (checked against " +
+                               Hex(target) + ")";
+                pointerLive_.clear();
+            }
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Records, for this process, which paths lead to the address entered at left.\n"
+                              "A path is stable once it led to the value in two different processes,\n"
+                              "invalidated as soon as it led elsewhere once. Nothing is removed; Save keeps\n"
+                              "the history for the next session.");
     }
 
     ImGui::SetNextItemWidth(std::max(Px(200), ImGui::GetContentRegionAvail().x - ButtonWidth("Save") -
@@ -945,9 +977,10 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
     if (refresh) lastPointerRefresh_ = now;
     const auto currentModules = CurrentPointerModules();
 
-    if (!ToolTable("PointerTable", 3)) return;
+    if (!ToolTable("PointerTable", 4)) return;
     ImGui::TableSetupScrollFreeze(0, 1);
-    ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+    ImGui::TableSetupColumn("Path", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+    ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch, 0.1f);
     ImGui::TableSetupColumn("Points to", ImGuiTableColumnFlags_WidthStretch, 0.22f);
     ImGui::TableSetupColumn("Value (4 bytes)", ImGuiTableColumnFlags_WidthStretch, 0.18f);
     ImGui::TableHeadersRow();
@@ -1003,6 +1036,20 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
             }
             ImGui::PopID();
             ImGui::TableSetColumnIndex(1);
+            {
+                const auto status = services::PointerScanner::Status(pointers_, path);
+                const char* name = services::PointerScanner::StatusName(status);
+                if (status == services::PointerPathStatus::Stable)
+                    ImGui::TextColored(ImVec4(0.35f, 0.78f, 0.45f, 1.0f), "%s", name);
+                else if (status == services::PointerPathStatus::Invalidated)
+                    ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.35f, 1.0f), "%s", name);
+                else
+                    ImGui::TextDisabled("%s", name);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%zu check(s) in other processes. Validate here records one for this process.",
+                                      path.checks.size());
+            }
+            ImGui::TableSetColumnIndex(2);
             if (resolved == 0) {
                 ImGui::TextDisabled("??");
             } else {
@@ -1010,7 +1057,7 @@ void ToolsWorkspace::DrawPointers(UiContext& context) {
                 MonoText("%s", Hex(resolved).c_str());
                 if (!same && ImGui::IsItemHovered()) ImGui::SetTooltip("No longer the scanned address");
             }
-            ImGui::TableSetColumnIndex(2);
+            ImGui::TableSetColumnIndex(3);
             int32_t value = 0;
             if (resolved && session->ReadMemory(resolved, &value, sizeof(value), nullptr)) ImGui::Text("%d", value);
             else ImGui::TextDisabled("??");
@@ -2433,7 +2480,7 @@ void ToolsWorkspace::Draw(UiContext& context) {
     PollPointerScan(context);
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session) {
-        HintText("Select a process to use the memory tools.");
+        NoTargetHint(context, "A running process is needed to use the memory tools.");
         return;
     }
     if (session->Target().id != targetId_) {

@@ -1,4 +1,5 @@
 #include "debugger_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -136,7 +137,7 @@ void DebuggerWorkspace::RefreshLive(UiContext& context) {
 void DebuggerWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.debuggerModel) {
-        HintText("Select a process to use the debugger.");
+        NoTargetHint(context, "A running process is needed to use the debugger.");
         return;
     }
 

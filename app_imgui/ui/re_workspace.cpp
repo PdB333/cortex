@@ -1,4 +1,5 @@
 #include "re_workspace.h"
+#include "target_hint.h"
 #include "widgets.h"
 #include "address_context_menu.h"
 
@@ -76,12 +77,12 @@ void ReWorkspace::RefreshAll(UiContext& context) {
 void ReWorkspace::Draw(UiContext& context) {
     const auto session = context.sessions ? context.sessions->Active() : nullptr;
     if (!session || !context.reModel) {
-        HintText("Select a process to use the RE workspace.");
+        NoTargetHint(context, "A running process is needed to use the RE workspace.");
         return;
     }
 
-    if (targetId_ != session->Target().id)
-        ResetForTarget(context, session->Target().id);
+    if (targetId_ != TargetKey(session->Target()))
+        ResetForTarget(context, TargetKey(session->Target()));
 
     uint64_t navigationAddress = 0;
     if (context.ConsumeNavigation("re", navigationAddress)) {
