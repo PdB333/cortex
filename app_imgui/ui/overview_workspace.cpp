@@ -46,9 +46,11 @@ std::string McpConfiguration() {
 
 // A bordered card of the start page with a title, a description and its
 // own buttons below.
+// A height of 0 fits the card to its content (stacked cards).
 void Card(const char* id, const char* title, const char* body, float width, float height,
           const std::function<void()>& actions) {
-    ImGui::BeginChild(id, ImVec2(width, height), ImGuiChildFlags_Borders);
+    ImGui::BeginChild(id, ImVec2(width, height),
+                      ImGuiChildFlags_Borders | (height > 0 ? 0 : ImGuiChildFlags_AutoResizeY));
     ImGui::Dummy(ImVec2(0, Px(4)));
     {
         HeadingFont heading;
@@ -103,9 +105,11 @@ void OverviewWorkspace::DrawStart(UiContext& context) {
     ImGui::EndGroup();
     ImGui::Dummy(ImVec2(0, Px(14)));
 
-    const bool row = maxWidth >= Px(280) * 3 + style.ItemSpacing.x * 2;
+    // Side by side when the three fit; stacked (each as tall as its content,
+    // so all three stay on screen) in a narrow window.
+    const bool row = maxWidth >= Px(220) * 3 + style.ItemSpacing.x * 2;
     const float width = row ? (maxWidth - style.ItemSpacing.x * 2) / 3.0f : maxWidth;
-    const float height = Px(250);
+    const float height = row ? Px(250) : 0.0f;
     auto place = [&](bool first) {
         if (row && !first) ImGui::SameLine();
         else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + left);

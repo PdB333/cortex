@@ -55,6 +55,9 @@ user32.GetClassLongPtrW.argtypes = [W.HWND, ctypes.c_int]
 user32.SendMessageW.restype = ctypes.c_ssize_t
 user32.SendMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
 user32.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+user32.SendMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, ctypes.c_void_p]
+user32.GetParent.restype = W.HWND
+user32.GetDlgItem.restype = W.HWND
 
 failures = []
 results = []
@@ -113,14 +116,40 @@ def rect(hwnd):
 
 
 def foreground(hwnd):
-    # A process may only take the foreground under conditions; a synthetic
-    # Alt press satisfies them, as for any automation tool.
-    key(0x12, up=False)
+    # A process may only take the foreground under conditions; sharing the
+    # input state of the current foreground thread satisfies them. (A
+    # synthetic Alt press would too, but it opens the window's menu bar.)
+    current = user32.GetForegroundWindow()
+    mine = kernel32.GetCurrentThreadId()
+    theirs = user32.GetWindowThreadProcessId(current, None) if current else 0
+    if theirs and theirs != mine:
+        user32.AttachThreadInput(mine, theirs, True)
     user32.SetForegroundWindow(hwnd)
-    key(0x12, up=True)
     user32.BringWindowToTop(hwnd)
+    if theirs and theirs != mine:
+        user32.AttachThreadInput(mine, theirs, False)
     time.sleep(0.4)
     return user32.GetForegroundWindow() == hwnd
+
+
+EnumChildProc = ctypes.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
+
+
+def file_name_box(dialog):
+    """The File name edit box of a common Open dialog."""
+    found = []
+
+    def visit(hwnd, _):
+        cls = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, cls, 64)
+        parent = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(user32.GetParent(hwnd), parent, 64)
+        if cls.value == "Edit" and parent.value == "ComboBox":
+            found.append(hwnd)
+        return True
+
+    user32.EnumChildWindows(dialog, EnumChildProc(visit), 0)
+    return found[0] if found else None
 
 
 # ------------------------------------------------------------------ input
@@ -354,15 +383,23 @@ def main():
         chord(VK_CONTROL, ord("O"))
         dialog = wait_for(lambda: [w for w in windows(desktop.pid) if w[2] == "#32770"], 15)
         if check(dialog, "Ctrl+O shows the system file dialog"):
+            time.sleep(2.0)  # the dialog fills its views before it takes input
             screenshot(out, "02-file-dialog")
-            foreground(dialog[0][0])
-            type_text(fixture)
-            chord(VK_RETURN)
+            box = wait_for(lambda: file_name_box(dialog[0][0]), 10)
+            check(box, "the dialog has its File name box")
+            if box:
+                user32.SendMessageW(box, 0x000C, 0, ctypes.c_wchar_p(fixture))  # WM_SETTEXT
+                time.sleep(0.3)
+                user32.SendMessageW(user32.GetDlgItem(dialog[0][0], 1), 0x00F5, 0, None)  # Open: BM_CLICK
             check(wait_for(lambda: any(os.path.normcase(p) == os.path.normcase(fixture)
                                        for p in recent_files(settings_path)), 20),
                   "the chosen file is inspected and joins the recent files", recent_files(settings_path))
             time.sleep(1.0)
             screenshot(out, "03-files-layout", rect(hwnd))
+        # A dialog left open (a failed step) would block every next step.
+        for w in [w for w in windows(desktop.pid) if w[2] == "#32770"]:
+            user32.PostMessageW(w[0], 0x0010, 0, 0)
+        time.sleep(0.5)
 
         # 3. Help: the guide opens with the associated program.
         foreground(hwnd)
