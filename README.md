@@ -22,7 +22,7 @@ It reads files as well as live processes, can use Ghidra, ILSpy and live debugge
 
 <br>
 
-<img src="docs/images/readme/manual-find-what-writes.gif" alt="Cortex attaches to the test target, scans for 100, narrows to one address after a hit, finds the instruction that writes it and opens it in the disassembler" width="100%">
+<img src="docs/images/readme/manual-find-what-writes.gif" alt="From the start page, Cortex attaches to the test target by name, scans for 100, narrows to one address after a hit, finds the instruction that writes it and opens it in the disassembler" width="100%">
 
 <sub>Recorded from the real desktop against the repository's test target: attach, scan, narrow down, <i>find out what writes</i>, disassembler. No speed-up and no edits besides the captions.</sub>
 

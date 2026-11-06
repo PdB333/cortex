@@ -1000,11 +1000,15 @@ void DrawHeader(AppState& app) {
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Home: open a file, select a process or connect an AI agent");
     }
     ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
-    if (ImGui::Button("Open a file..."))
-        OpenFile(app);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Analyze an .exe, .dll, .asar, script or archive without running it (Ctrl+O)");
-    ImGui::SameLine();
+    // With a process attached the line holds the target and the debugger
+    // controls; opening a file stays in File > Open a file... and Ctrl+O.
+    if (!session) {
+        if (ImGui::Button("Open a file..."))
+            OpenFile(app);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Analyze an .exe, .dll, .asar, script or archive without running it (Ctrl+O)");
+        ImGui::SameLine();
+    }
     if (ImGui::Button(session ? "Change process" : "Select process"))
         app.ui.requestProcessPicker = true;
     if (ImGui::IsItemHovered())

@@ -18,7 +18,7 @@ The Cortex mark in the header, **File > Home**, **Help > Start page** and **Work
 
 ### Header
 
-- The Cortex mark (back to Home), **Open a file...**, then **Select process** / **Change process**, which opens the process picker; the target (process, PID, architecture) follows.
+- The Cortex mark (back to Home), **Open a file...** (while no process is attached; `Ctrl+O` always works), then **Select process** / **Change process**, which opens the process picker; the target (process, PID, architecture) follows.
 - **Go to...**, **Pause target** (both greyed out without a process) and, once a debugger is attached, **Pause**, **Continue**, **Step** and **Over**, then a chip per attached session.
 - On the right: AI activity status, the **Read-only / Writes allowed** toggle and **Detach**. The layouts (presets) are in the **Workspace** menu.
 
