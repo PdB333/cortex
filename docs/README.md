@@ -15,6 +15,7 @@ This directory contains both user-facing documentation for the unified Cortex ap
 - [Known limitations](limitations.md) — the documented limits, collected in one page.
 - [Third-party notices](third-party.md) — licences of the libraries and of the optional external engines.
 - [Contributing](../CONTRIBUTING.md) and [security policy](../SECURITY.md).
+- [Releasing](releasing.md): how the release workflow builds, checks and (only after approval) publishes the archive.
 
 ## Product architecture
 

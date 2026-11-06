@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../version.h"
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -14,7 +16,7 @@ using json = nlohmann::json;
 inline constexpr const char* kModernProtocolVersion = "2026-07-28";
 inline constexpr const char* kLatestLegacyProtocolVersion = "2025-11-25";
 inline constexpr const char* kServerName = "cortex";
-inline constexpr const char* kServerVersion = "1.0.1";
+inline constexpr const char* kServerVersion = cortex::kVersion;
 inline constexpr long long kCatalogTtlMs = 30000;
 
 enum class ToolProfile {

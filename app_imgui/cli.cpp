@@ -3,6 +3,7 @@
 
 #include "desktop_app.h"
 #include "../host/cli_entry_points.h"
+#include "../core/version.h"
 
 
 namespace cortex::desktop {
@@ -47,10 +48,10 @@ static int ForwardCli(CliEntryPoint entry, const char* programName,
 
 static void PrintCliUsage(FILE* out = stdout) {
     std::fputs(
-        "Cortex lightweight migration preview\n\n"
+        "Cortex: memory scanner, debugger, reverse engineering and MCP server\n\n"
         "Usage:\n"
         "  cortex                         Launch the ImGui desktop UI\n"
-        "  cortex --version               Print preview version\n"
+        "  cortex --version               Print the Cortex version\n"
         "  cortex --smoke-test            Run deterministic headless ImGui smoke\n"
         "  cortex --gui-workspace-suite   Render all workspaces/presets and validate docking\n"
         "  cortex --gui-attached-suite    Exercise GUI against a live --pid target\n"
@@ -69,8 +70,8 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex inspect <file> [...]    Identify a file and print its structure (PE, ASAR, JS, .NET, ZIP)\n"
         "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n"
         "  cortex investigation ...       List, show, report, approve or reject investigation steps\n"
-        "  cortex provider list|run ...   External engines: Ghidra headless (native), ILSpy (C#)\n"
-        "  cortex live targets|scripts|watch  Node.js/Electron inspector (CDP): scripts, log breakpoints\n",
+        "  cortex provider list|run ...   External engines: Ghidra (native), ILSpy (C#), Vineflower (Java)\n"
+        "  cortex live targets|scripts|watch  Live debuggers (CDP, debugpy, netcoredbg, JDWP): log breakpoints\n",
         out);
 }
 
@@ -83,7 +84,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
         return 0;
     }
     if (command == "--version" || command == "version") {
-        std::puts("cortex 1.0.1");
+        std::printf("cortex %s\n", cortex::kVersion);
         return 0;
     }
 #if CORTEX_WITH_TEST_MODES

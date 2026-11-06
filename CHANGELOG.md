@@ -2,9 +2,18 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [Unreleased]
+## [v2.0.0] - not yet released
 
-Cortex 2.0, steps 1 to 8 (step 4: static artifact analysis of PE and native code, ASAR, JavaScript/TypeScript, Electron, .NET, ZIP; step 5: evidence records; step 6: investigations; step 7: the AI Investigation workspace; step 8: external analysis engines). See `docs/cortex-2-roadmap.md`.
+Cortex 2.0. Highlights:
+
+- **Two ways to work.** The desktop and the command line for a person; `cortex.exe mcp` for an AI agent, which is read-only unless the operator starts it with `--allow-writes` and whose every tool call appears in the desktop's AI Activity panel.
+- **Files as well as processes.** Static analysis of PE and native code, .NET metadata and CIL, Electron ASAR, JavaScript/TypeScript with source maps, and ZIP/JAR, without running anything.
+- **External engines.** Ghidra (PE x64/x86, ELF), ILSpy (C#) and Vineflower (Java) as separate processes, with results cached by SHA-256 and mapped back to the live module by RVA.
+- **Live providers.** Log breakpoints for Node.js (CDP), Python (debugpy), .NET (netcoredbg, stdio mode on Windows) and Java (JDWP), with no evaluation of code.
+- **Evidence and investigations.** Records with provenance, class and status; supervised investigations with a plan, journal, report and approval by the person; an AI Investigation workspace.
+- **Quality.** Parser and protocol fuzzing, robustness tests against killed targets and failing engines, live baselines and a comparison with Ghidra measured in CI. Fixes include a target crash at thread exit, a scan-session leak in the target and several ways a malformed request could end the MCP server.
+
+The plan, what each step validated and its limits: `docs/cortex-2-roadmap.md` and `docs/limitations.md`. Steps 1 to 10.
 
 ### Added
 

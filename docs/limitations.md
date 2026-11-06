@@ -18,9 +18,9 @@ report the mismatch.
   configures, and the test runner sends bounded window-message input. Not
   every program handles window messages
   ([automated tests](automated-tests.md)).
-- **Cortex 2.0 is unreleased.** Static analysis of files, evidence,
-  investigations, external engines and live providers exist on the
-  development branch and in CI artifacts, not in the v1.0.1 release
+- **Until v2.0.0 is published,** static analysis of files, evidence,
+  investigations, external engines and live providers are in the CI
+  artifacts of the development branch, not in the v1.0.1 release
   ([roadmap](cortex-2-roadmap.md)).
 
 ## Security model

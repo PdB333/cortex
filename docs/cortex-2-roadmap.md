@@ -879,9 +879,21 @@ The full description is in `docs/investigations.md`.
 
 - The README order, the portable archive, three demos and the guides listed in
   the brief.
-- `CONTRIBUTING.md`, `SECURITY.md`, issue and PR templates. None exist today:
-  `.github/` contains workflows only.
+- `CONTRIBUTING.md`, `SECURITY.md`, issue and PR templates.
 - A release only after explicit approval.
+
+**Status (ready for approval, not released):**
+
+| Item | Result |
+|---|---|
+| README | Two ways to use Cortex, three GIFs recorded from the real app, a table of what can be analyzed with each row's validation, safety model, FAQ, light and dark banner |
+| Brand | New logo (transparent background), banners, `cortex.ico` at nine sizes |
+| Project files | `CONTRIBUTING.md`, `SECURITY.md`, issue and PR templates, `docs/limitations.md`, `docs/releasing.md` |
+| Version | 2.0.0 in one place (`core/version.h`): `--version`, the Help menu, MCP `serverInfo`; release workflow on `v2.0.0` |
+| Install notes | `README_INSTALL.txt` for 2.0 (two ways, MCP arguments, optional engines) |
+| Release notes | The `## [v2.0.0]` section of `CHANGELOG.md`, which the workflow publishes |
+| Archive checks | Documents, README links resolving in the archive, version, 2.0 commands, no test leftovers (see `docs/releasing.md`) |
+| Not done here | A run on a real Windows desktop (icon, attach, MCP client); the release itself, which needs the maintainer's approval |
 
 ## 8. Multi-runtime support (added requirement)
 

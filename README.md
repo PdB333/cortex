@@ -85,7 +85,7 @@ A typical session mixes the two: the agent narrows down a value and finds the in
 
 ## Quick start
 
-Download **`cortex-v1.0.1-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive (or use the `cortex-imgui-gui-tested-portable` artifact of a green CI run for the current branch).
+Download **`cortex-v<version>-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive (or use the `cortex-imgui-gui-tested-portable` artifact of a green CI run for the current branch).
 
 **By hand (desktop):**
 

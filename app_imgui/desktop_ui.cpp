@@ -4,6 +4,7 @@
 #include "desktop_app.h"
 #include "ui/tools_tabs.h"
 #include "ui/address_resolver.h"
+#include "../core/version.h"
 
 #include <tlhelp32.h>
 
@@ -1211,7 +1212,7 @@ void DrawApp(AppState& app) {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::TextDisabled("Cortex v1.0.1");
+            ImGui::TextDisabled("Cortex v%s", cortex::kVersion);
             ImGui::Separator();
             if (ImGui::MenuItem("Diagnostics"))
                 app.workspaces.Select("diagnostics");
