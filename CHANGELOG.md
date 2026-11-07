@@ -20,6 +20,8 @@ Installing, setting up and updating Cortex without editing files by hand.
   - Load configuration and a hardening summary: ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET shadow stack, stack cookie.
   - Section entropy and packer detection (UPX, ASPack, MPRESS, PECompact, Themida, VMProtect, Enigma and others, plus heuristics). Detection only: Cortex never unpacks.
   - Checked against pefile (imphash, entropy) and osslsigncode (Authenticode digest) on new fixtures, a tampered signed file, a hand-built Rich header, and five minutes of fuzzing.
+- **Windows minidumps** (`.dmp`): the system and process, the exception with its faulting module+offset and the address read or written, the threads with their instruction and stack pointers, the modules with versions and PDB identities, the memory kept. Unknown streams (Wine's, vendors') are listed. Checked against the minidump package on a Wine dump, and on a dump written by Windows in the desktop acceptance run.
+- **Registry hives** (`regf`: SYSTEM, SOFTWARE, NTUSER.DAT, `reg save` files): base block with its checksum, and the key tree with typed values (strings, numbers, lists, binary), bounded; cell loops are cut. Checked against python-registry on a generated hive, and on a `reg save` file on Windows.
 - **Formats roadmap** (`docs/formats-roadmap.md`): every format Cortex reads and about two hundred planned ones, with state and priority.
 - The real-desktop acceptance run also checks the setup on a scratch profile, an update from a local feed (and a tampered download being refused), and a silent install, run and uninstall.
 

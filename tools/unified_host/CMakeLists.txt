@@ -61,6 +61,8 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/core/artifacts/pe_extras.cpp
     ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
+    ${CORTEX_ROOT}/core/artifacts/minidump_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/hive_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp
     ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
     ${CORTEX_ROOT}/core/artifacts/js_provider.cpp

@@ -319,6 +319,8 @@ add_executable(cortex_host
     core/artifacts/pe_extras.cpp
     core/artifacts/asar_provider.cpp
     core/artifacts/registry_default.cpp
+    core/artifacts/minidump_provider.cpp
+    core/artifacts/hive_provider.cpp
     core/artifacts/js_lexer.cpp
     core/artifacts/js_analysis.cpp
     core/artifacts/js_provider.cpp
@@ -572,6 +574,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -610,6 +614,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -631,6 +637,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -652,6 +660,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -684,6 +694,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -708,6 +720,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -738,6 +752,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
@@ -829,6 +845,8 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
+        core/artifacts/minidump_provider.cpp
+        core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp

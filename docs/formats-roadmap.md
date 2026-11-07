@@ -55,7 +55,7 @@ Rules that apply to every row:
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| Windows minidumps (.dmp) | threads, stacks, modules, exception record, memory ranges | ⬜ | P1 | built-in |
+| Windows minidumps (.dmp) | system, process, exception with module+offset and access, threads with registers, modules with versions and PDB ids, memory ranges | ✅ | | built-in |
 | Windows Error Reporting reports | report fields | ⬜ | P3 | built-in |
 | Cortex crash reports and snapshots | crash bundles, memory snapshots | ✅ | | built-in |
 | Linux core files | threads, registers, mappings | ⬜ | P4 | built-in |
@@ -165,7 +165,8 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Protobuf | schema-less decoding; .proto from descriptors embedded in binaries | ⬜ | P3 | built-in |
 | FlatBuffers (.bfbs), Cap'n Proto, MessagePack, CBOR, BSON, Thrift, Avro | structure | ⬜ | P4 | built-in |
 | Property lists (binary, XML), NSKeyedArchiver | values | ⬜ | P4 | built-in |
-| Windows registry hives (REGF), .reg | keys and values | ⬜ | P1 | built-in |
+| Windows registry hives (REGF) | base block, key tree, typed values (bounded) | ✅ | | built-in |
+| Registry exports (.reg) | keys and values | ⬜ | P3 | built-in |
 | Java serialization, .NET BinaryFormatter (detection), Python pickle (disassembly), Ruby Marshal, PHP serialize | structure, never instantiated | ⬜ | P3 | built-in |
 | X.509, PKCS#7, catalog files (.cat) | certificates and hashes | ⬜ | P1 | built-in |
 

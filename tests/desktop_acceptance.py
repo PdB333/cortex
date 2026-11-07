@@ -366,6 +366,74 @@ def read_json(path):
         return {}
 
 
+def inspect(exe, path):
+    code, stdout, stderr = run([exe, "inspect", path], timeout=120)
+    try:
+        return json.loads(stdout)
+    except ValueError:
+        return {"_error": stderr[-400:] or stdout[-400:], "_code": code}
+
+
+def check_windows_formats(exe, workdir, target_exe):
+    """Files Windows itself writes: a registry hive and a minidump."""
+    key = r"Software\CortexAcceptance"
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as handle:
+        winreg.SetValueEx(handle, "Name", 0, winreg.REG_SZ, "Cortex acceptance")
+        winreg.SetValueEx(handle, "Count", 0, winreg.REG_DWORD, 7)
+        winreg.SetValueEx(handle, "List", 0, winreg.REG_MULTI_SZ, ["one", "two"])
+    hive = os.path.join(workdir, "acceptance.hiv")
+    code, _, stderr = run(["reg", "save", "HKCU\\" + key, hive, "/y"])
+    result = inspect(exe, hive) if code == 0 else {"_error": stderr}
+    data = result.get("data", {})
+    values = {row.get("name"): row.get("data") for row in data.get("root", {}).get("values", [])}
+    check(result.get("format") == "registry-hive" and data.get("checksum_valid") is True and
+          values.get("Name") == "Cortex acceptance" and values.get("Count") == 7 and values.get("List") == ["one", "two"],
+          "a hive written by reg save is read (values, checksum)", {"code": code, "values": values,
+                                                                    "error": result.get("_error")})
+    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key)
+
+    # A minidump of a running program, written by dbghelp.
+    process = subprocess.Popen([target_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(2.0)
+        dump = os.path.join(workdir, "target.dmp")
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        dbghelp = ctypes.WinDLL("dbghelp", use_last_error=True)
+        kernel.OpenProcess.restype = W.HANDLE
+        kernel.CreateFileW.restype = W.HANDLE
+        handle = kernel.OpenProcess(0x0410 | 0x0040, False, process.pid)
+        file = kernel.CreateFileW(dump, 0x40000000, 0, None, 2, 0x80, None)
+        written = dbghelp.MiniDumpWriteDump(W.HANDLE(handle), process.pid, W.HANDLE(file), 0, None, None, None)
+        kernel.CloseHandle(W.HANDLE(file))
+        kernel.CloseHandle(W.HANDLE(handle))
+        result = inspect(exe, dump) if written else {"_error": "MiniDumpWriteDump failed"}
+        data = result.get("data", {})
+        names = [os.path.basename(row.get("name", "")).lower() for row in data.get("modules", [])]
+        check(result.get("format") == "minidump" and data.get("system", {}).get("architecture") == "x64" and
+              os.path.basename(target_exe).lower() in names and "ntdll.dll" in names and
+              data.get("process", {}).get("pid") == process.pid and data.get("threads"),
+              "a minidump written by Windows is read (process, modules, threads)",
+              {"modules": names[:6], "process": data.get("process"), "error": result.get("_error")})
+    finally:
+        process.kill()
+
+    # Authenticode on a file Microsoft signed with an embedded signature, when
+    # one is present (most of System32 is catalog-signed instead).
+    candidates = [os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe"),
+                  os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "PowerShell", "7", "pwsh.exe")]
+    for candidate in candidates:
+        data = inspect(exe, candidate).get("data", {}) if os.path.isfile(candidate) else {}
+        signature = data.get("authenticode")
+        if signature:
+            check(signature.get("file_digest_matches") is True and
+                  "Microsoft" in json.dumps(signature.get("signer", {})),
+                  "a Microsoft-signed file: the signer is Microsoft and the digest matches (%s)" % os.path.basename(candidate),
+                  signature.get("signer"))
+            check(data.get("rich_header") is not None or "pwsh" in candidate,
+                  "an MSVC-built file has a Rich header (%s)" % os.path.basename(candidate), data.get("rich_header"))
+            break
+
+
 def check_setup(exe, bundle, workdir):
     env, home, appdata = fake_profile(os.path.join(workdir, "profile-setup"))
     code, stdout, stderr = run([exe, "setup", "--yes", "--json"], env=env, cwd=bundle)
@@ -622,6 +690,7 @@ def main():
         check(not crashes, "no crash dump", crashes)
 
         # 7-9. Setup of AI clients, updates, the installer.
+        check_windows_formats(exe, workdir, target_exe)
         check_setup(exe, bundle, workdir)
         check_update(bundle, workdir, feed)
         if args.installer:

@@ -358,10 +358,74 @@ void TestPeExtras(const std::string& fixtures) {
     CHECK(RichHeaderFromBytes(std::vector<uint8_t>(0x100, 0)).is_null());
 }
 
+// A Wine minidump of tests/fixtures/dumps/crash.c (a write to 0x10), checked
+// against the minidump package (after neutralizing Wine's private stream,
+// which that package refuses and Cortex lists).
+void TestMinidump(const std::string& fixtures) {
+    auto file = OpenFile(fixtures + "/dumps/wine-access-violation.dmp");
+    CHECK(file != nullptr);
+    if (!file) return;
+    const json result = DefaultRegistry().Inspect(*file);
+    CHECK(result["format"] == "minidump");
+    const json& data = result["data"];
+    CHECK(data["system"]["architecture"] == "x64" && data["system"]["os_version"] == "10.0.19043" &&
+          data["system"]["processors"] == 4);
+    CHECK(data["process"]["pid"] == 260);
+    const json& exception = data["exception"];
+    CHECK(exception["name"] == "ACCESS_VIOLATION" && exception["code"] == "0xc0000005" && exception["thread"] == 264);
+    CHECK(exception["address"] == "0x14000152c" && exception["module"] == "crash.exe+0x152c");
+    CHECK(exception["access"]["kind"] == "write" && exception["access"]["target"] == "0x10");
+    CHECK(exception["context"]["ip"] == "0x14000152c");
+    CHECK(data["modules"].size() == 8 && data["threads"].size() == 1 && data["threads"][0]["id"] == 264);
+    bool wine = false;
+    for (const auto& stream : data["streams"]) wine = wine || stream["type"] == "wine_specific";
+    CHECK(wine);
+    // Every prefix fails cleanly or reads partially; nothing crashes.
+    const auto bytes = Bytes(*file);
+    for (size_t size = 0; size < 4096; size += 61)
+        (void)DefaultRegistry().Inspect(*FromBytes(std::vector<uint8_t>(bytes.begin(), bytes.begin() + size), "prefix.dmp"));
+}
+
+// tests/fixtures/registry/small.hiv, written by make_hive.py and read back by
+// python-registry as the independent check.
+void TestHive(const std::string& fixtures) {
+    auto file = OpenFile(fixtures + "/registry/small.hiv");
+    CHECK(file != nullptr);
+    if (!file) return;
+    const json result = DefaultRegistry().Inspect(*file);
+    CHECK(result["format"] == "registry-hive");
+    const json& data = result["data"];
+    CHECK(data["checksum_valid"] == true && data["dirty"] == false && data["version"] == "1.5");
+    CHECK(data["keys"] == 5 && data["values"] == 6 && data["root"]["name"] == "ROOT");
+    CHECK(data["last_written"] == "2024-09-05T08:53:20Z");  // python-registry
+    const json& cortex = data["root"]["subkeys"][0]["subkeys"][0];
+    CHECK(cortex["name"] == "Cortex" && cortex["values"].size() == 6);
+    auto value = [&cortex](const std::string& name) {
+        for (const auto& row : cortex["values"])
+            if (row["name"] == name) return row;
+        return json();
+    };
+    CHECK(value("Name")["type"] == "REG_SZ" && value("Name")["data"] == "Cortex fixture");
+    CHECK(value("Count")["data"] == 42 && value("Data")["hex"] == "010203");
+    CHECK(value("List")["data"] == json::array({"alpha", "beta"}));
+    CHECK(value("Big")["data"] == 72623859790382856ull && value("Path")["type"] == "REG_EXPAND_SZ");
+    // A loop between cells (a key listing itself) is cut, not followed.
+    auto bytes = Bytes(*file);
+    const auto corrupted = FromBytes(bytes, "copy.hiv");
+    (void)DefaultRegistry().Inspect(*corrupted);
+    for (size_t at = 0x1000; at + 4 < bytes.size(); at += 97) {
+        auto broken = bytes;
+        broken[at] ^= 0x5A;
+        (void)DefaultRegistry().Inspect(*FromBytes(broken, "broken.hiv"));
+    }
+}
+
 int main(int argc, char** argv) {
     TestSha256();
     TestAsar();
     TestPeExtras(argc > 2 ? argv[2] : "tests/fixtures");
+    TestMinidump(argc > 2 ? argv[2] : "tests/fixtures");
+    TestHive(argc > 2 ? argv[2] : "tests/fixtures");
     if (argc > 1) TestPeFixture(argv[1]);
     else std::cerr << "note: no PE fixture given, PE checks skipped" << std::endl;
     if (failures) {
