@@ -96,6 +96,7 @@ private:
     std::array<char, 1024> ilspycmd_ = {};
     std::array<char, 1024> dotnetPath_ = {};
     std::array<char, 1024> vineflowerJar_ = {};
+    std::string javaHome_;  // a JDK found by Find installed engines
     std::array<char, 128> engineFilter_ = {};
 };
 

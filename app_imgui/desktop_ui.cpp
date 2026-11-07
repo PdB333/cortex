@@ -137,6 +137,8 @@ enum class CommandAction {
     PresetAi,
     OpenFile,
     OpenGuide,
+    OpenSetup,
+    CheckUpdates,
     ViewArtifacts,
     ViewAiInvestigation,
     PresetTrace,
@@ -238,6 +240,8 @@ constexpr CommandEntry kCommands[] = {
     {"Scan: Undo the last scan", CommandAction::Dispatch, "scan_undo"},
     {"Scan: Cancel the running scan", CommandAction::Dispatch, "scan_cancel"},
     {"Address list: Freeze / unfreeze all", CommandAction::Dispatch, "freeze_toggle_all"},
+    {"Setup: AI clients and analysis engines", CommandAction::OpenSetup},
+    {"Help: Check for updates", CommandAction::CheckUpdates},
     {"Help: Getting started", CommandAction::OpenGuide, "getting-started.md"},
     {"Help: Desktop guide", CommandAction::OpenGuide, "ui-guide.md"},
     {"Help: Connecting an AI agent (MCP)", CommandAction::OpenGuide, "mcp.md"},
@@ -290,6 +294,8 @@ void ExecuteCommand(AppState& app, CommandAction action, const char* command = n
         case CommandAction::PresetFiles: app.workspaces.ApplyPreset(WorkspacePreset::Files); break;
         case CommandAction::PresetAi: app.workspaces.ApplyPreset(WorkspacePreset::Ai); break;
         case CommandAction::OpenFile: OpenFile(app); break;
+        case CommandAction::OpenSetup: OpenSetupPanel(app); break;
+        case CommandAction::CheckUpdates: StartUpdateCheck(app, true); break;
         case CommandAction::OpenGuide:
             if (command) OpenGuide(app, command);
             break;
@@ -1157,6 +1163,7 @@ void DrawApp(AppState& app) {
     }
 
     app.aiActivityModel.Poll(app.settings.Values().aiActivityHistoryLimit);
+    MaybeCheckForUpdates(app);
     TrackForegroundProcess(app);
     AutoAttach(app);
     {
@@ -1313,6 +1320,9 @@ void DrawApp(AppState& app) {
             if (ImGui::MenuItem("AI Investigation"))
                 app.workspaces.Select("ai-investigation");
             ImGui::Separator();
+            if (ImGui::MenuItem("Set up AI clients and engines..."))
+                OpenSetupPanel(app);
+            ImGui::Separator();
             if (ImGui::BeginMenu("Advanced")) {
                 if (ImGui::MenuItem("Sessions"))
                     app.workspaces.Select("sessions");
@@ -1352,12 +1362,18 @@ void DrawApp(AppState& app) {
             if (ImGui::MenuItem("Connecting an AI agent (MCP)")) OpenGuide(app, "mcp.md");
             if (ImGui::MenuItem("Known limitations")) OpenGuide(app, "limitations.md");
             ImGui::Separator();
+            if (ImGui::MenuItem("Set up AI clients and engines..."))
+                OpenSetupPanel(app);
+            if (ImGui::MenuItem("Check for updates..."))
+                StartUpdateCheck(app, true);
+            ImGui::Separator();
             if (ImGui::MenuItem("Diagnostics"))
                 app.workspaces.Select("diagnostics");
             ImGui::Separator();
             ImGui::TextDisabled("Cortex v%s", cortex::kVersion);
             ImGui::EndMenu();
         }
+        DrawUpdateButton(app);
         ImGui::EndMenuBar();
     }
 
@@ -1381,7 +1397,13 @@ void DrawApp(AppState& app) {
     else
         ImGui::TextDisabled("[%s]  %s", layout, app.ui.status.c_str());
 
+    if (app.ui.requestSetupPanel) {
+        app.ui.requestSetupPanel = false;
+        OpenSetupPanel(app);
+    }
     DrawProcessPicker(app);
+    DrawSetupPanel(app);
+    DrawUpdateDialog(app);
     DrawCommandPalette(app);
     DrawGoTo(app);
     DrawPromptSurface(app);

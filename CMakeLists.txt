@@ -584,6 +584,23 @@ if(BUILD_TESTING)
     target_link_libraries(cortex_artifacts_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME cortex_artifacts_tests COMMAND cortex_artifacts_tests $<TARGET_FILE:cortex_test_target>)
 
+    # Setup and updater: AI client registration on a fake home, engine
+    # detection, update feed, checksums, archive unpacking.
+    add_executable(cortex_setup_tests
+        tests/setup_tests.cpp
+        core/setup/setup.cpp
+        core/setup/updater.cpp
+        core/artifacts/artifact.cpp
+        core/artifacts/zip_provider.cpp
+        core/artifacts/inflate.cpp
+    )
+    target_include_directories(cortex_setup_tests PRIVATE core)
+    target_link_libraries(cortex_setup_tests PRIVATE nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(cortex_setup_tests PRIVATE winhttp shell32)
+    endif()
+    add_test(NAME cortex_setup_tests COMMAND cortex_setup_tests)
+
     add_executable(cortex_js_tests
         tests/js_tests.cpp
         core/artifacts/artifact.cpp
@@ -827,7 +844,7 @@ endif()
 
 # Standalone test executables must not depend on compiler DLLs being on PATH.
 if(BUILD_TESTING AND MINGW)
-    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests
+    foreach(test_target cortex_knowledge_graph_tests cortex_test_code_candidates_tests cortex_test_generate_tests cortex_test_evidence_graph_tests cortex_config_defaults_tests cortex_session_manager_tests cortex_project_store_tests cortex_investigation_context_tests cortex_events_tests cortex_artifacts_tests cortex_setup_tests cortex_artifact_tools_tests cortex_js_tests cortex_dotnet_tests cortex_native_code_tests cortex_evidence_tests cortex_investigation_tests cortex_process_tree_tests cortex_analysis_provider_tests cortex_cdp_tests cortex_dap_tests cortex_test_plan_tests cortex_test_knowledge_tests cortex_test_code_context_tests cortex_test_code_knowledge_tests cortex_pe_unwind_tests cortex_launch_config_tests cortex_knowledge_query_tests cortex_knowledge_model_tests
                         cortex_request_id_tests cortex_pagination_tests cortex_mcp_protocol_tests cortex_mcp_pipe_protocol_tests cortex_mcp_schema_tests cortex_mcp_query_schema_tests cortex_mcp_bridge_policy_tests cortex_mcp_authority_tests cortex_semantic_tools_tests cortex_action_transaction_tests)
         target_link_options(${test_target} PRIVATE -static -static-libgcc -static-libstdc++)
     endforeach()

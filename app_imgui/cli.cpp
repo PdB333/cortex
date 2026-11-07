@@ -71,7 +71,10 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex evidence export|list    Export or list recorded evidence (JSON or Markdown)\n"
         "  cortex investigation ...       List, show, report, approve or reject investigation steps\n"
         "  cortex provider list|run ...   External engines: Ghidra (native), ILSpy (C#), Vineflower (Java)\n"
-        "  cortex live targets|scripts|watch  Live debuggers (CDP, debugpy, netcoredbg, JDWP): log breakpoints\n",
+        "  cortex live targets|scripts|watch  Live debuggers (CDP, debugpy, netcoredbg, JDWP): log breakpoints\n"
+        "  cortex setup [--yes|--dry-run] Register Cortex in your AI clients and find the analysis engines\n"
+        "  cortex update [--check]        Install the latest release (verified download)\n"
+        "  cortex <file>                  Open the desktop on a file (Files layout)\n",
         out);
 }
 
@@ -120,6 +123,8 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "investigation") return ForwardCli(CortexInvestigationMain, "cortex investigation", args, 2);
     if (command == "provider") return ForwardCli(CortexProviderMain, "cortex provider", args, 2);
     if (command == "live") return ForwardCli(CortexLiveMain, "cortex live", args, 2);
+    if (command == "setup") return ForwardCli(CortexSetupMain, "cortex setup", args, 2);
+    if (command == "update") return ForwardCli(CortexUpdateMain, "cortex update", args, 2);
     if (command == "diagnose" || command == "diagnostics" || command == "watch")
         return ForwardCli(CortexDiagnoseMain, "cortex diagnose", args, 2);
     if (command == "analyze" || command == "analyse") {

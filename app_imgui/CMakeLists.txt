@@ -99,6 +99,7 @@ add_executable(cortex_imgui WIN32
     main.cpp
     cli.cpp
     desktop_ui.cpp
+    setup_ui.cpp
     application/settings.cpp
     application/hotkeys.cpp
     application/cheat_table.cpp
@@ -174,6 +175,9 @@ add_executable(cortex_imgui WIN32
     ../tools/investigation_main.cpp
     ../tools/provider_main.cpp
     ../tools/live_main.cpp
+    ../tools/setup_main.cpp
+    ../core/setup/setup.cpp
+    ../core/setup/updater.cpp
     ../core/artifacts/artifact.cpp
     ../core/artifacts/pe_provider.cpp
     ../core/artifacts/asar_provider.cpp
@@ -278,6 +282,7 @@ target_link_libraries(cortex_imgui PRIVATE
     ole32
     crypt32
     comdlg32
+    winhttp
 )
 
 if(MINGW)

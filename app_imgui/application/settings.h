@@ -58,6 +58,12 @@ struct Settings {
     // Files inspected from the desktop, most recent first (File > Recent
     // files and the start page).
     std::vector<std::string> recentFiles;
+    // Updates: one small request to the release feed at most once a day at
+    // start-up (never in test modes); a version the person skipped is not
+    // offered again.
+    bool updateCheckAtStartup = true;
+    long long lastUpdateCheck = 0;  // seconds since 1970
+    std::string skippedUpdate;
 };
 
 inline constexpr size_t kMaxRecentFiles = 8;

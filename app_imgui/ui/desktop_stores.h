@@ -66,6 +66,13 @@ inline cortex::providers::Settings DesktopEngineSettings() {
             settings.ilspycmd = saved.value("ilspycmd", std::string());
             settings.dotnet = saved.value("dotnet", std::string());
             settings.vineflowerJar = saved.value("vineflower", std::string());
+            // A JDK chosen by setup: Ghidra and Vineflower find java through
+            // JAVA_HOME, which this process sets when it has none.
+            const std::string javaHome = saved.value("java_home", std::string());
+            if (!javaHome.empty()) {
+                settings.java = (std::filesystem::u8path(javaHome) / "bin" / "java.exe").u8string();
+                if (!_wgetenv(L"JAVA_HOME")) _wputenv_s(L"JAVA_HOME", std::filesystem::u8path(javaHome).wstring().c_str());
+            }
         }
     } catch (...) {
     }
@@ -92,8 +99,22 @@ inline std::shared_ptr<cortex::providers::Service> DesktopAnalysis() {
 // Saves the engine paths and starts a new service (running jobs of the old
 // one are cancelled when it is released).
 inline bool ConfigureDesktopAnalysis(const std::string& ghidraDir, const std::string& ilspycmd, const std::string& dotnet,
-                                     const std::string& vineflower, std::string& error) {
-    const nlohmann::json saved{{"ghidra_dir", ghidraDir}, {"ilspycmd", ilspycmd}, {"dotnet", dotnet}, {"vineflower", vineflower}};
+                                     const std::string& vineflower, std::string& error,
+                                     const std::string& javaHome = std::string()) {
+    // Keys this form does not show (java_home, netcoredbg from setup) are kept.
+    nlohmann::json saved = nlohmann::json::object();
+    try {
+        std::ifstream file(DesktopDataDirectory() / "analysis-engines.json");
+        if (file) saved = nlohmann::json::parse(file);
+        if (!saved.is_object()) saved = nlohmann::json::object();
+    } catch (...) {
+        saved = nlohmann::json::object();
+    }
+    saved["ghidra_dir"] = ghidraDir;
+    saved["ilspycmd"] = ilspycmd;
+    saved["dotnet"] = dotnet;
+    saved["vineflower"] = vineflower;
+    if (!javaHome.empty()) saved["java_home"] = javaHome;
     std::error_code ec;
     std::filesystem::create_directories(DesktopDataDirectory(), ec);
     if (!cortex::services::WriteFileAtomically(DesktopDataDirectory() / "analysis-engines.json", saved.dump(2), &error)) return false;

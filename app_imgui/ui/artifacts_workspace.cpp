@@ -8,6 +8,7 @@
 #include "../../mcp_bridge/evidence_tools.h"
 #include "code_navigation.h"
 #include "desktop_stores.h"
+#include "../../core/setup/setup.h"
 #include "../../core/artifacts/dotnet_provider.h"
 #include "../../core/services/user_data.h"
 #include "../../core/artifacts/js_provider.h"
@@ -1313,9 +1314,34 @@ void ArtifactsWorkspace::DrawEngines(UiContext& context) {
         ImGui::InputTextWithHint("dotnet (for ilspycmd.dll)", "PATH", dotnetPath_.data(), dotnetPath_.size());
         ImGui::SetNextItemWidth(Px(480));
         ImGui::InputTextWithHint("vineflower.jar", "CORTEX_VINEFLOWER (java from JAVA_HOME or PATH)", vineflowerJar_.data(), vineflowerJar_.size());
+        // Fills the empty fields with the installations found in the usual
+        // places (Downloads, Program Files, PATH, dotnet tools).
+        if (ImGui::Button("Find installed engines")) {
+            const auto environment = setup::CurrentEnvironment(std::filesystem::u8path(desktop::ExecutableDirectory()) / "cortex.exe");
+            int filled = 0;
+            for (const auto& report : setup::DetectEngines(environment)) {
+                if (report.found.empty()) continue;
+                const std::string found = report.found.front().path.u8string();
+                auto fill = [&](std::array<char, 1024>& field) {
+                    if (field[0] != '\0') return;
+                    Copy(field.data(), field.size(), found);
+                    ++filled;
+                };
+                if (report.id == "ghidra") fill(ghidraDir_);
+                else if (report.id == "ilspycmd") fill(ilspycmd_);
+                else if (report.id == "dotnet") fill(dotnetPath_);
+                else if (report.id == "vineflower") fill(vineflowerJar_);
+                else if (report.id == "java") javaHome_ = found;
+            }
+            context.status = filled ? std::to_string(filled) + " engine location(s) found; Save to keep them"
+                                    : "No other engine found; see Help > Set up AI clients and engines for the downloads";
+        }
+        ImGui::SameLine();
         if (ImGui::Button("Save and detect")) {
             std::string error;
-            if (ConfigureDesktopAnalysis(ghidraDir_.data(), ilspycmd_.data(), dotnetPath_.data(), vineflowerJar_.data(), error)) RefreshEngines(context);
+            if (ConfigureDesktopAnalysis(ghidraDir_.data(), ilspycmd_.data(), dotnetPath_.data(), vineflowerJar_.data(), error,
+                                         javaHome_))
+                RefreshEngines(context);
             else context.status = "Saving engine locations failed: " + error;
         }
     }
