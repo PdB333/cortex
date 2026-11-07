@@ -246,6 +246,7 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Unity Mono and IL2CPP on an attached game | classes, methods, fields at run time | ⬜ | P2 |
 | Lua embedded in a game | states, globals, functions | ⬜ | P2 |
 | Windows services, COM objects | service and class inventory | ⬜ | P3 |
+| Linux processes (process_vm_readv, ptrace) | memory scan and edit, hardware breakpoints, trace | ⬜ | see Platforms |
 | Android devices (adb) | packages, processes, logs | ⬜ | P4 |
 
 ## Waves
