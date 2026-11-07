@@ -85,7 +85,9 @@ A typical session mixes the two: the agent narrows down a value and finds the in
 
 ## Quick start
 
-Download **`cortex-v<version>-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive (or use the `cortex-imgui-gui-tested-portable` artifact of a green CI run for the current branch).
+From the [latest release](https://github.com/PdB333/cortex/releases/latest), take **`cortex-v<version>-windows-setup.exe`** (per-user install, no administrator rights, Start menu entry, optional *Analyze with Cortex* right-click entry) or **`cortex-v<version>-windows-portable.zip`** (extract anywhere). Both update themselves: Cortex checks for a new release once a day and installs it after you agree, only if its SHA-256 matches the one published with the release ([installing and updating](docs/setup-and-updates.md)).
+
+**Connect your AI clients in one step:** Home › *Set up my AI clients automatically*, or `cortex.exe setup`. Cortex finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Gemini CLI, Codex and LM Studio, adds itself to them read-only (each file backed up first), and finds your Ghidra, JDK, ILSpy, Vineflower and netcoredbg installations.
 
 **By hand (desktop):**
 
@@ -257,7 +259,7 @@ Every panel is a dockable window. Presets arrange them for the task: **Home**, *
 
 ## AI & MCP
 
-MCP is built into `cortex.exe`. Configure your client once; the server starts without a target and attaches to processes on request.
+MCP is built into `cortex.exe`. `cortex.exe setup` (or Help › *Set up AI clients and engines* in the desktop) registers it in the AI clients installed on your machine; by hand, add this to your client's configuration. The server starts without a target and attaches to processes on request.
 
 ```json
 {
@@ -302,6 +304,9 @@ cortex.exe mcp [--pid N] [--tools all] [--allow-state | --allow-writes]
 cortex.exe inspect <file> [--cil METHOD]      # PE, .NET, ASAR, JS/TS, ZIP; nothing runs
 cortex.exe provider list|run ...              # Ghidra, ILSpy, Vineflower
 cortex.exe live targets|scripts|watch ...     # CDP, DAP (debugpy, netcoredbg), JDWP
+cortex.exe setup [--dry-run|--yes]            # register Cortex in your AI clients, find the engines
+cortex.exe update [--check]                   # install the latest release (SHA-256 verified)
+cortex.exe <file>                             # open the desktop on a file
 cortex.exe evidence export|list               # evidence records (JSON or Markdown)
 cortex.exe investigation list|show|approve    # investigations and their steps
 cortex.exe probe --pid 1234                   # read-only target and runtime health
@@ -397,6 +402,8 @@ No. It provides bounded, supervised experiments (a launcher limited to profiles 
 | [Evidence](docs/evidence.md) · [Investigations](docs/investigations.md) | Records with provenance; supervised multi-step investigations |
 | [Architecture](docs/unified-app-architecture.md) · [Roadmap](docs/cortex-2-roadmap.md) | Layering; the Cortex 2.0 plan and what each step validated |
 | [Diagnostics](docs/external-diagnostics.md) · [Symbols](docs/symbols.md) · [Hooks](docs/hooks.md) · [Mod SDK](docs/mod-sdk.md) | Crash and hang tooling |
+| [Installing and updating](docs/setup-and-updates.md) | Installer, AI client setup, engine detection, updates and their limits |
+| [Formats roadmap](docs/formats-roadmap.md) | Every format Cortex reads, and the ones planned, by priority |
 | [Known limitations](docs/limitations.md) | What Cortex does not do, or has not validated, in one page |
 | [Changelog](CHANGELOG.md) · [Third-party](docs/third-party.md) | Release history and licences |
 

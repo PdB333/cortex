@@ -2,6 +2,24 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [v2.1.0] - not yet released
+
+Installing, setting up and updating Cortex without editing files by hand.
+
+### Added
+
+- **Installer** (`cortex-vX.Y.Z-windows-setup.exe`, Inno Setup): per-user install in `%LOCALAPPDATA%\Programs\Cortex` without administrator rights, Start menu entry, optional desktop shortcut, optional *Analyze with Cortex* right-click entry for `.exe`, `.dll` and `.asar` files, optional AI client setup. The uninstaller removes the program, the right-click entry and the MCP entries that start this copy; your data is kept. The release workflow installs, checks and uninstalls it on Windows before publishing.
+- **AI client setup** (`cortex setup`, and Home › *Set up my AI clients automatically* / Help › *Set up AI clients and engines*): finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Copilot), Gemini CLI, Codex and LM Studio, shows the plan, and adds Cortex to them read-only after you confirm. Each changed file is backed up first; a file that is not plain JSON is never rewritten. `--dry-run`, `--client`, `--allow-writes`, `--remove`, `--json`.
+- **Engine detection:** Ghidra, a JDK, ILSpy (ilspycmd), the .NET SDK, Vineflower and netcoredbg in the usual places (environment variables, `PATH`, dotnet tools, Downloads, Program Files, `C:\tools`). The paths found are passed to the MCP server and saved for the desktop; Artifacts › Engines › *Find installed engines*. A JDK found sets `JAVA_HOME` for Ghidra and Vineflower.
+- **Updates** (`cortex update`, and an *Update to X.Y.Z* button in the desktop): a daily check of the latest release (one HTTPS request; can be turned off), the release notes, then a download checked against the release's `SHA256SUMS.txt`. An installed copy runs the new installer, which closes and reopens Cortex; a portable copy is unpacked into a new folder beside the current one. Programs that still use files of an installed copy are listed instead of being forced. Releases now publish `SHA256SUMS.txt`.
+- `cortex.exe <file>` opens the desktop on a file in the Files layout.
+- **Formats roadmap** (`docs/formats-roadmap.md`): every format Cortex reads and about two hundred planned ones, with state and priority.
+- The real-desktop acceptance run also checks the setup on a scratch profile, an update from a local feed (and a tampered download being refused), and a silent install, run and uninstall.
+
+### Fixed
+
+- The Home cards fit a 1024x768 window, and the header no longer overflows to a second line with a debugger attached.
+
 ## [v2.0.0] - 2026-11-06
 
 Cortex 2.0. Highlights:

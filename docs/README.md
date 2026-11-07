@@ -12,6 +12,8 @@ This directory contains both user-facing documentation for the unified Cortex ap
 - [Analysis providers](analysis-providers.md) — Ghidra, ILSpy and Vineflower, and the live providers (CDP, debugpy, netcoredbg, JDWP): setup, guarantees, validation and limits.
 - [Evidence](evidence.md) and [investigations](investigations.md) — records with provenance and status; supervised multi-step investigations.
 - [Launching and testing programs](automated-tests.md) — operator launch profiles and the bounded trial runner.
+- [Installing, setting up and updating](setup-and-updates.md) — the installer, AI client setup, engine detection and updates.
+- [Formats roadmap](formats-roadmap.md) — every format Cortex reads and the ones planned, with state and priority.
 - [Known limitations](limitations.md) — the documented limits, collected in one page.
 - [Third-party notices](third-party.md) — licences of the libraries and of the optional external engines.
 - [Contributing](../CONTRIBUTING.md) and [security policy](../SECURITY.md).

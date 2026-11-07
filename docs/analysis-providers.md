@@ -32,7 +32,12 @@ an executable or pass engine arguments.
   `PATH` (`--java` on the CLI). The version is read from the jar's `--help` banner.
 - **Desktop:** Artifacts › Engines › *Engine locations*. The paths are saved in
   `analysis-engines.json` in the user data folder; an empty field falls back to
-  the environment.
+  the environment. *Find installed engines* fills the empty fields with the
+  installations found in the usual places.
+- **Automatically:** `cortex.exe setup` (or Help › *Set up AI clients and
+  engines*) finds Ghidra, a JDK, ilspycmd, dotnet, Vineflower and netcoredbg,
+  saves them for the desktop and passes them to the MCP server it registers in
+  your AI clients ([installing and updating](setup-and-updates.md)).
 
 ## Running
 

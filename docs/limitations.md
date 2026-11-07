@@ -18,10 +18,22 @@ report the mismatch.
   configures, and the test runner sends bounded window-message input. Not
   every program handles window messages
   ([automated tests](automated-tests.md)).
-- **Until v2.0.0 is published,** static analysis of files, evidence,
-  investigations, external engines and live providers are in the CI
-  artifacts of the development branch, not in the v1.0.1 release
-  ([roadmap](cortex-2-roadmap.md)).
+- **Formats.** Cortex reads PE, .NET, Electron ASAR, JavaScript/TypeScript,
+  ZIP/JAR, and ELF through Ghidra. The others are planned, by priority, in
+  the [formats roadmap](formats-roadmap.md).
+
+## Installation and updates
+
+- **Not code-signed yet.** SmartScreen warns on the first run of the
+  installer and of `cortex.exe`. An update is accepted only when its SHA-256
+  matches the release's `SHA256SUMS.txt`; that proves the file is the one
+  published, not who built it ([installing and updating](setup-and-updates.md)).
+- **AI client setup** edits the user-level configuration of eight known
+  clients. A file that is not plain JSON (comments) is left untouched, and
+  per-project configurations are not changed.
+- **An installed copy is updated only when nothing else uses its files** (an
+  MCP server started from it, a target with its runtime loaded); Cortex lists
+  them instead of forcing.
 
 ## Security model
 
