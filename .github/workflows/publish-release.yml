@@ -7,6 +7,7 @@ on:
     paths:
       - "app_imgui/**"
       - "resources/windows/**"
+      - "installer/**"
       - "core/**"
       - "mcp_bridge/**"
       - "runtime_helper/**"
@@ -24,6 +25,7 @@ on:
     paths:
       - "app_imgui/**"
       - "resources/windows/**"
+      - "installer/**"
       - "core/**"
       - "mcp_bridge/**"
       - "runtime_helper/**"
@@ -43,15 +45,15 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-v2.0.0-${{ github.ref }}
+  group: publish-v2.1.0-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  RELEASE_TAG: v2.0.0
+  RELEASE_TAG: v2.1.0
 
 jobs:
   windows-x64-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.0.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.1.0')
     runs-on: windows-2025
     timeout-minutes: 50
     steps:
@@ -130,7 +132,7 @@ jobs:
           retention-days: 2
 
   windows-x86-stage:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.0.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.1.0')
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -180,7 +182,7 @@ jobs:
           retention-days: 2
 
   package:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.0.0')
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Release v2.1.0')
     needs: [windows-x64-stage, windows-x86-stage]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -238,8 +240,8 @@ jobs:
           $broken = @($links | Where-Object { -not (Test-Path (Join-Path $bundle $_)) })
           if ($broken.Count -gt 0) { throw "README links missing from the archive: $($broken -join ', ')" }
           Write-Host ("README links checked: {0}" -f $links.Count)
-          if ((Get-Content (Join-Path $bundle "README_INSTALL.txt") -Raw) -notmatch "v2\.0\.0") {
-            throw "README_INSTALL.txt does not name v2.0.0"
+          if ((Get-Content (Join-Path $bundle "README_INSTALL.txt") -Raw) -notmatch "v2\.1\.0") {
+            throw "README_INSTALL.txt does not name v2.1.0"
           }
           $leftovers = @(Get-ChildItem -Recurse -Force $bundle | Where-Object {
             $_.Name -like "cortex.mcp.*.token" -or $_.Name -eq "cortex_crashes" -or $_.Name -eq "cortex_sessions" -or
@@ -258,12 +260,12 @@ jobs:
           $versionError = $versionProcess.StandardError.ReadToEnd()
           $versionProcess.WaitForExit()
           Write-Host ("release version output: {0}" -f $versionText.Trim())
-          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "2\.0\.0") {
-            throw "release binary does not report v2.0.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
+          if ($versionProcess.ExitCode -ne 0 -or $versionText -notmatch "2\.1\.0") {
+            throw "release binary does not report v2.1.0 (exit=$($versionProcess.ExitCode), stderr=$versionError)"
           }
 
           $help = & (Join-Path $bundle "cortex.exe") --help 2>&1 | Out-String
-          foreach ($command in @("mcp", "inspect", "provider", "live", "evidence", "investigation")) {
+          foreach ($command in @("mcp", "inspect", "provider", "live", "evidence", "investigation", "setup", "update")) {
             if ($help -notmatch "cortex $command") { throw "--help does not list '$command'" }
           }
           $providers = & (Join-Path $bundle "cortex.exe") provider list 2>&1 | Out-String
@@ -298,18 +300,72 @@ jobs:
           }
 
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v2.0.0-windows-portable.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/cortex-v2.1.0-windows-portable.zip" -CompressionLevel Optimal
 
-      - name: Upload release archive
+      # The installer is built from the validated bundle, then installed,
+      # run and uninstalled silently on this runner.
+      - name: Build and validate the installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Host }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup (ISCC.exe) is not available" }
+          $bundle = (Resolve-Path "staging/x64/Cortex").Path
+          $dist = (Resolve-Path "dist").Path
+          & $iscc /Q "/DAppVersion=2.1.0" "/DSourceDir=$bundle" "/DOutputDir=$dist" "installer\cortex.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          $setup = Join-Path $dist "cortex-v2.1.0-windows-setup.exe"
+          if (-not (Test-Path $setup)) { throw "the installer was not produced" }
+
+          $dir = Join-Path $env:RUNNER_TEMP "cortex-installed"
+          $install = Start-Process $setup -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$dir`"", "/TASKS=openwith") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "silent install failed ($($install.ExitCode))" }
+          foreach ($required in @("cortex.exe", "unins000.exe", "runtime\x64\cortex_core.dll", "runtime\x86\cortex_core.dll",
+                                  "runtime\x86\cortex_runtime_helper.exe", "docs\getting-started.md", "LICENSE")) {
+            if (-not (Test-Path (Join-Path $dir $required))) { throw "installed copy misses $required" }
+          }
+          if (Test-Path (Join-Path $dir "cortex.portable")) { throw "the installed copy must not be portable" }
+          if (-not (Test-Path "HKCU:\Software\Classes\SystemFileAssociations\.dll\shell\Cortex\command")) {
+            throw "the Analyze with Cortex entry was not registered"
+          }
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = Join-Path $dir "cortex.exe"
+          foreach ($argument in @("update", "--check", "--json", "--feed", (Join-Path $dir "missing-feed.json"))) { [void]$start.ArgumentList.Add($argument) }
+          $start.UseShellExecute = $false
+          $start.RedirectStandardOutput = $true
+          $start.CreateNoWindow = $true
+          $process = [System.Diagnostics.Process]::Start($start)
+          $report = $process.StandardOutput.ReadToEnd() | ConvertFrom-Json
+          $process.WaitForExit()
+          if ($report.install -ne "installed" -or $report.current -ne "2.1.0") { throw "the installed copy reports $($report | ConvertTo-Json -Compress)" }
+          Write-Host "installed copy: $($report.install) $($report.current)"
+
+          $uninstall = Start-Process (Join-Path $dir "unins000.exe") -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "silent uninstall failed ($($uninstall.ExitCode))" }
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $dir "cortex.exe")); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path (Join-Path $dir "cortex.exe")) { throw "the uninstaller left cortex.exe" }
+          if (Test-Path "HKCU:\Software\Classes\SystemFileAssociations\.dll\shell\Cortex") { throw "the uninstaller left the right-click entry" }
+
+          # Checksums the updater verifies before installing anything.
+          $sums = foreach ($file in @("cortex-v2.1.0-windows-portable.zip", "cortex-v2.1.0-windows-setup.exe")) {
+            "{0}  {1}" -f (Get-FileHash (Join-Path $dist $file) -Algorithm SHA256).Hash.ToLowerInvariant(), $file
+          }
+          Set-Content -Path (Join-Path $dist "SHA256SUMS.txt") -Value $sums -Encoding ascii
+          Get-Content (Join-Path $dist "SHA256SUMS.txt")
+
+      - name: Upload release files
         uses: actions/upload-artifact@v4
         with:
-          name: cortex-v2.0.0-windows-portable
-          path: dist/cortex-v2.0.0-windows-portable.zip
+          name: cortex-v2.1.0-windows-portable
+          path: |
+            dist/cortex-v2.1.0-windows-portable.zip
+            dist/cortex-v2.1.0-windows-setup.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, 'Release v2.0.0')
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, 'Release v2.1.0')
     needs: package
     runs-on: ubuntu-latest
     steps:
@@ -319,14 +375,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^## \[v2.0.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
+          awk '/^## \[v2.1.0\]/{found=1; next} /^## \[/{if(found) exit} found' CHANGELOG.md > release-notes.md
           test -s release-notes.md
 
       - name: Download release archive
         uses: actions/download-artifact@v4
         with:
-          name: cortex-v2.0.0-windows-portable
+          name: cortex-v2.1.0-windows-portable
           path: dist
+
+      - name: Check the release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -la
+          sha256sum -c SHA256SUMS.txt
 
       - name: Publish GitHub release
         env:
@@ -342,4 +406,6 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
             --notes-file release-notes.md \
-            dist/cortex-v2.0.0-windows-portable.zip
+            dist/cortex-v2.1.0-windows-portable.zip \
+            dist/cortex-v2.1.0-windows-setup.exe \
+            dist/SHA256SUMS.txt

@@ -16,7 +16,13 @@ with SendInput, as a person would, and checks what it can from outside:
      Enter attaches, typing a value and Enter runs a first scan;
   5. MCP: a client next to the desktop, read-only then with --allow-writes:
      a write is refused, then applied;
-  6. the window closes cleanly, with no crash report.
+  6. the window closes cleanly, with no crash report;
+  7. cortex setup registers this cortex.exe in Cursor, Claude Desktop and
+     Codex of a scratch profile, and removes it;
+  8. cortex update installs a 9.9.9 release from a local feed beside a
+     portable copy, and refuses a tampered download;
+  9. with --installer: a silent per-user install (right-click entry, AI
+     clients task), the installed copy, and a clean uninstall.
 
 Screenshots are saved to --out and, since CI artifacts are not always
 reachable, also printed to the log as base64 PNG between
@@ -332,11 +338,148 @@ def error_code(content):
     return None
 
 
+# ------------------------------------------------------------------ setup, updates, installer
+
+def run(command, env=None, cwd=None, timeout=120):
+    result = subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+    return result.returncode, result.stdout, result.stderr
+
+
+def fake_profile(root):
+    """A user profile with Cursor, Claude Desktop and Codex installed."""
+    home = os.path.join(root, "home")
+    appdata = os.path.join(root, "roaming")
+    os.makedirs(os.path.join(home, ".cursor"), exist_ok=True)
+    os.makedirs(os.path.join(appdata, "Claude"), exist_ok=True)
+    os.makedirs(os.path.join(home, ".codex"), exist_ok=True)
+    with open(os.path.join(home, ".codex", "config.toml"), "w") as handle:
+        handle.write('model = "o3"\n')
+    env = dict(os.environ, USERPROFILE=home, APPDATA=appdata, LOCALAPPDATA=os.path.join(root, "local"))
+    return env, home, appdata
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def check_setup(exe, bundle, workdir):
+    env, home, appdata = fake_profile(os.path.join(workdir, "profile-setup"))
+    code, stdout, stderr = run([exe, "setup", "--yes", "--json"], env=env, cwd=bundle)
+    try:
+        report = json.loads(stdout)
+    except ValueError:
+        report = {}
+    states = {client["id"]: client["state"] for client in report.get("clients", [])}
+    check(code == 0 and states.get("cursor") == "not_configured" and states.get("windsurf") == "not_installed",
+          "cortex setup finds Cursor, Claude Desktop and Codex, and only them", {"code": code, "states": states,
+                                                                               "stderr": stderr[-300:]})
+    cursor = read_json(os.path.join(home, ".cursor", "mcp.json")).get("mcpServers", {}).get("cortex", {})
+    claude = read_json(os.path.join(appdata, "Claude", "claude_desktop_config.json")).get("mcpServers", {}).get("cortex", {})
+    with open(os.path.join(home, ".codex", "config.toml")) as handle:
+        codex = handle.read()
+    check(os.path.normcase(cursor.get("command", "")) == os.path.normcase(exe) and cursor.get("args", [None])[0] == "mcp" and
+          "--allow-writes" not in cursor.get("args", []),
+          "Cursor runs this cortex.exe mcp, read-only", cursor)
+    check(claude.get("args", [None])[0] == "mcp", "Claude Desktop gets the same entry", claude)
+    check("[mcp_servers.cortex]" in codex and 'model = "o3"' in codex, "Codex gains cortex and keeps its settings", codex)
+    code, stdout, _ = run([exe, "setup", "--remove", "--yes"], env=env, cwd=bundle)
+    cursor = read_json(os.path.join(home, ".cursor", "mcp.json")).get("mcpServers", {})
+    check(code == 0 and "cortex" not in cursor, "cortex setup --remove takes it out again", stdout[-400:])
+
+
+def build_update_feed(bundle, folder):
+    """A 9.9.9 release of this bundle: portable archive, checksums, feed."""
+    import hashlib
+    import zipfile
+    os.makedirs(folder, exist_ok=True)
+    archive = os.path.join(folder, "cortex-v9.9.9-windows-portable.zip")
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
+        for root, dirs, files in os.walk(bundle):
+            dirs[:] = [d for d in dirs if d not in ("e2e",)]
+            for name in files:
+                if name.lower().endswith((".token", ".jsonl", ".dmp")):
+                    continue
+                path = os.path.join(root, name)
+                zipped.write(path, os.path.relpath(path, bundle))
+    with open(archive, "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    with open(os.path.join(folder, "SHA256SUMS.txt"), "w") as handle:
+        handle.write("%s  cortex-v9.9.9-windows-portable.zip\n" % digest)
+    release = {"tag_name": "v9.9.9", "name": "Cortex 9.9.9", "html_url": "https://github.com/PdB333/cortex/releases",
+               "body": "Acceptance test release.",
+               "assets": [{"name": "cortex-v9.9.9-windows-portable.zip", "browser_download_url": archive, "size": 1},
+                          {"name": "SHA256SUMS.txt", "browser_download_url": os.path.join(folder, "SHA256SUMS.txt"),
+                           "size": 1}]}
+    path = os.path.join(folder, "latest.json")
+    with open(path, "w") as handle:
+        json.dump(release, handle)
+    return path
+
+
+def check_update(bundle, workdir, feed):
+    import shutil
+    apps = os.path.join(workdir, "apps")
+    current = os.path.join(apps, "cortex-current")
+    shutil.copytree(bundle, current, ignore=shutil.ignore_patterns("e2e", "*.token", "*.jsonl"))
+    exe = os.path.join(current, "cortex.exe")
+    env = dict(os.environ, LOCALAPPDATA=os.path.join(workdir, "update-appdata"))
+    code, stdout, _ = run([exe, "update", "--check", "--json", "--feed", feed], env=env)
+    report = json.loads(stdout) if stdout.strip().startswith("{") else {}
+    check(code == 10 and report.get("available") and report.get("install") == "portable",
+          "cortex update --check sees 9.9.9 (portable copy)", {"code": code, "report": report})
+    code, stdout, stderr = run([exe, "update", "--yes", "--feed", feed], env=env, timeout=300)
+    new = os.path.join(apps, "cortex-v9.9.9")
+    check(code == 0 and os.path.isfile(os.path.join(new, "cortex.exe")) and os.path.isfile(exe),
+          "cortex update unpacks the verified archive beside the current copy, which stays", stdout + stderr)
+    code, stdout, _ = run([os.path.join(new, "cortex.exe"), "--version"], env=env)
+    check(code == 0 and "cortex" in stdout, "the new copy runs", stdout)
+    # A tampered archive is refused.
+    archive = os.path.join(os.path.dirname(feed), "cortex-v9.9.9-windows-portable.zip")
+    with open(archive, "ab") as handle:
+        handle.write(b"tampered")
+    code, stdout, stderr = run([exe, "update", "--yes", "--feed", feed], env=env, timeout=300)
+    check(code != 0 and "SHA-256" in stdout + stderr, "a tampered download is refused", stdout + stderr)
+
+
+def check_installer(setup_exe, workdir, feed):
+    env, home, _ = fake_profile(os.path.join(workdir, "profile-installer"))
+    target = os.path.join(workdir, "installed")
+    code = subprocess.run([setup_exe, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=%s" % target,
+                           "/TASKS=openwith,setupclients"], env=env, timeout=300).returncode
+    exe = os.path.join(target, "cortex.exe")
+    check(code == 0 and os.path.isfile(exe) and os.path.isfile(os.path.join(target, "unins000.exe")),
+          "the installer installs silently, per user", code)
+    cursor = read_json(os.path.join(home, ".cursor", "mcp.json")).get("mcpServers", {}).get("cortex", {})
+    check(os.path.normcase(cursor.get("command", "")) == os.path.normcase(exe),
+          "the installer's AI clients task registers the installed cortex.exe", cursor)
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Classes\SystemFileAssociations\.dll\shell\Cortex\command") as key:
+            command = winreg.QueryValue(key, "")
+    except OSError:
+        command = ""
+    check(exe.lower() in command.lower(), "Analyze with Cortex is in the right-click menu", command)
+    code, stdout, _ = run([exe, "update", "--check", "--json", "--feed", feed], env=env)
+    report = json.loads(stdout) if stdout.strip().startswith("{") else {}
+    check(report.get("install") == "installed", "the installed copy knows it is installed", report)
+    code = subprocess.run([os.path.join(target, "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
+                          env=env, timeout=300).returncode
+    gone = wait_for(lambda: not os.path.exists(exe), 60)
+    cursor = read_json(os.path.join(home, ".cursor", "mcp.json")).get("mcpServers", {})
+    check(code == 0 and gone and "cortex" not in cursor,
+          "the uninstaller removes the files and this copy's AI client entries", {"code": code, "cursor": cursor})
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle", required=True, help="the portable folder with cortex.exe, runtime, e2e, docs")
     parser.add_argument("--fixture", default=os.path.join("tests", "fixtures", "electron-app.asar"))
     parser.add_argument("--out", required=True)
+    parser.add_argument("--installer", help="cortex-v*-windows-setup.exe to install, check and uninstall")
     args = parser.parse_args()
 
     bundle = os.path.abspath(args.bundle)
@@ -355,6 +498,10 @@ def main():
 
     check_icon_resource(exe, out)
     register_md_viewer()
+    # A local release feed announcing 9.9.9: the desktop's start-up check
+    # finds it, and the update steps below install from it.
+    feed = build_update_feed(bundle, os.path.join(workdir, "feed"))
+    env["CORTEX_UPDATE_FEED"] = feed
 
     desktop = subprocess.Popen([exe], cwd=bundle, env=env)
     target = None
@@ -473,6 +620,12 @@ def main():
         check(code == 0, "the window closes cleanly (exit code %s)" % code)
         crashes = [name for root, _, files in os.walk(bundle) for name in files if name.lower().endswith(".dmp")]
         check(not crashes, "no crash dump", crashes)
+
+        # 7-9. Setup of AI clients, updates, the installer.
+        check_setup(exe, bundle, workdir)
+        check_update(bundle, workdir, feed)
+        if args.installer:
+            check_installer(os.path.abspath(args.installer), workdir, feed)
     finally:
         for w in notepads:
             user32.PostMessageW(w[0], 0x0010, 0, 0)
