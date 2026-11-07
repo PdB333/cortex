@@ -13,6 +13,13 @@ Installing, setting up and updating Cortex without editing files by hand.
 - **Engine detection:** Ghidra, a JDK, ILSpy (ilspycmd), the .NET SDK, Vineflower and netcoredbg in the usual places (environment variables, `PATH`, dotnet tools, Downloads, Program Files, `C:\tools`). The paths found are passed to the MCP server and saved for the desktop; Artifacts › Engines › *Find installed engines*. A JDK found sets `JAVA_HOME` for Ghidra and Vineflower.
 - **Updates** (`cortex update`, and an *Update to X.Y.Z* button in the desktop): a daily check of the latest release (one HTTPS request; can be turned off), the release notes, then a download checked against the release's `SHA256SUMS.txt`. An installed copy runs the new installer, which closes and reopens Cortex; a portable copy is unpacked into a new folder beside the current one. Programs that still use files of an installed copy are listed instead of being forced. Releases now publish `SHA256SUMS.txt`.
 - `cortex.exe <file>` opens the desktop on a file in the Files layout.
+- **PE analysis, first wave of the formats roadmap** (`cortex.exe inspect`, Artifacts, `cortex_artifact_*`):
+  - Authenticode: signer and certificates (subject, issuer, serial, validity), timestamp presence, and whether the file's current digest matches the signed one. The chain is not checked against trusted roots.
+  - Import hash (pefile-compatible), delay-load imports, Rich header (product ids, builds, counts, checksum, hash).
+  - Resources: the tree, version information and its strings, the manifest (execution level, UI access, DPI awareness).
+  - Load configuration and a hardening summary: ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET shadow stack, stack cookie.
+  - Section entropy and packer detection (UPX, ASPack, MPRESS, PECompact, Themida, VMProtect, Enigma and others, plus heuristics). Detection only: Cortex never unpacks.
+  - Checked against pefile (imphash, entropy) and osslsigncode (Authenticode digest) on new fixtures, a tampered signed file, a hand-built Rich header, and five minutes of fuzzing.
 - **Formats roadmap** (`docs/formats-roadmap.md`): every format Cortex reads and about two hundred planned ones, with state and priority.
 - The real-desktop acceptance run also checks the setup on a scratch profile, an update from a local feed (and a tampered download being refused), and a silent install, run and uninstall.
 

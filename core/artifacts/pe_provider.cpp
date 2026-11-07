@@ -1,4 +1,5 @@
 #include "pe_provider.h"
+#include "pe_extras.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -450,8 +451,10 @@ json PeExports(const ByteSource& source, const PeFile& pe, const InspectOptions&
 
 std::vector<Capability> PeProvider::Capabilities() const {
     return {{"static", CapabilityStatus::Validated, "cortex_artifacts_tests (PE fixtures, malformed inputs)",
-             "headers, sections, imports, exports, relocations, debug/CodeView, TLS, exception table, CLR header, "
-             "overlay"},
+             "headers, sections with entropy, imports with imphash, delay imports, exports, relocations, debug/CodeView, "
+             "TLS, exception table, CLR header, overlay, Rich header, resources (version, manifest), load config, "
+             "hardening (ASLR, DEP, CFG, SafeSEH, CET, /GS), packer detection, Authenticode (signer, certificates, "
+             "digest match; chain not verified)"},
             {"decompile", CapabilityStatus::Unavailable, "",
              "no built-in decompiler. External: the Ghidra analysis provider (cortex_analysis_start provider=ghidra, "
              "`cortex provider run ghidra`) when the operator configures Ghidra"},
@@ -478,6 +481,7 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
                             {"virtual_size", section.virtualSize},
                             {"raw_offset", HexU64(section.rawOffset)},
                             {"raw_size", section.rawSize},
+                            {"entropy", Entropy(source, section.rawOffset, section.rawSize)},
                             {"flags", SectionFlags(section.characteristics)}});
         if (section.rawSize) lastRawEnd = std::max<uint64_t>(lastRawEnd, uint64_t(section.rawOffset) + section.rawSize);
     }
@@ -523,6 +527,22 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
         if (entrySize) data["exception"] = {{"runtime_functions", pe.directories[kPeException].size / entrySize}};
     }
     if (dotnet) data["clr"] = ClrHeader(source, pe);
+
+    // What the file says about its build, signature and protections.
+    if (data.contains("imports")) {
+        const std::string imphash = ImportHash(data["imports"]);
+        if (!imphash.empty()) data["imphash"] = imphash;
+    }
+    if (pe.HasDirectory(kPeDelayImport)) data["delay_imports"] = DelayImports(source, pe, options);
+    const json rich = RichHeader(source);
+    if (!rich.is_null()) data["rich_header"] = rich;
+    if (pe.HasDirectory(kPeResource)) data["resources"] = Resources(source, pe, options);
+    const json loadConfig = LoadConfig(source, pe);
+    if (!loadConfig.is_null()) data["load_config"] = loadConfig;
+    data["hardening"] = Hardening(source, pe, loadConfig);
+    data["packers"] = Packers(source, pe, data.value("imports", json::array()), data["sections"]);
+    const json signature = Authenticode(source, pe);
+    if (!signature.is_null()) data["authenticode"] = signature;
 
     // Bytes after the last section that the loader never maps: installers,
     // PyInstaller archives, appended data. The Authenticode certificate

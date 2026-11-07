@@ -2,10 +2,17 @@
 // provider on a real Cortex-built executable, the ASAR provider on generated
 // archives, and robustness against truncated, corrupted and random inputs.
 //
-//   cortex_artifacts_tests <pe fixture>   (the test target; CTest passes it)
+//   cortex_artifacts_tests <pe fixture> [fixtures dir]   (CTest passes both)
+//
+// tests/fixtures/pe: signed-version.exe (MinGW, version and manifest
+// resources, signed with a self-signed test certificate by osslsigncode) and
+// packed.exe (the same program packed by UPX); app.c and app.rc rebuild them.
+// Expected values come from pefile 2024 (imphash, entropy) and osslsigncode
+// verify (the Authenticode digest).
 
 #include "artifacts/artifact.h"
 #include "artifacts/asar_provider.h"
+#include "artifacts/pe_extras.h"
 #include "artifacts/pe_provider.h"
 #include "artifacts/sha256.h"
 
@@ -275,9 +282,86 @@ void TestAsar() {
 
 } // namespace
 
+json InspectData(const std::string& path) {
+    auto file = OpenFile(path);
+    CHECK(file != nullptr);
+    if (!file) return json::object();
+    return DefaultRegistry().Inspect(*file)["data"];
+}
+
+void TestPeExtras(const std::string& fixtures) {
+    CHECK(Md5Hex("") == "d41d8cd98f00b204e9800998ecf8427e");
+    CHECK(Md5Hex("The quick brown fox jumps over the lazy dog") == "9e107d9d372bb6826bd81d3542a419d6");
+
+    const json signedPe = InspectData(fixtures + "/pe/signed-version.exe");
+    CHECK(signedPe.value("imphash", std::string()) == "6c200472c4c0cc849e4a34115a04f86a");  // pefile
+    bool text = false;
+    for (const auto& section : signedPe["sections"])
+        if (section["name"] == ".text") text = section["entropy"] == 5.85;  // pefile: 5.85
+    CHECK(text);
+    const json& version = signedPe["resources"]["version"];
+    CHECK(version["file_version"] == "1.2.3.4" && version["product_version"] == "1.2.0.0");
+    CHECK(version["strings"]["CompanyName"] == "Cortex test fixtures" &&
+          version["strings"]["OriginalFilename"] == "signed-version.exe" && version["translation"] == "040904b0");
+    CHECK(signedPe["resources"]["manifest"]["requested_execution_level"] == "asInvoker" &&
+          signedPe["resources"]["manifest"]["assembly_name"] == "Cortex.Fixture.Signed");
+    CHECK(signedPe["resources"]["counts"]["string_table"] == 1);
+    CHECK(signedPe["hardening"]["aslr"] == true && signedPe["hardening"]["dep"] == true &&
+          signedPe["hardening"]["high_entropy_va"] == true && signedPe["hardening"]["cfg"] == false);
+    const json& signature = signedPe["authenticode"];
+    CHECK(signature["certificate_type"] == "pkcs_signed_data" && signature["digest_algorithm"] == "sha256");
+    CHECK(signature["signer"]["subject"]["CN"] == "Cortex Test Signer" && signature["signer"]["self_signed"] == true);
+    CHECK(signature["file_digest_matches"] == true && signature["verified_chain"] == false);
+    CHECK(signature["signed_digest"] == "c4c3f0a7e534b0df2b91824eeec15f2f5627fe2ff4339041207985047f5572b3");  // osslsigncode
+    CHECK(signedPe["packers"]["detected"].empty());
+
+    // One byte of code changed after signing: the digest no longer matches.
+    auto file = OpenFile(fixtures + "/pe/signed-version.exe");
+    if (file) {
+        auto bytes = Bytes(*file);
+        PeFile pe;
+        std::string error;
+        CHECK(ParsePe(*file, pe, error));
+        bytes[pe.sections.front().rawOffset + 16] ^= 0xFF;
+        const auto tampered = FromBytes(bytes, "tampered.exe");
+        const json data = DefaultRegistry().Inspect(*tampered)["data"];
+        CHECK(data["authenticode"]["file_digest_matches"] == false);
+    }
+
+    const json packed = InspectData(fixtures + "/pe/packed.exe");
+    CHECK(packed.value("imphash", std::string()) == "d9904535440e42784fec24bb2374117d");  // pefile
+    CHECK(!packed["packers"]["detected"].empty() && packed["packers"]["detected"][0]["name"] == "UPX");
+    CHECK(!packed["packers"]["signals"].empty());
+
+    // A Rich header built by hand: DanS, padding, two entries, Rich, key.
+    std::vector<uint8_t> head(0x100, 0);
+    head[0] = 'M';
+    head[1] = 'Z';
+    const uint32_t key = 0x1234ABCDu;
+    auto put = [&head](size_t at, uint32_t value) {
+        for (int i = 0; i < 4; ++i) head[at + i] = static_cast<uint8_t>(value >> (8 * i));
+    };
+    put(0x80, 0x536E6144u ^ key);
+    put(0x84, key);
+    put(0x88, key);
+    put(0x8C, key);
+    put(0x90, ((0x0104u << 16) | 30159u) ^ key);  // product 0x104, build 30159
+    put(0x94, 7u ^ key);
+    put(0x98, ((0x0105u << 16) | 30159u) ^ key);
+    put(0x9C, 3u ^ key);
+    put(0xA0, 0x68636952u);
+    put(0xA4, key);
+    const json rich = RichHeaderFromBytes(head);
+    CHECK(!rich.is_null() && rich["entries"].size() == 2 && rich["entries"][0]["product_id"] == 0x104 &&
+          rich["entries"][0]["build"] == 30159 && rich["entries"][0]["count"] == 7 && rich["key"] == "1234abcd");
+    CHECK(rich["checksum_valid"] == false);  // the key above is not the real checksum
+    CHECK(RichHeaderFromBytes(std::vector<uint8_t>(0x100, 0)).is_null());
+}
+
 int main(int argc, char** argv) {
     TestSha256();
     TestAsar();
+    TestPeExtras(argc > 2 ? argv[2] : "tests/fixtures");
     if (argc > 1) TestPeFixture(argv[1]);
     else std::cerr << "note: no PE fixture given, PE checks skipped" << std::endl;
     if (failures) {

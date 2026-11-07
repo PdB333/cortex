@@ -316,6 +316,7 @@ add_executable(cortex_host
     mcp_bridge/host_mode.cpp
     core/artifacts/artifact.cpp
     core/artifacts/pe_provider.cpp
+    core/artifacts/pe_extras.cpp
     core/artifacts/asar_provider.cpp
     core/artifacts/registry_default.cpp
     core/artifacts/js_lexer.cpp
@@ -568,6 +569,7 @@ if(BUILD_TESTING)
         tests/artifacts_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -582,7 +584,7 @@ if(BUILD_TESTING)
     )
     target_include_directories(cortex_artifacts_tests PRIVATE core)
     target_link_libraries(cortex_artifacts_tests PRIVATE nlohmann_json::nlohmann_json)
-    add_test(NAME cortex_artifacts_tests COMMAND cortex_artifacts_tests $<TARGET_FILE:cortex_test_target>)
+    add_test(NAME cortex_artifacts_tests COMMAND cortex_artifacts_tests $<TARGET_FILE:cortex_test_target> ${CMAKE_SOURCE_DIR}/tests/fixtures)
 
     # Setup and updater: AI client registration on a fake home, engine
     # detection, update feed, checksums, archive unpacking.
@@ -605,6 +607,7 @@ if(BUILD_TESTING)
         tests/js_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -625,6 +628,7 @@ if(BUILD_TESTING)
         tests/dotnet_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -645,6 +649,7 @@ if(BUILD_TESTING)
         tests/native_code_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -676,6 +681,7 @@ if(BUILD_TESTING)
         tests/evidence_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -699,6 +705,7 @@ if(BUILD_TESTING)
         tests/investigation_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -728,6 +735,7 @@ if(BUILD_TESTING)
     core/providers/vineflower_provider.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp
@@ -818,6 +826,7 @@ if(BUILD_TESTING)
         tests/artifact_tools_tests.cpp
         core/artifacts/artifact.cpp
         core/artifacts/pe_provider.cpp
+        core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
         core/artifacts/js_lexer.cpp

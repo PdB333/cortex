@@ -26,14 +26,14 @@ Rules that apply to every row:
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
 | PE32 / PE32+ | headers, sections, imports, exports, relocations, x64 unwind, code catalog, xrefs, CFG | ✅ | | built-in |
-| PE Authenticode | WIN_CERTIFICATE, PKCS#7 signer and X.509 fields | ⬜ | P1 | built-in |
-| PE import hash | imphash, delay-load imports | ⬜ | P1 | built-in |
-| PE Rich header | toolchain (compiler and linker) records | ⬜ | P1 | built-in |
-| PE TLS callbacks | callback addresses | ⬜ | P1 | built-in |
-| PE resources | version info, manifest, icons, dialogs, string tables | ⬜ | P1 | built-in |
-| PE debug directory | CodeView PDB path and GUID, POGO | ⬜ | P1 | built-in |
-| PE hardening | ASLR, DEP, CFG, SafeSEH, CET from Load Config | ⬜ | P1 | built-in |
-| PE overlay, entropy, packer detection | appended data, section entropy, known packer signatures (detection only) | ⬜ | P1 | built-in |
+| PE Authenticode | WIN_CERTIFICATE, PKCS#7 signer and certificates, timestamp presence, file digest match (chain not verified) | ✅ | | built-in |
+| PE import hash | imphash (pefile-compatible), delay-load imports | ✅ | | built-in |
+| PE Rich header | product ids, builds, counts, checksum, hash | ✅ | | built-in |
+| PE TLS callbacks | callback addresses | ✅ | | built-in |
+| PE resources | resource tree, version info and strings, manifest (execution level, DPI) | ✅ | | built-in |
+| PE debug directory | CodeView PDB path, GUID and age | ✅ | | built-in |
+| PE hardening | load config; ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET, /GS | ✅ | | built-in |
+| PE overlay, entropy, packer detection | appended data, section entropy, 16 packer families and heuristics (detection only) | ✅ | | built-in |
 | PE ARM64, ARM64EC, CHPE | Windows on ARM images | ⬜ | P3 | built-in |
 | ELF | sections, segments, symbols, relocations, notes, hardening | 🟡 Ghidra only | P1 | built-in |
 | Mach-O (thin and fat) | load commands, symbols, code signature, entitlements, chained fixups | ⬜ | P3 | built-in |

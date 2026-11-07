@@ -58,6 +58,7 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
     ${CORTEX_ROOT}/core/artifacts/artifact.cpp
     ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/pe_extras.cpp
     ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
     ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp

@@ -180,6 +180,7 @@ add_executable(cortex_imgui WIN32
     ../core/setup/updater.cpp
     ../core/artifacts/artifact.cpp
     ../core/artifacts/pe_provider.cpp
+    ../core/artifacts/pe_extras.cpp
     ../core/artifacts/asar_provider.cpp
     ../core/artifacts/registry_default.cpp
     ../core/artifacts/js_lexer.cpp

@@ -33,7 +33,7 @@ FetchContent_MakeAvailable(zydis)
 
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 set(ARTIFACT_SOURCES
-    ${ROOT}/core/artifacts/artifact.cpp ${ROOT}/core/artifacts/pe_provider.cpp
+    ${ROOT}/core/artifacts/artifact.cpp ${ROOT}/core/artifacts/pe_provider.cpp ${ROOT}/core/artifacts/pe_extras.cpp
     ${ROOT}/core/artifacts/asar_provider.cpp ${ROOT}/core/artifacts/registry_default.cpp
     ${ROOT}/core/artifacts/js_lexer.cpp ${ROOT}/core/artifacts/js_analysis.cpp
     ${ROOT}/core/artifacts/js_provider.cpp ${ROOT}/core/artifacts/source_map.cpp
