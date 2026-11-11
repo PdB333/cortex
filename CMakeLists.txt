@@ -314,6 +314,7 @@ add_executable(cortex_host
     injector/main.cpp
     mcp_bridge/main.cpp
     mcp_bridge/host_mode.cpp
+    mcp_bridge/ps5_tools.cpp
     tools/ps5_main.cpp
     core/artifacts/artifact.cpp
     core/artifacts/pe_provider.cpp

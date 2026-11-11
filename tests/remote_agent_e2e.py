@@ -344,7 +344,7 @@ def main():
                 conn,_=listener.accept()
                 with context.wrap_socket(conn,server_side=True) as peer:
                     peer.settimeout(5)
-                    hello={'schema':'cortex.remote.hello.v1','protocol':'cortex-remote','version':1,'session':'a'*32,'instance':'b'*32,'platform':'fixture','capabilities':{'memory_write':True}}
+                    hello={'schema':'cortex.remote.hello.v1','protocol':'cortex-remote','version':1,'session':'a'*32,'instance':'b'*32,'platform':'fixture','capabilities':{'processes':True,'maps':True,'memory_read':True,'memory_write':True,'target_generation':True,'read_effect':'fixture_only','max_memory_bytes':65536,'max_write_bytes':32768,'breakpoints':False,'hardware_tested':False}}
                     send(peer,1,0,hello);observed.append(receive(peer,2,1))
             except Exception as error:observed.append(str(error))
         thread=threading.Thread(target=fake_server,daemon=True);thread.start()

@@ -4,6 +4,9 @@ Recorded on 2026-11-11 in the `feat/formats-cortex-remote` worktree, based on
 `3cdc7cb97e8d59221a9aca13c388b4d2500d146d`. These are observed local results,
 not a claim of universal security or console compatibility.
 
+This is the initial implementation record. Subsequent changes and revalidation
+are recorded in [the hardening/query report](cortex-remote-hardening.md).
+
 ## Windows client and own agent
 
 Toolchain: llvm-mingw 20261104, Clang 23.1.5, separate x86_64 and i686 builds.
@@ -81,4 +84,5 @@ python tests/remote_agent_e2e.py --client <cortex.exe> --agent <cortex-agent.exe
 Local logs and generated credentials stay under `build/cortex-remote-verification/`
 and are not committed. The new GitHub workflow separately runs native Linux
 sanitizers, a coverage-guided decoder campaign and a PS5 cross-build. **These
-local results do not assert that the newly added GitHub workflow has run.**
+local results describe that initial run; later GitHub outcomes are recorded on
+the PR and in the separate hardening report, not inferred from these counts.**

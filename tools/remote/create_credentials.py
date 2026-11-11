@@ -9,6 +9,8 @@ only agent/ to the target and client/ to the PC. This does not deploy anything.
 from __future__ import annotations
 import argparse
 import json
+import hashlib
+import ssl
 import os
 from pathlib import Path
 import re
@@ -19,21 +21,33 @@ import subprocess
 def create(out: Path, endpoint: str, platform: str = 'ps5', server_name: str = 'cortex-agent.local', days: int = 30) -> None:
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', server_name):
         raise ValueError('server_name must be a simple DNS certificate name')
+    if any(not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label) for label in server_name.split('.')):
+        raise ValueError('server_name must contain valid DNS labels')
     if platform not in ('ps5', 'freebsd', 'fixture') or not 1 <= days <= 365:
         raise ValueError('invalid platform or certificate lifetime')
     match = re.fullmatch(r'([0-9]+(?:\.[0-9]+){3}):([0-9]+)', endpoint)
     if not match or not 1 <= int(match[2]) <= 65535 or any(int(x) > 255 or (len(x) > 1 and x[0] == '0') for x in match[1].split('.')):
         raise ValueError('endpoint must be numeric IPv4:port')
+    if not 1 <= int(match[1].split('.')[0]) < 224:
+        raise ValueError('endpoint must identify a unicast peer')
     openssl = os.environ.get('CORTEX_OPENSSL') or shutil.which('openssl')
     if not openssl:
         raise RuntimeError('OpenSSL is required to generate certificates')
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
+    # This guard must exist even when provisioning fails half-way.
+    (out / '.gitignore').write_text('*\n', encoding='ascii')
     for name in ('authority', 'agent', 'client'):
         (out / name).mkdir(mode=0o700)
 
+    # Some Windows OpenSSL builds embed a build-machine openssl.cnf path.
+    # Use a private, minimal provisioning config rather than global defaults.
+    provision = out / 'authority' / 'provision.cnf'
+    provision.write_text('[req]\ndistinguished_name = dn\nprompt = no\n[dn]\nCN = Cortex Remote\n', encoding='ascii')
+    environment = dict(os.environ, OPENSSL_CONF=str(provision))
+
     def run(*args: str) -> None:
-        proc = subprocess.run([openssl, *map(str, args)], cwd=out, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run([openssl, *map(str, args)], cwd=out, env=environment, capture_output=True, text=True, timeout=30)
         if proc.returncode:
             raise RuntimeError('OpenSSL failed: ' + proc.stderr[-2000:])
 
@@ -53,17 +67,19 @@ def create(out: Path, endpoint: str, platform: str = 'ps5', server_name: str = '
         shutil.copyfile(out / 'authority/ca.crt', out / side / 'ca.crt')
         (out / side / 'identity.csr').unlink()
         (out / side / 'extensions.txt').unlink()
+    def fingerprint(side: str) -> str:
+        der = ssl.PEM_cert_to_DER_cert((out / side / 'identity.crt').read_text(encoding='ascii'))
+        return hashlib.sha256(der).hexdigest()
+
     common = {'ca_certificate': 'ca.crt', 'certificate': 'identity.crt', 'private_key': 'identity.key', 'allow_writes': False, 'timeout_ms': 5000}
-    client = dict(common, schema='cortex.remote.client.v1', endpoint=endpoint, server_name=server_name, expected_platform=platform)
-    agent = dict(common, schema='cortex.remote.agent.v1', listen=endpoint, allow_ptrace_stop=False, allowed_pids=[])
+    client = dict(common, schema='cortex.remote.client.v1', endpoint=endpoint, server_name=server_name, expected_platform=platform, server_certificate_sha256=fingerprint('agent'))
+    agent = dict(common, schema='cortex.remote.agent.v1', listen=endpoint, allow_ptrace_stop=False, allowed_pids=[], allowed_client_sha256=[fingerprint('client')])
     for side, config in [('agent', agent), ('client', client)]:
         (out / side / (side + '.json')).write_text(json.dumps(config, indent=2) + '\n', encoding='utf-8')
     if os.name != 'nt':
         for path in out.rglob('*'):
             if path.is_file():
                 path.chmod(0o600)
-    # Prevent accidental git add from inside a generated credentials directory.
-    (out / '.gitignore').write_text('*\n', encoding='ascii')
 
 
 def main() -> int:

@@ -22,6 +22,8 @@ if(NOT TARGET nlohmann_json::nlohmann_json)
 endif()
 add_library(cortex_remote STATIC
     "${CORTEX_REMOTE_ROOT}/core/remote/protocol.cpp"
+    "${CORTEX_REMOTE_ROOT}/core/remote/queries.cpp"
+    "${CORTEX_REMOTE_ROOT}/core/remote/validation.cpp"
     "${CORTEX_REMOTE_ROOT}/core/remote/tls.cpp"
     "${CORTEX_REMOTE_ROOT}/core/remote/client.cpp")
 target_compile_features(cortex_remote PUBLIC cxx_std_17)

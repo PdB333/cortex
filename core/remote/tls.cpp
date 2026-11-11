@@ -17,6 +17,7 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/pk.h>
+#include <mbedtls/platform_util.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
@@ -95,7 +96,7 @@ TlsContext::TlsContext(const TlsFiles& files,bool server):impl_(new Impl){
     Ok(mbedtls_x509_crt_parse(&c.ca,reinterpret_cast<const unsigned char*>(ca.data()),ca.size()),"ca_parse_failed");
     Ok(mbedtls_x509_crt_parse(&c.cert,reinterpret_cast<const unsigned char*>(cert.data()),cert.size()),"certificate_parse_failed");
     int keyResult=mbedtls_pk_parse_key(&c.key,reinterpret_cast<const unsigned char*>(key.data()),key.size(),nullptr,0,mbedtls_ctr_drbg_random,&c.random);
-    std::fill(key.begin(),key.end(),'\0');Ok(keyResult,"private_key_parse_failed");
+    mbedtls_platform_zeroize(key.data(),key.size());Ok(keyResult,"private_key_parse_failed");
     Ok(mbedtls_ssl_config_defaults(&c.config,server?MBEDTLS_SSL_IS_SERVER:MBEDTLS_SSL_IS_CLIENT,MBEDTLS_SSL_TRANSPORT_STREAM,MBEDTLS_SSL_PRESET_DEFAULT),"tls_config_failed");
     // Restrict negotiation to authenticated ephemeral key exchange and AEAD.
     static const int suites[]={MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,MBEDTLS_TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,0};
@@ -172,7 +173,7 @@ std::unique_ptr<Channel> Channel::Connect(TlsContext& context,const Endpoint& en
     auto channel=std::unique_ptr<Channel>(new Channel(context,static_cast<uintptr_t>(sock.Release()),timeoutMs,peerName));
     channel->impl_->deadline=deadline;channel->Handshake();return channel;
 }
-void Channel::Handshake(){for(;;){int result=mbedtls_ssl_handshake(&impl_->ssl);if(result==0)break;if(impl_->Retry(result))continue;throw std::runtime_error("tls_handshake_failed");}Require(mbedtls_ssl_get_verify_result(&impl_->ssl)==0&&mbedtls_ssl_get_peer_cert(&impl_->ssl)!=nullptr,"tls_peer_not_verified");}
+void Channel::Handshake(){for(;;){Require(Clock::now()<impl_->deadline,"timeout");int result=mbedtls_ssl_handshake(&impl_->ssl);if(result==0)break;if(impl_->Retry(result))continue;throw std::runtime_error("tls_handshake_failed");}Require(mbedtls_ssl_get_verify_result(&impl_->ssl)==0&&mbedtls_ssl_get_peer_cert(&impl_->ssl)!=nullptr,"tls_peer_not_verified");}
 void Channel::Send(FrameKind kind,uint32_t id,const json& body){auto text=DumpJson(body);auto h=EncodeHeader(kind,id,static_cast<uint32_t>(text.size()));impl_->Write(h.data(),h.size());impl_->Write(reinterpret_cast<const uint8_t*>(text.data()),text.size());}
 json Channel::Receive(FrameKind kind,uint32_t id){std::array<uint8_t,16> bytes{};impl_->Read(bytes.data(),bytes.size());auto h=DecodeHeader(bytes);Require(h.kind==kind&&h.id==id,"unexpected_frame");std::string body(h.size,'\0');impl_->Read(reinterpret_cast<uint8_t*>(body.data()),body.size());return ParseJson(body);}
 std::string Channel::PeerFingerprint()const{auto* crt=mbedtls_ssl_get_peer_cert(&impl_->ssl);Require(crt!=nullptr,"tls_peer_not_verified");Bytes hash(32);Ok(mbedtls_sha256(crt->raw.p,crt->raw.len,hash.data(),0),"fingerprint_failed");return ByteHex(hash);}

@@ -1,4 +1,5 @@
 #include "protocol.h"
+#include "queries.h"
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -114,20 +115,35 @@ TlsFiles ReadTlsFiles(const std::string& path,const json& c){return{ConfigPath(p
 std::string Hex(uint64_t n){char b[24];std::snprintf(b,sizeof(b),"0x%llx",static_cast<unsigned long long>(n));return b;}
 std::string ByteHex(const Bytes& bytes){static const char d[]="0123456789abcdef";std::string s;s.reserve(bytes.size()*2);for(auto b:bytes){s+=d[b>>4];s+=d[b&15];}return s;}
 Bytes Unhex(const std::string& s){Require(!s.empty()&&s.size()<=kMaxMemory*2&&s.size()%2==0,"invalid_hex_length");auto digit=[](char c){return c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;};Bytes b;b.reserve(s.size()/2);for(size_t i=0;i<s.size();i+=2){int a=digit(s[i]),v=digit(s[i+1]);Require(a>=0&&v>=0,"invalid_hex");b.push_back(static_cast<uint8_t>(a*16+v));}return b;}
-void ValidateArguments(const std::string& action,const json& a) {
-    Require(action=="info"||action=="processes"||action=="maps"||action=="read"||action=="write","unknown_action");
-    if(action=="info")Keys(a,{});
-    if(action=="processes")Keys(a,{"limit"});
-    if(action=="maps")Keys(a,{"pid","target_id","limit"});
-    if(action=="read")Keys(a,{"pid","target_id","address","length"});
-    if(action=="write")Keys(a,{"pid","target_id","address","hex","expected_hex","expected_name","mutation_permission"});
-    if(a.contains("limit"))UInt(a,"limit",1,256);
-    if(action=="maps"||action=="read"||action=="write"){UInt(a,"pid",1,2147483647);Text(a,"target_id",256);}
-    if(action=="read"||action=="write"){
-        auto addr=Number(Text(a,"address",20));size_t len=0;
-        if(action=="read")len=static_cast<size_t>(UInt(a,"length",1,kMaxMemory));
-        else{auto b=Unhex(Text(a,"hex",kMaxMemory*2));auto expected=Unhex(Text(a,"expected_hex",kMaxMemory*2));Require(b.size()==expected.size(),"expected_length_mismatch");len=b.size();Text(a,"expected_name",128);Require(Flag(a,"mutation_permission"),"mutation_permission_required");}
-        Require(addr<=kMaxUserAddress&&len-1<=kMaxUserAddress-addr,"address_out_of_user_range");
+void ValidateArguments(const std::string& action, const json& args) {
+    Require(action == "info" || action == "processes" || action == "maps" || action == "read" || action == "write" || action == "scan", "unknown_action");
+    if (action == "info") Keys(args, {});
+    if (action == "processes") Keys(args, {"limit"});
+    if (action == "maps") Keys(args, {"pid", "target_id", "limit", "offset", "expected_revision"});
+    if (action == "read") Keys(args, {"pid", "target_id", "address", "length"});
+    if (action == "scan") Keys(args, {"pid", "target_id", "address", "length", "pattern", "max_matches"});
+    if (action == "write") Keys(args, {"pid", "target_id", "address", "hex", "expected_hex", "expected_name", "mutation_permission"});
+    if (args.contains("limit")) UInt(args, "limit", 1, 256);
+    if (action == "maps") {
+        const auto offset = args.contains("offset") ? UInt(args, "offset", 0, 16384) : 0;
+        if (offset) Require(args.contains("expected_revision"), "map_revision_required");
+        if (args.contains("expected_revision")) ValidateFingerprint(Text(args, "expected_revision", 64));
+    }
+    if (action != "info" && action != "processes") { UInt(args, "pid", 1, 2147483647); Text(args, "target_id", 256); }
+    if (action == "read" || action == "write" || action == "scan") {
+        const auto address = Number(Text(args, "address", 20)); size_t length = 0;
+        if (action == "write") {
+            const auto replacement = Unhex(Text(args, "hex", kMaxWriteMemory * 2));
+            const auto expected = Unhex(Text(args, "expected_hex", kMaxWriteMemory * 2));
+            Require(replacement.size() == expected.size(), "expected_length_mismatch"); length = replacement.size();
+            Text(args, "expected_name", 128); Require(Flag(args, "mutation_permission"), "mutation_permission_required");
+        } else length = static_cast<size_t>(UInt(args, "length", 1, kMaxMemory));
+        Require(address <= kMaxUserAddress && length - 1 <= kMaxUserAddress - address, "address_out_of_user_range");
+    }
+    if (action == "scan") {
+        (void)ParsePattern(Text(args, "pattern", 768));
+        if (args.contains("max_matches")) UInt(args, "max_matches", 1, 256);
     }
 }
+
 } // namespace cortex::remote

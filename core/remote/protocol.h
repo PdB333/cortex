@@ -12,6 +12,8 @@ using json = nlohmann::json;
 using Bytes = std::vector<uint8_t>;
 constexpr uint32_t kMaxFrame = 262144;
 constexpr size_t kMaxMemory = 65536;
+// Both expected and replacement bytes are hex-encoded in one bounded frame.
+constexpr size_t kMaxWriteMemory = 32768;
 constexpr uint64_t kMaxUserAddress = 0x00007fffffffffffULL;
 enum class FrameKind : uint8_t { Hello = 1, Request = 2, Response = 3 };
 struct Header { FrameKind kind; uint32_t id; uint32_t size; };
@@ -35,6 +37,9 @@ std::string Hex(uint64_t value);
 std::string ByteHex(const Bytes& bytes);
 Bytes Unhex(const std::string& text);
 void ValidateArguments(const std::string& action, const json& args);
+void ValidateFingerprint(const std::string& value);
+void ValidateCapabilities(const json& capabilities);
+void ValidateResponseResult(const std::string& action, const json& args, const json& result);
 
 struct TlsFiles { std::string ca, certificate, privateKey; };
 TlsFiles ReadTlsFiles(const std::string& path, const json& config);

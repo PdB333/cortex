@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "operations.h"
 #include "../../core/remote/tls.h"
 #include <csignal>
 #include <iostream>
@@ -21,7 +22,7 @@ int main(int argc,char** argv){
         Require(!fixture,"fixture_backend_not_allowed_in_PS5_build");
 #endif
         auto config=ReadConfig(path,"cortex.remote.agent.v1");
-        Keys(config,{"schema","listen","ca_certificate","certificate","private_key","allow_writes","allow_ptrace_stop","allowed_pids","timeout_ms","max_connections"});
+        Keys(config,{"schema","listen","ca_certificate","certificate","private_key","allow_writes","allow_ptrace_stop","allowed_pids","timeout_ms","max_connections","allowed_client_sha256"});
         Endpoint endpoint;Require(ParseEndpoint(Text(config,"listen",32),endpoint,true),"invalid_listen_endpoint");
         int timeout=config.contains("timeout_ms")?static_cast<int>(UInt(config,"timeout_ms",100,15000)):5000;
         uint64_t maxConnections=config.contains("max_connections")?UInt(config,"max_connections",1,1000000):0;
@@ -29,6 +30,16 @@ int main(int argc,char** argv){
         if(config.contains("allowed_pids")){
             Require(config["allowed_pids"].is_array()&&config["allowed_pids"].size()<=256,"invalid_pid_allowlist");std::set<uint32_t> unique;
             for(const auto& p:config["allowed_pids"]){auto n=static_cast<uint32_t>(UInt(json{{"pid",p}},"pid",1,2147483647));Require(unique.insert(n).second,"duplicate_allowed_pid");policy.allowedPids.push_back(n);}
+        }
+        std::set<std::string> allowedCertificates;
+        if(config.contains("allowed_client_sha256")) {
+            const auto& allowed=config["allowed_client_sha256"];
+            Require(allowed.is_array()&&!allowed.empty()&&allowed.size()<=32,"invalid_client_certificate_allowlist");
+            for(const auto& entry:allowed) {
+                Require(entry.is_string(),"invalid_client_certificate_allowlist");
+                auto value=entry.get<std::string>();ValidateFingerprint(value);
+                Require(allowedCertificates.insert(value).second,"duplicate_client_certificate");
+            }
         }
         if(!fixture)Require(!policy.allowedPids.empty(),"native_pid_allowlist_required");
 #ifdef CORTEX_REMOTE_PS5
@@ -43,7 +54,9 @@ int main(int argc,char** argv){
         while(!stopRequested&&(!maxConnections||count<maxConnections)){
             try{
                 auto channel=listener.Accept(tls,timeout);if(!channel)continue;++count;
-                channel->Handshake();const auto session=tls.RandomId();
+                channel->Handshake();
+                Require(allowedCertificates.empty()||allowedCertificates.count(channel->PeerFingerprint()),"client_certificate_not_allowed");
+                const auto session=tls.RandomId();
                 json hello={{"schema","cortex.remote.hello.v1"},{"protocol","cortex-remote"},{"version",1},{"session",session},{"instance",instance},{"platform",backend->Platform()},{"capabilities",backend->Capabilities()}};
                 channel->Send(FrameKind::Hello,0,hello);
                 auto request=channel->Receive(FrameKind::Request,1);
@@ -51,9 +64,16 @@ int main(int argc,char** argv){
                 Require(Text(request,"schema",64)=="cortex.remote.request.v1","invalid_request_schema");
                 Require(Text(request,"session",32)==session&&Text(request,"instance",32)==instance,"request_session_mismatch");
                 auto action=Text(request,"action",32);Require(request.contains("arguments"),"missing_arguments");
-                json result;
-                try{ValidateArguments(action,request["arguments"]);result=backend->Execute(action,request["arguments"],instance);}
-                catch(const std::exception& e){result={{"ok",false},{"error",e.what()},{"write_state","not_written"},{"retry_safe",false}};}
+                json result;bool writeDispatched=false;
+                try{
+                    ValidateArguments(action,request["arguments"]);
+                    writeDispatched=action=="write";
+                    result=ExecuteOperation(*backend,action,request["arguments"],instance);
+                }catch(const std::exception& e){
+                    // A backend exception can happen after target I/O. A thrown
+                    // write must never be transformed into a definite refusal.
+                    result={{"ok",false},{"error",e.what()},{"write_state",writeDispatched?"may_have_changed":"not_written"},{"retry_safe",false}};
+                }
                 if(action=="write"){
                     if(!result.contains("write_state"))result["write_state"]="may_have_changed";
                     result["retry_safe"]=false;

@@ -168,6 +168,7 @@ add_executable(cortex_imgui WIN32
     ../injector/main.cpp
     ../mcp_bridge/main.cpp
     ../mcp_bridge/host_mode.cpp
+    ../mcp_bridge/ps5_tools.cpp
     ../tools/diagnostics_host/main.cpp
     ../tools/symbolize_main.cpp
     ../tools/inspect_main.cpp

@@ -56,6 +56,7 @@ add_executable(cortex_host
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
+    ${CORTEX_ROOT}/mcp_bridge/ps5_tools.cpp
     ${CORTEX_ROOT}/tools/ps5_main.cpp
     ${CORTEX_ROOT}/core/artifacts/artifact.cpp
     ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp

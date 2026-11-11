@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "../../core/remote/queries.h"
 #include <algorithm>
 #include <cstring>
 #include <set>
@@ -69,8 +70,14 @@ public:
         return "freebsd";
 #endif
     }
-    json Capabilities()const override{return{{"processes",true},{"maps",true},{"memory_read",policy_.allowPtraceStop},{"memory_write",policy_.allowWrites&&policy_.allowPtraceStop},{"target_generation",true},{"read_effect","temporary_ptrace_stop"},{"max_memory_bytes",kMaxMemory},{"breakpoints",false},{"hardware_tested",false},{"abi_policy","SDK layout must match; no guessed offsets"}};}
+    json Capabilities()const override{return{{"processes",true},{"maps",true},{"memory_read",policy_.allowPtraceStop},{"memory_write",policy_.allowWrites&&policy_.allowPtraceStop},{"target_generation",true},{"read_effect","temporary_ptrace_stop"},{"max_memory_bytes",kMaxMemory},{"max_write_bytes",kMaxWriteMemory},{"memory_scan",policy_.allowPtraceStop},{"map_pagination",true},{"breakpoints",false},{"hardware_tested",false},{"abi_policy","SDK layout must match; no guessed offsets"}};}
     json Execute(const std::string& action,const json& args,const std::string& instance)override{
+        bool attempted=false;
+        try{return Run(action,args,instance,attempted);}
+        catch(const std::exception& e){return{{"ok",false},{"error",e.what()},{"write_state",attempted?"may_have_changed":"not_written"},{"retry_safe",false}};}
+    }
+private:
+    json Run(const std::string& action,const json& args,const std::string& instance,bool& attempted){
         ValidateArguments(action,args);
         if(action=="info")return{{"ok",true},{"backend","native sysctl/ptrace under existing OS permissions"},{"capabilities",Capabilities()}};
         if(action=="processes"){
@@ -82,9 +89,9 @@ public:
         Require(Token(p,instance)==Text(args,"target_id",256),"stale_target");
         if(action=="maps"){
             auto maps=Mappings(pid);Require(Token(Process(pid),instance)==Token(p,instance),"stale_target");
-            size_t limit=args.contains("limit")?static_cast<size_t>(UInt(args,"limit",1,256)):256;json rows=json::array();
-            for(const auto& m:maps){if(rows.size()==limit)break;rows.push_back({{"name",m.name},{"start",Hex(m.begin)},{"end",Hex(m.end)},{"offset",Hex(m.offset)},{"read",bool(m.protection&KVME_PROT_READ)},{"write",bool(m.protection&KVME_PROT_WRITE)},{"execute",bool(m.protection&KVME_PROT_EXEC)}});}
-            return{{"ok",true},{"pid",pid},{"target_id",Token(p,instance)},{"maps",rows},{"total",maps.size()},{"truncated",rows.size()<maps.size()}};
+            std::vector<MemoryMapping> rows;rows.reserve(maps.size());
+            for(const auto& m:maps)rows.push_back({m.begin,m.end,m.offset,bool(m.protection&KVME_PROT_READ),bool(m.protection&KVME_PROT_WRITE),bool(m.protection&KVME_PROT_EXEC),m.name});
+            return MapPage(rows,args,pid,Token(p,instance));
         }
         Require(policy_.allowPtraceStop,"ptrace_stop_not_authorized");Require(!quarantined_.count(pid),"prior_detach_failed_restart_agent_after_manual_recovery");
         Require(p.ki_stat!=SSTOP&&p.ki_stat!=SZOMB&&(p.ki_flag&P_TRACED)==0,"target_not_in_running_untraced_state");
@@ -97,11 +104,14 @@ public:
             Require(ptrace(PT_ATTACH,static_cast<pid_t>(pid),nullptr,0)==0,"ptrace_attach_denied");attached=true;
             auto deadline=Clock::now()+std::chrono::seconds(2);int status=0;
             for(;;){pid_t got=waitpid(static_cast<pid_t>(pid),&status,WNOHANG|WUNTRACED);if(got==static_cast<pid_t>(pid)){if(WIFEXITED(status)||WIFSIGNALED(status)){attached=false;throw std::runtime_error("target_exited");}Require(WIFSTOPPED(status),"unexpected_wait_state");if(WSTOPSIG(status)!=SIGSTOP){preserveSignal=WSTOPSIG(status);throw std::runtime_error("unexpected_stop_signal");}break;}Require(got==0||(got<0&&errno==EINTR),"waitpid_failed");Require(Clock::now()<deadline,"ptrace_stop_timeout");usleep(1000);}
-            Require(Token(Process(pid),instance)==Token(p,instance),"stale_target");Range(pid,address,length,write);
+            const auto stopped=Process(pid);
+            Require(Token(stopped,instance)==Token(p,instance),"stale_target");
+            if(write)Require(Name(stopped)==Text(args,"expected_name",128),"process_identity_mismatch");
+            Range(pid,address,length,write);
             auto io=[&](Bytes& bytes,int operation){ptrace_io_desc desc{};desc.piod_op=operation;desc.piod_offs=reinterpret_cast<void*>(static_cast<uintptr_t>(address));desc.piod_addr=bytes.data();desc.piod_len=bytes.size();Require(ptrace(PT_IO,static_cast<pid_t>(pid),reinterpret_cast<caddr_t>(&desc),0)==0&&desc.piod_len==bytes.size(),"ptrace_io_failed_or_partial");};
             Bytes before(length);io(before,PIOD_READ_D);
             json result={{"ok",true},{"pid",pid},{"target_id",Token(p,instance)},{"address",Hex(address)},{"length",length},{"effect","temporary_ptrace_stop"}};
-            if(write){Require(before==Unhex(Text(args,"expected_hex",kMaxMemory*2)),"expected_bytes_mismatch");possiblyWritten=true;io(replacement,PIOD_WRITE_D);Bytes after(length);io(after,PIOD_READ_D);Require(after==replacement,"write_readback_mismatch");result["write_state"]="readback_matched";result["atomic"]=false;}
+            if(write){Require(before==Unhex(Text(args,"expected_hex",kMaxMemory*2)),"expected_bytes_mismatch");possiblyWritten=true;attempted=true;io(replacement,PIOD_WRITE_D);Bytes after(length);io(after,PIOD_READ_D);Require(after==replacement,"write_readback_mismatch");result["write_state"]="readback_matched";result["atomic"]=false;}
             else result["hex"]=ByteHex(before);
             Require(detach(),"ptrace_detach_failed");return result;
         }catch(const std::exception& e){bool clean=detach();return{{"ok",false},{"error",e.what()},{"write_state",possiblyWritten?"may_have_changed":"not_written"},{"target_may_be_stopped",!clean},{"retry_safe",false}};}

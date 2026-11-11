@@ -55,6 +55,10 @@ private:
     std::array<char, 32> ps5Address_ = {};
     std::array<char, 129> ps5Name_ = {};
     std::array<char, 513> ps5Expected_ = {}, ps5Hex_ = {};
+    std::array<char, 769> ps5Pattern_ = {};
+    std::string ps5MapRevision_;
+    int ps5NextMapOffset_ = -1;
+    int ps5MaxMatches_ = 64;
     int ps5Pid_ = 0, ps5Length_ = 64;
     bool ps5AllowWrites_ = false;
     nlohmann::json ps5Result_, ps5Processes_;

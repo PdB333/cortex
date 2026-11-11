@@ -4,6 +4,12 @@ All notable changes to Cortex are documented in this file.
 
 ## [Unreleased PS5 connector]
 
+- **Remote memory search:** one bounded read (up to 64 KiB), fixed-byte/`??` patterns, exact total matches and capped address results. Exposed in CLI, MCP and the desktop panel; no whole-process scan or atomic snapshot claim.
+- **Remote map pagination:** explicit cursors and SHA-256 map revisions reject changed layouts across pages; desktop next-page controls and CLI/MCP parameters included.
+- **Remote hardening:** optional exact server pin and client certificate allowlist (enabled in newly provisioned profiles), stricter capabilities/reply validation, safe handling of uncertain writes, and 32 KiB write cap that fits expected/replacement hex into the frame. Provisioning uses a private OpenSSL configuration and creates its ignore guard before keys.
+- **Build/CI:** fix the failed x86 fixture job by removing its optional unavailable ccache package, add dedicated remote Windows x64/x86 jobs, and move remote MCP schemas out of the large host translation unit. Existing fixture and integration tests remain enabled.
+- **Regression coverage:** query/response contracts, independent map-hash oracle, actual mutual-TLS tests of same-CA non-allowlisted clients and hostile replies, full-size fixture writes and expanded fuzz seeds. See `docs/validation/cortex-remote-hardening.md` for actual results and pending hardware validation.
+
 - Independent Cortex Remote v1 client AND native Cortex agent: mutual TLS, session/instance IDs, generation-bound processes, maps, bounded memory I/O and operator-controlled writes with expected-byte comparison/readback. Desktop, CLI and MCP use the same client; the prior third-party protocol implementation is removed. Windows x64/x86 tests and a native PS5 SDK ELF build are provided; real-console validation remains pending. See `docs/ps5-connector.md` and `docs/cortex-remote-protocol.md`.
 
 ## [v2.1.0] - not yet released
