@@ -319,14 +319,14 @@ add_executable(cortex_host
     core/artifacts/pe_extras.cpp
     core/artifacts/asar_provider.cpp
     core/artifacts/registry_default.cpp
-    core/artifacts/minidump_provider.cpp
+    core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
     core/artifacts/hive_provider.cpp
     core/artifacts/js_lexer.cpp
     core/artifacts/js_analysis.cpp
     core/artifacts/js_provider.cpp
     core/artifacts/source_map.cpp
     core/artifacts/inflate.cpp
-    core/artifacts/zip_provider.cpp
+    core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
     core/artifacts/dotnet_metadata.cpp
     core/artifacts/cil.cpp
     core/artifacts/dotnet_provider.cpp
@@ -574,14 +574,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -597,7 +597,8 @@ if(BUILD_TESTING)
         core/setup/setup.cpp
         core/setup/updater.cpp
         core/artifacts/artifact.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
+        core/artifacts/package_metadata.cpp
         core/artifacts/inflate.cpp
     )
     target_include_directories(cortex_setup_tests PRIVATE core)
@@ -614,14 +615,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -637,14 +638,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -660,14 +661,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -694,14 +695,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -720,14 +721,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -752,14 +753,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp
@@ -845,14 +846,14 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
         core/artifacts/js_provider.cpp
         core/artifacts/source_map.cpp
         core/artifacts/inflate.cpp
-        core/artifacts/zip_provider.cpp
+        core/artifacts/zip_provider.cpp core/artifacts/appx_metadata.cpp
         core/artifacts/dotnet_metadata.cpp
         core/artifacts/cil.cpp
         core/artifacts/dotnet_provider.cpp

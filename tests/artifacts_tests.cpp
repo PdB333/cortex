@@ -15,6 +15,11 @@
 #include "artifacts/pe_extras.h"
 #include "artifacts/pe_provider.h"
 #include "artifacts/sha256.h"
+#include "pdb_tests.h"
+#include "elf_tests.h"
+#include "cab_tests.h"
+#include "compound_tests.h"
+#include "appx_tests.h"
 
 #include <chrono>
 #include <cstring>
@@ -420,12 +425,81 @@ void TestHive(const std::string& fixtures) {
     }
 }
 
+// A deterministic, never-executed native-subsystem PE with ntoskrnl imports.
+// Rebuild with tests/fixtures/drivers/make_fixture.py. These fixtures do not
+// implement DriverEntry and must never be loaded into the kernel.
+void TestWindowsDrivers(const std::string& fixtures) {
+    const auto& registry = DefaultRegistry();
+    for (const char* arch : {"x86", "x64"}) {
+        std::string error;
+        auto file = OpenFile(fixtures + "/drivers/fixture-" + arch + ".sys", &error);
+        CHECK(file != nullptr);
+        if (!file) continue;
+        const json report = registry.Inspect(*file);
+        CHECK(report["ok"] == true && report["format"] == "pe");
+        CHECK(report["provider"]["name"] == "pe");  // no second PE parser
+        const json& data = report["data"];
+        CHECK(data["kind"] == "driver" && data["subsystem"] == "native");
+        CHECK(data["machine"] == arch);
+        CHECK(data["entry_rva"] == "0x1000");
+        CHECK(data["driver"]["classification"] == "candidate");
+        CHECK(data["driver"]["entry_rva"] == "0x1000");
+        CHECK(data["driver"]["kernel_imports"] == json::array({"ntoskrnl.exe"}));
+        CHECK(HasImport(data, "ntoskrnl.exe", "IoCreateDevice"));
+        CHECK(data["driver"]["indicators"] == json::array({"sys_extension", "wdm_driver_flag", "kernel_imports"}));
+
+        const auto original = Bytes(*file);
+        const uint32_t peOffset = uint32_t(original[0x3C]) | (uint32_t(original[0x3D]) << 8);
+        const size_t optional = peOffset + 24;
+
+        // A .sys suffix is not enough: the PE must have the native subsystem.
+        auto gui = original;
+        gui[optional + 68] = 2;
+        const json wrongSubsystem = registry.Inspect(*FromBytes(gui, "fake.sys"));
+        CHECK(wrongSubsystem["ok"] == true && wrongSubsystem["data"]["kind"] == "dll");
+        CHECK(!wrongSubsystem["data"].contains("driver"));
+
+        // The native subsystem and actual kernel imports still identify a
+        // driver candidate if the file has been renamed.
+        const json renamed = registry.Inspect(*FromBytes(original, "renamed.exe"));
+        CHECK(renamed["data"]["kind"] == "driver");
+        CHECK(renamed["data"]["driver"]["indicators"] == json::array({"wdm_driver_flag", "kernel_imports"}));
+
+        // Import listing bounds must be visible, not silently omitted.
+        InspectOptions zero;
+        zero.maxEntries = 0;
+        const json limited = registry.Inspect(*file, zero);
+        CHECK(limited["data"]["imports_truncated"] == true);
+        CHECK(limited["data"]["driver"]["kernel_imports_may_be_incomplete"] == true);
+
+        // Truncated/corrupted files are untrusted bytes; no crash or hang.
+        for (size_t prefix = 0; prefix < original.size(); prefix += 23)
+            (void)registry.Inspect(*FromBytes(
+                std::vector<uint8_t>(original.begin(), original.begin() + prefix), "truncated.sys"));
+
+        std::mt19937 rng(0x515953u + static_cast<unsigned>(original.size()));
+        for (int trial = 0; trial < 500; ++trial) {
+            auto damaged = original;
+            for (int n = 0, edits = 1 + static_cast<int>(rng() % 6); n < edits; ++n)
+                damaged[rng() % damaged.size()] = static_cast<uint8_t>(rng());
+            (void)registry.Inspect(*FromBytes(std::move(damaged), "mutated.sys"));
+        }
+    }
+    CHECK(registry.Inspect(*FromBytes({'M', 'Z'}, "fake.sys"))["ok"] == false);
+}
+
 int main(int argc, char** argv) {
     TestSha256();
     TestAsar();
     TestPeExtras(argc > 2 ? argv[2] : "tests/fixtures");
     TestMinidump(argc > 2 ? argv[2] : "tests/fixtures");
     TestHive(argc > 2 ? argv[2] : "tests/fixtures");
+    TestWindowsDrivers(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += pdb_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += elf_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += cab_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += compound_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += appx_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
     if (argc > 1) TestPeFixture(argv[1]);
     else std::cerr << "note: no PE fixture given, PE checks skipped" << std::endl;
     if (failures) {

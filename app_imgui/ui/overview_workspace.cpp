@@ -117,14 +117,12 @@ void OverviewWorkspace::DrawStart(UiContext& context) {
 
     place(true);
     Card("HomeFile", "Analyze a file",
-         "Executables, DLLs, .NET assemblies, Electron .asar archives, JavaScript and ZIP files. "
+         "Executables, symbols, type libraries, archives, extension packages, certificates and dumps. "
          "The file is read, never run.",
          width, height, [&context]() {
              if (ImGui::Button("Open a file...", ImVec2(-1, Px(34)))) {
                  std::string chosen;
-                 if (ShowOpenFileDialog(L"All files\0*.*\0Executables and libraries\0*.exe;*.dll\0"
-                                        L"Electron archives\0*.asar\0",
-                                        chosen))
+                 if (ShowOpenFileDialog(ArtifactFileFilter(), chosen))
                      context.commands.push_back("home_open " + chosen);
              }
              const auto* recent = context.settings ? &context.settings->Values().recentFiles : nullptr;

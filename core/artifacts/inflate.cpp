@@ -1,6 +1,8 @@
 #include "inflate.h"
 
 #include <array>
+#include <algorithm>
+#include <limits>
 
 namespace cortex::artifacts {
 namespace {
@@ -39,6 +41,9 @@ public:
         }
         return true;
     }
+
+    // Bits reads only as many bytes as needed; fewer than eight bits remain.
+    size_t BytesConsumed() const { return pos_; }
 
 private:
     bool Fail(std::string& error) {
@@ -283,6 +288,33 @@ bool Inflate(const uint8_t* input, size_t size, std::vector<uint8_t>& output, si
     output.clear();
     error.clear();
     return Decoder(input, size, output, maxOutput).Run(error);
+}
+
+bool InflatePrefix(const uint8_t* input, size_t size, std::vector<uint8_t>& output,
+                   size_t maxOutput, size_t& consumed, std::string& error) {
+    output.clear(); error.clear(); consumed = 0;
+    Decoder decoder(input, size, output, maxOutput);
+    if (!decoder.Run(error)) { output.clear(); return false; }
+    consumed = decoder.BytesConsumed();
+    return true;
+}
+
+bool InflateWithDictionary(const uint8_t* input, size_t size, const uint8_t* dictionary,
+                           size_t dictionarySize, std::vector<uint8_t>& output,
+                           size_t maxOutput, std::string& error) {
+    output.clear();
+    error.clear();
+    const size_t history = std::min<size_t>(dictionarySize, 32768);
+    if (history && !dictionary) { error = "inflate_dictionary_missing"; return false; }
+    if (maxOutput > std::numeric_limits<size_t>::max() - history) {
+        error = "inflate_output_limit"; return false;
+    }
+    if (history) output.assign(dictionary + dictionarySize - history, dictionary + dictionarySize);
+    if (!Decoder(input, size, output, history + maxOutput).Run(error)) {
+        output.clear(); return false;
+    }
+    output.erase(output.begin(), output.begin() + history);
+    return true;
 }
 
 uint32_t Crc32(const uint8_t* data, size_t size, uint32_t crc) {

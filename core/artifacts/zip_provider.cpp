@@ -1,6 +1,9 @@
 #include "zip_provider.h"
+#include "package_metadata.h"
 
 #include "inflate.h"
+#include "appx_metadata.h"
+#include "bounded_reader.h"
 
 #include <algorithm>
 #include <map>
@@ -27,6 +30,7 @@ struct Directory {
 
 struct Entry {
     std::string name;
+    bool nameEncodingValid = true;
     uint16_t flags = 0;
     uint16_t method = 0;
     uint32_t crc = 0;
@@ -62,7 +66,7 @@ bool FindDirectory(const ByteSource& source, Directory& directory, std::string& 
         directory.offset = directoryOffset;
         if (commentLength) {
             const auto comment = source.ReadSome(at + 22, std::min<size_t>(commentLength, 1024));
-            directory.comment.assign(comment.begin(), comment.end());
+            directory.comment = bounded::Utf8(comment.data(), comment.size());
         }
         uint64_t directoryEnd = at;
         if (entries == 0xFFFF || directorySize == 0xFFFFFFFF || directoryOffset == 0xFFFFFFFF) {
@@ -130,7 +134,8 @@ bool ReadEntries(const ByteSource& source, const Directory& directory, std::vect
         }
         Entry entry;
         const auto name = source.ReadSome(at + 46, nameLength);
-        entry.name.assign(name.begin(), name.end());
+        entry.name = bounded::Utf8(name.data(), name.size());
+        entry.nameEncodingValid = entry.name == std::string(name.begin(), name.end());
         entry.flags = flags;
         entry.method = method;
         entry.crc = crc;
@@ -191,7 +196,11 @@ Child ToChild(const ByteSource& source, const Entry& entry) {
         child.note = "local header missing";
         return child;
     }
-    child.offset = entry.localOffset + 30 + nameLength + extraLength;
+    const uint64_t headerSize = 30ull + nameLength + extraLength;
+    if (!bounded::Range(source.Size(), entry.localOffset, headerSize)) {
+        child.readable = false; child.note = "local header outside the archive"; return child;
+    }
+    child.offset = entry.localOffset + headerSize;
     if (child.offset > source.Size() || entry.compressed > source.Size() - child.offset) {
         child.readable = false;
         child.note = "data outside the archive";
@@ -207,6 +216,10 @@ Child ToChild(const ByteSource& source, const Entry& entry) {
     } else if (entry.size > kZipMaxExpandedEntry) {
         child.readable = false;
         child.note = "larger than the " + std::to_string(kZipMaxExpandedEntry >> 20) + " MiB expansion limit";
+    }
+    if (!entry.nameEncodingValid) {
+        child.readable = false;
+        child.note = "filename is not supported UTF-8; display was repaired, extraction refused";
     }
     if (UnsafeName(entry.name)) {
         child.readable = false;
@@ -240,6 +253,7 @@ std::vector<uint8_t> Expand(const ByteSource& source, const Child& child, std::s
         error = "child_not_readable";
         return out;
     }
+    if (child.storedSize > kZipMaxExpandedEntry) { error = "zip_stored_read_limit"; return out; }
     const auto stored = source.ReadSome(child.offset, static_cast<size_t>(child.storedSize));
     if (stored.size() != child.storedSize) {
         error = "read_failed";
@@ -375,7 +389,7 @@ json ZipProvider::Inspect(const ByteSource& source, const InspectOptions& option
         if (it == byName.end() || it->second->size > limit) return std::string();
         std::string expandError;
         const auto bytes = Expand(source, *it->second, expandError);
-        return std::string(bytes.begin(), bytes.end());
+        return bounded::Utf8(bytes.data(), bytes.size());
     };
     if (kind == "nupkg") {
         const std::string xml = text(nuspec, 1u << 20);
@@ -398,6 +412,18 @@ json ZipProvider::Inspect(const ByteSource& source, const InspectOptions& option
         }
     } else if (kind == "wheel") {
         data["wheel"] = wheel;
+    }
+    const json appx = InspectAppx(source, children, options);
+    if (!appx.empty()) {
+        data["appx"] = appx;
+        if (appx.contains("format")) data["format"] = appx["format"];
+    }
+    if (!data.contains("appx")) {
+        const json package = InspectZipPackage(source, children, options);
+        if (!package.empty()) {
+            data["package_metadata"] = package;
+            if (package.contains("format")) data["format"] = package["format"];
+        }
     }
     if (!childError.empty()) data["warnings"].push_back(childError);
     return data;

@@ -252,9 +252,7 @@ constexpr CommandEntry kCommands[] = {
 // "home_open" command, so both paths are the same).
 void OpenFile(AppState& app) {
     std::string chosen;
-    if (cortex::ui::ShowOpenFileDialog(L"All files\0*.*\0Executables and libraries\0*.exe;*.dll\0"
-                                       L"Electron archives\0*.asar\0",
-                                       chosen))
+    if (cortex::ui::ShowOpenFileDialog(cortex::ui::ArtifactFileFilter(), chosen))
         app.ui.commands.push_back("home_open " + chosen);
 }
 

@@ -7,8 +7,8 @@ report the mismatch.
 
 ## Scope
 
-- **Windows targets only.** The runtime and debugger attach to Windows x86 and
-  x64 processes. ELF is supported for static analysis through Ghidra only;
+- **Native injected runtime and debugger: Windows targets only.** The runtime and debugger attach to Windows x86 and
+  x64 processes. ELF32/64 has a native static reader in the wave-1 worktree; Ghidra remains optional for decompilation;
   Mach-O is not validated ([analysis providers](analysis-providers.md)).
 - **No protection bypass.** Cortex does not get around anti-cheat, DRM,
   licence checks, obfuscation, anti-debugging or an Electron app's disabled
@@ -19,8 +19,34 @@ report the mismatch.
   every program handles window messages
   ([automated tests](automated-tests.md)).
 - **Formats.** Cortex reads PE, .NET, Electron ASAR, JavaScript/TypeScript,
-  ZIP/JAR, and ELF through Ghidra. The others are planned, by priority, in
+  ZIP/JAR. The wave-1 worktree additionally reads native ELF, PDB/MSF7, CAB, CFB/MSI and APPX/MSIX metadata with explicit partial-support limits. Other formats are planned, by priority, in
   the [formats roadmap](formats-roadmap.md).
+
+- **WinRT .winmd support is structural and partial.** Cortex inventories CLR tables and tdWindowsRuntime types, but does not validate all WinRT-specific GuidAttribute/VersionAttribute and type projection rules. The local fixture is synthetic and is not a full SDK conformance oracle. No WinRT activation or code execution.
+- **Windows driver files (.sys) are classified heuristically.** A Native-subsystem PE plus a .sys extension, WDM flag or recognized kernel import is labelled a driver candidate. The entry RVA is not a verified DriverEntry symbol, and Cortex does not check whether Windows would load the file.
+
+## Wave-1 reader limits
+
+See [implementation and verification](formats-wave1-implementation.md). PDB is an MSF7/common-record reader, not full recursive type resolution. CAB expansion supports stored/MSZIP only, not LZX/Quantum or split cabinets. MSI is database inspection only, with bounded codepage support. APPX block hashes are compared to an untrusted manifest; signatures and publisher trust are not validated. The portable static target is not a Linux process debugger or Android port.
+
+## Additional archive, certificate and package reader limits
+
+See [additional implementation scope](formats-next-implementation.md). These are
+local development capabilities, not promises about the published release.
+
+- TAR links/sparse entries and ar thin references are not followed. gzip has
+  bounded expansion and CRC/ISIZE checks; 7z/xz/zstd/bzip2 decompression is not
+  added. Debian/npm files are inspected, never installed or executed.
+- Certificate and CMS fields are structural metadata. Signature, chain and
+  revocation verification are **not implemented**. Matching subject/issuer
+  names is not evidence of a self-signature. Catalog CTL content is exposed
+  raw; individual catalog entries are not decoded.
+- COM support is MSFT only. SLTG, full imported-type resolution, defaults and
+  codepage projection remain unsupported. No target COM object is activated.
+- CRX proofs and claimed extension IDs are not authenticated. XPI/VSIX/WAR/EAR
+  manifests are inventories, not full schema validation. JMOD is a ZIP
+  container view, not Java bytecode/module analysis. Python code is never
+  imported. Squirrel URLs/hashes are claims, never fetched or applied.
 
 ## Installation and updates
 
