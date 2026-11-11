@@ -3,6 +3,7 @@
 #include "artifacts/artifact.h"
 #include "artifacts/cil.h"
 #include "artifacts/dotnet_metadata.h"
+#include "artifacts/dotnet_provider.h"
 #include "artifacts/native_code.h"
 #include "artifacts/pe_provider.h"
 
@@ -21,8 +22,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     PeFile pe;
     std::string error;
     if (!ParsePe(*source, pe, error)) return 0;
+    // Include the native-subsystem .sys driver metadata in the PE fuzzer.
+    InspectOptions options;
+    options.maxEntries = 64;
+    (void)PeProvider().Inspect(*source, options, error);
 
     if (pe.HasDirectory(kPeClr)) {
+        // Also exercise WinMD identity/type summaries, which share CLR parsing.
+        (void)DotNetProvider().Inspect(*source, options, error);
         dotnet::Metadata metadata;
         if (metadata.Parse(*source, pe, error)) {
             const uint32_t methods = metadata.Rows(dotnet::MethodDef);

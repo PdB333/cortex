@@ -1,0 +1,129 @@
+name: Cortex Remote protocol and agent
+
+on:
+  push:
+    branches: ["feat/formats-cortex-remote"]
+  pull_request:
+    paths:
+      - "core/remote/**"
+      - "agent/remote/**"
+      - "tools/remote/**"
+      - "cmake/**"
+      - "tests/remote_*"
+      - "tests/fuzz/fuzz_remote_protocol.cpp"
+      - "tests/fuzz/make_remote_seeds.py"
+      - "app_imgui/ui/ps5_panel.cpp"
+      - "mcp_bridge/ps5_tools.h"
+      - "mcp_bridge/ps5_tools.cpp"
+      - "mcp_bridge/host_mode.cpp"
+      - ".github/workflows/cortex-remote.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compiler, TLS provisioning tool and sanitizer runtimes
+        run: sudo apt-get update && sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build openssl
+      - name: Configure
+        run: >-
+          cmake -S tools/remote -B build/remote -G Ninja
+          -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_BUILD_TYPE=Debug -DCORTEX_REMOTE_SANITIZERS=ON
+          -DCORTEX_REMOTE_FUZZ=ON
+      - name: Build
+        run: cmake --build build/remote --parallel 2
+      - name: Client against own agent and independent TLS peer
+        run: ctest --test-dir build/remote --output-on-failure
+      - name: Coverage-guided protocol fuzzing (no sockets)
+        run: |
+          mkdir -p build/remote-corpus build/remote-findings
+          python3 tests/fuzz/make_remote_seeds.py build/remote-corpus
+          build/remote/fuzz_remote_protocol -max_total_time=60 -max_len=262160 -timeout=5 -rss_limit_mb=1024 -artifact_prefix=build/remote-findings/ build/remote-corpus
+      - name: Keep logs, never credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-remote-linux-logs
+          path: |
+            build/remote/Testing/Temporary/*.log
+            build/remote-findings/
+          if-no-files-found: ignore
+
+  windows-contracts:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            msystem: MINGW64
+            prefix: mingw-w64-x86_64
+          - arch: x86
+            msystem: MINGW32
+            prefix: mingw-w64-i686
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install compiler and provisioning tool (no optional ccache)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          path-type: inherit
+          update: true
+          install: >-
+            git openssl
+            ${{ matrix.prefix }}-gcc
+            ${{ matrix.prefix }}-cmake
+            ${{ matrix.prefix }}-ninja
+      - name: Build and test own client/agent
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export CORTEX_OPENSSL="$(cygpath -w "$(command -v openssl)")"
+          cmake -S tools/remote -B build/remote-${{ matrix.arch }} -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/remote-${{ matrix.arch }} --parallel 2
+          ctest --test-dir build/remote-${{ matrix.arch }} --output-on-failure
+      - name: Keep logs, never certificates or keys
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-remote-windows-${{ matrix.arch }}-logs
+          path: build/remote-${{ matrix.arch }}/Testing/Temporary/*.log
+          if-no-files-found: ignore
+
+  ps5-cross-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 llvm-18 ninja-build unzip
+      - name: Fetch pinned open SDK (build dependency only)
+        run: |
+          mkdir -p build/sdk
+          curl --fail --location --retry 2 https://github.com/ps5-payload-dev/sdk/releases/download/v0.45/ps5-payload-sdk.zip -o build/sdk.zip
+          echo '5fac64093d0e3e69f2584ce7935f24f703f622d9681f1495c85b9f00d1291a2c  build/sdk.zip' | sha256sum --check
+          unzip -q build/sdk.zip -d build/sdk
+      - name: Cross-build the native agent (no fixture backend)
+        run: |
+          cmake -S tools/remote -B build/ps5 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/ps5-clang-toolchain.cmake" \
+            -DCORTEX_PS5_SDK="$PWD/build/sdk/ps5-payload-sdk" \
+            -DCORTEX_LLVM_BIN=/usr/lib/llvm-18/bin \
+            -DCORTEX_REMOTE_PS5=ON -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/ps5 --target cortex-agent --parallel 2
+          llvm-readelf-18 --file-header --dynamic build/ps5/cortex-agent.elf
+      # A successful link is not a console test. Do not publish SDK-linked
+      # binaries as releases here; source and dependency licences differ.

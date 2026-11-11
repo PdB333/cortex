@@ -12,9 +12,10 @@ import json
 import os
 import sys
 import zlib
+import zipfile
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-NAMES = {"bin": 0, "dll": 1, "exe": 2, "asar": 3, "js": 4, "map": 5, "zip": 7, "jar": 8, "ts": 9}
+NAMES = {"bin": 0, "dll": 1, "exe": 2, "asar": 3, "js": 4, "map": 5, "zip": 7, "jar": 8, "ts": 9, "sys": 10, "winmd": 11, "pdb": 12, "elf": 13, "cab": 14, "msi": 15, "msix": 16}
 
 
 def put(out, corpus, name, data):
@@ -31,6 +32,9 @@ def main():
         (os.path.join(fixtures, "dotnet", "Cortex.Fixture.dll"), "dll"),
         (os.path.join(fixtures, "java", "Cortex.Fixture.jar"), "jar"),
         (os.path.join(fixtures, "elf", "actor.elf"), "bin"),
+        (os.path.join(fixtures, "drivers", "fixture-x86.sys"), "sys"),
+        (os.path.join(fixtures, "drivers", "fixture-x64.sys"), "sys"),
+        (os.path.join(fixtures, "dotnet", "winmd", "Cortex.WinRT.winmd"), "winmd"),
     ]
     files += [(p, "exe") for p in glob.glob(os.path.join(ROOT, "tests", "fuzz", "seeds", "pe", "*.exe"))]
     files += [(p, "js") for p in sorted(glob.glob(os.path.join(fixtures, "**", "*.js"), recursive=True))[:20]]
@@ -41,7 +45,7 @@ def main():
             continue
         data = open(path, "rb").read()
         put(out, "artifact", "seed%d" % index, bytes([NAMES[kind]]) + data)
-        if kind in ("dll", "exe") and len(data) <= 65536:
+        if kind in ("dll", "exe", "sys") and len(data) <= 65536:
             put(out, "pe_code", "seed%d" % index, data)
         if kind in ("js", "ts"):
             put(out, "text", "js%d" % index, bytes([0 if kind == "js" else 4]) + data[:200000])
@@ -52,6 +56,47 @@ def main():
         base64.b64encode(b'{"version":3,"sources":["a.ts"],"mappings":"AAAA"}'))
     put(out, "text", "map", bytes([1]) + json.dumps(
         {"version": 3, "sources": ["a.ts"], "names": [], "mappings": "AAAA;AACA,CAAC"}).encode())
+    # Wave 1: valid structure-aware starting points, including independent producers.
+    kinds = [("pdb", "*.pdb", "pdb", 0), ("elf-native", "*.elf", "elf", 1),
+             ("elf", "actor.elf", "elf", 1), ("cab", "*.cab", "cab", 2),
+             ("compound", "*.cfb", "msi", 3), ("compound", "*.msi", "msi", 3),
+             ("appx", "*.msix", "msix", 5), ("appx", "*.appx", "msix", 5),
+             ("appx", "*.msixbundle", "msix", 5)]
+    for directory, pattern, kind, mode in kinds:
+        for path in sorted(glob.glob(os.path.join(fixtures, directory, pattern))):
+            with open(path, "rb") as handle:
+                data = handle.read()
+            name = directory + "_" + os.path.basename(path)
+            put(out, "artifact", name, bytes([NAMES[kind]]) + data)
+            put(out, "wave1", name, bytes([mode]) + data)
+            if kind == "msix":
+                with zipfile.ZipFile(path) as archive:
+                    for member in archive.namelist():
+                        if member.endswith(".xml"):
+                            put(out, "wave1", name + "_" + member.replace("/", "_"), bytes([4]) + archive.read(member))
+    dictionary = b"Cortex dictionary " * 10
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15, zdict=dictionary)
+    encoded = compressor.compress(dictionary * 3) + compressor.flush()
+    put(out, "wave1", "deflate_dictionary", bytes([6, len(dictionary)]) + dictionary + encoded)
+    put(out, "wave1", "xml_dtd", bytes([4]) + b'<!DOCTYPE x><x/>')
+    put(out, "wave1", "xml_namespace", bytes([4]) + b'<p:R xmlns:p="urn:x"><p:C A="&#65;"/></p:R>')
+    # Next native formats: stable mode bytes of fuzz_format_next.cpp.
+    next_kinds = [("archive-next", "*.tar", 0), ("archive-next", "*.gz", 1),
+                  ("archive-next", "*.tgz", 1), ("archive-next", "*.a", 2), ("archive-next", "*.deb", 2),
+                  ("certificates", "*.der", 3), ("certificates", "*.pem", 3), ("certificates", "*.p7b", 3),
+                  ("certificates", "*.p7m", 3), ("certificates", "*.cat", 3), ("typelib", "*.tlb", 4),
+                  ("package-next", "*.zip", 5), ("package-next", "*.xpi", 5), ("package-next", "*.vsix", 5),
+                  ("package-next", "*.war", 5), ("package-next", "*.ear", 5), ("package-next", "*.pyz", 5),
+                  ("package-next", "*.whl", 5), ("package-next", "*.crx", 6), ("package-next", "*.jmod", 6),
+                  ("package-next", "RELEASES", 7), ("package-next", "invalid-RELEASES.txt", 7)]
+    for directory, pattern, mode in next_kinds:
+        for path in sorted(glob.glob(os.path.join(fixtures, directory, pattern))):
+            with open(path, "rb") as handle:
+                data = handle.read()
+            name = directory + "_" + os.path.basename(path)
+            put(out, "format_next", name, bytes([mode]) + data)
+            if mode != 7:
+                put(out, "artifact", "next_" + name, bytes([7 if mode == 5 else 0]) + data)
     # Live protocols (fuzz_protocols): mode byte, then the stream.
     def ws_frame(payload, opcode=1, fin=True):
         head = bytes([(0x80 if fin else 0) | opcode])

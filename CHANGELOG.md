@@ -2,17 +2,34 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [Unreleased PS5 connector]
+
+- **Remote memory search:** one bounded read (up to 64 KiB), fixed-byte/`??` patterns, exact total matches and capped address results. Exposed in CLI, MCP and the desktop panel; no whole-process scan or atomic snapshot claim.
+- **Remote map pagination:** explicit cursors and SHA-256 map revisions reject changed layouts across pages; desktop next-page controls and CLI/MCP parameters included.
+- **Remote hardening:** optional exact server pin and client certificate allowlist (enabled in newly provisioned profiles), stricter capabilities/reply validation, safe handling of uncertain writes, and 32 KiB write cap that fits expected/replacement hex into the frame. Provisioning uses a private OpenSSL configuration and creates its ignore guard before keys.
+- **Build/CI:** fix the failed x86 fixture job by removing its optional unavailable ccache package, add dedicated remote Windows x64/x86 jobs, and move remote MCP schemas out of the large host translation unit. Existing fixture and integration tests remain enabled.
+- **Regression coverage:** query/response contracts, independent map-hash oracle, actual mutual-TLS tests of same-CA non-allowlisted clients and hostile replies, full-size fixture writes and expanded fuzz seeds. See `docs/validation/cortex-remote-hardening.md` for actual results and pending hardware validation.
+
+- Independent Cortex Remote v1 client AND native Cortex agent: mutual TLS, session/instance IDs, generation-bound processes, maps, bounded memory I/O and operator-controlled writes with expected-byte comparison/readback. Desktop, CLI and MCP use the same client; the prior third-party protocol implementation is removed. Windows x64/x86 tests and a native PS5 SDK ELF build are provided; real-console validation remains pending. See `docs/ps5-connector.md` and `docs/cortex-remote-protocol.md`.
+
 ## [v2.1.0] - not yet released
 
 Installing, setting up and updating Cortex without editing files by hand.
 
 ### Added
 
+- **Additional artifact readers (local development):** TAR/PAX/GNU, gzip, ar/Debian/npm containers; X.509 DER/PEM, PKCS#7/CMS inventory; MSFT COM type libraries; CRX2/3, XPI/WebExtension, VSIX, WAR/EAR/JMOD, Python zipapp/wheel metadata and Squirrel RELEASES. Shared GUI/CLI/MCP routes, categorized file dialogs, independent fixtures and sanitizer tests. No signature trust or target execution is implied; exact limitations in `docs/formats-next-implementation.md`.
+
+- **Wave 1 readers (development source, not yet released):** native PDB/MSF7, ELF32/64 LE/BE, stored/MSZIP CAB, CFB/MSI tables and APPX/MSIX/bundle metadata; see `docs/formats-wave1-implementation.md` for exact support and exclusions. All share GUI/CLI/MCP artifact routes. Added fixtures, tests, a dedicated fuzz harness and a portable static build target.
+- **ZIP robustness:** invalid UTF-8 metadata found by instrumented mutations no longer causes JSON serialization failure. Invalid member names are repaired for display and refused for reading. Local-header and compressed-read bounds were tightened; reproducer retained.
+
 - **Installer** (`cortex-vX.Y.Z-windows-setup.exe`, Inno Setup): per-user install in `%LOCALAPPDATA%\Programs\Cortex` without administrator rights, Start menu entry, optional desktop shortcut, optional *Analyze with Cortex* right-click entry for `.exe`, `.dll` and `.asar` files, optional AI client setup. The uninstaller removes the program, the right-click entry and the MCP entries that start this copy; your data is kept. The release workflow installs, checks and uninstalls it on Windows before publishing.
 - **AI client setup** (`cortex setup`, and Home › *Set up my AI clients automatically* / Help › *Set up AI clients and engines*): finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Copilot), Gemini CLI, Codex and LM Studio, shows the plan, and adds Cortex to them read-only after you confirm. Each changed file is backed up first; a file that is not plain JSON is never rewritten. `--dry-run`, `--client`, `--allow-writes`, `--remove`, `--json`.
 - **Engine detection:** Ghidra, a JDK, ILSpy (ilspycmd), the .NET SDK, Vineflower and netcoredbg in the usual places (environment variables, `PATH`, dotnet tools, Downloads, Program Files, `C:\tools`). The paths found are passed to the MCP server and saved for the desktop; Artifacts › Engines › *Find installed engines*. A JDK found sets `JAVA_HOME` for Ghidra and Vineflower.
 - **Updates** (`cortex update`, and an *Update to X.Y.Z* button in the desktop): a daily check of the latest release (one HTTPS request; can be turned off), the release notes, then a download checked against the release's `SHA256SUMS.txt`. An installed copy runs the new installer, which closes and reopens Cortex; a portable copy is unpacked into a new folder beside the current one. Programs that still use files of an installed copy are listed instead of being forced. Releases now publish `SHA256SUMS.txt`.
 - `cortex.exe <file>` opens the desktop on a file in the Files layout.
+- **WinRT metadata (.winmd), wave 1**: detect WinMD structurally through CLR version and TypeDef flags, report WinRT type and interface names, public non-WinRT types and filename/assembly mismatches; use the existing .NET PE/CLR reader. Python-built fixtures (positive and negative), tests and fuzz corpora added. No execution, projection or activation.
+- **Windows driver files (.sys), wave 1**: the built-in PE reader identifies native-subsystem driver candidates from the .sys suffix, WDM flag and direct kernel imports. It reports candidate entry RVA and detection evidence; it never loads a driver or claims to prove the DriverEntry symbol. Both x86 and x64 fixtures, negative/malformed tests and fuzz corpus seeds were added.
 - **PE analysis, first wave of the formats roadmap** (`cortex.exe inspect`, Artifacts, `cortex_artifact_*`):
   - Authenticode: signer and certificates (subject, issuer, serial, validity), timestamp presence, and whether the file's current digest matches the signed one. The chain is not checked against trusted roots.
   - Import hash (pefile-compatible), delay-load imports, Rich header (product ids, builds, counts, checksum, hash).

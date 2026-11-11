@@ -559,6 +559,7 @@ bool ExerciseAiInvestigationWorkspace(AppState& app, std::string& error) {
         {"ai_investigation_approve " + id + " 1", "Approved step 1 of " + id},
         {"ai_tab Evidence", ""},
         {"ai_evidence_refresh", "Evidence: "},
+        {"ai_tab PS5", ""}, // renders the new panel without connecting anywhere
         {"ai_tab Process tree", ""},
         {"ai_process_tree " + std::to_string(GetCurrentProcessId()), "Process tree: "},
     };

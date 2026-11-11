@@ -98,6 +98,10 @@ void AiInvestigationWorkspace::Draw(UiContext& context) {
             DrawLive(context);
             ImGui::EndTabItem();
         }
+        if (ImGui::BeginTabItem("PS5 (experimental)", nullptr, TabFlags("PS5"))) {
+            DrawPs5(context);
+            ImGui::EndTabItem();
+        }
         ImGui::EndTabBar();
         selectTab_.clear();
     }

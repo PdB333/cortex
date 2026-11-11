@@ -14,10 +14,17 @@ This directory contains both user-facing documentation for the unified Cortex ap
 - [Launching and testing programs](automated-tests.md) — operator launch profiles and the bounded trial runner.
 - [Installing, setting up and updating](setup-and-updates.md) — the installer, AI client setup, engine detection and updates.
 - [Formats roadmap](formats-roadmap.md) — every format Cortex reads and the ones planned, with state and priority.
+- [Wave 1 delivery plan](formats-wave1-plan.md) — Windows formats, per-format acceptance gates, and the later Linux/Android porting sequence.
 - [Known limitations](limitations.md) — the documented limits, collected in one page.
 - [Third-party notices](third-party.md) — licences of the libraries and of the optional external engines.
 - [Contributing](../CONTRIBUTING.md) and [security policy](../SECURITY.md).
 - [Releasing](releasing.md): how the release workflow builds, checks and (only after approval) publishes the archive.
+
+- [Wave 1 implementation and test results](formats-wave1-implementation.md) - actual reader coverage, test evidence and remaining limits.
+- [Additional archive, certificate and package readers](formats-next-implementation.md) - implemented scope, fixture provenance, nested workflows and measured validation.
+- [Portable static build](../tools/static/README.md) - standalone artifact inspection without the Windows runtime.
+
+- [Our PS5 agent](ps5-connector.md) and [Cortex Remote protocol](cortex-remote-protocol.md) - independent client/server, mutual TLS, native SDK backend; hardware validation pending.
 
 ## Product architecture
 

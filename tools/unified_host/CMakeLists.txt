@@ -56,19 +56,21 @@ add_executable(cortex_host
     ${CORTEX_INJECT_SOURCE}
     ${CORTEX_MCP_SOURCE}
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
+    ${CORTEX_ROOT}/mcp_bridge/ps5_tools.cpp
+    ${CORTEX_ROOT}/tools/ps5_main.cpp
     ${CORTEX_ROOT}/core/artifacts/artifact.cpp
     ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/pe_extras.cpp
     ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
-    ${CORTEX_ROOT}/core/artifacts/minidump_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/minidump_provider.cpp ${CORTEX_ROOT}/core/artifacts/pdb_provider.cpp ${CORTEX_ROOT}/core/artifacts/elf_provider.cpp ${CORTEX_ROOT}/core/artifacts/cab_provider.cpp ${CORTEX_ROOT}/core/artifacts/compound_reader.cpp ${CORTEX_ROOT}/core/artifacts/compound_provider.cpp ${CORTEX_ROOT}/core/artifacts/msi_tables.cpp ${CORTEX_ROOT}/core/artifacts/archive_provider.cpp ${CORTEX_ROOT}/core/artifacts/certificate_provider.cpp ${CORTEX_ROOT}/core/artifacts/typelib_provider.cpp ${CORTEX_ROOT}/core/artifacts/package_metadata.cpp
     ${CORTEX_ROOT}/core/artifacts/hive_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp
     ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
     ${CORTEX_ROOT}/core/artifacts/js_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/source_map.cpp
     ${CORTEX_ROOT}/core/artifacts/inflate.cpp
-    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp ${CORTEX_ROOT}/core/artifacts/appx_metadata.cpp
     ${CORTEX_ROOT}/core/artifacts/dotnet_metadata.cpp
     ${CORTEX_ROOT}/core/artifacts/cil.cpp
     ${CORTEX_ROOT}/core/artifacts/dotnet_provider.cpp
@@ -122,7 +124,9 @@ target_compile_definitions(cortex_host PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
+include(${CORTEX_ROOT}/cmake/CortexRemote.cmake)
 target_link_libraries(cortex_host PRIVATE
+    cortex_remote
     nlohmann_json::nlohmann_json
     Zydis
     ws2_32

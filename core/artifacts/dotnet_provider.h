@@ -10,8 +10,8 @@ namespace cortex::artifacts {
 class DotNetProvider final : public Provider {
 public:
     const char* Name() const override { return "dotnet"; }
-    const char* Version() const override { return "1"; }
-    std::vector<std::string> Formats() const override { return {"dotnet"}; }
+    const char* Version() const override { return "2"; }
+    std::vector<std::string> Formats() const override { return {"dotnet", "winmd"}; }
     std::vector<Capability> Capabilities() const override;
     int Detect(const ByteSource& source) const override;
     json Inspect(const ByteSource& source, const InspectOptions& options, std::string& error) const override;

@@ -72,6 +72,7 @@ static void PrintCliUsage(FILE* out = stdout) {
         "  cortex investigation ...       List, show, report, approve or reject investigation steps\n"
         "  cortex provider list|run ...   External engines: Ghidra (native), ILSpy (C#), Vineflower (Java)\n"
         "  cortex live targets|scripts|watch  Live debuggers (CDP, debugpy, netcoredbg, JDWP): log breakpoints\n"
+        "  cortex ps5 info|processes|maps|read|write --config client.json  Cortex Remote agent\n"
         "  cortex setup [--yes|--dry-run] Register Cortex in your AI clients and find the analysis engines\n"
         "  cortex update [--check]        Install the latest release (verified download)\n"
         "  cortex <file>                  Open the desktop on a file (Files layout)\n",
@@ -122,6 +123,7 @@ static std::optional<int> RunCliMode(std::vector<std::string>& args) {
     if (command == "evidence") return ForwardCli(CortexEvidenceMain, "cortex evidence", args, 2);
     if (command == "investigation") return ForwardCli(CortexInvestigationMain, "cortex investigation", args, 2);
     if (command == "provider") return ForwardCli(CortexProviderMain, "cortex provider", args, 2);
+    if (command == "ps5") return ForwardCli(CortexPs5Main, "cortex ps5", args, 2);
     if (command == "live") return ForwardCli(CortexLiveMain, "cortex live", args, 2);
     if (command == "setup") return ForwardCli(CortexSetupMain, "cortex setup", args, 2);
     if (command == "update") return ForwardCli(CortexUpdateMain, "cortex update", args, 2);

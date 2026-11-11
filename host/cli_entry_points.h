@@ -14,6 +14,7 @@ int CortexInspectMain(int argc, char** argv);    // tools/inspect_main.cpp
 int CortexEvidenceMain(int argc, char** argv);   // tools/evidence_main.cpp
 int CortexInvestigationMain(int argc, char** argv);  // tools/investigation_main.cpp
 int CortexProviderMain(int argc, char** argv);   // tools/provider_main.cpp
+int CortexPs5Main(int argc, char** argv);        // tools/ps5_main.cpp
 int CortexLiveMain(int argc, char** argv);       // tools/live_main.cpp
 int CortexSetupMain(int argc, char** argv);      // tools/setup_main.cpp
 int CortexUpdateMain(int argc, char** argv);     // tools/setup_main.cpp

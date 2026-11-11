@@ -13,8 +13,8 @@ namespace cortex::artifacts {
 class ZipProvider final : public Provider {
 public:
     const char* Name() const override { return "zip"; }
-    const char* Version() const override { return "1"; }
-    std::vector<std::string> Formats() const override { return {"zip", "jar", "apk", "nupkg", "wheel"}; }
+    const char* Version() const override { return "3"; }
+    std::vector<std::string> Formats() const override { return {"zip", "jar", "apk", "nupkg", "wheel", "appx", "appxbundle", "vsix", "xpi", "webextension", "war", "ear", "python-zipapp"}; }
     std::vector<Capability> Capabilities() const override;
     int Detect(const ByteSource& source) const override;
     json Inspect(const ByteSource& source, const InspectOptions& options, std::string& error) const override;

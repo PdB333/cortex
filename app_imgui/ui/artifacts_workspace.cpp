@@ -286,13 +286,12 @@ int ArtifactsWorkspace::TabFlags(const char* name) const {
 void ArtifactsWorkspace::Draw(UiContext& context) {
     ImGui::SetNextItemWidth(std::max(Px(240), ImGui::GetContentRegionAvail().x - ButtonWidth("Browse...") -
                                                   ButtonWidth("Inspect") - Px(16)));
-    const bool enter = ImGui::InputTextWithHint("##ArtifactPath", "file: .exe, .dll, .asar ...", path_.data(), path_.size(),
+    const bool enter = ImGui::InputTextWithHint("##ArtifactPath", "file: .exe, .pdb, .tlb, .tar, .crx, .pem ...", path_.data(), path_.size(),
                                                 ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine();
     if (ImGui::Button("Browse...")) {
         std::string chosen;
-        if (ShowOpenFileDialog(L"All files\0*.*\0Executables and libraries\0*.exe;*.dll\0Electron archives\0*.asar\0",
-                               chosen)) {
+        if (ShowOpenFileDialog(ArtifactFileFilter(), chosen)) {
             Copy(path_.data(), path_.size(), chosen);
             child_.fill(0);
             Inspect(context, chosen, {});

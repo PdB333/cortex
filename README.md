@@ -370,7 +370,7 @@ No. Built-in parsers cover PE, native code, .NET metadata and CIL, ASAR, JS/TS a
 <details>
 <summary><b>Does anything leave my machine?</b></summary>
 
-No. Cortex has no telemetry or update check and uploads nothing. External engines run locally, and debug interfaces are reached only on `127.0.0.1`. Your MCP client decides what it sends to its own model.
+Cortex has no telemetry and does not upload analyzed files automatically. Its optional update check contacts GitHub; external analysis engines run locally. The optional Cortex Remote connector sends explicit requests to the agent selected in your TLS profile. Your MCP client separately decides what it sends to its model. See [setup and updates](docs/setup-and-updates.md) and [our PS5 agent](docs/ps5-connector.md).
 </details>
 
 <details>

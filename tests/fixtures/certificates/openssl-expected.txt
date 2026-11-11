@@ -1,0 +1,4 @@
+subject=CN=Cortex Test Certificate, O=Cortex Fixture, C=FR
+issuer=CN=Cortex Test Certificate, O=Cortex Fixture, C=FR
+serial=2A
+sha256 Fingerprint=01:DB:5B:E8:A3:52:3D:21:37:11:92:A5:4C:64:D7:13:E7:06:58:3E:53:BE:67:D1:FE:7D:C3:07:6E:4C:EE:C8
