@@ -21,6 +21,12 @@ Rules that apply to every row:
 - Each format lands with a fixture, a test and a fuzz harness, like the
   existing parsers ([tests/fuzz](../tests/fuzz/README.md)).
 
+The local wave-1 implementation and actual verification results are recorded in
+[formats-wave1-implementation.md](formats-wave1-implementation.md). Local test
+coverage does not make a feature shipped in the latest published release.
+Additional archives, certificates, COM typelibs and package readers are detailed
+in [formats-next-implementation.md](formats-next-implementation.md).
+
 ## 1. Executables and native binaries
 
 | Format | What Cortex reads | State | Priority | Engine |
@@ -35,11 +41,12 @@ Rules that apply to every row:
 | PE hardening | load config; ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET, /GS | ✅ | | built-in |
 | PE overlay, entropy, packer detection | appended data, section entropy, 16 packer families and heuristics (detection only) | ✅ | | built-in |
 | PE ARM64, ARM64EC, CHPE | Windows on ARM images | ⬜ | P3 | built-in |
-| ELF | sections, segments, symbols, relocations, notes, hardening | 🟡 Ghidra only | P1 | built-in |
+| ELF | Native ELF32/64 LE/BE, headers, symbols, REL/RELA, notes, dependencies and hardening metadata; Ghidra optional for decompilation | 🟡 implemented/tested locally; release pending | P1 | built-in |
 | Mach-O (thin and fat) | load commands, symbols, code signature, entitlements, chained fixups | ⬜ | P3 | built-in |
-| COFF objects, .lib and .a archives, .exp | symbols, sections, archive members | ⬜ | P3 | built-in |
+| ar static-library containers (.lib/.a) | Common/GNU/BSD member inventory and child bytes; thin external references refused; symbol indexes not decoded | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| COFF objects (.obj/.exp) | object symbols, sections, relocations (not implied by ar container support) | ⬜ | P3 | built-in |
 | DOS MZ, NE, LE/LX | 16-bit Windows, VxD, OS/2 headers | ⬜ | P4 | built-in (code via Ghidra) |
-| Windows drivers (.sys) | PE plus driver entry, imports from ntoskrnl | ⬜ | P1 | built-in |
+| Windows drivers (.sys) | Native-subsystem PE, candidate entry RVA, WDM flag and direct kernel imports (heuristic; not a proven DriverEntry) | 🟡 tested locally; CI/release pending | P1 | built-in PE |
 | UEFI images (.efi, TE) | PE/TE headers, GUIDs | ⬜ | P4 | built-in |
 | Intel HEX, Motorola S-record, UF2, raw images | load to an address; ARM vector table detection | ⬜ | P4 | built-in |
 
@@ -47,7 +54,7 @@ Rules that apply to every row:
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| PDB (MSF) | public and private symbols, types, line numbers | 🟡 through dbghelp in the live symbolizer | P1 | built-in |
+| PDB (MSF) | MSF7 GUID/age, DBI modules, symbols, common TPI/IPI records and C13 lines; no full type resolver | 🟡 implemented/tested locally; release pending | P1 | built-in (dbghelp remains live) |
 | DWARF (incl. split DWARF, .dSYM) | functions, types, lines | ⬜ | P3 | built-in |
 | CodeView, .map files, Breakpad .sym | symbols | ⬜ | P3 | built-in |
 
@@ -70,15 +77,18 @@ Rules that apply to every row:
 | .NET ReadyToRun, single-file bundles, NativeAOT detection | bundle members, R2R headers | ⬜ | P1 | built-in |
 | .NET resources (.resources) | resource names and values | ⬜ | P3 | built-in |
 | .NET strong name, obfuscator detection | signature, known obfuscator markers (detection only) | ⬜ | P3 | built-in |
-| WinRT metadata (.winmd) | types and members (ECMA-335, same parser as .NET) | ⬜ | P1 | built-in |
-| COM type libraries (.tlb) | interfaces, methods, GUIDs | ⬜ | P1 | built-in |
+| WinRT metadata (.winmd) | CLR metadata, Windows Runtime version marker, TypeDef flags, type/interface list, assembly name checks; no WinRT semantic projection yet | 🟡 tested locally; full conformance/CI pending | P1 | built-in .NET |
+| COM type libraries (.tlb) | MSFT GUIDs, types/interfaces, methods and parameters, tested on Windows-generated x86/x64 files; no SLTG/full type resolver | 🟡 implemented/tested locally; release pending | P1 | built-in |
 | Java .class | constant pool, methods, bytecode | ⬜ | P3 | built-in |
 | Java .jar to Java | decompiled sources | ✅ | | Vineflower |
-| .war, .ear, JMOD, jimage | archive members, modules | ⬜ | P3 | built-in |
+| .war and .ear | ZIP inventory and XML deployment-descriptor metadata; no execution | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| JMOD | Version 1.0 wrapper and nested ZIP (real JDK fixture); class bytes only, no module semantics | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| jimage | module image format | ⬜ | P3 | built-in |
 | Android DEX, ODEX, VDEX, OAT, ART | classes, methods, bytecode | ⬜ | P3 | built-in |
 | Python .pyc (2.7 to 3.13) | code objects, bytecode disassembly | ⬜ | P3 | built-in |
 | PyInstaller | CArchive members, Python version, entry scripts | ⬜ | P3 | built-in |
-| py2exe, cx_Freeze, Nuitka detection, .pyz, wheels | members and markers | ⬜ | P3 | built-in |
+| Python zipapps (.pyz), wheels | ZIP inventory, __main__.py entry point and wheel METADATA dependencies; no Python import or execution | 🟡 implemented/tested locally; release pending | P3 | built-in ZIP |
+| py2exe, cx_Freeze, Nuitka detection | packaged executable inventory and markers | ⬜ | P3 | built-in |
 | Lua bytecode (5.1 to 5.4, LuaJIT) | functions, constants, disassembly | ⬜ | P2 | built-in |
 | Go binaries | buildinfo, modules, pclntab function names (also when stripped) | ⬜ | P3 | built-in |
 | Rust binaries | cargo-auditable crates, crate names from paths and panics | ⬜ | P3 | built-in |
@@ -103,8 +113,8 @@ Rules that apply to every row:
 | webpack and Vite bundles | modules and chunk graph | ⬜ | P3 | built-in |
 | Tauri apps | assets embedded in the executable | ⬜ | P3 | built-in |
 | NW.js apps | package and scripts | ⬜ | P4 | built-in |
-| Browser and editor extensions (.crx, .xpi, .vsix) | manifest, permissions, scripts | ⬜ | P3 | built-in |
-| npm packages (.tgz) | package.json, files | ⬜ | P4 | built-in |
+| Browser and editor extensions (.crx, .xpi, .vsix) | CRX2/3 header/proof inventory, WebExtension permissions/scripts and VSIX/VS Code manifests; signatures unverified, no install | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| npm packages (.tgz) | gzip -> TAR -> package.json, dependencies/scripts as data and nested files; no install | 🟡 implemented/tested locally; release pending | P4 | built-in |
 
 ## 6. Game engines
 
@@ -132,17 +142,22 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
 | ZIP, JAR, APK, NuGet, wheels (stored and deflate) | entries, nested inspection | ✅ | | built-in |
-| 7z, TAR, gzip, bzip2, xz, zstd, lz4 | entries | ⬜ | P3 | built-in |
+| TAR (v7, ustar, PAX, GNU long names) | headers/checksums and bounded ordinary files; links/sparse/unsafe children not followed | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| gzip (.gz/.tgz) | concatenated members, optional headers, CRC/ISIZE and bounded DEFLATE to a payload child | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| 7z, bzip2, xz, zstd, lz4 | compressed archive readers | ⬜ | P3 | built-in |
 | RAR | entries (read only) | ⬜ | P4 | built-in |
-| CAB | entries | ⬜ | P1 | built-in |
-| MSI | OLE compound file, tables, custom actions, embedded CABs | ⬜ | P1 | built-in |
-| MSIX, APPX, appxbundle | manifest, signature, files | ⬜ | P1 | built-in |
+| CAB | Stored/MSZIP inventory and bounded expansion, block checksums/history; LZX/Quantum/spanned files unavailable | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| OLE Compound File (CFB v3/v4) | Bounded FAT/DIFAT/MiniFAT, storage tree, child streams; no COM activation | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| MSI | CFB/FAT/MiniFAT, schemas and table values, CustomAction listed only, embedded CAB | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| MSIX, APPX, appxbundle | Namespaced manifests, identity/dependencies/apps, bundles, SHA-256 block comparison; no signature trust | 🟡 implemented/tested locally; release pending | P1 | built-in ZIP + XML |
 | NSIS, Inno Setup, InstallShield, WiX Burn | script, file list (no running) | ⬜ | P1 | built-in |
-| Squirrel (Electron updates) | packages, releases file | ⬜ | P1 | built-in |
+| Squirrel (Electron updates) | RELEASES hash/name-or-URL/size claims, full/delta metadata; NuGet uses existing ZIP reader; no download/apply/setup.exe unpacking | 🟡 implemented/tested locally; release pending | P1 | built-in |
 | ISO/UDF, VHD/VHDX, WIM, CHM | file trees | ⬜ | P3 | built-in |
-| deb, rpm, AppImage, snap (squashfs) | control data, files | ⬜ | P4 | built-in |
+| Debian .deb | ar members and nested control/data tar.gz; no installation, scripts or fetching | 🟡 implemented/tested locally; release pending | P4 | built-in |
+| rpm, AppImage, snap (squashfs) | control data, files | ⬜ | P4 | built-in |
 | DMG, PKG (xar) | file trees | ⬜ | P4 | built-in |
 | Docker and OCI images | layers, configuration | ⬜ | P4 | built-in |
+
 
 ## 8. Mobile
 
@@ -168,7 +183,8 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Windows registry hives (REGF) | base block, key tree, typed values (bounded) | ✅ | | built-in |
 | Registry exports (.reg) | keys and values | ⬜ | P3 | built-in |
 | Java serialization, .NET BinaryFormatter (detection), Python pickle (disassembly), Ruby Marshal, PHP serialize | structure, never instantiated | ⬜ | P3 | built-in |
-| X.509, PKCS#7, catalog files (.cat) | certificates and hashes | ⬜ | P1 | built-in |
+| X.509 DER/PEM and PKCS#7/CMS | issuer/subject, validity, algorithms, fingerprints, signer/certificate/content inventory; no signature or chain trust | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| Catalog files (.cat) | CMS CTL OID recognition and raw content; catalog-entry decoding and signature trust not implemented | 🟡 implemented/tested locally; release pending | P1 | built-in |
 
 ## 10. AI models
 
@@ -248,6 +264,7 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Windows services, COM objects | service and class inventory | ⬜ | P3 |
 | Linux processes (process_vm_readv, ptrace) | memory scan and edit, hardware breakpoints, trace | ⬜ | see Platforms |
 | Android devices (adb) | packages, processes, logs | ⬜ | P4 |
+| PS5 via our Cortex agent / Cortex Remote v1 | mutual TLS, process generations, maps and authorized memory I/O; own PC client and native SDK agent | partial: client/server tests and ELF cross-build; hardware untested | experimental |
 
 ## Waves
 

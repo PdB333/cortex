@@ -12,7 +12,7 @@ using namespace cortex::artifacts;
 
 namespace {
 const char* const kNames[] = {"input.bin", "input.dll", "input.exe", "app.asar", "bundle.js",
-                              "bundle.js.map", "module.mjs", "archive.zip", "package.jar", "code.ts"};
+                              "bundle.js.map", "module.mjs", "archive.zip", "package.jar", "code.ts", "driver.sys", "module.winmd", "symbols.pdb", "program.elf", "archive.cab", "package.msi", "package.msix"};
 
 void Walk(const Registry& registry, ByteSourcePtr source, int depth) {
     InspectOptions options;

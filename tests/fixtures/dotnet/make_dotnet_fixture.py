@@ -20,8 +20,34 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import runpy
 
 here = os.path.dirname(os.path.abspath(__file__))
+
+
+def write_winmd_fixtures(out):
+    # Generator code is repository-owned; the WinMD bytes themselves are never loaded.
+    make = runpy.run_path(os.path.join(here, "winmd", "make_fixture.py"))["make"]
+    folder = os.path.join(out, "winmd")
+    os.makedirs(folder, exist_ok=True)
+    for name, winrt in (("Cortex.WinRT.winmd", True), ("not-winrt.winmd", False)):
+        with open(os.path.join(folder, name), "wb") as handle:
+            handle.write(make(winrt))
+
+
+def write_zip_cases(out):
+    """Generate ZIP-only fixtures independently of the optional .NET SDK."""
+    text = ("The quick brown fox jumps over the lazy dog. " * 200).encode()
+    with zipfile.ZipFile(os.path.join(out, "zip-cases.zip"), "w") as archive:
+        archive.writestr(zipfile.ZipInfo("stored.txt"), text, compress_type=zipfile.ZIP_STORED)
+        archive.writestr("fast.txt", text, compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
+        archive.writestr("best.txt", text, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        archive.writestr("random.bin", bytes((i * 7919 + 13) % 251 for i in range(5000)),
+                         compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("empty.txt", b"", compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("folder/", b"")
+        archive.writestr("folder/caf\u00e9.txt", "caf\u00e9".encode(), compress_type=zipfile.ZIP_DEFLATED)
+        archive.comment = b"cortex zip cases"
 
 
 def main():
@@ -29,6 +55,7 @@ def main():
     parser.add_argument("--out", default=here)
     out = os.path.abspath(parser.parse_args().out)
     os.makedirs(out, exist_ok=True)
+    write_winmd_fixtures(out)
     env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1")
     work = tempfile.mkdtemp(prefix="cortex-dotnet-")
     try:
@@ -43,17 +70,7 @@ def main():
         with open(os.path.join(out, "Cortex.Fixture-expected.json"), "w", newline="\n") as expected:
             subprocess.run(["dotnet", "run", "--project", os.path.join(here, "Oracle"), "-c", "Release", "--", dll],
                            check=True, env=env, stdout=expected)
-        text = ("The quick brown fox jumps over the lazy dog. " * 200).encode()
-        with zipfile.ZipFile(os.path.join(out, "zip-cases.zip"), "w") as archive:
-            archive.writestr(zipfile.ZipInfo("stored.txt"), text, compress_type=zipfile.ZIP_STORED)
-            archive.writestr("fast.txt", text, compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
-            archive.writestr("best.txt", text, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-            archive.writestr("random.bin", bytes((i * 7919 + 13) % 251 for i in range(5000)),
-                             compress_type=zipfile.ZIP_DEFLATED)
-            archive.writestr("empty.txt", b"", compress_type=zipfile.ZIP_DEFLATED)
-            archive.writestr("folder/", b"")
-            archive.writestr("folder/café.txt", "café".encode(), compress_type=zipfile.ZIP_DEFLATED)
-            archive.comment = b"cortex zip cases"
+        write_zip_cases(out)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print("fixture written to", out)

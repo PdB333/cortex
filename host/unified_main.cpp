@@ -239,6 +239,7 @@ int main(int argc, char** argv) {
 
     if (command == "serve" || command == "server" || command == "scan")
         return Forward(CortexServeMain, "cortex_host serve", argc, argv, 2);
+    if (command == "ps5") return Forward(CortexPs5Main, "cortex_host ps5", argc, argv, 2);
     if (command == "inject" || command == "injector")
         return Forward(CortexInjectMain, "cortex_host inject", argc, argv, 2);
     if (command == "probe")

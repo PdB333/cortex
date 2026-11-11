@@ -1,0 +1,20 @@
+{
+  "payload_sha256": "29f0cf7677d961b9c93d16a6c78676accf1fe81fb845c7db568e0703055a385a",
+  "npm": {
+    "name": "@cortex/owned-fixture",
+    "version": "1.2.3",
+    "main": "index.js",
+    "scripts": {
+      "postinstall": "DO_NOT_EXECUTE_THIS_FIXTURE"
+    },
+    "dependencies": {
+      "example": "^1.0.0"
+    }
+  },
+  "producers": [
+    "Python tarfile",
+    "gzip",
+    "zlib",
+    "struct"
+  ]
+}

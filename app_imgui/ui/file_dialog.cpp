@@ -44,6 +44,15 @@ bool Run(bool save, const wchar_t* filter, const wchar_t* extension, std::string
 
 } // namespace
 
+const wchar_t* ArtifactFileFilter() {
+    return L"All files\0*.*\0"
+           L"Executables and metadata\0*.exe;*.dll;*.sys;*.elf;*.winmd;*.pdb;*.tlb\0"
+           L"Archives and packages\0*.asar;*.zip;*.jar;*.apk;*.nupkg;*.whl;*.cab;*.msi;*.msix;*.appx;*.msixbundle;*.appxbundle;*.tar;*.gz;*.tgz;*.a;*.lib;*.deb\0"
+           L"Extensions and language packages\0*.crx;*.xpi;*.vsix;*.war;*.ear;*.jmod;*.pyz\0"
+           L"Certificates and catalogs\0*.cer;*.crt;*.der;*.pem;*.p7b;*.p7m;*.cat\0"
+           L"Dumps and registry hives\0*.dmp;*.hiv;*.regf\0";
+}
+
 bool ShowOpenFileDialog(const wchar_t* filter, std::string& path) {
     return Run(false, filter, nullptr, path);
 }
