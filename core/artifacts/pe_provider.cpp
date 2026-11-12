@@ -1,3 +1,4 @@
+#include "native_more_provider.h"
 #include "pe_provider.h"
 #include "pe_extras.h"
 
@@ -614,6 +615,8 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
             overlaySize = pe.directories[kPeSecurity].rva - overlayStart;
         if (overlaySize) data["overlay"] = {{"offset", HexU64(overlayStart)}, {"size", overlaySize}};
     }
+    const json go = GoBinaryInfo(source);
+    if (!go.is_null()) data["go"] = go;
     if (!pe.warnings.empty()) data["warnings"] = pe.warnings;
     return data;
 }

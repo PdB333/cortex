@@ -114,6 +114,14 @@ inline std::string Utf16(const View& bytes, bool little = true) {
     return out;
 }
 
+// At most `limit` bytes of valid UTF-8 text, never cut inside a character.
+inline std::string Clip(const std::string& text, size_t limit, const char* ellipsis = "...") {
+    if (text.size() <= limit) return text;
+    size_t end = limit;
+    while (end > 0 && (static_cast<uint8_t>(text[end]) & 0xC0) == 0x80) --end;
+    return text.substr(0, end) + ellipsis;
+}
+
 inline uint64_t Align4(uint64_t value) {
     if (value > std::numeric_limits<uint64_t>::max() - 3) throw Error("alignment_overflow");
     return (value + 3) & ~uint64_t(3);

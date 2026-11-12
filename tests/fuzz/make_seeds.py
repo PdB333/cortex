@@ -97,6 +97,30 @@ def main():
             put(out, "format_next", name, bytes([mode]) + data)
             if mode != 7:
                 put(out, "artifact", "next_" + name, bytes([7 if mode == 5 else 0]) + data)
+    # Formats beyond wave 1: stable mode bytes of fuzz_format_more.cpp.
+    more_kinds = [("bytecode", "*.pyc", 0), ("bytecode", "*.class", 1), ("bytecode", "*.luac", 2),
+                  ("bytecode", "*.wasm", 3), ("media", "*.spv", 4), ("native", "macho-*.o", 5),
+                  ("native", "*.obj", 6), ("data", "*.db", 7), ("data", "*-wal", 7), ("data", "*.bplist", 8),
+                  ("data", "*.pkl", 9), ("data", "*.npy", 10), ("data", "*.safetensors", 11),
+                  ("data", "*.gguf", 12), ("data", "*.onnx", 13), ("media", "*.pcap", 14), ("media", "*.pcapng", 14),
+                  ("media", "*.hex", 15), ("media", "*.srec", 16), ("media", "*.uf2", 17), ("media", "*.dtb", 18),
+                  ("media", "*.pdf", 19), ("media", "*.lnk", 20)]
+    for directory, pattern, mode in more_kinds:
+        for path in sorted(glob.glob(os.path.join(fixtures, "format-more", directory, pattern))):
+            with open(path, "rb") as handle:
+                data = handle.read()
+            if len(data) > (1 << 20) - 1:
+                continue
+            put(out, "format_more", directory + "_" + os.path.basename(path), bytes([mode]) + data)
+    # The Go scanner (last mode) on a slice around a real build-info header.
+    go = os.path.join(fixtures, "format-more", "native", "go-linux")
+    if os.path.exists(go):
+        with open(go, "rb") as handle:
+            data = handle.read()
+        at = data.find(b"\xff Go buildinf:")
+        if at >= 0:
+            put(out, "format_more", "go_buildinfo", bytes([21]) + data[at:at + 4096])
+
     # Live protocols (fuzz_protocols): mode byte, then the stream.
     def ws_frame(payload, opcode=1, fin=True):
         head = bytes([(0x80 if fin else 0) | opcode])

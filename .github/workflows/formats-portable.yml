@@ -36,11 +36,12 @@ jobs:
       - name: Prepare corpora
         run: |
           python3 tests/fuzz/make_seeds.py build/seeds
-          mkdir -p build/work-wave1 build/work-artifact build/work-format-next build/findings tests/fuzz/regressions/fuzz_format_next
+          mkdir -p build/work-wave1 build/work-artifact build/work-format-next build/work-format-more build/findings tests/fuzz/regressions/fuzz_format_next tests/fuzz/regressions/fuzz_format_more
       - name: Native coverage-guided fuzzing
         run: |
           build/formats/fuzz_wave1 -max_total_time=120 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-wave1 build/seeds/wave1 tests/fuzz/regressions/fuzz_wave1
           build/formats/fuzz_format_next -max_total_time=120 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-format-next build/seeds/format_next tests/fuzz/regressions/fuzz_format_next
+          build/formats/fuzz_format_more -max_total_time=180 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-format-more build/seeds/format_more tests/fuzz/regressions/fuzz_format_more
           build/formats/fuzz_artifact -max_total_time=60 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-artifact build/seeds/artifact
       - name: Keep test logs and reproducers
         if: always()

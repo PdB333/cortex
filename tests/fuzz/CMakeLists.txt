@@ -34,7 +34,7 @@ FetchContent_MakeAvailable(zydis)
 set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 set(ARTIFACT_SOURCES
     ${ROOT}/core/artifacts/artifact.cpp ${ROOT}/core/artifacts/pe_provider.cpp ${ROOT}/core/artifacts/pe_extras.cpp
-    ${ROOT}/core/artifacts/asar_provider.cpp ${ROOT}/core/artifacts/registry_default.cpp ${ROOT}/core/artifacts/minidump_provider.cpp ${ROOT}/core/artifacts/pdb_provider.cpp ${ROOT}/core/artifacts/elf_provider.cpp ${ROOT}/core/artifacts/cab_provider.cpp ${ROOT}/core/artifacts/compound_reader.cpp ${ROOT}/core/artifacts/compound_provider.cpp ${ROOT}/core/artifacts/msi_tables.cpp ${ROOT}/core/artifacts/archive_provider.cpp ${ROOT}/core/artifacts/certificate_provider.cpp ${ROOT}/core/artifacts/typelib_provider.cpp ${ROOT}/core/artifacts/package_metadata.cpp ${ROOT}/core/artifacts/hive_provider.cpp
+    ${ROOT}/core/artifacts/asar_provider.cpp ${ROOT}/core/artifacts/registry_default.cpp ${ROOT}/core/artifacts/minidump_provider.cpp ${ROOT}/core/artifacts/pdb_provider.cpp ${ROOT}/core/artifacts/elf_provider.cpp ${ROOT}/core/artifacts/cab_provider.cpp ${ROOT}/core/artifacts/compound_reader.cpp ${ROOT}/core/artifacts/compound_provider.cpp ${ROOT}/core/artifacts/msi_tables.cpp ${ROOT}/core/artifacts/archive_provider.cpp ${ROOT}/core/artifacts/certificate_provider.cpp ${ROOT}/core/artifacts/typelib_provider.cpp ${ROOT}/core/artifacts/package_metadata.cpp ${ROOT}/core/artifacts/bytecode_provider.cpp ${ROOT}/core/artifacts/native_more_provider.cpp ${ROOT}/core/artifacts/data_provider.cpp ${ROOT}/core/artifacts/capture_provider.cpp ${ROOT}/core/artifacts/firmware_provider.cpp ${ROOT}/core/artifacts/document_provider.cpp ${ROOT}/core/artifacts/hive_provider.cpp
     ${ROOT}/core/artifacts/js_lexer.cpp ${ROOT}/core/artifacts/js_analysis.cpp
     ${ROOT}/core/artifacts/js_provider.cpp ${ROOT}/core/artifacts/source_map.cpp
     ${ROOT}/core/artifacts/inflate.cpp ${ROOT}/core/artifacts/zip_provider.cpp ${ROOT}/core/artifacts/appx_metadata.cpp
@@ -53,7 +53,7 @@ else()
 endif()
 target_compile_options(cortex_fuzz_parsers PRIVATE ${SAN} -g -O1)
 
-foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores fuzz_wave1 fuzz_format_next)
+foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores fuzz_wave1 fuzz_format_next fuzz_format_more)
     if(CORTEX_FUZZ_REPLAY)
         add_executable(${harness} ${harness}.cpp replay_main.cpp)
         target_compile_options(${harness} PRIVATE ${SAN} -g -O1)
@@ -69,7 +69,7 @@ target_link_options(cortex_fuzz_parsers INTERFACE $<IF:$<BOOL:${CORTEX_FUZZ_REPL
 
 if(CORTEX_FUZZ_REPLAY)
     enable_testing()
-    foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores fuzz_wave1 fuzz_format_next)
+    foreach(harness fuzz_artifact fuzz_pe_code fuzz_text fuzz_protocols fuzz_stores fuzz_wave1 fuzz_format_next fuzz_format_more)
         add_test(NAME ${harness}_regressions COMMAND ${harness} ${CMAKE_CURRENT_SOURCE_DIR}/regressions/${harness})
     endforeach()
 endif()

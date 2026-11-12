@@ -1,4 +1,5 @@
 #include "elf_provider.h"
+#include "native_more_provider.h"
 #include "bounded_reader.h"
 
 #include <algorithm>
@@ -379,7 +380,12 @@ int ElfProvider::Detect(const ByteSource& source) const {
     uint8_t magic[4]; return source.Read(0, magic, 4) && !std::memcmp(magic, "\177ELF", 4) ? 80 : 0;
 }
 json ElfProvider::Inspect(const ByteSource& source, const InspectOptions& options, std::string& error) const {
-    try { return Elf(source, options).Inspect(); }
+    try {
+        json result = Elf(source, options).Inspect();
+        const json go = GoBinaryInfo(source);
+        if (!go.is_null()) result["go"] = go;
+        return result;
+    }
     catch (const Error& ex) { error = ex.what(); return nullptr; }
 }
 } // namespace cortex::artifacts

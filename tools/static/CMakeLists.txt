@@ -20,7 +20,9 @@ set(SOURCES
     inflate.cpp zip_provider.cpp appx_metadata.cpp
     dotnet_metadata.cpp cil.cpp dotnet_provider.cpp
     minidump_provider.cpp hive_provider.cpp pdb_provider.cpp elf_provider.cpp
-    cab_provider.cpp compound_reader.cpp compound_provider.cpp msi_tables.cpp archive_provider.cpp certificate_provider.cpp typelib_provider.cpp package_metadata.cpp)
+    cab_provider.cpp compound_reader.cpp compound_provider.cpp msi_tables.cpp archive_provider.cpp certificate_provider.cpp typelib_provider.cpp package_metadata.cpp
+    bytecode_provider.cpp native_more_provider.cpp data_provider.cpp
+    capture_provider.cpp firmware_provider.cpp document_provider.cpp)
 list(TRANSFORM SOURCES PREPEND "${ROOT}/core/artifacts/")
 add_library(cortex_static_parsers STATIC ${SOURCES})
 target_include_directories(cortex_static_parsers PUBLIC "${ROOT}/core")
@@ -65,13 +67,21 @@ if(BUILD_TESTING)
     add_test(NAME cortex_fuzz_wave1_regressions COMMAND cortex_fuzz_wave1_replay "${ROOT}/tests/fuzz/regressions/fuzz_wave1")
     add_executable(cortex_fuzz_wave1_mutations "${ROOT}/tests/fuzz/fuzz_wave1.cpp" "${ROOT}/tests/fuzz/mutation_main.cpp")
     target_link_libraries(cortex_fuzz_wave1_mutations PRIVATE cortex_static_parsers)
+    add_executable(cortex_fuzz_format_more_replay "${ROOT}/tests/fuzz/fuzz_format_more.cpp" "${ROOT}/tests/fuzz/replay_main.cpp")
+    target_link_libraries(cortex_fuzz_format_more_replay PRIVATE cortex_static_parsers)
+    add_test(NAME cortex_fuzz_format_more_regressions COMMAND cortex_fuzz_format_more_replay "${ROOT}/tests/fuzz/regressions/fuzz_format_more")
+    add_executable(cortex_fuzz_format_more_mutations "${ROOT}/tests/fuzz/fuzz_format_more.cpp" "${ROOT}/tests/fuzz/mutation_main.cpp")
+    target_link_libraries(cortex_fuzz_format_more_mutations PRIVATE cortex_static_parsers)
+    add_executable(cortex_format_more_tests "${ROOT}/tests/format_more_tests.cpp")
+    target_link_libraries(cortex_format_more_tests PRIVATE cortex_static_parsers)
+    add_test(NAME cortex_format_more_tests COMMAND cortex_format_more_tests "${ROOT}/tests/fixtures")
     add_executable(cortex_static_artifact_tests "${ROOT}/tests/artifacts_tests.cpp")
     target_link_libraries(cortex_static_artifact_tests PRIVATE cortex_static_parsers)
     add_test(NAME cortex_static_artifact_tests COMMAND cortex_static_artifact_tests)
     set_tests_properties(cortex_static_artifact_tests PROPERTIES WORKING_DIRECTORY "${ROOT}")
 endif()
 if(CORTEX_STATIC_FUZZ)
-    foreach(harness fuzz_artifact fuzz_wave1 fuzz_format_next)
+    foreach(harness fuzz_artifact fuzz_wave1 fuzz_format_next fuzz_format_more)
         add_executable(${harness} "${ROOT}/tests/fuzz/${harness}.cpp")
         target_compile_options(${harness} PRIVATE -fsanitize=fuzzer)
         target_link_options(${harness} PRIVATE -fsanitize=fuzzer)

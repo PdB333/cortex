@@ -1,0 +1,126 @@
+{
+ "coff": {
+  "amd64": {
+   "sections": [
+    ".text",
+    ".data",
+    ".bss",
+    ".text$cortexlongsection",
+    ".llvm_addrsig"
+   ],
+   "symbols": [
+    ".text",
+    ".data",
+    ".bss",
+    ".text$cortexlongsection",
+    ".llvm_addrsig",
+    "@feat.00",
+    "cortex_long_named_function",
+    "cortex_entry",
+    "cortex_counter",
+    "cortex_external_helper",
+    ".file"
+   ]
+  },
+  "i386": {
+   "sections": [
+    ".text",
+    ".data",
+    ".bss",
+    ".text$cortexlongsection",
+    ".llvm_addrsig"
+   ],
+   "symbols": [
+    ".text",
+    ".data",
+    ".bss",
+    ".text$cortexlongsection",
+    ".llvm_addrsig",
+    "@feat.00",
+    "_cortex_long_named_function",
+    "_cortex_entry",
+    "_cortex_counter",
+    "_cortex_external_helper",
+    ".file"
+   ]
+  }
+ },
+ "go": {
+  "go-linux": {
+   "build": {
+    "-buildmode": "exe",
+    "-compiler": "gc",
+    "-trimpath": "true",
+    "CGO_ENABLED": "0",
+    "DefaultGODEBUG": "asynctimerchan=1,gotestjsonbuildtext=1,gotypesalias=0,httplaxcontentlength=1,httpmuxgo121=1,httpservecontentkeepheaders=1,multipathtcp=0,randseednop=0,rsa1024min=0,tls10server=1,tls3des=1,tlsmlkem=0,tlsrsakex=1,tlsunsafeekm=1,winreadlinkvolume=0,winsymlink=0,x509keypairleaf=0,x509negativeserial=1,x509rsacrt=0,x509usepolicies=0",
+    "GOAMD64": "v1",
+    "GOARCH": "amd64",
+    "GOOS": "linux"
+   },
+   "main_functions": [
+    "main.main"
+   ],
+   "main_module": "example.com/cortexfixture",
+   "path": "example.com/cortexfixture",
+   "version": "go1.24.7"
+  },
+  "go-windows": {
+   "build": {
+    "-buildmode": "exe",
+    "-compiler": "gc",
+    "-trimpath": "true",
+    "CGO_ENABLED": "0",
+    "DefaultGODEBUG": "asynctimerchan=1,gotestjsonbuildtext=1,gotypesalias=0,httplaxcontentlength=1,httpmuxgo121=1,httpservecontentkeepheaders=1,multipathtcp=0,randseednop=0,rsa1024min=0,tls10server=1,tls3des=1,tlsmlkem=0,tlsrsakex=1,tlsunsafeekm=1,winreadlinkvolume=0,winsymlink=0,x509keypairleaf=0,x509negativeserial=1,x509rsacrt=0,x509usepolicies=0",
+    "GOAMD64": "v1",
+    "GOARCH": "amd64",
+    "GOOS": "windows"
+   },
+   "main_functions": [
+    "main.main"
+   ],
+   "main_module": "example.com/cortexfixture",
+   "path": "example.com/cortexfixture",
+   "version": "go1.24.7"
+  }
+ },
+ "macho": {
+  "arm64": {
+   "sections": [
+    "__text",
+    "__data",
+    "__compact_unwind"
+   ],
+   "symbols": [
+    "ltmp0",
+    "ltmp1",
+    "ltmp2",
+    "_cortex_counter",
+    "_cortex_entry",
+    "_cortex_long_named_function",
+    "_cortex_external_helper"
+   ]
+  },
+  "fat_cputypes": [
+   "CPU_TYPE_X86_64",
+   "CPU_TYPE_ARM64"
+  ],
+  "fat_offsets": [
+   4096,
+   8192
+  ],
+  "x86_64": {
+   "sections": [
+    "__text",
+    "__data",
+    "__compact_unwind",
+    "__eh_frame"
+   ],
+   "symbols": [
+    "_cortex_counter",
+    "_cortex_entry",
+    "_cortex_long_named_function",
+    "_cortex_external_helper"
+   ]
+  }
+ }
+}
