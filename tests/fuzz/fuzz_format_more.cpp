@@ -8,6 +8,7 @@
 #include "artifacts/data_provider.h"
 #include "artifacts/document_provider.h"
 #include "artifacts/firmware_provider.h"
+#include "artifacts/game_provider.h"
 #include "artifacts/native_more_provider.h"
 #include <cstdint>
 #include <memory>
@@ -38,6 +39,11 @@ const std::vector<std::shared_ptr<const Provider>>& Providers() {
         std::make_shared<DtbProvider>(),           // 18
         std::make_shared<PdfProvider>(),           // 19
         std::make_shared<LnkProvider>(),           // 20
+        nullptr,                                   // 21: the Go scanner (stable mode, see below)
+        std::make_shared<VpkProvider>(),           // 22
+        std::make_shared<QuakePakProvider>(),      // 23
+        std::make_shared<WadProvider>(),           // 24
+        std::make_shared<RenpyArchiveProvider>(),  // 25
     };
     return list;
 }
@@ -46,10 +52,10 @@ const std::vector<std::shared_ptr<const Provider>>& Providers() {
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* input, size_t size) {
     if (!size || size > (1u << 20)) return 0;
     const auto& providers = Providers();
-    const unsigned mode = input[0] % (providers.size() + 1);
+    const unsigned mode = input[0] % providers.size();
     ++input; --size;
     auto source = FromBytes(std::vector<uint8_t>(input, input + size), "fuzz-input");
-    if (mode == providers.size()) {  // the Go scanner runs inside PE, ELF and Mach-O
+    if (!providers[mode]) {  // the Go scanner runs inside PE, ELF and Mach-O
         (void)GoBinaryInfo(*source, 64).dump();
         return 0;
     }

@@ -572,6 +572,39 @@ json PickleLiteral(const std::vector<uint8_t>& bytes, std::string& error) {
                 case 'u': { auto items = popMark(); setItems(top(), items); break; }
                 case 'a': { json x = pop(); if (!top().is_array()) throw Error("pickle_append_target"); top().push_back(std::move(x)); break; }
                 case 'e': { auto items = popMark(); if (!top().is_array()) throw Error("pickle_append_target"); for (auto& x : items) top().push_back(std::move(x)); break; }
+                // Protocol 2 writes bytes as _codecs.encode(text, "latin1") or
+                // bytes(). Only these two are recognised, and Cortex rebuilds
+                // the bytes itself: nothing is imported or called.
+                case 'c': {
+                    size_t len = 0;
+                    while (v.U8(at + len) != '\n') if (++len > 256) throw Error("pickle_not_plain_data");
+                    const std::string module = v.Text(at, len); at += len + 1; len = 0;
+                    while (v.U8(at + len) != '\n') if (++len > 256) throw Error("pickle_not_plain_data");
+                    const std::string name = v.Text(at, len); at += len + 1;
+                    if (module == "_codecs" && name == "encode") stack.push_back({{"$rebuild", "latin1"}});
+                    else if ((module == "__builtin__" || module == "builtins") && name == "bytes") stack.push_back({{"$rebuild", "bytes"}});
+                    else throw Error("pickle_not_plain_data");
+                    break;
+                }
+                case 'R': {
+                    json args = pop(), fn = pop();
+                    if (!fn.is_object() || !fn.contains("$rebuild") || !args.is_array()) throw Error("pickle_not_plain_data");
+                    if (fn["$rebuild"] == "bytes" && args.empty()) { stack.push_back({{"$bytes", ""}}); break; }
+                    if (fn["$rebuild"] == "latin1" && args.size() == 2 && args[0].is_string() && args[1] == "latin1") {
+                        // Code points of the text are the byte values (all below 256 by construction).
+                        std::vector<uint8_t> out;
+                        const std::string text = args[0];
+                        for (size_t i = 0; i < text.size();) {
+                            const uint8_t c = static_cast<uint8_t>(text[i]);
+                            if (c < 0x80) { out.push_back(c); ++i; }
+                            else if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) { out.push_back(static_cast<uint8_t>(((c & 0x1F) << 6) | (text[i + 1] & 0x3F))); i += 2; }
+                            else throw Error("pickle_not_plain_data");
+                        }
+                        stack.push_back({{"$bytes", HexBytes(out.data(), out.size())}});
+                        break;
+                    }
+                    throw Error("pickle_not_plain_data");
+                }
                 case 0x94: memo[memo.size()] = top(); break;
                 case 'q': memo[v.U8(at)] = top(); at += 1; break;
                 case 'r': memo[v.U32(at)] = top(); at += 4; break;

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -537,6 +538,43 @@ void Spirv(Tests& t) {
     t.Truncated("media/compute.spv", 64);
 }
 
+
+// ---------------------------------------------------------------- games ---
+
+void Games(Tests& t) {
+    const auto all = t.Expected("games/expected.json");
+    const std::map<std::string, std::string> content = {{"scripts/config.txt", "owned = true\n"}, {"readme.md", "# cortex fixture\n"}};
+    struct Case { const char* file; const char* format; const char* key; };
+    for (const Case c : {Case{"games/pak01_dir.vpk", "vpk", "vpk"}, Case{"games/quake.pak", "id-pak", "pak"}, Case{"games/game.rpa", "rpa", "rpa"}}) {
+        auto file = t.File(c.file);
+        const auto report = DefaultRegistry().Inspect(*file);
+        t.Check(report.value("ok", false) && report.value("format", "") == c.format, std::string(c.file) + " detected");
+        if (!report.value("ok", false)) { std::cerr << report.dump() << '\n'; continue; }
+        const auto& want = all.at(c.key);
+        const json& wantFiles = c.key == std::string("rpa") ? want.at("files") : want;
+        t.Check(report.at("data").at("files").size() == wantFiles.size(), std::string(c.file) + " entry count matches the reference");
+        for (const auto& f : report.at("data").at("files")) {
+            const std::string name = f.at("name");
+            const auto& w = wantFiles.at(name);
+            const uint64_t size = w.is_object() ? (w.contains("size") ? w.at("size").get<uint64_t>() : w.at("length").get<uint64_t>()) : w.get<uint64_t>();
+            t.Check(f.at("size") == size, std::string(c.file) + " size of " + name);
+            if (c.key == std::string("vpk")) t.Check(f.at("crc32") == w.at("crc"), std::string(c.file) + " CRC of " + name);
+        }
+        for (const auto& [name, text] : content) {
+            std::string error;
+            auto child = DefaultRegistry().OpenChild(file, name, error);
+            const auto bytes = child ? child->ReadSome(0, 4096) : std::vector<uint8_t>();
+            t.Check(child && std::string(bytes.begin(), bytes.end()) == text, std::string(c.file) + " opens " + name + " " + error);
+        }
+    }
+    const auto wad = t.Inspect("games/doom.wad");
+    t.Check(wad.value("format", "") == "wad" && wad.at("data").at("type") == "PWAD", "WAD detected");
+    json lumps = json::array();
+    for (const auto& f : wad.at("data").at("files")) lumps.push_back({f.at("name"), f.at("size")});
+    t.Check(lumps == all.at("wad").at("lumps"), "WAD lumps match omgifol");
+    t.Truncated("games/game.rpa", 40);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -560,6 +598,7 @@ int main(int argc, char** argv) {
     t.Run("firmware", [&] { Firmware(t); });
     t.Run("documents", [&] { Documents(t); });
     t.Run("spirv", [&] { Spirv(t); });
+    t.Run("games", [&] { Games(t); });
     std::cout << t.checks << " checks, " << t.failures << " failures\n";
     return t.failures ? 1 : 0;
 }

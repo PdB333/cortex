@@ -36,9 +36,10 @@ CORTEX_DATA_PROVIDER(OnnxProvider, "onnx", (std::vector<std::string>{"onnx"}))
 json DisassemblePickle(const std::vector<uint8_t>& bytes, size_t maxInstructions, std::string& error);
 
 // The value of a pickle made only of plain data (dict, list, tuple, str,
-// bytes as {"$bytes": hex}, int, float, bool, None). Any import, call or
-// object construction makes it fail with "pickle_not_plain_data": nothing
-// is ever imported or called.
+// bytes as {"$bytes": hex}, int, float, bool, None). The two forms protocol 2
+// uses for bytes (_codecs.encode(text, "latin1") and bytes()) are rebuilt by
+// Cortex itself; any other import, call or object construction makes it fail
+// with "pickle_not_plain_data". Nothing is ever imported or called.
 json PickleLiteral(const std::vector<uint8_t>& bytes, std::string& error);
 
 } // namespace cortex::artifacts

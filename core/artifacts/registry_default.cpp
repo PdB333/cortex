@@ -20,6 +20,7 @@
 #include "capture_provider.h"
 #include "firmware_provider.h"
 #include "document_provider.h"
+#include "game_provider.h"
 
 namespace cortex::artifacts {
 
@@ -66,6 +67,10 @@ const Registry& DefaultRegistry() {
         built.Add(std::make_shared<DtbProvider>());
         built.Add(std::make_shared<PdfProvider>());
         built.Add(std::make_shared<LnkProvider>());
+        built.Add(std::make_shared<VpkProvider>());
+        built.Add(std::make_shared<QuakePakProvider>());
+        built.Add(std::make_shared<WadProvider>());
+        built.Add(std::make_shared<RenpyArchiveProvider>());
         return built;
     }();
     return registry;
