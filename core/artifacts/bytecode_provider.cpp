@@ -122,7 +122,7 @@ struct Marshal {
             case 'f': case 'x': {  // text floats of old marshal versions
                 value->kind = type == 'f' ? MValue::Float : MValue::Complex;
                 const unsigned parts = type == 'f' ? 1 : 2;
-                for (unsigned p = 0; p < parts; ++p) value->text += Raw(U8()) + (p + 1 < parts ? " " : "");
+                for (unsigned p = 0; p < parts; ++p) value->text += Printable(Raw(U8()), 64) + (p + 1 < parts ? " " : "");  // untrusted text
                 break;
             }
             case 's':

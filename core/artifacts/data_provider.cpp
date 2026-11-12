@@ -631,7 +631,17 @@ struct PyLiteral {
         if (word == "True") return true;
         if (word == "False") return false;
         if (word == "None") return nullptr;
-        if (!word.empty() && (std::isdigit(static_cast<unsigned char>(word[0])) || word[0] == '-')) return std::stoll(word);
+        if (!word.empty() && (std::isdigit(static_cast<unsigned char>(word[0])) || word[0] == '-')) {
+            // Bounded integer: no std::stoll, whose exceptions are not ours.
+            const bool negative = word[0] == '-';
+            if (word.size() == size_t(negative) || word.size() > 19) throw Error("npy_header_integer");
+            int64_t x = 0;
+            for (size_t i = negative; i < word.size(); ++i) {
+                if (!std::isdigit(static_cast<unsigned char>(word[i]))) throw Error("npy_header_integer");
+                x = x * 10 + (word[i] - '0');
+            }
+            return negative ? -x : x;
+        }
         throw Error("npy_header_token");
     }
 };
@@ -643,8 +653,8 @@ uint64_t ItemSize(const std::string& descr, bool& object) {
     if (kind == 'O') { object = true; return 8; }
     std::string digits;
     for (size_t i = 2; i < descr.size() && std::isdigit(static_cast<unsigned char>(descr[i])); ++i) digits += descr[i];
-    if (digits.empty()) throw Error("npy_descr_size");
-    const uint64_t n = std::stoull(digits);
+    if (digits.empty() || digits.size() > 9) throw Error("npy_descr_size");
+    const uint64_t n = std::stoull(digits);  // at most 9 digits: cannot overflow
     if (kind == 'U') return n * 4;
     if (kind == 'M' || kind == 'm') return 8;
     return n;
@@ -725,7 +735,10 @@ json Safetensors(const ByteSource& source, const InspectOptions& options) {
     uint64_t total = 0;
     for (const auto& [name, t] : doc.items()) {
         if (name == "__metadata__") continue;
-        if (!t.is_object() || !t.contains("dtype") || !t.contains("shape") || !t.contains("data_offsets")) throw Error("safetensors_tensor_fields");
+        if (!t.is_object() || !t.contains("dtype") || !t.contains("shape") || !t.contains("data_offsets") ||
+            !t["dtype"].is_string() || !t["shape"].is_array() || !t["data_offsets"].is_array() || t["data_offsets"].size() != 2 ||
+            !t["data_offsets"][0].is_number_unsigned() || !t["data_offsets"][1].is_number_unsigned()) throw Error("safetensors_tensor_fields");
+        for (const auto& d : t["shape"]) if (!d.is_number_unsigned()) throw Error("safetensors_shape_invalid");
         const std::string dtype = t["dtype"];
         uint64_t elements = 1;
         for (const auto& d : t["shape"]) { const uint64_t x = d.get<uint64_t>(); if (x && elements > UINT64_MAX / x) throw Error("safetensors_shape_overflow"); elements *= x; }
@@ -966,7 +979,10 @@ json Onnx(const ByteSource& source, const InspectOptions& options) {
 
 // --------------------------------------------------------------- Providers ---
 
-#define CORTEX_TRY(expr) error.clear(); try { return expr; } catch (const Error& e) { error = e.what(); return nullptr; }
+// Untrusted headers (safetensors JSON, NumPy dict literal) reach nlohmann
+// accessors: a type or range surprise there is a malformed file, not a crash.
+#define CORTEX_TRY(expr) error.clear(); try { return expr; } catch (const Error& e) { error = e.what(); return nullptr; } \
+    catch (const json::exception&) { error = "malformed_structure"; return nullptr; }
 
 std::vector<Capability> SqliteProvider::Capabilities() const {
     return {{"static", CapabilityStatus::Experimental, "cortex_format_more_tests; sqlite3-built database and WAL",
@@ -1014,6 +1030,7 @@ json PickleProvider::Inspect(const ByteSource& source, const InspectOptions& opt
         const auto bytes = bounded::Read(source, 0, source.Size(), 256u << 20);
         return DisassemblePickle(bytes, std::max<size_t>(options.maxEntries, 16), error);
     } catch (const Error& e) { error = e.what(); return nullptr; }
+    catch (const json::exception&) { error = "malformed_structure"; return nullptr; }
 }
 
 std::vector<Capability> NpyProvider::Capabilities() const {

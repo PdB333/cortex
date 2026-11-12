@@ -332,7 +332,7 @@ json PdfInspect(const ByteSource& source, const InspectOptions& options) {
         const Obj* e = pdf.Resolve(encrypt);
         json enc = json::object();
         if (e && e->kind == Obj::Dict) {
-            if (const Obj* f = e->Get("Filter")) enc["filter"] = f->text;
+            if (const Obj* f = e->Get("Filter")) enc["filter"] = bounded::Utf8(reinterpret_cast<const uint8_t*>(f->text.data()), f->text.size());
             if (const Obj* v = e->Get("V")) enc["v"] = v->number;
             if (const Obj* r = e->Get("R")) enc["r"] = r->number;
         }
