@@ -2,7 +2,8 @@ name: Desktop acceptance (real Windows desktop)
 
 # The shipped desktop driven on a real Windows session: the icon, the system
 # file dialog, a guide opened by the shell, attach and scan from the keyboard,
-# an MCP client next to the desktop, a clean close. See
+# an MCP client next to the desktop, a clean close; then cortex setup on a
+# scratch profile, an update from a local feed, and the installer. See
 # tests/desktop_acceptance.py. Screenshots are uploaded and printed to the
 # log as base64 PNG.
 
@@ -89,6 +90,20 @@ jobs:
             [ "$copied" -eq 1 ] || break
           done
 
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Host }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup (ISCC.exe) is not available" }
+          # The installer takes the bundle without the test programs.
+          New-Item -ItemType Directory -Force stage/installer-source, dist | Out-Null
+          Copy-Item -Recurse stage/Cortex/* stage/installer-source -Exclude e2e
+          Copy-Item LICENSE stage/installer-source
+          & $iscc /Q "/DAppVersion=2.1.0" "/DSourceDir=$((Resolve-Path stage/installer-source).Path)" "/DOutputDir=$((Resolve-Path dist).Path)" "installer\cortex.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          Get-ChildItem dist
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -98,7 +113,7 @@ jobs:
         run: |
           python -m pip install --quiet pillow==11.0.0
           $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot;$(Split-Path (Get-Command python).Source)"
-          python tests/desktop_acceptance.py --bundle stage/Cortex --out build/desktop-acceptance
+          python tests/desktop_acceptance.py --bundle stage/Cortex --out build/desktop-acceptance --installer dist/cortex-v2.1.0-windows-setup.exe
           if ($LASTEXITCODE -ne 0) { throw "desktop acceptance failed" }
 
       - name: Upload screenshots and report

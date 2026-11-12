@@ -145,6 +145,8 @@ struct UiContext {
     // Whether inspected files join the persisted recent files list (the
     // interactive desktop only).
     bool rememberRecentFiles = false;
+    // The start page asks the desktop to open Set up Cortex.
+    bool requestSetupPanel = false;
     // A layout (WorkspacePreset value) to apply after this frame, or -1.
     int requestPreset = -1;
     // Runs a long runtime operation (loading the runtime, captures, diffs,

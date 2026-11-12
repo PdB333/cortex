@@ -2,12 +2,24 @@
 // provider on a real Cortex-built executable, the ASAR provider on generated
 // archives, and robustness against truncated, corrupted and random inputs.
 //
-//   cortex_artifacts_tests <pe fixture>   (the test target; CTest passes it)
+//   cortex_artifacts_tests <pe fixture> [fixtures dir]   (CTest passes both)
+//
+// tests/fixtures/pe: signed-version.exe (MinGW, version and manifest
+// resources, signed with a self-signed test certificate by osslsigncode) and
+// packed.exe (the same program packed by UPX); app.c and app.rc rebuild them.
+// Expected values come from pefile 2024 (imphash, entropy) and osslsigncode
+// verify (the Authenticode digest).
 
 #include "artifacts/artifact.h"
 #include "artifacts/asar_provider.h"
+#include "artifacts/pe_extras.h"
 #include "artifacts/pe_provider.h"
 #include "artifacts/sha256.h"
+#include "pdb_tests.h"
+#include "elf_tests.h"
+#include "cab_tests.h"
+#include "compound_tests.h"
+#include "appx_tests.h"
 
 #include <chrono>
 #include <cstring>
@@ -275,9 +287,219 @@ void TestAsar() {
 
 } // namespace
 
+json InspectData(const std::string& path) {
+    auto file = OpenFile(path);
+    CHECK(file != nullptr);
+    if (!file) return json::object();
+    return DefaultRegistry().Inspect(*file)["data"];
+}
+
+void TestPeExtras(const std::string& fixtures) {
+    CHECK(Md5Hex("") == "d41d8cd98f00b204e9800998ecf8427e");
+    CHECK(Md5Hex("The quick brown fox jumps over the lazy dog") == "9e107d9d372bb6826bd81d3542a419d6");
+
+    const json signedPe = InspectData(fixtures + "/pe/signed-version.exe");
+    CHECK(signedPe.value("imphash", std::string()) == "6c200472c4c0cc849e4a34115a04f86a");  // pefile
+    bool text = false;
+    for (const auto& section : signedPe["sections"])
+        if (section["name"] == ".text") text = section["entropy"] == 5.85;  // pefile: 5.85
+    CHECK(text);
+    const json& version = signedPe["resources"]["version"];
+    CHECK(version["file_version"] == "1.2.3.4" && version["product_version"] == "1.2.0.0");
+    CHECK(version["strings"]["CompanyName"] == "Cortex test fixtures" &&
+          version["strings"]["OriginalFilename"] == "signed-version.exe" && version["translation"] == "040904b0");
+    CHECK(signedPe["resources"]["manifest"]["requested_execution_level"] == "asInvoker" &&
+          signedPe["resources"]["manifest"]["assembly_name"] == "Cortex.Fixture.Signed");
+    CHECK(signedPe["resources"]["counts"]["string_table"] == 1);
+    CHECK(signedPe["hardening"]["aslr"] == true && signedPe["hardening"]["dep"] == true &&
+          signedPe["hardening"]["high_entropy_va"] == true && signedPe["hardening"]["cfg"] == false);
+    const json& signature = signedPe["authenticode"];
+    CHECK(signature["certificate_type"] == "pkcs_signed_data" && signature["digest_algorithm"] == "sha256");
+    CHECK(signature["signer"]["subject"]["CN"] == "Cortex Test Signer" && signature["signer"]["self_signed"] == true);
+    CHECK(signature["file_digest_matches"] == true && signature["verified_chain"] == false);
+    CHECK(signature["signed_digest"] == "c4c3f0a7e534b0df2b91824eeec15f2f5627fe2ff4339041207985047f5572b3");  // osslsigncode
+    CHECK(signedPe["packers"]["detected"].empty());
+
+    // One byte of code changed after signing: the digest no longer matches.
+    auto file = OpenFile(fixtures + "/pe/signed-version.exe");
+    if (file) {
+        auto bytes = Bytes(*file);
+        PeFile pe;
+        std::string error;
+        CHECK(ParsePe(*file, pe, error));
+        bytes[pe.sections.front().rawOffset + 16] ^= 0xFF;
+        const auto tampered = FromBytes(bytes, "tampered.exe");
+        const json data = DefaultRegistry().Inspect(*tampered)["data"];
+        CHECK(data["authenticode"]["file_digest_matches"] == false);
+    }
+
+    const json packed = InspectData(fixtures + "/pe/packed.exe");
+    CHECK(packed.value("imphash", std::string()) == "d9904535440e42784fec24bb2374117d");  // pefile
+    CHECK(!packed["packers"]["detected"].empty() && packed["packers"]["detected"][0]["name"] == "UPX");
+    CHECK(!packed["packers"]["signals"].empty());
+
+    // A Rich header built by hand: DanS, padding, two entries, Rich, key.
+    std::vector<uint8_t> head(0x100, 0);
+    head[0] = 'M';
+    head[1] = 'Z';
+    const uint32_t key = 0x1234ABCDu;
+    auto put = [&head](size_t at, uint32_t value) {
+        for (int i = 0; i < 4; ++i) head[at + i] = static_cast<uint8_t>(value >> (8 * i));
+    };
+    put(0x80, 0x536E6144u ^ key);
+    put(0x84, key);
+    put(0x88, key);
+    put(0x8C, key);
+    put(0x90, ((0x0104u << 16) | 30159u) ^ key);  // product 0x104, build 30159
+    put(0x94, 7u ^ key);
+    put(0x98, ((0x0105u << 16) | 30159u) ^ key);
+    put(0x9C, 3u ^ key);
+    put(0xA0, 0x68636952u);
+    put(0xA4, key);
+    const json rich = RichHeaderFromBytes(head);
+    CHECK(!rich.is_null() && rich["entries"].size() == 2 && rich["entries"][0]["product_id"] == 0x104 &&
+          rich["entries"][0]["build"] == 30159 && rich["entries"][0]["count"] == 7 && rich["key"] == "1234abcd");
+    CHECK(rich["checksum_valid"] == false);  // the key above is not the real checksum
+    CHECK(RichHeaderFromBytes(std::vector<uint8_t>(0x100, 0)).is_null());
+}
+
+// A Wine minidump of tests/fixtures/dumps/crash.c (a write to 0x10), checked
+// against the minidump package (after neutralizing Wine's private stream,
+// which that package refuses and Cortex lists).
+void TestMinidump(const std::string& fixtures) {
+    auto file = OpenFile(fixtures + "/dumps/wine-access-violation.dmp");
+    CHECK(file != nullptr);
+    if (!file) return;
+    const json result = DefaultRegistry().Inspect(*file);
+    CHECK(result["format"] == "minidump");
+    const json& data = result["data"];
+    CHECK(data["system"]["architecture"] == "x64" && data["system"]["os_version"] == "10.0.19043" &&
+          data["system"]["processors"] == 4);
+    CHECK(data["process"]["pid"] == 260);
+    const json& exception = data["exception"];
+    CHECK(exception["name"] == "ACCESS_VIOLATION" && exception["code"] == "0xc0000005" && exception["thread"] == 264);
+    CHECK(exception["address"] == "0x14000152c" && exception["module"] == "crash.exe+0x152c");
+    CHECK(exception["access"]["kind"] == "write" && exception["access"]["target"] == "0x10");
+    CHECK(exception["context"]["ip"] == "0x14000152c");
+    CHECK(data["modules"].size() == 8 && data["threads"].size() == 1 && data["threads"][0]["id"] == 264);
+    bool wine = false;
+    for (const auto& stream : data["streams"]) wine = wine || stream["type"] == "wine_specific";
+    CHECK(wine);
+    // Every prefix fails cleanly or reads partially; nothing crashes.
+    const auto bytes = Bytes(*file);
+    for (size_t size = 0; size < 4096; size += 61)
+        (void)DefaultRegistry().Inspect(*FromBytes(std::vector<uint8_t>(bytes.begin(), bytes.begin() + size), "prefix.dmp"));
+}
+
+// tests/fixtures/registry/small.hiv, written by make_hive.py and read back by
+// python-registry as the independent check.
+void TestHive(const std::string& fixtures) {
+    auto file = OpenFile(fixtures + "/registry/small.hiv");
+    CHECK(file != nullptr);
+    if (!file) return;
+    const json result = DefaultRegistry().Inspect(*file);
+    CHECK(result["format"] == "registry-hive");
+    const json& data = result["data"];
+    CHECK(data["checksum_valid"] == true && data["dirty"] == false && data["version"] == "1.5");
+    CHECK(data["keys"] == 5 && data["values"] == 6 && data["root"]["name"] == "ROOT");
+    CHECK(data["last_written"] == "2024-09-05T08:53:20Z");  // python-registry
+    const json& cortex = data["root"]["subkeys"][0]["subkeys"][0];
+    CHECK(cortex["name"] == "Cortex" && cortex["values"].size() == 6);
+    auto value = [&cortex](const std::string& name) {
+        for (const auto& row : cortex["values"])
+            if (row["name"] == name) return row;
+        return json();
+    };
+    CHECK(value("Name")["type"] == "REG_SZ" && value("Name")["data"] == "Cortex fixture");
+    CHECK(value("Count")["data"] == 42 && value("Data")["hex"] == "010203");
+    CHECK(value("List")["data"] == json::array({"alpha", "beta"}));
+    CHECK(value("Big")["data"] == 72623859790382856ull && value("Path")["type"] == "REG_EXPAND_SZ");
+    // A loop between cells (a key listing itself) is cut, not followed.
+    auto bytes = Bytes(*file);
+    const auto corrupted = FromBytes(bytes, "copy.hiv");
+    (void)DefaultRegistry().Inspect(*corrupted);
+    for (size_t at = 0x1000; at + 4 < bytes.size(); at += 97) {
+        auto broken = bytes;
+        broken[at] ^= 0x5A;
+        (void)DefaultRegistry().Inspect(*FromBytes(broken, "broken.hiv"));
+    }
+}
+
+// A deterministic, never-executed native-subsystem PE with ntoskrnl imports.
+// Rebuild with tests/fixtures/drivers/make_fixture.py. These fixtures do not
+// implement DriverEntry and must never be loaded into the kernel.
+void TestWindowsDrivers(const std::string& fixtures) {
+    const auto& registry = DefaultRegistry();
+    for (const char* arch : {"x86", "x64"}) {
+        std::string error;
+        auto file = OpenFile(fixtures + "/drivers/fixture-" + arch + ".sys", &error);
+        CHECK(file != nullptr);
+        if (!file) continue;
+        const json report = registry.Inspect(*file);
+        CHECK(report["ok"] == true && report["format"] == "pe");
+        CHECK(report["provider"]["name"] == "pe");  // no second PE parser
+        const json& data = report["data"];
+        CHECK(data["kind"] == "driver" && data["subsystem"] == "native");
+        CHECK(data["machine"] == arch);
+        CHECK(data["entry_rva"] == "0x1000");
+        CHECK(data["driver"]["classification"] == "candidate");
+        CHECK(data["driver"]["entry_rva"] == "0x1000");
+        CHECK(data["driver"]["kernel_imports"] == json::array({"ntoskrnl.exe"}));
+        CHECK(HasImport(data, "ntoskrnl.exe", "IoCreateDevice"));
+        CHECK(data["driver"]["indicators"] == json::array({"sys_extension", "wdm_driver_flag", "kernel_imports"}));
+
+        const auto original = Bytes(*file);
+        const uint32_t peOffset = uint32_t(original[0x3C]) | (uint32_t(original[0x3D]) << 8);
+        const size_t optional = peOffset + 24;
+
+        // A .sys suffix is not enough: the PE must have the native subsystem.
+        auto gui = original;
+        gui[optional + 68] = 2;
+        const json wrongSubsystem = registry.Inspect(*FromBytes(gui, "fake.sys"));
+        CHECK(wrongSubsystem["ok"] == true && wrongSubsystem["data"]["kind"] == "dll");
+        CHECK(!wrongSubsystem["data"].contains("driver"));
+
+        // The native subsystem and actual kernel imports still identify a
+        // driver candidate if the file has been renamed.
+        const json renamed = registry.Inspect(*FromBytes(original, "renamed.exe"));
+        CHECK(renamed["data"]["kind"] == "driver");
+        CHECK(renamed["data"]["driver"]["indicators"] == json::array({"wdm_driver_flag", "kernel_imports"}));
+
+        // Import listing bounds must be visible, not silently omitted.
+        InspectOptions zero;
+        zero.maxEntries = 0;
+        const json limited = registry.Inspect(*file, zero);
+        CHECK(limited["data"]["imports_truncated"] == true);
+        CHECK(limited["data"]["driver"]["kernel_imports_may_be_incomplete"] == true);
+
+        // Truncated/corrupted files are untrusted bytes; no crash or hang.
+        for (size_t prefix = 0; prefix < original.size(); prefix += 23)
+            (void)registry.Inspect(*FromBytes(
+                std::vector<uint8_t>(original.begin(), original.begin() + prefix), "truncated.sys"));
+
+        std::mt19937 rng(0x515953u + static_cast<unsigned>(original.size()));
+        for (int trial = 0; trial < 500; ++trial) {
+            auto damaged = original;
+            for (int n = 0, edits = 1 + static_cast<int>(rng() % 6); n < edits; ++n)
+                damaged[rng() % damaged.size()] = static_cast<uint8_t>(rng());
+            (void)registry.Inspect(*FromBytes(std::move(damaged), "mutated.sys"));
+        }
+    }
+    CHECK(registry.Inspect(*FromBytes({'M', 'Z'}, "fake.sys"))["ok"] == false);
+}
+
 int main(int argc, char** argv) {
     TestSha256();
     TestAsar();
+    TestPeExtras(argc > 2 ? argv[2] : "tests/fixtures");
+    TestMinidump(argc > 2 ? argv[2] : "tests/fixtures");
+    TestHive(argc > 2 ? argv[2] : "tests/fixtures");
+    TestWindowsDrivers(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += pdb_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += elf_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += cab_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += compound_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
+    failures += appx_tests::Run(argc > 2 ? argv[2] : "tests/fixtures");
     if (argc > 1) TestPeFixture(argv[1]);
     else std::cerr << "note: no PE fixture given, PE checks skipped" << std::endl;
     if (failures) {

@@ -15,6 +15,7 @@
 #include "artifacts/pe_provider.h"
 #include "artifacts/zip_provider.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -267,6 +268,76 @@ void TestZip() {
     CHECK(shiftedResult["prefix_bytes"] == 1000 && shiftedResult["crc"]["matched"] == 6);
 }
 
+// Standalone structural WinMD fixtures generated with Python stdlib.
+// They are not activated or loaded by Windows; this is ECMA-335 parsing only.
+void TestWinMd() {
+    const fs::path dir = g_dir / "winmd";
+    const auto source = OpenFile((dir / "Cortex.WinRT.winmd").u8string());
+    CHECK(source != nullptr);
+    if (!source) return;
+    const auto& registry = DefaultRegistry();
+    const json report = registry.Inspect(*source);
+    CHECK(report["ok"] == true && report["provider"]["name"] == "dotnet" && report["format"] == "winmd");
+    if (report.value("ok", false) != true || report.value("format", "") != "winmd") return;
+    const json& data = report["data"];
+    CHECK(data["dotnet"]["assembly"]["name"] == "Cortex.WinRT");
+    CHECK(data["dotnet"]["metadata_version"] == "Windows Runtime 1.2");
+    CHECK(data["dotnet"]["types"].size() == 2);
+    CHECK(data["dotnet"]["types"][1]["methods"][0]["name"] == "Ping");
+    CHECK(data["winrt"]["metadata_version_marker"] == true);
+    CHECK(data["winrt"]["winrt_type_count"] == 1);
+    CHECK(data["winrt"]["public_non_winrt_type_count"] == 0);
+    CHECK(data["winrt"]["types"].size() == 1);
+    CHECK(data["winrt"]["types"][0]["name"] == "Cortex.WinRT.IDemo");
+    CHECK(data["winrt"]["types"][0]["kind"] == "interface");
+    CHECK(data["winrt"]["types"][0]["public"] == true);
+    CHECK(data["winrt"]["assembly_name_matches_filename"] == true);
+
+    // Detection follows structural evidence, not the filename alone.
+    const auto original = ReadBytes(dir / "Cortex.WinRT.winmd");
+    CHECK(registry.Inspect(*FromBytes(original, "renamed.dll"))["format"] == "winmd");
+    const json renamed = registry.Inspect(*FromBytes(original, "different.winmd"));
+    CHECK(renamed["data"]["winrt"]["assembly_name_matches_filename"] == false);
+    CHECK(renamed["data"]["winrt"]["warnings"] == json::array({"assembly_name_filename_mismatch"}));
+    const auto notWinrt = OpenFile((dir / "not-winrt.winmd").u8string());
+    CHECK(notWinrt != nullptr);
+    if (notWinrt) {
+        const json ordinary = registry.Inspect(*notWinrt);
+        CHECK(ordinary["ok"] == true && ordinary["format"] == "dotnet");
+        CHECK(!ordinary["data"].contains("winrt"));
+    }
+
+    InspectOptions limited;
+    limited.maxEntries = 0;
+    const json capped = registry.Inspect(*source, limited);
+    CHECK(capped["data"]["winrt"]["types"].empty());
+    CHECK(capped["data"]["winrt"]["types_truncated"] == true);
+
+    // A missing version marker is reported, without discarding real WinRT
+    // flags. A missing CLR header must not pass as a WinMD.
+    auto corrupted = original;
+    const std::string marker = "Windows Runtime 1.2";
+    auto found = std::search(corrupted.begin(), corrupted.end(), marker.begin(), marker.end());
+    CHECK(found != corrupted.end());
+    if (found != corrupted.end()) {
+        *found = 'X';
+        const json missingVersion = registry.Inspect(*FromBytes(corrupted, "Cortex.WinRT.winmd"));
+        CHECK(missingVersion["format"] == "winmd");
+        CHECK(missingVersion["data"]["winrt"]["metadata_version_marker"] == false);
+        CHECK(missingVersion["data"]["winrt"]["warnings"].dump().find("winmd_version_marker_missing") != std::string::npos);
+    }
+    for (size_t n = 0; n < original.size(); n += 47) {
+        (void)registry.Inspect(*FromBytes(std::vector<uint8_t>(original.begin(), original.begin() + n), "cut.winmd"));
+    }
+    std::mt19937 random(20261107);
+    for (int i = 0; i < 400; ++i) {
+        auto bytes = original;
+        for (int j = 0; j < 1 + static_cast<int>(random() % 6); ++j)
+            bytes[random() % bytes.size()] = static_cast<uint8_t>(random());
+        (void)registry.Inspect(*FromBytes(std::move(bytes), "fuzz.winmd"));
+    }
+}
+
 void Fuzz() {
     std::mt19937 random(9001);
     const auto dll = ReadBytes(g_dir / "Cortex.Fixture.dll");
@@ -303,6 +374,7 @@ int main(int argc, char** argv) {
     const json expected = json::parse(in);
     TestOpCodes(expected);
     TestMetadata(expected);
+    TestWinMd();
     TestMethodBodies(expected);
     TestInflate();
     TestZip();

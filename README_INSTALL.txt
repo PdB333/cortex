@@ -1,4 +1,4 @@
-CORTEX v2.0.0 - INSTALLATION AND QUICK START
+CORTEX v2.1.0 - INSTALLATION AND QUICK START
 ============================================
 
 Cortex ships as a single portable Windows application: cortex.exe. The x64
@@ -13,9 +13,17 @@ online services, are outside the scope of this project.
 INSTALLATION
 ------------
 
-1. Download the archive:
+Either run the installer (per user, no administrator rights):
 
-       cortex-v2.0.0-windows-portable.zip
+       cortex-v2.1.0-windows-setup.exe
+
+  It installs into %LOCALAPPDATA%\Programs\Cortex, adds Cortex to the Start
+  menu and, if you tick them, an "Analyze with Cortex" right-click entry and
+  your AI clients' configuration. Uninstall from Settings > Apps.
+
+Or use the portable archive:
+
+1. Download cortex-v2.1.0-windows-portable.zip.
 
 2. Extract the whole archive into a normal, writable folder, for example:
 
@@ -27,6 +35,26 @@ INSTALLATION
 4. Run:
 
        .\cortex.exe
+
+UPDATES
+-------
+
+Cortex checks for a new release once a day (Help > Check for updates...
+turns it off) and installs it when you agree. The download is accepted only
+if its SHA-256 matches the release's SHA256SUMS.txt. An installed copy runs
+the new installer; a portable copy is unpacked into a new folder beside the
+current one. From the command line: .\cortex.exe update --check
+
+SET UP YOUR AI CLIENTS
+----------------------
+
+       .\cortex.exe setup
+
+finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Gemini CLI,
+Codex and LM Studio, shows what it would change and, once you agree, adds
+Cortex to them read-only (each file is backed up first). It also finds
+Ghidra, a JDK, ILSpy, Vineflower and netcoredbg. The desktop does the same
+from Home > "Set up my AI clients automatically".
 
 TWO WAYS TO USE CORTEX
 ----------------------
@@ -85,7 +113,8 @@ Engines, live debuggers, evidence and investigations:
 MCP SERVER (FOR AN AI CLIENT)
 -----------------------------
 
-Add to your client's MCP configuration (read-only):
+"cortex.exe setup" writes this for you. By hand, add to your client's MCP
+configuration (read-only):
 
        { "mcpServers": { "cortex": { "command": "C:/Cortex/cortex.exe",
                                      "args": ["mcp"] } } }

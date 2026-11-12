@@ -194,6 +194,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         // Only the interactive desktop keeps a recent files list: test modes
         // must not write their fixtures into the person's settings.
         app.ui.rememberRecentFiles = true;
+        app.allowUpdateCheck = true;
         app.ui.runInBackground = [&app](std::string label, std::function<void()> work) {
             // A task started while another runs (not reachable from the UI,
             // which is hidden meanwhile) simply runs inline.
@@ -203,6 +204,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             }
             app.background.Start(std::move(label), std::move(work));
         };
+        // The installer waits for this mutex to go before replacing files.
+        CreateMutexW(nullptr, FALSE, L"CortexDesktopRunning");
+        // `cortex.exe <file>` (Explorer's "Analyze with Cortex", a file
+        // dropped on the icon): open it in the Files layout.
+        if (launchArgs.size() == 2 && !launchArgs[1].empty() && launchArgs[1][0] != '-') {
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(std::filesystem::u8path(launchArgs[1]), ec))
+                app.ui.commands.push_back("home_open " + launchArgs[1]);
+        }
     }
     bool done = false;
     int smokeFrames = 0;

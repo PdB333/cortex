@@ -16,6 +16,14 @@ Cortex opens on **Home**, which offers three ways in that need nothing from each
 
 The Cortex mark in the header, **File > Home**, **Help > Start page** and **Workspace > Home** come back to it. Once a process is attached, Home shows its summary.
 
+The AI card's **Set up my AI clients automatically** (also Help or Tools › **Set up AI clients and engines...**) opens **Set up Cortex**: the AI clients installed for you with their state (configured, not configured, registered with other settings), a **Let agents change targets** switch (off: read-only), the analysis engines found with a choice when several are installed and a download link when none is, then **Apply**, **Remove Cortex from the ticked clients** and **Search again**. Nothing is written before Apply, and each changed file is backed up; see [installing and updating](setup-and-updates.md).
+
+`cortex.exe <file>`, or **Analyze with Cortex** in Explorer's right-click menu (an installer option), opens Cortex on that file in the Files layout.
+
+### Updates
+
+When a newer release exists, an **Update to X.Y.Z** button appears at the right of the menu bar. **Help › Check for updates...** checks now. The **Updates** dialog shows the release notes and offers **Download and install** (an installed copy) or **Download and unpack** (a portable copy, into a new folder beside the current one), **Skip this version** and **Release page**; the check at start-up (once a day) can be turned off there. A download is used only if its SHA-256 matches the release's `SHA256SUMS.txt`.
+
 ### Header
 
 - The Cortex mark (back to Home), **Open a file...** (while no process is attached; `Ctrl+O` always works), then **Select process** / **Change process**, which opens the process picker; the target (process, PID, architecture) follows.

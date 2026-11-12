@@ -1,0 +1,59 @@
+{
+ "pak": {
+  "maps/start.bsp": 256,
+  "readme.md": 17,
+  "scripts/config.txt": 13
+ },
+ "rpa": {
+  "files": {
+   "maps/start.bsp": {
+    "length": 256,
+    "offset": 47
+   },
+   "readme.md": {
+    "length": 17,
+    "offset": 303
+   },
+   "scripts/config.txt": {
+    "length": 13,
+    "offset": 34
+   }
+  },
+  "key": 1111638594
+ },
+ "vpk": {
+  "maps/start.bsp": {
+   "crc": 1379302988,
+   "size": 256
+  },
+  "readme.md": {
+   "crc": 2175339215,
+   "size": 17
+  },
+  "scripts/config.txt": {
+   "crc": 313119389,
+   "size": 13
+  }
+ },
+ "wad": {
+  "lumps": [
+   [
+    "MAP01",
+    0
+   ],
+   [
+    "THINGS",
+    20
+   ],
+   [
+    "CORTEX",
+    10
+   ],
+   [
+    "ENDOOM",
+    16
+   ]
+  ],
+  "type": "PWAD"
+ }
+}

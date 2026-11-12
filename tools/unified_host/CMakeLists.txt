@@ -58,14 +58,17 @@ add_executable(cortex_host
     ${CORTEX_ROOT}/mcp_bridge/host_mode.cpp
     ${CORTEX_ROOT}/core/artifacts/artifact.cpp
     ${CORTEX_ROOT}/core/artifacts/pe_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/pe_extras.cpp
     ${CORTEX_ROOT}/core/artifacts/asar_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/registry_default.cpp
+    ${CORTEX_ROOT}/core/artifacts/minidump_provider.cpp ${CORTEX_ROOT}/core/artifacts/pdb_provider.cpp ${CORTEX_ROOT}/core/artifacts/elf_provider.cpp ${CORTEX_ROOT}/core/artifacts/cab_provider.cpp ${CORTEX_ROOT}/core/artifacts/compound_reader.cpp ${CORTEX_ROOT}/core/artifacts/compound_provider.cpp ${CORTEX_ROOT}/core/artifacts/msi_tables.cpp ${CORTEX_ROOT}/core/artifacts/archive_provider.cpp ${CORTEX_ROOT}/core/artifacts/certificate_provider.cpp ${CORTEX_ROOT}/core/artifacts/typelib_provider.cpp ${CORTEX_ROOT}/core/artifacts/package_metadata.cpp ${CORTEX_ROOT}/core/artifacts/bytecode_provider.cpp ${CORTEX_ROOT}/core/artifacts/native_more_provider.cpp ${CORTEX_ROOT}/core/artifacts/data_provider.cpp ${CORTEX_ROOT}/core/artifacts/capture_provider.cpp ${CORTEX_ROOT}/core/artifacts/firmware_provider.cpp ${CORTEX_ROOT}/core/artifacts/document_provider.cpp ${CORTEX_ROOT}/core/artifacts/game_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/hive_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/js_lexer.cpp
     ${CORTEX_ROOT}/core/artifacts/js_analysis.cpp
     ${CORTEX_ROOT}/core/artifacts/js_provider.cpp
     ${CORTEX_ROOT}/core/artifacts/source_map.cpp
     ${CORTEX_ROOT}/core/artifacts/inflate.cpp
-    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp
+    ${CORTEX_ROOT}/core/artifacts/zip_provider.cpp ${CORTEX_ROOT}/core/artifacts/appx_metadata.cpp
     ${CORTEX_ROOT}/core/artifacts/dotnet_metadata.cpp
     ${CORTEX_ROOT}/core/artifacts/cil.cpp
     ${CORTEX_ROOT}/core/artifacts/dotnet_provider.cpp

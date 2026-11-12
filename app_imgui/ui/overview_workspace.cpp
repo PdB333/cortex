@@ -117,14 +117,12 @@ void OverviewWorkspace::DrawStart(UiContext& context) {
 
     place(true);
     Card("HomeFile", "Analyze a file",
-         "Executables, DLLs, .NET assemblies, Electron .asar archives, JavaScript and ZIP files. "
+         "Executables, symbols, type libraries, archives, extension packages, certificates and dumps. "
          "The file is read, never run.",
          width, height, [&context]() {
              if (ImGui::Button("Open a file...", ImVec2(-1, Px(34)))) {
                  std::string chosen;
-                 if (ShowOpenFileDialog(L"All files\0*.*\0Executables and libraries\0*.exe;*.dll\0"
-                                        L"Electron archives\0*.asar\0",
-                                        chosen))
+                 if (ShowOpenFileDialog(ArtifactFileFilter(), chosen))
                      context.commands.push_back("home_open " + chosen);
              }
              const auto* recent = context.settings ? &context.settings->Values().recentFiles : nullptr;
@@ -152,8 +150,8 @@ void OverviewWorkspace::DrawStart(UiContext& context) {
 
     place(false);
     Card("HomeAi", "Work with an AI agent",
-         "Your MCP client (Claude, an IDE...) starts cortex.exe mcp. The agent is read-only unless you add "
-         "--allow-writes to its arguments. Follow and approve its work here.",
+         "Your MCP client (Claude, Cursor, VS Code...) starts cortex.exe mcp. The agent is read-only unless you allow "
+         "writes. Follow and approve its work here.",
          width, height, [this, &context]() {
              if (ImGui::Button(copied_ ? "Copied###CopyMcp" : "Copy the MCP configuration###CopyMcp",
                                ImVec2(-1, Px(34)))) {
@@ -161,6 +159,10 @@ void OverviewWorkspace::DrawStart(UiContext& context) {
                  copied_ = true;
              }
              if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", McpConfiguration().c_str());
+             if (ImGui::Button("Set up my AI clients automatically", ImVec2(-1, 0))) context.requestSetupPanel = true;
+             if (ImGui::IsItemHovered())
+                 ImGui::SetTooltip("Claude, Cursor, VS Code, Codex, Gemini CLI...: Cortex is added to the ones installed,\n"
+                                   "read-only, after you confirm. The engines found are passed along.");
              if (ImGui::Button("Open the AI workspace", ImVec2(-1, 0))) context.commands.push_back("home_ai");
          });
 

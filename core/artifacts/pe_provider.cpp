@@ -1,8 +1,12 @@
+#include "native_more_provider.h"
 #include "pe_provider.h"
+#include "pe_extras.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <map>
+#include <set>
 
 namespace cortex::artifacts {
 namespace {
@@ -239,6 +243,54 @@ json ClrHeader(const ByteSource& source, const PeFile& pe) {
     return result;
 }
 
+
+std::string LowerAscii(std::string text) {
+    for (char& ch : text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return text;
+}
+
+// A driver is a native-subsystem PE, not just a file ending in .sys.
+// The name and imports are evidence of *likely* role, never proof that a
+// loader would accept it or that its entry point is named DriverEntry.
+json DriverDetails(const ByteSource& source, const PeFile& pe, const json& imports, bool importsTruncated) {
+    if (pe.subsystem != 1 || pe.HasDirectory(kPeClr)) return nullptr;
+    const std::string name = source.Name();
+    const size_t separator = name.find_last_of("/\\!");
+    const std::string leaf = LowerAscii(separator == std::string::npos ? name : name.substr(separator + 1));
+    const bool sysExtension = leaf.size() >= 4 && leaf.compare(leaf.size() - 4, 4, ".sys") == 0;
+    const bool wdmFlag = (pe.dllCharacteristics & 0x2000) != 0;
+    static const std::set<std::string> kernelModules = {
+        "ntoskrnl.exe", "ntkrnlmp.exe", "ntkrnlpa.exe", "hal.dll",
+        "wdfldr.sys", "wdf01000.sys", "fltmgr.sys", "ndis.sys",
+        "storport.sys", "scsiport.sys"
+    };
+    std::set<std::string> observed;
+    if (imports.is_array()) {
+        for (const auto& row : imports) {
+            if (!row.is_object() || !row.contains("name") || !row["name"].is_string()) continue;
+            const std::string module = LowerAscii(row["name"].get<std::string>());
+            if (kernelModules.count(module)) observed.insert(module);
+        }
+    }
+    if (!sysExtension && !wdmFlag && observed.empty()) return nullptr;
+
+    json indicators = json::array();
+    if (sysExtension) indicators.push_back("sys_extension");
+    if (wdmFlag) indicators.push_back("wdm_driver_flag");
+    if (!observed.empty()) indicators.push_back("kernel_imports");
+
+    json modules = json::array();
+    for (const auto& module : observed) modules.push_back(module);
+    json result = {{"entry_rva", HexU64(pe.entryRva)},
+                   {"indicators", std::move(indicators)},
+                   {"kernel_imports", std::move(modules)},
+                   {"classification", "candidate"},
+                   {"note", "PE Native subsystem and driver indicators; the entry RVA is not a proven DriverEntry symbol. File is only read, never loaded."}};
+    if (pe.entryRva == 0) result["warning"] = "no_entry_point";
+    if (importsTruncated) result["kernel_imports_may_be_incomplete"] = true;
+    return result;
+}
+
 } // namespace
 
 const PeSection* PeFile::SectionFor(uint32_t rva) const {
@@ -450,8 +502,10 @@ json PeExports(const ByteSource& source, const PeFile& pe, const InspectOptions&
 
 std::vector<Capability> PeProvider::Capabilities() const {
     return {{"static", CapabilityStatus::Validated, "cortex_artifacts_tests (PE fixtures, malformed inputs)",
-             "headers, sections, imports, exports, relocations, debug/CodeView, TLS, exception table, CLR header, "
-             "overlay"},
+             "headers, sections with entropy, imports with imphash, delay imports, exports, relocations, debug/CodeView, "
+             "TLS, exception table, CLR header, overlay, Rich header, resources (version, manifest), load config, "
+             "hardening (ASLR, DEP, CFG, SafeSEH, CET, /GS), packer detection, Authenticode (signer, certificates, "
+             "digest match; chain not verified), native-subsystem .sys driver indicators and kernel imports"},
             {"decompile", CapabilityStatus::Unavailable, "",
              "no built-in decompiler. External: the Ghidra analysis provider (cortex_analysis_start provider=ghidra, "
              "`cortex provider run ghidra`) when the operator configures Ghidra"},
@@ -478,6 +532,7 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
                             {"virtual_size", section.virtualSize},
                             {"raw_offset", HexU64(section.rawOffset)},
                             {"raw_size", section.rawSize},
+                            {"entropy", Entropy(source, section.rawOffset, section.rawSize)},
                             {"flags", SectionFlags(section.characteristics)}});
         if (section.rawSize) lastRawEnd = std::max<uint64_t>(lastRawEnd, uint64_t(section.rawOffset) + section.rawSize);
     }
@@ -506,14 +561,15 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
                  {"sections", std::move(sections)},
                  {"directories", std::move(directories)}};
 
-    bool truncated = false;
+    bool importsTruncated = false;
     if (pe.HasDirectory(kPeImport)) {
-        data["imports"] = PeImports(source, pe, options, truncated);
-        if (truncated) data["imports_truncated"] = true;
+        data["imports"] = PeImports(source, pe, options, importsTruncated);
+        if (importsTruncated) data["imports_truncated"] = true;
     }
     if (pe.HasDirectory(kPeExport)) {
-        data["exports"] = PeExports(source, pe, options, truncated);
-        if (truncated) data["exports_truncated"] = true;
+        bool exportsTruncated = false;
+        data["exports"] = PeExports(source, pe, options, exportsTruncated);
+        if (exportsTruncated) data["exports_truncated"] = true;
     }
     if (pe.HasDirectory(kPeBaseReloc)) data["relocations"] = Relocations(source, pe);
     if (pe.HasDirectory(kPeDebug)) data["debug"] = DebugEntries(source, pe);
@@ -523,6 +579,27 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
         if (entrySize) data["exception"] = {{"runtime_functions", pe.directories[kPeException].size / entrySize}};
     }
     if (dotnet) data["clr"] = ClrHeader(source, pe);
+    const json driver = DriverDetails(source, pe, data.value("imports", json::array()), importsTruncated);
+    if (!driver.is_null()) {
+        data["kind"] = "driver";
+        data["driver"] = driver;
+    }
+
+    // What the file says about its build, signature and protections.
+    if (data.contains("imports")) {
+        const std::string imphash = ImportHash(data["imports"]);
+        if (!imphash.empty()) data["imphash"] = imphash;
+    }
+    if (pe.HasDirectory(kPeDelayImport)) data["delay_imports"] = DelayImports(source, pe, options);
+    const json rich = RichHeader(source);
+    if (!rich.is_null()) data["rich_header"] = rich;
+    if (pe.HasDirectory(kPeResource)) data["resources"] = Resources(source, pe, options);
+    const json loadConfig = LoadConfig(source, pe);
+    if (!loadConfig.is_null()) data["load_config"] = loadConfig;
+    data["hardening"] = Hardening(source, pe, loadConfig);
+    data["packers"] = Packers(source, pe, data.value("imports", json::array()), data["sections"]);
+    const json signature = Authenticode(source, pe);
+    if (!signature.is_null()) data["authenticode"] = signature;
 
     // Bytes after the last section that the loader never maps: installers,
     // PyInstaller archives, appended data. The Authenticode certificate
@@ -538,6 +615,8 @@ json PeProvider::Inspect(const ByteSource& source, const InspectOptions& options
             overlaySize = pe.directories[kPeSecurity].rva - overlayStart;
         if (overlaySize) data["overlay"] = {{"offset", HexU64(overlayStart)}, {"size", overlaySize}};
     }
+    const json go = GoBinaryInfo(source);
+    if (!go.is_null()) data["go"] = go;
     if (!pe.warnings.empty()) data["warnings"] = pe.warnings;
     return data;
 }

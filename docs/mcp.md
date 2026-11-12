@@ -539,7 +539,7 @@ Nothing is evaluated in the program. See `docs/analysis-providers.md`.
 
 ## Server metadata
 
-`initialize` and `server/discover` report the server name and version (`core/version.h`, 2.0.0). `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
+`initialize` and `server/discover` report the server name and version (`core/version.h`, 2.1.0). `/schema/validate` on the runtime checks the tool manifest and MCP schemas and is exercised by the integrated E2E, which also calls every read-only tool of the manifest.
 
 ## Compatibility
 

@@ -5,7 +5,7 @@ file parsers under AddressSanitizer and UndefinedBehaviorSanitizer:
 
 | Harness | What it drives |
 |---|---|
-| `fuzz_artifact` | The provider registry as `cortex.exe inspect` uses it: detection, `Inspect`, the list of children and up to six children two levels deep (PE, .NET, ZIP/JAR with DEFLATE, ASAR, JavaScript/TypeScript, source maps). The first byte picks the file name, since some providers also look at the extension. |
+| `fuzz_artifact` | The provider registry as `cortex.exe inspect` uses it: detection, `Inspect`, the list of children and up to six children two levels deep (PE, native-subsystem .sys driver candidates, WinMD/WinRT metadata, .NET, ZIP/JAR with DEFLATE, ASAR, JavaScript/TypeScript, source maps). The first byte picks the file name, since some providers also look at the extension. |
 | `fuzz_pe_code` | `ParsePe`, CLR metadata and the CIL of up to 16 methods, and the native-code index (Zydis): functions, strings, xrefs, CFG and fingerprints of the first functions. Inputs are capped at 1 MiB. |
 | `fuzz_text` | The JavaScript lexer and analysis, source maps, base64 data URLs and DEFLATE. The first byte picks the decoder. |
 | `fuzz_protocols` | The live debug protocols as the sessions decode them (`core/live/protocol_frames`): WebSocket messages for CDP, DAP's `Content-Length` framing, JDWP packets, and the typed accessors (`core/live/json_safe.h`) applied at every node of each message. Also checks properties: cleaned text always serializes, `ValidUtf8` is idempotent, `Clip` respects its bound. |
@@ -40,3 +40,23 @@ plain executables, and `ctest` replays every file there on each run.
   by `fuzz_protocols`. It reads replies through the same typed accessors.
 - Python bytecode, Unity `global-metadata.dat`, class files and WebAssembly
   have no parser yet.
+
+## Wave 1 harness and Windows mutation runs
+
+`fuzz_wave1` exercises PDB, ELF, CAB, CFB/MSI, bounded XML, ZIP/APPX and dictionary-aware DEFLATE, including JSON serialization and bounded child reads. `make_seeds.py` supplies independent-producer and structural fixture inputs. The original full fuzz CMake project and `tools/static` both build the harness.
+
+LLVM-MinGW currently rejects libFuzzer instrumentation for its target. `tools/static` therefore also provides `cortex_fuzz_wave1_mutations`: the same harness with fixed-seed mutations under ASan/UBSan, explicitly **not coverage-guided**. The local run completed 20,000 mutations after fixing `zip-invalid-utf8-name`, now a retained regression. The workflow `formats-portable.yml` provides native Linux Clang/libFuzzer jobs, not a claim of a run that has not occurred.
+
+## Additional formats harness
+
+`fuzz_format_next` selects TAR, gzip, ar, certificate/CMS, MSFT type-library,
+ZIP package metadata, CRX/JMOD wrapper or Squirrel RELEASES parsing with its
+first byte. It checks structured output serialization and bounded readable
+children. Inputs are capped at 1 MiB. `make_seeds.py` builds the 48-input
+`format_next` corpus from Python/OpenSSL/Windows/JDK fixtures.
+
+`tools/static` provides `cortex_fuzz_format_next_mutations` for deterministic
+ASan/UBSan sweeps on Windows and `fuzz_format_next` for native Clang libFuzzer.
+The latter is wired into `formats-portable.yml`; providing a workflow is not
+proof that it ran. The additional-format crash-replay directory is initially
+empty, so a passing zero-input replay is not a fuzz-coverage claim.

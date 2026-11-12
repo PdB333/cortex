@@ -1,0 +1,772 @@
+{
+ "bplist": {
+  "big": 1099511627776,
+  "classes": [
+   "CortexFixture",
+   "NSObject"
+  ],
+  "data_hex": "0001636f72746578",
+  "date_seconds": 725857445.0,
+  "unicode": "h\u00e9llo \u2713"
+ },
+ "gguf": {
+  "answer": 42,
+  "fields": [
+   "GGUF.kv_count",
+   "GGUF.tensor_count",
+   "GGUF.version",
+   "cortex.answer",
+   "cortex.owned",
+   "cortex.scale",
+   "general.architecture",
+   "general.name",
+   "tokenizer.ggml.tokens"
+  ],
+  "name": "cortex-fixture",
+  "tensors": {
+   "output_norm.weight": {
+    "shape": [
+     8
+    ],
+    "type": "F16"
+   },
+   "token_embd.weight": {
+    "shape": [
+     8,
+     3
+    ],
+    "type": "F32"
+   }
+  }
+ },
+ "npy": {
+  "f32.npy": {
+   "descr": "<f4",
+   "fortran": false,
+   "shape": [
+    3,
+    4
+   ]
+  },
+  "fortran.npy": {
+   "descr": "<f8",
+   "fortran": true,
+   "shape": [
+    2,
+    3
+   ]
+  },
+  "i64.npy": {
+   "descr": "<i8",
+   "fortran": false,
+   "shape": [
+    5
+   ]
+  },
+  "object.npy": {
+   "descr": "|O",
+   "fortran": false,
+   "shape": [
+    2
+   ]
+  },
+  "struct.npy": {
+   "descr": "structured",
+   "fortran": false,
+   "shape": [
+    3
+   ]
+  },
+  "text.npy": {
+   "descr": "<U6",
+   "fortran": false,
+   "shape": [
+    2
+   ]
+  }
+ },
+ "onnx": {
+  "graph": "cortex_graph",
+  "initializers": [
+   [
+    "W",
+    [
+     4,
+     3
+    ]
+   ],
+   [
+    "B",
+    [
+     3
+    ]
+   ]
+  ],
+  "inputs": [
+   "X"
+  ],
+  "ir_version": 14,
+  "metadata": {
+   "owner": "cortex"
+  },
+  "ops": [
+   "MatMul",
+   "Add",
+   "Relu"
+  ],
+  "opset": [
+   [
+    "",
+    17
+   ]
+  ],
+  "outputs": [
+   "Y"
+  ],
+  "producer": "cortex-fixture"
+ },
+ "pickle": {
+  "benign.pkl": {
+   "imports": [],
+   "ops": [
+    [
+     0,
+     "PROTO"
+    ],
+    [
+     2,
+     "FRAME"
+    ],
+    [
+     11,
+     "EMPTY_DICT"
+    ],
+    [
+     12,
+     "MEMOIZE"
+    ],
+    [
+     13,
+     "MARK"
+    ],
+    [
+     14,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     20,
+     "MEMOIZE"
+    ],
+    [
+     21,
+     "EMPTY_LIST"
+    ],
+    [
+     22,
+     "MEMOIZE"
+    ],
+    [
+     23,
+     "MARK"
+    ],
+    [
+     24,
+     "BININT1"
+    ],
+    [
+     26,
+     "BINFLOAT"
+    ],
+    [
+     35,
+     "NONE"
+    ],
+    [
+     36,
+     "NEWTRUE"
+    ],
+    [
+     37,
+     "APPENDS"
+    ],
+    [
+     38,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     45,
+     "MEMOIZE"
+    ],
+    [
+     46,
+     "SHORT_BINBYTES"
+    ],
+    [
+     53,
+     "MEMOIZE"
+    ],
+    [
+     54,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     60,
+     "MEMOIZE"
+    ],
+    [
+     61,
+     "TUPLE2"
+    ],
+    [
+     62,
+     "MEMOIZE"
+    ],
+    [
+     63,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     68,
+     "MEMOIZE"
+    ],
+    [
+     69,
+     "EMPTY_SET"
+    ],
+    [
+     70,
+     "MEMOIZE"
+    ],
+    [
+     71,
+     "MARK"
+    ],
+    [
+     72,
+     "BININT1"
+    ],
+    [
+     74,
+     "BININT1"
+    ],
+    [
+     76,
+     "ADDITEMS"
+    ],
+    [
+     77,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     82,
+     "MEMOIZE"
+    ],
+    [
+     83,
+     "LONG1"
+    ],
+    [
+     98,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     106,
+     "MEMOIZE"
+    ],
+    [
+     107,
+     "EMPTY_DICT"
+    ],
+    [
+     108,
+     "MEMOIZE"
+    ],
+    [
+     109,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     116,
+     "MEMOIZE"
+    ],
+    [
+     117,
+     "BINGET"
+    ],
+    [
+     119,
+     "SETITEM"
+    ],
+    [
+     120,
+     "SETITEMS"
+    ],
+    [
+     121,
+     "STOP"
+    ]
+   ]
+  },
+  "evil.pkl": {
+   "imports": [
+    [
+     "posix",
+     "system"
+    ]
+   ],
+   "ops": [
+    [
+     0,
+     "PROTO"
+    ],
+    [
+     2,
+     "FRAME"
+    ],
+    [
+     11,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     18,
+     "MEMOIZE"
+    ],
+    [
+     19,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     27,
+     "MEMOIZE"
+    ],
+    [
+     28,
+     "STACK_GLOBAL"
+    ],
+    [
+     29,
+     "MEMOIZE"
+    ],
+    [
+     30,
+     "SHORT_BINUNICODE"
+    ],
+    [
+     61,
+     "MEMOIZE"
+    ],
+    [
+     62,
+     "TUPLE1"
+    ],
+    [
+     63,
+     "MEMOIZE"
+    ],
+    [
+     64,
+     "REDUCE"
+    ],
+    [
+     65,
+     "MEMOIZE"
+    ],
+    [
+     66,
+     "STOP"
+    ]
+   ]
+  },
+  "ordered.pkl": {
+   "imports": [
+    [
+     "collections",
+     "OrderedDict"
+    ],
+    [
+     "datetime",
+     "date"
+    ],
+    [
+     "_codecs",
+     "encode"
+    ]
+   ],
+   "ops": [
+    [
+     0,
+     "PROTO"
+    ],
+    [
+     2,
+     "GLOBAL"
+    ],
+    [
+     27,
+     "BINPUT"
+    ],
+    [
+     29,
+     "EMPTY_TUPLE"
+    ],
+    [
+     30,
+     "REDUCE"
+    ],
+    [
+     31,
+     "BINPUT"
+    ],
+    [
+     33,
+     "BINUNICODE"
+    ],
+    [
+     39,
+     "BINPUT"
+    ],
+    [
+     41,
+     "GLOBAL"
+    ],
+    [
+     56,
+     "BINPUT"
+    ],
+    [
+     58,
+     "GLOBAL"
+    ],
+    [
+     74,
+     "BINPUT"
+    ],
+    [
+     76,
+     "BINUNICODE"
+    ],
+    [
+     86,
+     "BINPUT"
+    ],
+    [
+     88,
+     "BINUNICODE"
+    ],
+    [
+     99,
+     "BINPUT"
+    ],
+    [
+     101,
+     "TUPLE2"
+    ],
+    [
+     102,
+     "BINPUT"
+    ],
+    [
+     104,
+     "REDUCE"
+    ],
+    [
+     105,
+     "BINPUT"
+    ],
+    [
+     107,
+     "TUPLE1"
+    ],
+    [
+     108,
+     "BINPUT"
+    ],
+    [
+     110,
+     "REDUCE"
+    ],
+    [
+     111,
+     "BINPUT"
+    ],
+    [
+     113,
+     "SETITEM"
+    ],
+    [
+     114,
+     "STOP"
+    ]
+   ]
+  },
+  "torch-data.pkl": {
+   "imports": [
+    [
+     "collections",
+     "OrderedDict"
+    ],
+    [
+     "torch._utils",
+     "_rebuild_tensor_v2"
+    ],
+    [
+     "torch",
+     "FloatStorage"
+    ]
+   ],
+   "ops": [
+    [
+     0,
+     "PROTO"
+    ],
+    [
+     2,
+     "GLOBAL"
+    ],
+    [
+     27,
+     "BINPUT"
+    ],
+    [
+     29,
+     "EMPTY_TUPLE"
+    ],
+    [
+     30,
+     "REDUCE"
+    ],
+    [
+     31,
+     "BINPUT"
+    ],
+    [
+     33,
+     "BINUNICODE"
+    ],
+    [
+     44,
+     "BINPUT"
+    ],
+    [
+     46,
+     "GLOBAL"
+    ],
+    [
+     79,
+     "BINPUT"
+    ],
+    [
+     81,
+     "MARK"
+    ],
+    [
+     82,
+     "MARK"
+    ],
+    [
+     83,
+     "BINUNICODE"
+    ],
+    [
+     95,
+     "BINPUT"
+    ],
+    [
+     97,
+     "GLOBAL"
+    ],
+    [
+     117,
+     "BINPUT"
+    ],
+    [
+     119,
+     "BINUNICODE"
+    ],
+    [
+     125,
+     "BINPUT"
+    ],
+    [
+     127,
+     "BINUNICODE"
+    ],
+    [
+     135,
+     "BINPUT"
+    ],
+    [
+     137,
+     "BININT1"
+    ],
+    [
+     139,
+     "TUPLE"
+    ],
+    [
+     140,
+     "BINPUT"
+    ],
+    [
+     142,
+     "BINPERSID"
+    ],
+    [
+     143,
+     "BININT1"
+    ],
+    [
+     145,
+     "BININT1"
+    ],
+    [
+     147,
+     "BININT1"
+    ],
+    [
+     149,
+     "TUPLE2"
+    ],
+    [
+     150,
+     "BINPUT"
+    ],
+    [
+     152,
+     "BININT1"
+    ],
+    [
+     154,
+     "BININT1"
+    ],
+    [
+     156,
+     "TUPLE2"
+    ],
+    [
+     157,
+     "BINPUT"
+    ],
+    [
+     159,
+     "NEWFALSE"
+    ],
+    [
+     160,
+     "BINGET"
+    ],
+    [
+     162,
+     "EMPTY_TUPLE"
+    ],
+    [
+     163,
+     "REDUCE"
+    ],
+    [
+     164,
+     "BINPUT"
+    ],
+    [
+     166,
+     "TUPLE"
+    ],
+    [
+     167,
+     "BINPUT"
+    ],
+    [
+     169,
+     "REDUCE"
+    ],
+    [
+     170,
+     "BINPUT"
+    ],
+    [
+     172,
+     "SETITEM"
+    ],
+    [
+     173,
+     "STOP"
+    ]
+   ]
+  }
+ },
+ "safetensors": {
+  "metadata": {
+   "format": "np",
+   "owner": "cortex"
+  },
+  "tensors": {
+   "bias": {
+    "dtype": "F16",
+    "shape": [
+     3
+    ]
+   },
+   "ids": {
+    "dtype": "I64",
+    "shape": [
+     5
+    ]
+   },
+   "weight": {
+    "dtype": "F32",
+    "shape": [
+     4,
+     3
+    ]
+   }
+  }
+ },
+ "sqlite": {
+  "application_id": 1129271892,
+  "counts": {
+   "settings": 50,
+   "users": 301
+  },
+  "page_size": 1024,
+  "schema": [
+   [
+    "table",
+    "users",
+    "users",
+    2,
+    "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT, score REAL, avatar BLOB)"
+   ],
+   [
+    "index",
+    "users_name",
+    "users",
+    3,
+    "CREATE INDEX users_name ON users(name)"
+   ],
+   [
+    "table",
+    "settings",
+    "settings",
+    4,
+    "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID"
+   ],
+   [
+    "view",
+    "top_users",
+    "top_users",
+    0,
+    "CREATE VIEW top_users AS SELECT name FROM users WHERE score > 50"
+   ],
+   [
+    "trigger",
+    "users_audit",
+    "users",
+    0,
+    "CREATE TRIGGER users_audit AFTER INSERT ON users BEGIN SELECT 1; END"
+   ]
+  ],
+  "user_version": 7,
+  "wal_frames": 5,
+  "wal_page_size": 4096
+ }
+}

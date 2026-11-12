@@ -6,7 +6,7 @@
   <img src="docs/images/brand/cortex-banner-dark.png" alt="Cortex: find what changed it, show the evidence" width="720">
 </picture>
 
-**See a value change in a program you own. Find the instruction that changed it. Show the evidence.**
+**See inside any software you own.** Find the value, catch the instruction that changes it, show the evidence.
 
 Memory scanner, debugger and reverse-engineering workspace for Windows software in one native app.
 It reads files as well as live processes, can use Ghidra, ILSpy and live debuggers, and has an MCP server so an AI agent can do the same work under your control.
@@ -85,7 +85,9 @@ A typical session mixes the two: the agent narrows down a value and finds the in
 
 ## Quick start
 
-Download **`cortex-v<version>-windows-portable.zip`** from the [latest release](https://github.com/PdB333/cortex/releases) and extract the whole archive (or use the `cortex-imgui-gui-tested-portable` artifact of a green CI run for the current branch).
+From the [latest release](https://github.com/PdB333/cortex/releases/latest), take **`cortex-v<version>-windows-setup.exe`** (per-user install, no administrator rights, Start menu entry, optional *Analyze with Cortex* right-click entry) or **`cortex-v<version>-windows-portable.zip`** (extract anywhere). Both update themselves: Cortex checks for a new release once a day and installs it after you agree, only if its SHA-256 matches the one published with the release ([installing and updating](docs/setup-and-updates.md)).
+
+**Connect your AI clients in one step:** Home › *Set up my AI clients automatically*, or `cortex.exe setup`. Cortex finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Gemini CLI, Codex and LM Studio, adds itself to them read-only (each file backed up first), and finds your Ghidra, JDK, ILSpy, Vineflower and netcoredbg installations.
 
 **By hand (desktop):**
 
@@ -156,6 +158,7 @@ Each row lists how its validation is done. "Validated" means checked in CI again
 | **PE files and native code** | Headers, sections, imports and exports, functions, xrefs, CFG, annotations | Nothing else | Compared with `objdump` (`tests/native_static_e2e.py`) |
 | **.NET assemblies** | Metadata (all 45 tables), types, members, P/Invoke, CIL with exception clauses | Nothing else | Compared with `System.Reflection.Metadata` (`tests/dotnet_e2e.py`) |
 | **JavaScript / TypeScript, Electron** | Modules and imports, bundles, source maps, `package.json`, preload, `webPreferences`, IPC channels | Nothing else | `tests/fixtures/electron-app.asar` and its expected output |
+| **50+ file formats, built in** | Mach-O, ELF, COFF, PDB, Go (names even when stripped), Python `.pyc`, Java `.class`, Lua/LuaJIT, WebAssembly, SPIR-V, SQLite, pickles (dangerous imports flagged), NumPy, safetensors, GGUF, ONNX, pcap/pcapng, PDF, `.lnk`, MSI, MSIX, CAB, certificates, minidumps, registry hives, firmware images, game archives (VPK, PAK, WAD, RPA)… Read, never run | Nothing else | Each one against an independent reference on fixtures from the real toolchain (`tests/format_more_tests.cpp` and others), plus fuzzing. See the [roadmap](docs/formats-roadmap.md) and [limitations](docs/limitations.md) |
 | **Decompiled native code** | Functions, calls, types and C by RVA, mapped to the live module when the SHA-256 matches | [Ghidra](https://github.com/NationalSecurityAgency/ghidra) 11.x and JDK 21 | PE x64 and x86, ELF x86-64 (`analysis-engines` CI job) |
 | **Decompiled C#** | C# project or a single type | [ILSpy](https://github.com/icsharpcode/ILSpy) `ilspycmd` 9.x | The decompiled project is rebuilt and compared with the original |
 | **Decompiled Java** | Java sources | [Vineflower](https://github.com/Vineflower/vineflower) 1.11 and a JDK | Sources recompile; `javap -p` signatures match |
@@ -164,7 +167,7 @@ Each row lists how its validation is done. "Validated" means checked in CI again
 | **Live .NET** | Log breakpoints with stack and locals | [netcoredbg](https://github.com/Samsung/netcoredbg) 3.1, started by Cortex in stdio mode | Real netcoredbg 3.1.2 against `tests/fixtures/dotnet-live`, on Windows (stdio mode) and Linux |
 | **Live Java** | Log breakpoints with stack and locals | A JVM started with JDWP | Real JVM against `tests/fixtures/java-live` |
 
-Live providers never evaluate code. At a log breakpoint they record the stack and locals and resume at once, and a pause Cortex did not set is resumed too. Python bytecode, Unity/IL2CPP and WebAssembly are planned; see the [roadmap](docs/cortex-2-roadmap.md).
+Live providers never evaluate code. At a log breakpoint they record the stack and locals and resume at once, and a pause Cortex did not set is resumed too. Unity/IL2CPP, Unreal and Godot are planned; see the [formats roadmap](docs/formats-roadmap.md).
 
 ## How it fits together
 
@@ -257,7 +260,7 @@ Every panel is a dockable window. Presets arrange them for the task: **Home**, *
 
 ## AI & MCP
 
-MCP is built into `cortex.exe`. Configure your client once; the server starts without a target and attaches to processes on request.
+MCP is built into `cortex.exe`. `cortex.exe setup` (or Help › *Set up AI clients and engines* in the desktop) registers it in the AI clients installed on your machine; by hand, add this to your client's configuration. The server starts without a target and attaches to processes on request.
 
 ```json
 {
@@ -302,6 +305,9 @@ cortex.exe mcp [--pid N] [--tools all] [--allow-state | --allow-writes]
 cortex.exe inspect <file> [--cil METHOD]      # PE, .NET, ASAR, JS/TS, ZIP; nothing runs
 cortex.exe provider list|run ...              # Ghidra, ILSpy, Vineflower
 cortex.exe live targets|scripts|watch ...     # CDP, DAP (debugpy, netcoredbg), JDWP
+cortex.exe setup [--dry-run|--yes]            # register Cortex in your AI clients, find the engines
+cortex.exe update [--check]                   # install the latest release (SHA-256 verified)
+cortex.exe <file>                             # open the desktop on a file
 cortex.exe evidence export|list               # evidence records (JSON or Markdown)
 cortex.exe investigation list|show|approve    # investigations and their steps
 cortex.exe probe --pid 1234                   # read-only target and runtime health
@@ -365,7 +371,7 @@ No. Built-in parsers cover PE, native code, .NET metadata and CIL, ASAR, JS/TS a
 <details>
 <summary><b>Does anything leave my machine?</b></summary>
 
-No. Cortex has no telemetry or update check and uploads nothing. External engines run locally, and debug interfaces are reached only on `127.0.0.1`. Your MCP client decides what it sends to its own model.
+Nothing about what you analyze. Cortex has no telemetry and uploads nothing. Its only network request is an optional daily update check against GitHub releases, which you can turn off. External engines run locally, and debug interfaces are reached only on `127.0.0.1`. Your MCP client decides what it sends to its own model.
 </details>
 
 <details>
@@ -397,6 +403,8 @@ No. It provides bounded, supervised experiments (a launcher limited to profiles 
 | [Evidence](docs/evidence.md) · [Investigations](docs/investigations.md) | Records with provenance; supervised multi-step investigations |
 | [Architecture](docs/unified-app-architecture.md) · [Roadmap](docs/cortex-2-roadmap.md) | Layering; the Cortex 2.0 plan and what each step validated |
 | [Diagnostics](docs/external-diagnostics.md) · [Symbols](docs/symbols.md) · [Hooks](docs/hooks.md) · [Mod SDK](docs/mod-sdk.md) | Crash and hang tooling |
+| [Installing and updating](docs/setup-and-updates.md) | Installer, AI client setup, engine detection, updates and their limits |
+| [Formats roadmap](docs/formats-roadmap.md) | Every format Cortex reads, and the ones planned, by priority |
 | [Known limitations](docs/limitations.md) | What Cortex does not do, or has not validated, in one page |
 | [Changelog](CHANGELOG.md) · [Third-party](docs/third-party.md) | Release history and licences |
 

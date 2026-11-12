@@ -211,6 +211,12 @@ bool SettingsStore::Load(std::string* error) {
         }
         values_.autoAttachEnabled = getBool("autoAttachEnabled", false);
         values_.autoAttachProcesses = getString("autoAttachProcesses");
+        values_.updateCheckAtStartup = getBool("updateCheckAtStartup", true);
+        {
+            const auto last = document.find("lastUpdateCheck");
+            values_.lastUpdateCheck = last != document.end() && last->is_number_integer() ? last->get<long long>() : 0;
+        }
+        values_.skippedUpdate = getString("skippedUpdate");
         values_.recentFiles.clear();
         const auto recent = document.find("recentFiles");
         if (recent != document.end() && recent->is_array()) {
@@ -267,7 +273,10 @@ bool SettingsStore::Save(std::string* error) const {
             {"hotkeys", values_.hotkeys},
             {"autoAttachEnabled", values_.autoAttachEnabled},
             {"autoAttachProcesses", values_.autoAttachProcesses},
-            {"recentFiles", values_.recentFiles}
+            {"recentFiles", values_.recentFiles},
+            {"updateCheckAtStartup", values_.updateCheckAtStartup},
+            {"lastUpdateCheck", values_.lastUpdateCheck},
+            {"skippedUpdate", values_.skippedUpdate}
         };
         if (!services::WriteFileAtomically(path_, document.dump(2) + '\n')) {
             if (error) *error = "unable_to_write_settings";

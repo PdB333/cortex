@@ -27,6 +27,8 @@
 #include "application/watches_model.h"
 #include "application/scripts_model.h"
 #include "application/screenshot_model.h"
+#include "../core/setup/setup.h"
+#include "../core/setup/updater.h"
 #include "ui/actions_workspace.h"
 #include "ui/address_context_menu.h"
 #include "ui/addresses_workspace.h"
@@ -90,6 +92,8 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <future>
 #include <limits>
 #include <memory>
@@ -141,6 +145,38 @@ struct BackgroundTask {
         finished.get();
         return true;
     }
+};
+
+// Help > Set up AI clients and engines (setup_ui.cpp): what was detected and
+// what the person ticked. Detection runs in the background.
+struct SetupPanelState {
+    std::mutex mutex;
+    bool loading = false;
+    bool loaded = false;
+    cortex::setup::Environment environment;
+    std::vector<cortex::setup::ClientStatus> clients;
+    std::vector<cortex::setup::EngineReport> engines;
+    std::map<std::string, bool> selected;   // client id -> ticked
+    std::map<std::string, int> engineChoice;  // engine id -> index in found, -1 none
+    bool allowWrites = false;
+    bool passEngines = true;
+    std::vector<std::string> log;
+    bool scrollToLog = false;
+};
+
+// Updates (setup_ui.cpp). A check or a download runs on its own thread and
+// writes here under the mutex; the UI reads a copy each frame.
+struct UpdateState {
+    std::mutex mutex;
+    bool checking = false;
+    bool checked = false;
+    bool manual = false;  // asked from the menu: show the result even when up to date
+    cortex::setup::UpdateCheck result;
+    bool working = false;  // downloading, verifying or applying
+    std::string progress;
+    std::string outcome;   // last download/apply message
+    std::string newFolder; // portable: where the new version was unpacked
+    bool quitRequested = false;  // the installer runs: close Cortex
 };
 
 struct AppState {
@@ -195,6 +231,13 @@ struct AppState {
     // Auto-attach skips the process the user detached from.
     uint64_t autoAttachSkipPid = 0;
     std::chrono::steady_clock::time_point lastAutoAttach{};
+
+    std::shared_ptr<SetupPanelState> setupPanel = std::make_shared<SetupPanelState>();
+    std::shared_ptr<UpdateState> update = std::make_shared<UpdateState>();
+    bool requestSetupPanel = false;
+    bool requestUpdateDialog = false;
+    // Only the interactive desktop checks for updates (never test modes).
+    bool allowUpdateCheck = false;
 
     // Declared last so it is destroyed first: its future waits for a running
     // task, which may still use the models above.
@@ -387,6 +430,15 @@ void DispatchCommand(AppState& app, const std::string& command);
 void ResetTargetState(AppState& app);
 void NavigateTo(AppState& app, uint64_t address, const char* workspace);
 bool ParseAddressToken(const std::string& text, uint64_t& value, int defaultBase = 0);
+
+// Setup and updates (setup_ui.cpp).
+void OpenSetupPanel(AppState& app);
+void DrawSetupPanel(AppState& app);
+void StartUpdateCheck(AppState& app, bool manual);
+void MaybeCheckForUpdates(AppState& app);
+void DrawUpdateDialog(AppState& app);
+// The header's "Update to vX" button when a newer release is known.
+void DrawUpdateButton(AppState& app);
 
 // Every workspace preset, in header order.
 inline constexpr cortex::ui::WorkspacePreset kGuiPresets[] = {

@@ -1414,6 +1414,43 @@ bool ExerciseStartPage(AppState& app, std::string& error) {
     return true;
 }
 
+// Set up Cortex and Updates render, including a failed check (the feed is
+// a file that does not exist: nothing goes to the network).
+bool ExerciseSetupAndUpdates(AppState& app, std::string& error) {
+    _wputenv_s(L"CORTEX_UPDATE_FEED", L"Z:\\no-such-folder\\latest.json");
+    OpenSetupPanel(app);
+    for (int frame = 0; frame < 200; ++frame) {
+        if (!RenderGuiFrame(app, error, false)) return false;
+        std::lock_guard<std::mutex> lock(app.setupPanel->mutex);
+        if (app.setupPanel->loaded) break;
+        Sleep(10);
+    }
+    {
+        std::lock_guard<std::mutex> lock(app.setupPanel->mutex);
+        if (!app.setupPanel->loaded || app.setupPanel->clients.size() != cortex::setup::ClientIds().size() ||
+            app.setupPanel->engines.size() != 6) {
+            error = "setup_panel_detection";
+            return false;
+        }
+    }
+    for (int frame = 0; frame < 3; ++frame)
+        if (!RenderGuiFrame(app, error, false)) return false;
+    ImGui::CloseCurrentPopup();
+    StartUpdateCheck(app, true);
+    for (int frame = 0; frame < 200; ++frame) {
+        if (!RenderGuiFrame(app, error, false)) return false;
+        std::lock_guard<std::mutex> lock(app.update->mutex);
+        if (app.update->checked) break;
+        Sleep(10);
+    }
+    std::lock_guard<std::mutex> lock(app.update->mutex);
+    if (!app.update->checked || app.update->result.ok) {
+        error = "update_check_with_missing_feed";
+        return false;
+    }
+    return true;
+}
+
 int RunGuiWorkspaceSuite() {
     AppState app;
     std::string error;
@@ -1426,6 +1463,10 @@ int RunGuiWorkspaceSuite() {
     if (!ExerciseStartPage(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
         return 8;
+    }
+    if (!ExerciseSetupAndUpdates(app, error)) {
+        std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());
+        return 9;
     }
     if (!ExerciseGuiPresets(app, error)) {
         std::fprintf(stderr, "gui workspace suite: %s\n", error.c_str());

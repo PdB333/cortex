@@ -1,0 +1,188 @@
+{
+ "dtb": {
+  "bootargs": "console=ttyS0 owned",
+  "compatible": [
+   "cortex,fixture",
+   "cortex,board"
+  ],
+  "memory_reg": [
+   2147483648,
+   268435456
+  ],
+  "model": "Cortex Fixture Board",
+  "paths": [
+   "/",
+   "/chosen",
+   "/cpus",
+   "/cpus/cpu@0",
+   "/memory@80000000"
+  ]
+ },
+ "ihex": {
+  "bytes": 53,
+  "segments": [
+   [
+    0,
+    32
+   ],
+   [
+    65536,
+    65557
+   ]
+  ],
+  "start": 65536
+ },
+ "lnk": {
+  "data": {
+   "command_line_arguments": "/A owned.txt",
+   "description": "Cortex fixture link",
+   "icon_location": "C:\\Windows\\System32\\shell32.dll",
+   "working_directory": "C:\\Users\\Public"
+  },
+  "flags": [
+   "HasLinkTargetIDList",
+   "HasName",
+   "HasWorkingDir",
+   "HasArguments",
+   "HasIconLocation",
+   "IsUnicode",
+   "ForceNoLinkInfo"
+  ],
+  "icon_index": 3,
+  "target_path": "C:\\Windows\\System32\\notepad.exe",
+  "window_style": "SW_SHOWMAXIMIZED"
+ },
+ "pcap": {
+  "dns": [
+   "owned.cortex.test"
+  ],
+  "first": 1700000000.25,
+  "flows": [
+   [
+    "tcp/ipv4",
+    51515,
+    443
+   ],
+   [
+    "tcp/ipv6",
+    40001,
+    80
+   ],
+   [
+    "udp/ipv4",
+    40000,
+    53
+   ]
+  ],
+  "http": [
+   "GET /index.html HTTP/1.1 [host cortex.test]"
+  ],
+  "last": 1700000004.25,
+  "packets": 5,
+  "protocols": {
+   "arp": 1,
+   "icmp": 1,
+   "ipv4": 3,
+   "ipv6": 1,
+   "tcp": 2,
+   "udp": 1
+  },
+  "sni": [
+   "cortex.example"
+  ]
+ },
+ "pcapng": {
+  "dns": [
+   "owned.cortex.test"
+  ],
+  "first": 1700000000.25,
+  "flows": [
+   [
+    "tcp/ipv4",
+    51515,
+    443
+   ],
+   [
+    "tcp/ipv6",
+    40001,
+    80
+   ],
+   [
+    "udp/ipv4",
+    40000,
+    53
+   ]
+  ],
+  "http": [
+   "GET /index.html HTTP/1.1 [host cortex.test]"
+  ],
+  "last": 1700000004.25,
+  "packets": 5,
+  "protocols": {
+   "arp": 1,
+   "icmp": 1,
+   "ipv4": 3,
+   "ipv6": 1,
+   "tcp": 2,
+   "udp": 1
+  },
+  "sni": [
+   "cortex.example"
+  ]
+ },
+ "pdf": {
+  "attachments": [
+   "notes.txt"
+  ],
+  "author": "Owned",
+  "encrypted": true,
+  "javascript": true,
+  "pages": 3,
+  "title": "Cortex fixture",
+  "uris": [
+   "https://cortex.example/"
+  ]
+ },
+ "spirv": {
+  "compute": {
+   "local_size": [
+    8,
+    1,
+    1
+   ],
+   "model": "GLCompute",
+   "names": [
+    "cortexData",
+    "Data",
+    "values"
+   ]
+  },
+  "fragment": {
+   "model": "Fragment",
+   "names": [
+    "cortexColor",
+    "outColor"
+   ]
+  }
+ },
+ "srec": {
+  "header": "cortex",
+  "segments": [
+   [
+    134217728,
+    134217792
+   ],
+   [
+    134221824,
+    134221830
+   ]
+  ],
+  "start": 134217728
+ },
+ "uf2": {
+  "blocks": 4,
+  "bytes": 1024,
+  "family": "RP2040",
+  "start": 268435456
+ }
+}

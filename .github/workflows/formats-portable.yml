@@ -1,0 +1,54 @@
+name: Portable static formats
+
+on:
+  pull_request:
+    paths:
+      - "core/artifacts/**"
+      - "tests/**"
+      - "tools/static/**"
+      - ".github/workflows/formats-portable.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-clang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native compiler and sanitizer runtimes
+        run: sudo apt-get update && sudo apt-get install -y clang-18 libclang-rt-18-dev ninja-build
+      - name: Configure portable static readers
+        run: >-
+          cmake -S tools/static -B build/formats -G Ninja
+          -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Debug
+          '-DCMAKE_CXX_FLAGS_DEBUG=-O1 -g'
+          -DCORTEX_STATIC_SANITIZERS=ON -DCORTEX_STATIC_FUZZ=ON
+      - name: Build
+        run: cmake --build build/formats --parallel 2
+      - name: Tests and stored regression inputs
+        run: ctest --test-dir build/formats --output-on-failure
+      - name: Prepare corpora
+        run: |
+          python3 tests/fuzz/make_seeds.py build/seeds
+          mkdir -p build/work-wave1 build/work-artifact build/work-format-next build/work-format-more build/findings tests/fuzz/regressions/fuzz_format_next tests/fuzz/regressions/fuzz_format_more
+      - name: Native coverage-guided fuzzing
+        run: |
+          build/formats/fuzz_wave1 -max_total_time=120 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-wave1 build/seeds/wave1 tests/fuzz/regressions/fuzz_wave1
+          build/formats/fuzz_format_next -max_total_time=120 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-format-next build/seeds/format_next tests/fuzz/regressions/fuzz_format_next
+          build/formats/fuzz_format_more -max_total_time=180 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-format-more build/seeds/format_more tests/fuzz/regressions/fuzz_format_more
+          build/formats/fuzz_artifact -max_total_time=60 -max_len=1048576 -timeout=10 -rss_limit_mb=2048 -artifact_prefix=build/findings/ build/work-artifact build/seeds/artifact
+      - name: Keep test logs and reproducers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-formats-linux-logs
+          path: |
+            build/formats/Testing/Temporary/
+            build/findings/
+          if-no-files-found: ignore

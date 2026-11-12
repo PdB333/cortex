@@ -1,0 +1,48 @@
+{
+  "manifest": {
+    "manifest_version": 3,
+    "name": "Cortex Extension Fixture",
+    "version": "1.2.3",
+    "permissions": [
+      "storage",
+      "tabs"
+    ],
+    "host_permissions": [
+      "https://fixture.invalid/*"
+    ],
+    "background": {
+      "service_worker": "worker.js"
+    },
+    "content_scripts": [
+      {
+        "matches": [
+          "https://fixture.invalid/*"
+        ],
+        "js": [
+          "content.js"
+        ],
+        "run_at": "document_idle"
+      }
+    ],
+    "browser_specific_settings": {
+      "gecko": {
+        "id": "fixture@cortex.invalid"
+      }
+    }
+  },
+  "vscode": {
+    "name": "fixture",
+    "publisher": "cortex",
+    "version": "2.3.4",
+    "main": "./out/extension.js",
+    "engines": {
+      "vscode": "^1.90.0"
+    },
+    "activationEvents": [
+      "onCommand:cortex.fixture"
+    ]
+  },
+  "crx_signature_valid": false,
+  "crx_id": "000102030405060708090a0b0c0d0e0f",
+  "jmod_scope": "container only"
+}
