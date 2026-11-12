@@ -77,7 +77,9 @@ jobs:
   p1-hardening:
     name: p1-${{ matrix.arch }}
     runs-on: windows-latest
-    timeout-minutes: 45
+    # Every test executable compiles the artifact parsers itself; with the
+    # v2.1 formats the x86 build needs more than 45 minutes on 2 jobs.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +114,7 @@ jobs:
 
       - name: Build Cortex
         shell: msys2 {0}
-        run: cmake --build build/p1-${{ matrix.arch }} --parallel 2
+        run: cmake --build build/p1-${{ matrix.arch }} --parallel 4
 
       - name: Run CTest suite (includes the action transaction and semantic plan tests)
         shell: msys2 {0}
