@@ -1,6 +1,6 @@
 # Additional artifact readers: implementation and verification
 
-**Status: local development source, not committed, merged or released.** This
+**Status: released in v2.1.0.** This
 increment builds on [wave 1](formats-wave1-implementation.md). It adds useful
 readable containers and package metadata, not a claim of 200 fully supported
 formats. Parsing, decompilation and live debugging are distinct capabilities.

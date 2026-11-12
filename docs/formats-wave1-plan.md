@@ -68,40 +68,8 @@ runtime DLL as a Linux implementation.
 remains on the PC and uses ADB for only owned/authorized debuggable apps
 or personally controlled rooted devices. No Android bypass or jailbreak.
 
-## Current state of this worktree
+## Status
 
-- [x] Windows driver candidate parser in existing PE provider (source).
-- [x] Deterministic x86/x64 synthetic PE fixtures and corpus wiring (source).
-- [ ] Full unit, fuzz, Windows x64/x86 and UI/CLI/MCP CI validation.
-- [x] Structural WinMD recognition, type/method inventory and negative fixture tests (local only).
-- [ ] Independent SDK oracle, full WinMD semantic conformance and COM typelibs.
-- [ ] PDB/MSF.
-- [ ] CAB, MSI, MSIX and installer families.
-- [ ] Native ELF.
-- [ ] WebView2 live.
-- [ ] Linux static/runtime and Android static/ADB.
-
-No future item is shipped merely because this plan lists it.
-
-## Implemented increment and remaining acceptance
-
-The following now have code, fixtures, sanitizer tests in independent Windows x64/x86 builds and CLI/MCP checks: PDB/MSF7, native ELF, stored/MSZIP CAB, CFB/MSI and APPX/MSIX/bundles. See [measured scope and remaining work](formats-wave1-implementation.md). This supersedes the original unchecked implementation notes above without treating those broader lots as fully finished.
-
-- [x] Native PDB/MSF7 common-record reader; deeper type semantics remain open.
-- [x] Native ELF32/64 reader; compressed sections and sectionless dynsym remain open.
-- [x] CAB stored/MSZIP, including cross-block history; LZX remains open.
-- [x] CFB v3/v4 and MSI database inventory, including embedded CAB traversal.
-- [x] APPX/MSIX and bundle metadata, plus untrusted block-map comparison.
-- [x] Platform-neutral static build and CLI; Windows x64/x86 sanitizer-tested.
-- [ ] Linux CI execution; native coverage-guided fuzzing on Linux.
-- [ ] COM typelibs, certificate/catalog readers, installer families, WebView2 live.
-- [ ] Full Linux GUI/process backend and Android/ADB.
-
-## Additional reader increment
-
-See [formats-next-implementation.md](formats-next-implementation.md). MSFT COM
-metadata, structural X.509/PEM/CMS, TAR/gzip/ar plus Debian/npm containers,
-CRX/XPI/VSIX, Java package wrappers, Python ZIP metadata and Squirrel RELEASES
-now have integrated code and local checks. SLTG, full certificate/catalog
-verification and the installer executable payload readers remain open. Earlier
-unchecked rows describe the broader end goals, not a claim that no code exists.
+Delivered in v2.1.0. What was verified, and how, is in
+[formats-wave1-implementation.md](formats-wave1-implementation.md); the
+remaining limits are in [limitations](limitations.md).

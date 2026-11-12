@@ -2,24 +2,26 @@
 
 All notable changes to Cortex are documented in this file.
 
-## [v2.1.0] - not yet released
+## [v2.1.0] - 2026-11-12
 
-Installing, setting up and updating Cortex without editing files by hand.
+Installing, setting up and updating Cortex without editing files by hand,
+and more than fifty file formats read by built-in parsers. Every format is
+read, never run: no unpacking, no decryption, no unpickling.
 
 ### Added
-
-- **Additional artifact readers (local development):** TAR/PAX/GNU, gzip, ar/Debian/npm containers; X.509 DER/PEM, PKCS#7/CMS inventory; MSFT COM type libraries; CRX2/3, XPI/WebExtension, VSIX, WAR/EAR/JMOD, Python zipapp/wheel metadata and Squirrel RELEASES. Shared GUI/CLI/MCP routes, categorized file dialogs, independent fixtures and sanitizer tests. No signature trust or target execution is implied; exact limitations in `docs/formats-next-implementation.md`.
-
-- **Wave 1 readers (development source, not yet released):** native PDB/MSF7, ELF32/64 LE/BE, stored/MSZIP CAB, CFB/MSI tables and APPX/MSIX/bundle metadata; see `docs/formats-wave1-implementation.md` for exact support and exclusions. All share GUI/CLI/MCP artifact routes. Added fixtures, tests, a dedicated fuzz harness and a portable static build target.
-- **ZIP robustness:** invalid UTF-8 metadata found by instrumented mutations no longer causes JSON serialization failure. Invalid member names are repaired for display and refused for reading. Local-header and compressed-read bounds were tightened; reproducer retained.
 
 - **Installer** (`cortex-vX.Y.Z-windows-setup.exe`, Inno Setup): per-user install in `%LOCALAPPDATA%\Programs\Cortex` without administrator rights, Start menu entry, optional desktop shortcut, optional *Analyze with Cortex* right-click entry for `.exe`, `.dll` and `.asar` files, optional AI client setup. The uninstaller removes the program, the right-click entry and the MCP entries that start this copy; your data is kept. The release workflow installs, checks and uninstalls it on Windows before publishing.
 - **AI client setup** (`cortex setup`, and Home › *Set up my AI clients automatically* / Help › *Set up AI clients and engines*): finds Claude Desktop, Claude Code, Cursor, Windsurf, VS Code (Copilot), Gemini CLI, Codex and LM Studio, shows the plan, and adds Cortex to them read-only after you confirm. Each changed file is backed up first; a file that is not plain JSON is never rewritten. `--dry-run`, `--client`, `--allow-writes`, `--remove`, `--json`.
 - **Engine detection:** Ghidra, a JDK, ILSpy (ilspycmd), the .NET SDK, Vineflower and netcoredbg in the usual places (environment variables, `PATH`, dotnet tools, Downloads, Program Files, `C:\tools`). The paths found are passed to the MCP server and saved for the desktop; Artifacts › Engines › *Find installed engines*. A JDK found sets `JAVA_HOME` for Ghidra and Vineflower.
 - **Updates** (`cortex update`, and an *Update to X.Y.Z* button in the desktop): a daily check of the latest release (one HTTPS request; can be turned off), the release notes, then a download checked against the release's `SHA256SUMS.txt`. An installed copy runs the new installer, which closes and reopens Cortex; a portable copy is unpacked into a new folder beside the current one. Programs that still use files of an installed copy are listed instead of being forced. Releases now publish `SHA256SUMS.txt`.
 - `cortex.exe <file>` opens the desktop on a file in the Files layout.
-- **WinRT metadata (.winmd), wave 1**: detect WinMD structurally through CLR version and TypeDef flags, report WinRT type and interface names, public non-WinRT types and filename/assembly mismatches; use the existing .NET PE/CLR reader. Python-built fixtures (positive and negative), tests and fuzz corpora added. No execution, projection or activation.
-- **Windows driver files (.sys), wave 1**: the built-in PE reader identifies native-subsystem driver candidates from the .sys suffix, WDM flag and direct kernel imports. It reports candidate entry RVA and detection evidence; it never loads a driver or claims to prove the DriverEntry symbol. Both x86 and x64 fixtures, negative/malformed tests and fuzz corpus seeds were added.
+
+#### File formats
+
+Each reader is checked against an independent reference on fixtures made by
+the real toolchain, and fuzzed with ASan and UBSan. What each one leaves out
+is listed in `docs/limitations.md`.
+
 - **PE analysis, first wave of the formats roadmap** (`cortex.exe inspect`, Artifacts, `cortex_artifact_*`):
   - Authenticode: signer and certificates (subject, issuer, serial, validity), timestamp presence, and whether the file's current digest matches the signed one. The chain is not checked against trusted roots.
   - Import hash (pefile-compatible), delay-load imports, Rich header (product ids, builds, counts, checksum, hash).
@@ -27,14 +29,24 @@ Installing, setting up and updating Cortex without editing files by hand.
   - Load configuration and a hardening summary: ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET shadow stack, stack cookie.
   - Section entropy and packer detection (UPX, ASPack, MPRESS, PECompact, Themida, VMProtect, Enigma and others, plus heuristics). Detection only: Cortex never unpacks.
   - Checked against pefile (imphash, entropy) and osslsigncode (Authenticode digest) on new fixtures, a tampered signed file, a hand-built Rich header, and five minutes of fuzzing.
+- **Windows formats:** native PDB/MSF7 (symbols, records), CAB (stored and MSZIP), MSI databases (CFB tables), APPX/MSIX and bundles, X.509/PKCS#7 certificates and `.cat` catalogs, COM type libraries (`.tlb`), WinRT metadata (`.winmd`) and driver candidates (`.sys`).
 - **Windows minidumps** (`.dmp`): the system and process, the exception with its faulting module+offset and the address read or written, the threads with their instruction and stack pointers, the modules with versions and PDB identities, the memory kept. Unknown streams (Wine's, vendors') are listed. Checked against the minidump package on a Wine dump, and on a dump written by Windows in the desktop acceptance run.
 - **Registry hives** (`regf`: SYSTEM, SOFTWARE, NTUSER.DAT, `reg save` files): base block with its checksum, and the key tree with typed values (strings, numbers, lists, binary), bounded; cell loops are cut. Checked against python-registry on a generated hive, and on a `reg save` file on Windows.
+- **Native binaries:** ELF32/64 (both byte orders), Mach-O thin and fat (load commands, segments, symbols, dylibs, build version), COFF objects and `.lib` members. Go binaries, stripped or not, in PE, ELF or Mach-O: version, modules, build settings and every function name from the pclntab (checked with `go version -m` and `go tool nm`).
+- **Bytecode:** Python `.pyc` (code-object tree; CPython 3.13 instructions identical to `dis`), Java `.class` (constant pool, members, instructions as `javap -c`), Lua 5.1 to 5.4 and LuaJIT chunks, WebAssembly modules, SPIR-V shaders.
+- **Data and AI models:** SQLite databases and WAL journals (schema and row counts), binary property lists and NSKeyedArchiver, Python pickles (opcodes, and the imports they would perform judged; `os.system` and the like are flagged), NumPy `.npy`/`.npz`, safetensors, GGUF and ONNX.
+- **Captures, firmware and documents:** pcap and pcapng (flows, TLS server names, HTTP requests, DNS questions), Intel HEX, S-record, UF2, device trees, PDF (pages, JavaScript, actions, URIs, attachments, encryption; nothing is run or decrypted) and Windows shortcuts (`.lnk`, including the target from shell items).
+- **Archives and packages:** TAR, gzip, ar/Debian, npm, CRX, XPI, VSIX, WAR/EAR, JMOD, Python wheels and zipapps, Squirrel `RELEASES`; game archives: Valve VPK, id PAK and WAD, Ren'Py RPA (its index read as plain data only).
+- The Open dialog has categories for the new formats.
 - **Formats roadmap** (`docs/formats-roadmap.md`): every format Cortex reads and about two hundred planned ones, with state and priority.
 - The real-desktop acceptance run also checks the setup on a scratch profile, an update from a local feed (and a tampered download being refused), and a silent install, run and uninstall.
 
 ### Fixed
 
+### Fixed
+
 - The Home cards fit a 1024x768 window, and the header no longer overflows to a second line with a debugger attached.
+- ZIP members with invalid UTF-8 names are shown repaired and refused for reading, instead of failing the whole listing.
 
 ## [v2.0.0] - 2026-11-06
 

@@ -1,6 +1,6 @@
 # Wave 1: local implementation and verification
 
-Status: **development worktree, not merged or released**. This document records
+Status: **released in v2.1.0**. This document records
 what has code and test evidence; it is not a claim that all wave 1 or 200 formats
 are supported. The original .sys and structural .winmd additions are preserved.
 
@@ -59,8 +59,8 @@ The GUI smoke test is not a complete visual acceptance test for every format.
 
 `tools/static` builds the shared file parsers and `cortex-inspect` without
 Windows process APIs, the GUI, injection, Zydis or external decompilers. It
-has been compiled and tested on Windows x64/x86. Its Linux workflow is ready
-for CI, not yet executed in this worktree. This is **not** a Linux desktop,
+has been compiled and tested on Windows x64/x86, and on Linux by the
+*Portable static formats* workflow. This is **not** a Linux desktop,
 Linux live debugger or Android port.
 
 ## Work still open

@@ -6,7 +6,7 @@
   <img src="docs/images/brand/cortex-banner-dark.png" alt="Cortex: find what changed it, show the evidence" width="720">
 </picture>
 
-**See a value change in a program you own. Find the instruction that changed it. Show the evidence.**
+**See inside any software you own.** Find the value, catch the instruction that changes it, show the evidence.
 
 Memory scanner, debugger and reverse-engineering workspace for Windows software in one native app.
 It reads files as well as live processes, can use Ghidra, ILSpy and live debuggers, and has an MCP server so an AI agent can do the same work under your control.
@@ -158,6 +158,7 @@ Each row lists how its validation is done. "Validated" means checked in CI again
 | **PE files and native code** | Headers, sections, imports and exports, functions, xrefs, CFG, annotations | Nothing else | Compared with `objdump` (`tests/native_static_e2e.py`) |
 | **.NET assemblies** | Metadata (all 45 tables), types, members, P/Invoke, CIL with exception clauses | Nothing else | Compared with `System.Reflection.Metadata` (`tests/dotnet_e2e.py`) |
 | **JavaScript / TypeScript, Electron** | Modules and imports, bundles, source maps, `package.json`, preload, `webPreferences`, IPC channels | Nothing else | `tests/fixtures/electron-app.asar` and its expected output |
+| **50+ file formats, built in** | Mach-O, ELF, COFF, PDB, Go (names even when stripped), Python `.pyc`, Java `.class`, Lua/LuaJIT, WebAssembly, SPIR-V, SQLite, pickles (dangerous imports flagged), NumPy, safetensors, GGUF, ONNX, pcap/pcapng, PDF, `.lnk`, MSI, MSIX, CAB, certificates, minidumps, registry hives, firmware images, game archives (VPK, PAK, WAD, RPA)… Read, never run | Nothing else | Each one against an independent reference on fixtures from the real toolchain (`tests/format_more_tests.cpp` and others), plus fuzzing. See the [roadmap](docs/formats-roadmap.md) and [limitations](docs/limitations.md) |
 | **Decompiled native code** | Functions, calls, types and C by RVA, mapped to the live module when the SHA-256 matches | [Ghidra](https://github.com/NationalSecurityAgency/ghidra) 11.x and JDK 21 | PE x64 and x86, ELF x86-64 (`analysis-engines` CI job) |
 | **Decompiled C#** | C# project or a single type | [ILSpy](https://github.com/icsharpcode/ILSpy) `ilspycmd` 9.x | The decompiled project is rebuilt and compared with the original |
 | **Decompiled Java** | Java sources | [Vineflower](https://github.com/Vineflower/vineflower) 1.11 and a JDK | Sources recompile; `javap -p` signatures match |
@@ -166,7 +167,7 @@ Each row lists how its validation is done. "Validated" means checked in CI again
 | **Live .NET** | Log breakpoints with stack and locals | [netcoredbg](https://github.com/Samsung/netcoredbg) 3.1, started by Cortex in stdio mode | Real netcoredbg 3.1.2 against `tests/fixtures/dotnet-live`, on Windows (stdio mode) and Linux |
 | **Live Java** | Log breakpoints with stack and locals | A JVM started with JDWP | Real JVM against `tests/fixtures/java-live` |
 
-Live providers never evaluate code. At a log breakpoint they record the stack and locals and resume at once, and a pause Cortex did not set is resumed too. Python bytecode, Unity/IL2CPP and WebAssembly are planned; see the [roadmap](docs/cortex-2-roadmap.md).
+Live providers never evaluate code. At a log breakpoint they record the stack and locals and resume at once, and a pause Cortex did not set is resumed too. Unity/IL2CPP, Unreal and Godot are planned; see the [formats roadmap](docs/formats-roadmap.md).
 
 ## How it fits together
 
@@ -370,7 +371,7 @@ No. Built-in parsers cover PE, native code, .NET metadata and CIL, ASAR, JS/TS a
 <details>
 <summary><b>Does anything leave my machine?</b></summary>
 
-No. Cortex has no telemetry or update check and uploads nothing. External engines run locally, and debug interfaces are reached only on `127.0.0.1`. Your MCP client decides what it sends to its own model.
+Nothing about what you analyze. Cortex has no telemetry and uploads nothing. Its only network request is an optional daily update check against GitHub releases, which you can turn off. External engines run locally, and debug interfaces are reached only on `127.0.0.1`. Your MCP client decides what it sends to its own model.
 </details>
 
 <details>

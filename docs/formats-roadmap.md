@@ -21,11 +21,10 @@ Rules that apply to every row:
 - Each format lands with a fixture, a test and a fuzz harness, like the
   existing parsers ([tests/fuzz](../tests/fuzz/README.md)).
 
-The local wave-1 implementation and actual verification results are recorded in
-[formats-wave1-implementation.md](formats-wave1-implementation.md). Local test
-coverage does not make a feature shipped in the latest published release.
-Additional archives, certificates, COM typelibs and package readers are detailed
-in [formats-next-implementation.md](formats-next-implementation.md).
+How each shipped reader was verified: [Windows formats](formats-wave1-implementation.md),
+[archives, certificates, type libraries and packages](formats-next-implementation.md),
+and, for the rest, `tests/format_more_tests.cpp` with the generators in
+`tests/fixtures/format-more`. Their limits are in [limitations](limitations.md).
 
 ## 1. Executables and native binaries
 
@@ -41,20 +40,20 @@ in [formats-next-implementation.md](formats-next-implementation.md).
 | PE hardening | load config; ASLR, high-entropy VA, DEP, CFG, SafeSEH, CET, /GS | ✅ | | built-in |
 | PE overlay, entropy, packer detection | appended data, section entropy, 16 packer families and heuristics (detection only) | ✅ | | built-in |
 | PE ARM64, ARM64EC, CHPE | Windows on ARM images | ⬜ | P3 | built-in |
-| ELF | Native ELF32/64 LE/BE, headers, symbols, REL/RELA, notes, dependencies and hardening metadata; Ghidra optional for decompilation | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| Mach-O (thin and fat) | load commands, symbols, code signature, entitlements, chained fixups | ⬜ | P3 | built-in |
-| ar static-library containers (.lib/.a) | Common/GNU/BSD member inventory and child bytes; thin external references refused; symbol indexes not decoded | 🟡 implemented/tested locally; release pending | P3 | built-in |
-| COFF objects (.obj/.exp) | object symbols, sections, relocations (not implied by ar container support) | ⬜ | P3 | built-in |
+| ELF | Native ELF32/64 LE/BE, headers, symbols, REL/RELA, notes, dependencies and hardening metadata; Ghidra optional for decompilation | ✅ |  | built-in |
+| Mach-O (thin and fat) | load commands, symbols, code signature, entitlements, chained fixups | ✅ |  | built-in |
+| ar static-library containers (.lib/.a) | Common/GNU/BSD member inventory and child bytes; thin external references refused; symbol indexes not decoded | ✅ |  | built-in |
+| COFF objects (.obj/.exp) | object symbols, sections, relocations (not implied by ar container support) | 🟡 no .exp |  | built-in |
 | DOS MZ, NE, LE/LX | 16-bit Windows, VxD, OS/2 headers | ⬜ | P4 | built-in (code via Ghidra) |
-| Windows drivers (.sys) | Native-subsystem PE, candidate entry RVA, WDM flag and direct kernel imports (heuristic; not a proven DriverEntry) | 🟡 tested locally; CI/release pending | P1 | built-in PE |
+| Windows drivers (.sys) | Native-subsystem PE, candidate entry RVA, WDM flag and direct kernel imports (heuristic; not a proven DriverEntry) | ✅ |  | built-in PE |
 | UEFI images (.efi, TE) | PE/TE headers, GUIDs | ⬜ | P4 | built-in |
-| Intel HEX, Motorola S-record, UF2, raw images | load to an address; ARM vector table detection | ⬜ | P4 | built-in |
+| Intel HEX, Motorola S-record, UF2, raw images | load to an address; ARM vector table detection | 🟡 no raw images |  | built-in |
 
 ## 2. Symbols and debug information
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| PDB (MSF) | MSF7 GUID/age, DBI modules, symbols, common TPI/IPI records and C13 lines; no full type resolver | 🟡 implemented/tested locally; release pending | P1 | built-in (dbghelp remains live) |
+| PDB (MSF) | MSF7 GUID/age, DBI modules, symbols, common TPI/IPI records and C13 lines; no full type resolver | ✅ |  | built-in (dbghelp remains live) |
 | DWARF (incl. split DWARF, .dSYM) | functions, types, lines | ⬜ | P3 | built-in |
 | CodeView, .map files, Breakpad .sym | symbols | ⬜ | P3 | built-in |
 
@@ -77,20 +76,20 @@ in [formats-next-implementation.md](formats-next-implementation.md).
 | .NET ReadyToRun, single-file bundles, NativeAOT detection | bundle members, R2R headers | ⬜ | P1 | built-in |
 | .NET resources (.resources) | resource names and values | ⬜ | P3 | built-in |
 | .NET strong name, obfuscator detection | signature, known obfuscator markers (detection only) | ⬜ | P3 | built-in |
-| WinRT metadata (.winmd) | CLR metadata, Windows Runtime version marker, TypeDef flags, type/interface list, assembly name checks; no WinRT semantic projection yet | 🟡 tested locally; full conformance/CI pending | P1 | built-in .NET |
-| COM type libraries (.tlb) | MSFT GUIDs, types/interfaces, methods and parameters, tested on Windows-generated x86/x64 files; no SLTG/full type resolver | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| Java .class | constant pool, methods, bytecode | ⬜ | P3 | built-in |
+| WinRT metadata (.winmd) | CLR metadata, Windows Runtime version marker, TypeDef flags, type/interface list, assembly name checks; no WinRT semantic projection yet | ✅ |  | built-in .NET |
+| COM type libraries (.tlb) | MSFT GUIDs, types/interfaces, methods and parameters, tested on Windows-generated x86/x64 files; no SLTG/full type resolver | ✅ |  | built-in |
+| Java .class | constant pool, methods, bytecode | ✅ |  | built-in |
 | Java .jar to Java | decompiled sources | ✅ | | Vineflower |
-| .war and .ear | ZIP inventory and XML deployment-descriptor metadata; no execution | 🟡 implemented/tested locally; release pending | P3 | built-in |
-| JMOD | Version 1.0 wrapper and nested ZIP (real JDK fixture); class bytes only, no module semantics | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| .war and .ear | ZIP inventory and XML deployment-descriptor metadata; no execution | ✅ |  | built-in |
+| JMOD | Version 1.0 wrapper and nested ZIP (real JDK fixture); class bytes only, no module semantics | ✅ |  | built-in |
 | jimage | module image format | ⬜ | P3 | built-in |
 | Android DEX, ODEX, VDEX, OAT, ART | classes, methods, bytecode | ⬜ | P3 | built-in |
-| Python .pyc (2.7 to 3.13) | code objects, bytecode disassembly | ⬜ | P3 | built-in |
+| Python .pyc (2.7 to 3.13) | code objects, bytecode disassembly | ✅ |  | built-in |
 | PyInstaller | CArchive members, Python version, entry scripts | ⬜ | P3 | built-in |
-| Python zipapps (.pyz), wheels | ZIP inventory, __main__.py entry point and wheel METADATA dependencies; no Python import or execution | 🟡 implemented/tested locally; release pending | P3 | built-in ZIP |
-| py2exe, cx_Freeze, Nuitka detection | packaged executable inventory and markers | ⬜ | P3 | built-in |
-| Lua bytecode (5.1 to 5.4, LuaJIT) | functions, constants, disassembly | ⬜ | P2 | built-in |
-| Go binaries | buildinfo, modules, pclntab function names (also when stripped) | ⬜ | P3 | built-in |
+| Python zipapps (.pyz), wheels | ZIP inventory, __main__.py entry point and wheel METADATA dependencies; no Python import or execution | ✅ |  | built-in ZIP |
+| py2exe, cx_Freeze, Nuitka detection | packaged executable inventory and markers | 🟡 .pyz and wheels |  | built-in |
+| Lua bytecode (5.1 to 5.4, LuaJIT) | functions, constants, disassembly | ✅ |  | built-in |
+| Go binaries | buildinfo, modules, pclntab function names (also when stripped) | ✅ |  | built-in |
 | Rust binaries | cargo-auditable crates, crate names from paths and panics | ⬜ | P3 | built-in |
 | Swift and Objective-C | runtime metadata, classes and selectors | ⬜ | P4 | built-in |
 | Delphi and C++Builder | RTTI, DFM forms | ⬜ | P3 | built-in |
@@ -98,7 +97,7 @@ in [formats-next-implementation.md](formats-next-implementation.md).
 | AutoIt (.a3x) and compiled AutoHotkey | embedded script | ⬜ | P3 | built-in |
 | Dart AOT and Flutter | snapshot hash, engine provenance, symbols | ⬜ | P3 | built-in |
 | Erlang BEAM | atoms, exports, imports, code | ⬜ | P4 | built-in |
-| WebAssembly | sections, imports, exports, names, DWARF, disassembly | ⬜ | P3 | built-in |
+| WebAssembly | sections, imports, exports, names, DWARF, disassembly | 🟡 no disassembly or DWARF |  | built-in |
 
 ## 5. JavaScript, web and desktop apps
 
@@ -113,8 +112,8 @@ in [formats-next-implementation.md](formats-next-implementation.md).
 | webpack and Vite bundles | modules and chunk graph | ⬜ | P3 | built-in |
 | Tauri apps | assets embedded in the executable | ⬜ | P3 | built-in |
 | NW.js apps | package and scripts | ⬜ | P4 | built-in |
-| Browser and editor extensions (.crx, .xpi, .vsix) | CRX2/3 header/proof inventory, WebExtension permissions/scripts and VSIX/VS Code manifests; signatures unverified, no install | 🟡 implemented/tested locally; release pending | P3 | built-in |
-| npm packages (.tgz) | gzip -> TAR -> package.json, dependencies/scripts as data and nested files; no install | 🟡 implemented/tested locally; release pending | P4 | built-in |
+| Browser and editor extensions (.crx, .xpi, .vsix) | CRX2/3 header/proof inventory, WebExtension permissions/scripts and VSIX/VS Code manifests; signatures unverified, no install | ✅ |  | built-in |
+| npm packages (.tgz) | gzip -> TAR -> package.json, dependencies/scripts as data and nested files; no install | ✅ |  | built-in |
 
 ## 6. Game engines
 
@@ -130,9 +129,9 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Unreal .uasset, .uexp | names, imports, exports | ⬜ | P2 | built-in |
 | Godot .pck, GDScript bytecode (.gdc) | inventory, tokens | ⬜ | P2 | built-in |
 | GameMaker data.win | chunks, code entries | ⬜ | P2 | built-in |
-| RPG Maker (.rgssad, .rvdata2), Ren'Py (.rpa, .rpyc) | archives, Ruby Marshal, Python bytecode | ⬜ | P2 | built-in |
-| Source engine (.vpk, .bsp) | file inventory, map lumps | ⬜ | P4 | built-in |
-| id Tech (.pak, .pk3, .wad) | file inventory | ⬜ | P4 | built-in |
+| RPG Maker (.rgssad, .rvdata2), Ren'Py (.rpa, .rpyc) | archives, Ruby Marshal, Python bytecode | 🟡 Ren'Py .rpa |  | built-in |
+| Source engine (.vpk, .bsp) | file inventory, map lumps | 🟡 .vpk |  | built-in |
+| id Tech (.pak, .pk3, .wad) | file inventory | ✅ |  | built-in |
 | Bethesda (.bsa, .ba2, .esp) | archive and plugin records | ⬜ | P4 | built-in |
 | CryEngine .pak, XNA/MonoGame .xnb, LÖVE .love | inventory | ⬜ | P4 | built-in |
 | Direct3D shaders (DXBC, DXIL, .cso) | signatures, resources, disassembly | ⬜ | P2 | built-in |
@@ -142,18 +141,18 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
 | ZIP, JAR, APK, NuGet, wheels (stored and deflate) | entries, nested inspection | ✅ | | built-in |
-| TAR (v7, ustar, PAX, GNU long names) | headers/checksums and bounded ordinary files; links/sparse/unsafe children not followed | 🟡 implemented/tested locally; release pending | P3 | built-in |
-| gzip (.gz/.tgz) | concatenated members, optional headers, CRC/ISIZE and bounded DEFLATE to a payload child | 🟡 implemented/tested locally; release pending | P3 | built-in |
+| TAR (v7, ustar, PAX, GNU long names) | headers/checksums and bounded ordinary files; links/sparse/unsafe children not followed | ✅ |  | built-in |
+| gzip (.gz/.tgz) | concatenated members, optional headers, CRC/ISIZE and bounded DEFLATE to a payload child | ✅ |  | built-in |
 | 7z, bzip2, xz, zstd, lz4 | compressed archive readers | ⬜ | P3 | built-in |
 | RAR | entries (read only) | ⬜ | P4 | built-in |
-| CAB | Stored/MSZIP inventory and bounded expansion, block checksums/history; LZX/Quantum/spanned files unavailable | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| OLE Compound File (CFB v3/v4) | Bounded FAT/DIFAT/MiniFAT, storage tree, child streams; no COM activation | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| MSI | CFB/FAT/MiniFAT, schemas and table values, CustomAction listed only, embedded CAB | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| MSIX, APPX, appxbundle | Namespaced manifests, identity/dependencies/apps, bundles, SHA-256 block comparison; no signature trust | 🟡 implemented/tested locally; release pending | P1 | built-in ZIP + XML |
+| CAB | Stored/MSZIP inventory and bounded expansion, block checksums/history; LZX/Quantum/spanned files unavailable | ✅ |  | built-in |
+| OLE Compound File (CFB v3/v4) | Bounded FAT/DIFAT/MiniFAT, storage tree, child streams; no COM activation | ✅ |  | built-in |
+| MSI | CFB/FAT/MiniFAT, schemas and table values, CustomAction listed only, embedded CAB | ✅ |  | built-in |
+| MSIX, APPX, appxbundle | Namespaced manifests, identity/dependencies/apps, bundles, SHA-256 block comparison; no signature trust | ✅ |  | built-in ZIP + XML |
 | NSIS, Inno Setup, InstallShield, WiX Burn | script, file list (no running) | ⬜ | P1 | built-in |
-| Squirrel (Electron updates) | RELEASES hash/name-or-URL/size claims, full/delta metadata; NuGet uses existing ZIP reader; no download/apply/setup.exe unpacking | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| Squirrel (Electron updates) | RELEASES hash/name-or-URL/size claims, full/delta metadata; NuGet uses existing ZIP reader; no download/apply/setup.exe unpacking | ✅ |  | built-in |
 | ISO/UDF, VHD/VHDX, WIM, CHM | file trees | ⬜ | P3 | built-in |
-| Debian .deb | ar members and nested control/data tar.gz; no installation, scripts or fetching | 🟡 implemented/tested locally; release pending | P4 | built-in |
+| Debian .deb | ar members and nested control/data tar.gz; no installation, scripts or fetching | ✅ |  | built-in |
 | rpm, AppImage, snap (squashfs) | control data, files | ⬜ | P4 | built-in |
 | DMG, PKG (xar) | file trees | ⬜ | P4 | built-in |
 | Docker and OCI images | layers, configuration | ⬜ | P4 | built-in |
@@ -175,26 +174,26 @@ Reading and listing only. Encrypted archives stay encrypted.
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| SQLite (with WAL) | schema, rows | ⬜ | P3 | built-in |
+| SQLite (with WAL) | schema, rows | ✅ |  | built-in |
 | LevelDB and IndexedDB | keys and values (Electron and Chrome storage) | ⬜ | P3 | built-in |
 | Protobuf | schema-less decoding; .proto from descriptors embedded in binaries | ⬜ | P3 | built-in |
 | FlatBuffers (.bfbs), Cap'n Proto, MessagePack, CBOR, BSON, Thrift, Avro | structure | ⬜ | P4 | built-in |
-| Property lists (binary, XML), NSKeyedArchiver | values | ⬜ | P4 | built-in |
+| Property lists (binary, XML), NSKeyedArchiver | values | 🟡 binary |  | built-in |
 | Windows registry hives (REGF) | base block, key tree, typed values (bounded) | ✅ | | built-in |
 | Registry exports (.reg) | keys and values | ⬜ | P3 | built-in |
-| Java serialization, .NET BinaryFormatter (detection), Python pickle (disassembly), Ruby Marshal, PHP serialize | structure, never instantiated | ⬜ | P3 | built-in |
-| X.509 DER/PEM and PKCS#7/CMS | issuer/subject, validity, algorithms, fingerprints, signer/certificate/content inventory; no signature or chain trust | 🟡 implemented/tested locally; release pending | P1 | built-in |
-| Catalog files (.cat) | CMS CTL OID recognition and raw content; catalog-entry decoding and signature trust not implemented | 🟡 implemented/tested locally; release pending | P1 | built-in |
+| Java serialization, .NET BinaryFormatter (detection), Python pickle (disassembly), Ruby Marshal, PHP serialize | structure, never instantiated | 🟡 Python pickle |  | built-in |
+| X.509 DER/PEM and PKCS#7/CMS | issuer/subject, validity, algorithms, fingerprints, signer/certificate/content inventory; no signature or chain trust | ✅ |  | built-in |
+| Catalog files (.cat) | CMS CTL OID recognition and raw content; catalog-entry decoding and signature trust not implemented | ✅ |  | built-in |
 
 ## 10. AI models
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| GGUF, safetensors | metadata, tensors | ⬜ | P4 | built-in |
-| ONNX | graph, operators, inputs and outputs | ⬜ | P4 | built-in |
-| PyTorch .pt / .pth | ZIP plus pickle opcodes, flagged imports (never loaded) | ⬜ | P4 | built-in |
+| GGUF, safetensors | metadata, tensors | ✅ |  | built-in |
+| ONNX | graph, operators, inputs and outputs | ✅ |  | built-in |
+| PyTorch .pt / .pth | ZIP plus pickle opcodes, flagged imports (never loaded) | ✅ |  | built-in |
 | TensorFlow SavedModel, .pb, TFLite | graph, signatures | ⬜ | P4 | built-in |
-| Keras (.h5, .keras), NumPy (.npy, .npz) | layers, arrays | ⬜ | P4 | built-in |
+| Keras (.h5, .keras), NumPy (.npy, .npz) | layers, arrays | 🟡 NumPy |  | built-in |
 | Core ML, OpenVINO IR, TensorRT engine headers | model metadata | ⬜ | P4 | built-in |
 
 ## 11. GPU code and shaders
@@ -203,23 +202,23 @@ Reading and listing only. Encrypted archives stay encrypted.
 |---|---|---|---|---|
 | CUDA fatbin, CUBIN, PTX; HIP code objects | targets, kernels, parameters | ⬜ | P4 | built-in |
 | DXBC, DXIL, .cso | see game engines | ⬜ | P2 | built-in |
-| SPIR-V | modules, entry points, disassembly | ⬜ | P2 | built-in |
+| SPIR-V | modules, entry points, disassembly | ✅ |  | built-in |
 | Metal .metallib, Unity shader blobs | inventory | ⬜ | P4 | built-in |
 
 ## 12. Documents and scripts
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| PDF | objects, JavaScript, embedded files | ⬜ | P4 | built-in |
+| PDF | objects, JavaScript, embedded files | ✅ |  | built-in |
 | Office OOXML and OLE, VBA macros (source and P-code) | parts, macros | ⬜ | P4 | built-in |
-| RTF (OLE objects), OneNote, .lnk shortcuts | objects, targets | ⬜ | P4 | built-in |
+| RTF (OLE objects), OneNote, .lnk shortcuts | objects, targets | 🟡 .lnk |  | built-in |
 | PowerShell, VBScript, JScript, HTA, batch | parsed structure, never run | ⬜ | P4 | built-in |
 
 ## 13. Network and traces
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| pcap, pcapng | packets, flows, TLS SNI, HTTP | ⬜ | P4 | built-in |
+| pcap, pcapng | packets, flows, TLS SNI, HTTP | ✅ |  | built-in |
 | HAR, Fiddler SAZ, mitmproxy flows | requests and responses | ⬜ | P3 | built-in |
 | ETW traces (.etl), Process Monitor (.pml), event logs (.evtx) | events | ⬜ | P4 | built-in |
 | Chrome traces (JSON) | events | ⬜ | P4 | built-in |
@@ -229,7 +228,7 @@ Reading and listing only. Encrypted archives stay encrypted.
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
 | UEFI capsules, firmware volumes, FFS | files, GUIDs, PE/TE images | ⬜ | P4 | built-in |
-| U-Boot images (uImage, FIT), device trees (DTB) | headers, nodes | ⬜ | P4 | built-in |
+| U-Boot images (uImage, FIT), device trees (DTB) | headers, nodes | 🟡 device trees |  | built-in |
 | SquashFS, CramFS, JFFS2, UBIFS, ext4 | file trees | ⬜ | P4 | built-in |
 | Android boot.img, vbmeta, sparse images | headers | ⬜ | P4 | built-in |
 | ESP32 and ESP8266 images, SVD files | segments, peripherals | ⬜ | P4 | built-in |
@@ -239,7 +238,7 @@ Reading and listing only. Encrypted archives stay encrypted.
 
 | Format | What Cortex reads | State | Priority | Engine |
 |---|---|---|---|---|
-| Windows .inf, .cat, .mui, side-by-side manifests | sections, catalogs, resources | ⬜ | P1 | built-in |
+| Windows .inf, .cat, .mui, side-by-side manifests | sections, catalogs, resources | 🟡 .cat |  | built-in |
 | Linux kernel modules (.ko), eBPF objects | modinfo, programs, maps | ⬜ | P4 | built-in |
 | macOS kexts | bundle and Mach-O | ⬜ | P4 | built-in |
 
