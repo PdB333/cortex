@@ -25,6 +25,8 @@ struct Tests {
         return source;
     }
     json Inspect(const std::string& path) { return DefaultRegistry().Inspect(*File(path)); }
+    // Refused by every dedicated provider: failed, or only described by the reader of last resort.
+    static bool Refused(const json& r) { return !r.value("ok", false) || r.value("provider", json::object()).value("name", "") == "generic"; }
     std::vector<uint8_t> Bytes(ByteSourcePtr source) {
         return source->ReadSome(0, static_cast<size_t>(source->Size()));
     }
@@ -61,7 +63,7 @@ void Archives(Tests& t) {
             t.Check(!DefaultRegistry().OpenChild(file, child.at("name"), error), "TAR unsafe open refused");
         }
     }
-    t.Check(!t.Inspect("archive-next/bad-checksum.tar").value("ok", false), "TAR checksum rejected");
+    t.Check(Tests::Refused(t.Inspect("archive-next/bad-checksum.tar")), "TAR checksum rejected");
     for (const char* name : {"plain.gz", "optional-header.gz"}) {
         auto file = t.File(std::string("archive-next/") + name);
         const auto report = DefaultRegistry().Inspect(*file);
@@ -134,7 +136,7 @@ void Certificates(Tests& t) {
     t.Check(p7b.value("format", "") == "pkcs7" && p7b.at("data").at("certificate_count") == 1 && p7b.at("data").at("signer_count") == 0,
             "PKCS7 certificate-only bundle");
     for (const char* name : {"bad-base64.pem", "indefinite.der"})
-        t.Check(!t.Inspect(std::string("certificates/") + name).value("ok", false), "invalid certificate encoding refused");
+        t.Check(Tests::Refused(t.Inspect(std::string("certificates/") + name)), "invalid certificate encoding refused");
     InspectOptions zero; zero.maxEntries = 0;
     const auto bounded = DefaultRegistry().Inspect(*pem, zero);
     t.Check(bounded.at("data").at("certificates").empty() && bounded.at("data").at("truncated") == true, "certificate listing bound");
@@ -221,7 +223,7 @@ void Packages(Tests& t) {
     t.Check(release.at("data").at("packages").at(1).at("delta") == true, "Squirrel delta metadata");
     t.Check(release.at("data").at("network_requests") == false && release.at("data").at("installation") == false, "Squirrel references not downloaded");
     auto invalid = FromBytes(t.Bytes(t.File("package-next/invalid-RELEASES.txt")), "RELEASES");
-    t.Check(!DefaultRegistry().Inspect(*invalid).value("ok", false), "Squirrel traversal name rejected");
+    t.Check(Tests::Refused(DefaultRegistry().Inspect(*invalid)), "Squirrel traversal name rejected");
     InspectOptions zero; zero.maxEntries = 0;
     const auto zeroRelease = DefaultRegistry().Inspect(*releaseFile, zero);
     t.Check(zeroRelease.at("data").at("packages").empty() && zeroRelease.at("data").at("truncated") == true, "Squirrel output bounds");

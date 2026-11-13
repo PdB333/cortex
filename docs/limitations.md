@@ -97,6 +97,20 @@ produced by the real toolchain (`tests/format_more_tests.cpp`, generators in
   are listed, not readable. Encrypted or obfuscated game archives are not
   supported and never decrypted.
 
+## Unknown files (reader of last resort)
+
+- A signature names what a file **most likely** is; it does not validate the
+  file. Only formats with a built-in reader are parsed further.
+- Strings and embedded files are searched in the first 64 MiB, the text
+  profile in the first 4 MiB; the entropy covers up to 1 GiB. Strings and notable values are
+  capped (64 of each kind), and so is the number of embedded files.
+- Embedded files are found by strong signatures and confirmed by a dedicated
+  reader where one exists; an embedded file without one (an image, a 7-Zip
+  archive) is listed but its end is only estimated (the next hit or the end
+  of the file). A compressed or encrypted region is never decompressed or
+  decrypted, so files hidden inside it are not seen.
+- The language of a text file is a guess from its first lines.
+
 ## Installation and updates
 
 - **Not code-signed yet.** SmartScreen warns on the first run of the

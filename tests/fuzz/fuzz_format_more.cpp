@@ -9,6 +9,7 @@
 #include "artifacts/document_provider.h"
 #include "artifacts/firmware_provider.h"
 #include "artifacts/game_provider.h"
+#include "artifacts/generic_provider.h"
 #include "artifacts/native_more_provider.h"
 #include <cstdint>
 #include <memory>
@@ -44,6 +45,7 @@ const std::vector<std::shared_ptr<const Provider>>& Providers() {
         std::make_shared<QuakePakProvider>(),      // 23
         std::make_shared<WadProvider>(),           // 24
         std::make_shared<RenpyArchiveProvider>(),  // 25
+        std::make_shared<GenericProvider>(),       // 26: the reader of last resort
     };
     return list;
 }

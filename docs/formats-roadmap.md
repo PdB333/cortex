@@ -26,6 +26,11 @@ How each shipped reader was verified: [Windows formats](formats-wave1-implementa
 and, for the rest, `tests/format_more_tests.cpp` with the generators in
 `tests/fixtures/format-more`. Their limits are in [limitations](limitations.md).
 
+Any other file opens with the **reader of last resort**: likely type from
+about 150 signatures or the extension, text or binary profile, entropy,
+strings (URLs, IP addresses, paths, registry keys, GUIDs) and embedded files
+confirmed by their own readers. See [limitations](limitations.md#unknown-files-reader-of-last-resort).
+
 ## 1. Executables and native binaries
 
 | Format | What Cortex reads | State | Priority | Engine |

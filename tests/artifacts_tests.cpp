@@ -30,6 +30,11 @@
 
 namespace {
 
+// Refused by every dedicated provider: failed, or only described by the
+// reader of last resort (the "generic" provider describes any file).
+bool Refused(const cortex::artifacts::json& r) { return r["ok"] == false || r["provider"]["name"] == "generic"; }
+
+
 using namespace cortex::artifacts;
 
 int failures = 0;
@@ -158,8 +163,10 @@ void TestPeFixture(const std::string& path) {
     };
     uint32_t lfanew = 0;
     std::memcpy(&lfanew, original.data() + 0x3C, 4);
-    CHECK(mutate(0x3C, {0xFF, 0xFF, 0xFF, 0x7F})["ok"] == false);              // e_lfanew far outside
-    CHECK(mutate(lfanew, {'X', 'E', 0, 0})["error"] == "unknown_format");  // no provider claims it
+    // A broken PE is not claimed by the PE provider; the reader of last resort describes it.
+    auto notPe = [](const json& r) { return r["ok"] == false || r["provider"]["name"] == "generic"; };
+    CHECK(notPe(mutate(0x3C, {0xFF, 0xFF, 0xFF, 0x7F})));                  // e_lfanew far outside
+    CHECK(mutate(lfanew, {'X', 'E', 0, 0})["provider"]["name"] == "generic");  // no dedicated provider claims it
     {
         auto copy = original;
         copy[lfanew] = 'X';
@@ -263,7 +270,7 @@ void TestAsar() {
     // Malformed archives.
     auto bad = MakeAsar(tree, payload);
     bad[4] = 0xFF; bad[5] = 0xFF; bad[6] = 0xFF; bad[7] = 0x7F;  // header larger than the file
-    CHECK(registry.Inspect(*FromBytes(bad, "bad1"))["ok"] == false);
+    CHECK(Refused(registry.Inspect(*FromBytes(bad, "bad1"))));
     bad = MakeAsar(tree, payload);
     bad[16] = '[';                                              // not a file tree
     CHECK(!AsarProvider().Detect(*FromBytes(bad, "bad2")));
@@ -277,12 +284,13 @@ void TestAsar() {
     small.maxEntries = 2;
     CHECK(registry.ListChildren(*archive, small)["children"].size() == 2);
 
-    // Random bytes are nobody's format.
+    // Random bytes are nobody's format: only the reader of last resort describes them.
     std::mt19937 random(7);
     std::vector<uint8_t> noise(4096);
     for (auto& byte : noise) byte = static_cast<uint8_t>(random());
     const json unknown = registry.Inspect(*FromBytes(noise, "noise"));
-    CHECK(unknown["ok"] == false && unknown["error"] == "unknown_format" && unknown["identity"]["sha256"].is_string());
+    CHECK(unknown["ok"] == true && unknown["provider"]["name"] == "generic" && unknown["format"] == "unknown" &&
+          unknown["data"]["entropy"]["overall"].get<double>() > 7.9 && unknown["identity"]["sha256"].is_string());
 }
 
 } // namespace
@@ -485,7 +493,7 @@ void TestWindowsDrivers(const std::string& fixtures) {
             (void)registry.Inspect(*FromBytes(std::move(damaged), "mutated.sys"));
         }
     }
-    CHECK(registry.Inspect(*FromBytes({'M', 'Z'}, "fake.sys"))["ok"] == false);
+    CHECK(Refused(registry.Inspect(*FromBytes({'M', 'Z'}, "fake.sys"))));
 }
 
 int main(int argc, char** argv) {

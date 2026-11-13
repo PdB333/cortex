@@ -22,7 +22,7 @@ set(SOURCES
     minidump_provider.cpp hive_provider.cpp pdb_provider.cpp elf_provider.cpp
     cab_provider.cpp compound_reader.cpp compound_provider.cpp msi_tables.cpp archive_provider.cpp certificate_provider.cpp typelib_provider.cpp package_metadata.cpp
     bytecode_provider.cpp native_more_provider.cpp data_provider.cpp
-    capture_provider.cpp firmware_provider.cpp document_provider.cpp game_provider.cpp)
+    capture_provider.cpp firmware_provider.cpp document_provider.cpp game_provider.cpp generic_provider.cpp)
 list(TRANSFORM SOURCES PREPEND "${ROOT}/core/artifacts/")
 add_library(cortex_static_parsers STATIC ${SOURCES})
 target_include_directories(cortex_static_parsers PUBLIC "${ROOT}/core")

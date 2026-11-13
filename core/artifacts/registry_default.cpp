@@ -21,6 +21,7 @@
 #include "firmware_provider.h"
 #include "document_provider.h"
 #include "game_provider.h"
+#include "generic_provider.h"
 
 namespace cortex::artifacts {
 
@@ -71,6 +72,9 @@ const Registry& DefaultRegistry() {
         built.Add(std::make_shared<QuakePakProvider>());
         built.Add(std::make_shared<WadProvider>());
         built.Add(std::make_shared<RenpyArchiveProvider>());
+        // Last resort: claims any file with the lowest score, so a dedicated
+        // provider always wins and nothing is left without a description.
+        built.Add(std::make_shared<GenericProvider>());
         return built;
     }();
     return registry;

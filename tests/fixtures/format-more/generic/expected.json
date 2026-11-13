@@ -1,0 +1,113 @@
+{
+ "anim.gif": {
+  "file_description": "GIF image data, version 89a, 64 x 48",
+  "file_mime": "image/gif"
+ },
+ "clip.mkv": {
+  "file_description": "Matroska data",
+  "file_mime": "video/x-matroska"
+ },
+ "clip.mp4": {
+  "file_description": "ISO Media, MP4 Base Media v1 [ISO 14496-12:2003]",
+  "file_mime": "video/mp4"
+ },
+ "config.json": {
+  "file_description": "JSON text data",
+  "file_mime": "application/json"
+ },
+ "data.txt.bz2": {
+  "file_description": "bzip2 compressed data, block size = 900k",
+  "file_mime": "application/x-bzip2"
+ },
+ "data.txt.xz": {
+  "file_description": "XZ compressed data, checksum CRC64",
+  "file_mime": "application/x-xz"
+ },
+ "dropper.bin": {
+  "embedded": [
+   2379,
+   21411,
+   21574
+  ],
+  "file_description": "data",
+  "file_mime": "application/octet-stream",
+  "strings": [
+   "https://cortex.example/update?id=7",
+   "contact: owner@cortex.example",
+   "server 192.168.10.42 port 8080",
+   "C:\\Program Files\\Cortex\\cortex.exe",
+   "HKEY_LOCAL_MACHINE\\SOFTWARE\\Cortex\\Settings",
+   "{3f2504e0-4f89-11d3-9a0c-0305e82c3301}",
+   "/usr/lib/cortex/plugin.so"
+  ],
+  "utf16_url": "http://utf16.cortex.example/path"
+ },
+ "empty.dat": {
+  "file_description": "empty",
+  "file_mime": "inode/x-empty"
+ },
+ "export.reg": {
+  "file_description": "Windows Registry text (Win2K or above)",
+  "file_mime": "text/x-ms-regedit"
+ },
+ "image.png": {
+  "file_description": "PNG image data, 64 x 48, 8-bit/color RGB, non-interlaced",
+  "file_mime": "image/png"
+ },
+ "noise.bin": {
+  "file_description": "data",
+  "file_mime": "application/octet-stream"
+ },
+ "notes.md": {
+  "file_description": "ASCII text",
+  "file_mime": "text/plain"
+ },
+ "page.html": {
+  "file_description": "HTML document, ASCII text",
+  "file_mime": "text/html"
+ },
+ "photo.jpg": {
+  "file_description": "JPEG image data, JFIF standard 1.02, aspect ratio, density 1x1, segment length 16, comment: \"Lavc60.31.102\", baseline, precision 8, 64x48, components 3",
+  "file_mime": "image/jpeg"
+ },
+ "picture.bmp": {
+  "file_description": "PC bitmap, Windows 3.x format, 64 x 48 x 24, image size 9216, cbSize 9270, bits offset 54",
+  "file_mime": "image/bmp"
+ },
+ "picture.webp": {
+  "file_description": "RIFF (little-endian) data, Web/P image, VP8 encoding, 64x48, Scaling: [none]x[none], YUV color, decoders should clamp",
+  "file_mime": "image/webp"
+ },
+ "run.sh": {
+  "file_description": "POSIX shell script, ASCII text executable",
+  "file_mime": "text/x-shellscript"
+ },
+ "settings.ini": {
+  "file_description": "ASCII text",
+  "file_mime": "text/plain"
+ },
+ "slot1.sav": {
+  "file_description": "data",
+  "file_mime": "application/octet-stream"
+ },
+ "table.csv": {
+  "file_description": "CSV ASCII text",
+  "file_mime": "text/csv"
+ },
+ "tone.flac": {
+  "file_description": "FLAC audio bitstream data, 16 bit, mono, 44.1 kHz, 22050 samples",
+  "file_mime": "audio/flac"
+ },
+ "tone.ogg": {
+  "file_description": "Ogg data, Vorbis audio, mono, 44100 Hz, ~80000 bps",
+  "file_mime": "audio/ogg"
+ },
+ "tone.wav": {
+  "file_description": "RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, mono 44100 Hz",
+  "file_mime": "audio/x-wav"
+ },
+ "utf16.txt": {
+  "file_description": "Unicode text, UTF-16, little-endian text, with CRLF line terminators",
+  "file_mime": "text/plain"
+ }
+}

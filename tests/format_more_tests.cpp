@@ -40,7 +40,8 @@ struct Tests {
     void Truncated(const std::string& path, size_t keep) {
         auto bytes = File(path)->ReadSome(0, keep);
         const auto report = DefaultRegistry().Inspect(*FromBytes(std::move(bytes), path + "#truncated"));
-        Check(!report.value("ok", false), "truncated " + path + " refused");
+        // Refused, or only described by the reader of last resort: never claimed as that format.
+        Check(!report.value("ok", false) || report.at("provider").at("name") == "generic", "truncated " + path + " refused");
     }
     void Run(const char* name, const std::function<void()>& action) {
         try { action(); }
@@ -575,6 +576,80 @@ void Games(Tests& t) {
     t.Truncated("games/game.rpa", 40);
 }
 
+
+// ------------------------------------------------------- last resort ---
+
+void Generic(Tests& t) {
+    const auto all = t.Expected("generic/expected.json");
+    auto inspect = [&](const std::string& name) { return t.Inspect("generic/" + name); };
+    auto isGeneric = [](const json& r) { return r.value("ok", false) && r.at("provider").at("name") == "generic"; };
+    // Signatures agree with libmagic's top-level type.
+    for (const auto& [name, want] : all.items()) {
+        const std::string mime = want.at("file_mime");
+        const std::string top = mime.substr(0, mime.find('/'));
+        if (top != "image" && top != "audio" && top != "video" && mime != "application/x-bzip2" && mime != "application/x-xz") continue;
+        const auto r = inspect(name);
+        t.Check(isGeneric(r), name + " handled by the reader of last resort");
+        if (!isGeneric(r)) { std::cerr << "  " << r.value("provider", json::object()).dump() << '\n'; continue; }
+        const auto& sig = r.at("data").at("signature");
+        const std::string category = sig.is_null() ? "" : sig.value("category", "");
+        const std::string expectCategory = top == "application" ? "archive" : top;
+        t.Check(category == expectCategory, name + " identified as " + expectCategory + " like file(1) (" + want.at("file_description").get<std::string>().substr(0, 40) + ")");
+    }
+    // Text languages.
+    const std::map<std::string, std::string> languages = {{"config.json", "JSON"}, {"page.html", "HTML"}, {"run.sh", "script"},
+                                                          {"table.csv", "CSV"}, {"settings.ini", "INI"}, {"notes.md", "Markdown"},
+                                                          {"export.reg", "registry export"}};
+    for (const auto& [name, language] : languages) {
+        const auto r = inspect(name);
+        if (!isGeneric(r)) { t.Check(r.value("ok", false), name + " described by " + r.value("provider", json::object()).value("name", std::string("?"))); continue; }
+        const auto& c = r.at("data").at("content");
+        t.Check(c.at("kind") == "text" && c.value("language", "") == language, name + " is " + language + " text (got " + c.value("language", std::string("-")) + ")");
+    }
+    const auto sh = inspect("run.sh").at("data").at("content");
+    t.Check(sh.value("details", json::object()).value("interpreter", "") == "/bin/sh", "shebang interpreter");
+    const auto u16 = inspect("utf16.txt").at("data").at("content");
+    t.Check(u16.value("encoding", "") == "utf-16le" && u16.value("line_endings", "") == "crlf" && u16.at("preview").at(0) == "Cortex UTF-16 text",
+            "UTF-16LE text with CRLF, like file(1)");
+    // Strings and embedded files.
+    const auto& dw = all.at("dropper.bin");
+    const auto dropper = inspect("dropper.bin");
+    t.Check(isGeneric(dropper), "dropper handled by the reader of last resort");
+    const auto& d = dropper.at("data");
+    std::vector<uint64_t> offsets;
+    for (const auto& e : d.at("embedded")) offsets.push_back(e.at("offset"));
+    t.Check(json(offsets) == dw.at("embedded"), "embedded PE, ZIP and PNG found at their offsets");
+    const auto& notable = d.at("strings").at("notable");
+    auto has = [&](const char* kind, const std::string& value) {
+        if (!notable.contains(kind)) return false;
+        for (const auto& v : notable.at(kind)) if (v.get<std::string>().find(value) != std::string::npos) return true;
+        return false;
+    };
+    t.Check(has("urls", "https://cortex.example/update?id=7") && has("urls", "http://utf16.cortex.example/path"), "URLs (ASCII and UTF-16)");
+    t.Check(has("emails", "owner@cortex.example"), "e-mail address");
+    t.Check(has("ip_addresses", "192.168.10.42"), "IP address");
+    t.Check(has("paths", "C:\\Program Files\\Cortex\\cortex.exe") && has("paths", "/usr/lib/cortex/plugin.so"), "Windows and Unix paths");
+    t.Check(has("registry_keys", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Cortex\\Settings"), "registry key");
+    t.Check(has("guids", "3f2504e0-4f89-11d3-9a0c-0305e82c3301"), "GUID");
+    auto file = t.File("generic/dropper.bin");
+    const auto list = DefaultRegistry().ListChildren(*file);
+    std::map<std::string, std::string> formats;
+    for (const auto& child : list.at("children")) {
+        std::string error;
+        auto inner = DefaultRegistry().OpenChild(file, child.at("name"), error);
+        if (inner) formats[child.at("name")] = DefaultRegistry().Inspect(*inner).value("format", "");
+    }
+    bool pe = false, zip = false;
+    for (const auto& [name, format] : formats) { pe = pe || format == "pe"; zip = zip || format == "zip"; }
+    t.Check(pe && zip, "embedded PE and ZIP open with their own readers");
+    // Entropy, hints and edge cases.
+    const auto noise = inspect("noise.bin").at("data");
+    t.Check(noise.at("entropy").at("overall").get<double>() > 7.9 && noise.at("entropy").at("assessment") == "compressed_or_encrypted" &&
+            noise.at("content").at("kind") == "binary", "random bytes: high entropy, binary");
+    t.Check(inspect("slot1.sav").at("data").at("summary").get<std::string>().find("game save") != std::string::npos, "extension hint for an unknown save");
+    t.Check(inspect("empty.dat").at("data").at("summary") == "empty file", "empty file");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -599,6 +674,7 @@ int main(int argc, char** argv) {
     t.Run("documents", [&] { Documents(t); });
     t.Run("spirv", [&] { Spirv(t); });
     t.Run("games", [&] { Games(t); });
+    t.Run("generic", [&] { Generic(t); });
     std::cout << t.checks << " checks, " << t.failures << " failures\n";
     return t.failures ? 1 : 0;
 }

@@ -1,0 +1,5 @@
+{
+  "name": "cortex",
+  "version": 2,
+  "features": ["scan", "debug"]
+}

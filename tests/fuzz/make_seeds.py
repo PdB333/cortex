@@ -105,12 +105,12 @@ def main():
                   ("data", "*.gguf", 12), ("data", "*.onnx", 13), ("media", "*.pcap", 14), ("media", "*.pcapng", 14),
                   ("media", "*.hex", 15), ("media", "*.srec", 16), ("media", "*.uf2", 17), ("media", "*.dtb", 18),
                   ("media", "*.pdf", 19), ("media", "*.lnk", 20), ("games", "*.vpk", 22), ("games", "*.pak", 23),
-                  ("games", "*.wad", 24), ("games", "*.rpa", 25)]
+                  ("games", "*.wad", 24), ("games", "*.rpa", 25), ("generic", "*.*", 26)]
     for directory, pattern, mode in more_kinds:
         for path in sorted(glob.glob(os.path.join(fixtures, "format-more", directory, pattern))):
             with open(path, "rb") as handle:
                 data = handle.read()
-            if len(data) > (1 << 20) - 1:
+            if len(data) > (1 << 20) - 1 or path.endswith("expected.json"):
                 continue
             put(out, "format_more", directory + "_" + os.path.basename(path), bytes([mode]) + data)
     # The Go scanner (last mode) on a slice around a real build-info header.

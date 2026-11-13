@@ -2,6 +2,23 @@
 
 All notable changes to Cortex are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Any other file is still described.** When no built-in reader claims a file, whatever its extension, the reader of last resort (`generic`) reports:
+  - what it most likely is, from about 150 signatures (images, audio and video, fonts, disk images and file systems, firmware, Android, game engines, documents, databases, keys and certificates, containers), or from what the extension usually denotes;
+  - whether it is text or binary; for text, the encoding (BOM, UTF-8, UTF-16), line endings, the likely language (JSON, XML/HTML, script by shebang, INI, CSV, YAML, registry export, Markdown) and a short preview;
+  - entropy overall and per region, to spot compressed or encrypted parts;
+  - ASCII and UTF-16 strings, with the URLs, IP addresses, e-mail addresses, paths, registry keys and GUIDs pulled out;
+  - files embedded at an offset (an executable, a ZIP, an image, a database…), each confirmed by its dedicated reader and opened as a child with it.
+
+  Nothing is run, decrypted or unpacked. Checked against `file(1)` on fixtures from ffmpeg, xz, bzip2, zip and Python (`tests/fixtures/format-more/make_generic_fixtures.py`), and fuzzed.
+
+### Changed
+
+- Files that no reader understood used to be refused; they now open with the reader of last resort. A malformed file of a known format is still refused by its own reader when its signature is recognised; otherwise it is described as unknown data.
+
 ## [v2.1.0] - 2026-11-12
 
 Installing, setting up and updating Cortex without editing files by hand,

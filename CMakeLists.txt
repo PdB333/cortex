@@ -319,7 +319,7 @@ add_executable(cortex_host
     core/artifacts/pe_extras.cpp
     core/artifacts/asar_provider.cpp
     core/artifacts/registry_default.cpp
-    core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+    core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
     core/artifacts/hive_provider.cpp
     core/artifacts/js_lexer.cpp
     core/artifacts/js_analysis.cpp
@@ -574,7 +574,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -615,7 +615,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -638,7 +638,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -661,7 +661,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -695,7 +695,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -721,7 +721,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -753,7 +753,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
@@ -846,7 +846,7 @@ if(BUILD_TESTING)
         core/artifacts/pe_extras.cpp
         core/artifacts/asar_provider.cpp
         core/artifacts/registry_default.cpp
-        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp
+        core/artifacts/minidump_provider.cpp core/artifacts/pdb_provider.cpp core/artifacts/elf_provider.cpp core/artifacts/cab_provider.cpp core/artifacts/compound_reader.cpp core/artifacts/compound_provider.cpp core/artifacts/msi_tables.cpp core/artifacts/archive_provider.cpp core/artifacts/certificate_provider.cpp core/artifacts/typelib_provider.cpp core/artifacts/package_metadata.cpp core/artifacts/bytecode_provider.cpp core/artifacts/native_more_provider.cpp core/artifacts/data_provider.cpp core/artifacts/capture_provider.cpp core/artifacts/firmware_provider.cpp core/artifacts/document_provider.cpp core/artifacts/game_provider.cpp core/artifacts/generic_provider.cpp
         core/artifacts/hive_provider.cpp
         core/artifacts/js_lexer.cpp
         core/artifacts/js_analysis.cpp
